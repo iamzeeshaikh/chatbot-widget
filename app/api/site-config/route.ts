@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     .single()
 
   if (error || !data) {
-    return NextResponse.json({ error: 'Site not found', debug: error?.message, code: error?.code }, { status: 404, headers: corsHeaders })
+    return NextResponse.json({ error: 'Site not found' }, { status: 404, headers: corsHeaders })
   }
 
   return NextResponse.json(data, { headers: corsHeaders })
