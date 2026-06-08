@@ -1,13 +1,20 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+let _genAI: GoogleGenerativeAI | null = null
+
+function getGenAI(): GoogleGenerativeAI {
+  if (!_genAI) {
+    _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+  }
+  return _genAI
+}
 
 export async function generateReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+  const model = getGenAI().getGenerativeModel({
+    model: 'gemini-2.0-flash',
     systemInstruction: systemPrompt,
   })
 
