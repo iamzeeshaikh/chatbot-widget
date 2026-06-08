@@ -1,5 +1,7 @@
 import { supabase } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 interface Lead {
   id: string
   site_id: string
