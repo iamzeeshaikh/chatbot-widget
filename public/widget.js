@@ -165,12 +165,17 @@
     if (el) el.scrollTop = el.scrollHeight;
   }
 
+  function renderText(role, text) {
+    if (role !== 'bot') return escapeHtml(text);
+    return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  }
+
   function appendMessage(role, text) {
     var el = document.getElementById('zee-chat-messages');
     if (!el) return;
     var div = document.createElement('div');
     div.className = 'zee-msg ' + role;
-    div.textContent = text;
+    div.innerHTML = renderText(role, text);
     el.appendChild(div);
     scrollToBottom();
   }
