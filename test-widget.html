@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Widget Test Page</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 80px auto; padding: 20px; }
+    h1 { color: #1f2937; }
+    p { color: #6b7280; line-height: 1.6; }
+    .sites { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+    .site-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; }
+    code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Chatbot Widget Test</h1>
+  <p>This page tests the widget embed. The floating chat button should appear in the bottom-right corner.</p>
+  <p>Current site: <code>zeecustomboxes</code></p>
+
+  <div class="sites">
+    <div class="site-card">
+      <strong>Zee Custom Boxes</strong><br>
+      <code>siteId=zeecustomboxes</code>
+    </div>
+    <div class="site-card">
+      <strong>Zee Pack</strong><br>
+      <code>siteId=zeepack</code>
+    </div>
+    <div class="site-card">
+      <strong>Sports Wear</strong><br>
+      <code>siteId=sports</code>
+    </div>
+    <div class="site-card">
+      <strong>Lead Gen</strong><br>
+      <code>siteId=leadgen</code>
+    </div>
+  </div>
+
+  <!-- Change siteId param to test different bots -->
+  <script src="https://chatbot-widget-ebon.vercel.app/widget.js?siteId=zeecustomboxes"></script>
+</body>
+</html>
