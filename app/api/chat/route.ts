@@ -40,8 +40,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ reply }, { headers: corsHeaders })
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('Chat error:', msg)
-    return NextResponse.json({ error: 'Internal server error', debug: msg }, { status: 500, headers: corsHeaders })
+    console.error('Chat error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: corsHeaders })
   }
 }

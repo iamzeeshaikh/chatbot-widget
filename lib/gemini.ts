@@ -14,7 +14,7 @@ export async function generateReply(
   messages: { role: string; content: string }[]
 ): Promise<string> {
   const model = getGenAI().getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-flash-latest',
     systemInstruction: systemPrompt,
   })
 
