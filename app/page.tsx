@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string }
-interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; mode: string; lead: { name: string | null; email: string | null } | null }
+interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 
@@ -34,6 +34,17 @@ export default function Dashboard() {
   const [sending, setSending] = useState(false)
   const [togglingMode, setTogglingMode] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Filter state
+  const [filterSite, setFilterSite] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Delete state
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set())
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Live visitors state
   const [visitors, setVisitors] = useState<Visitor[]>([])
@@ -162,6 +173,49 @@ export default function Dashboard() {
     setSelectedSession({ ...selectedSession, mode: newMode })
     setSessions((prev) => prev.map((s) => s.session_id === selectedSession.session_id ? { ...s, mode: newMode } : s))
     setTogglingMode(false)
+  }
+
+  // ── Derived filter values ──────────────────────────────────────────────────
+  const sessionSites = Array.from(new Map(sessions.map(s => [s.site_id, s.site_name])).entries())
+    .map(([id, name]) => ({ site_id: id, site_name: name }))
+
+  const filteredSessions = sessions.filter(s => {
+    if (filterSite && s.site_id !== filterSite) return false
+    if (filterStatus === 'bot' && s.mode !== 'bot') return false
+    if (filterStatus === 'human' && s.mode !== 'human') return false
+    if (filterStatus === 'lead' && !s.lead) return false
+    if (filterStatus === 'no-response' && s.last_role !== 'user') return false
+    if (searchQuery && !s.preview.toLowerCase().includes(searchQuery.toLowerCase())) return false
+    return true
+  })
+
+  // ── Delete actions ─────────────────────────────────────────────────────────
+  async function deleteSession(sessionId: string) {
+    setDeleting(true)
+    await fetch('/api/admin/delete-session', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionIds: [sessionId] }),
+    })
+    setSessions(prev => prev.filter(s => s.session_id !== sessionId))
+    if (selectedSession?.session_id === sessionId) setSelectedSession(null)
+    setConfirmDeleteId(null)
+    setDeleting(false)
+  }
+
+  async function deleteBulk() {
+    const ids = Array.from(selectedSessions)
+    setDeleting(true)
+    await fetch('/api/admin/delete-session', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionIds: ids }),
+    })
+    setSessions(prev => prev.filter(s => !ids.includes(s.session_id)))
+    if (selectedSession && ids.includes(selectedSession.session_id)) setSelectedSession(null)
+    setSelectedSessions(new Set())
+    setConfirmBulkDelete(false)
+    setDeleting(false)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -323,34 +377,125 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
-            <div className="p-3 border-b border-gray-800">
-              <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">All Sessions ({sessions.length})</p>
+            {/* Filter bar */}
+            <div className="p-3 border-b border-gray-800 space-y-2">
+              <div className="flex gap-1.5">
+                <select value={filterSite} onChange={e => setFilterSite(e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
+                  <option value="">All Sites</option>
+                  {sessionSites.map(s => <option key={s.site_id} value={s.site_id}>{s.site_name}</option>)}
+                </select>
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
+                  <option value="all">All Status</option>
+                  <option value="bot">Bot Active</option>
+                  <option value="human">Human Agent</option>
+                  <option value="lead">Lead Captured</option>
+                  <option value="no-response">No Response</option>
+                </select>
+              </div>
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search messages..."
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-gray-500"
+              />
+              {(filterSite || filterStatus !== 'all' || searchQuery) && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">{filteredSessions.length} result{filteredSessions.length !== 1 ? 's' : ''}</span>
+                  <button onClick={() => { setFilterSite(''); setFilterStatus('all'); setSearchQuery('') }} className="text-xs text-blue-400 hover:text-blue-300">Clear filters</button>
+                </div>
+              )}
             </div>
-            {sessions.length === 0 ? (
-              <p className="text-gray-500 text-sm p-4">No conversations yet</p>
-            ) : sessions.map((s) => (
-              <button
-                key={s.session_id}
-                onClick={() => setSelectedSession(s)}
-                className={`w-full text-left px-4 py-3 border-b border-gray-800/60 hover:bg-gray-800/60 transition-colors ${selectedSession?.session_id === s.session_id ? 'bg-gray-800' : ''}`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-xs font-medium text-gray-200 truncate">{s.site_name}</span>
-                    <span className="text-xs font-mono text-gray-600 shrink-0">#{s.site_id}</span>
+            {/* Bulk select bar */}
+            <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 bg-gray-900/30">
+              <input
+                type="checkbox"
+                checked={filteredSessions.length > 0 && filteredSessions.every(s => selectedSessions.has(s.session_id))}
+                onChange={e => {
+                  if (e.target.checked) setSelectedSessions(new Set(filteredSessions.map(s => s.session_id)))
+                  else setSelectedSessions(new Set())
+                }}
+                className="rounded accent-blue-500 cursor-pointer"
+              />
+              <span className="text-xs text-gray-400 flex-1">
+                {selectedSessions.size > 0 ? `${selectedSessions.size} selected` : `All Sessions (${filteredSessions.length})`}
+              </span>
+              {selectedSessions.size > 0 && (
+                confirmBulkDelete ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-red-400">Delete {selectedSessions.size}?</span>
+                    <button onClick={deleteBulk} disabled={deleting} className="text-xs text-red-400 hover:text-red-300 font-semibold ml-1">Yes</button>
+                    <span className="text-xs text-gray-600 mx-0.5">·</span>
+                    <button onClick={() => setConfirmBulkDelete(false)} className="text-xs text-gray-400 hover:text-gray-300">No</button>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                    {s.mode === 'human' && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" title="Human Agent mode" />}
-                    <span className="text-xs text-gray-500">{timeAgo(s.last_at)}</span>
+                ) : (
+                  <button onClick={() => setConfirmBulkDelete(true)} className="text-xs text-red-400 hover:text-red-300">Delete Selected</button>
+                )
+              )}
+            </div>
+            {filteredSessions.length === 0 ? (
+              <p className="text-gray-500 text-sm p-4">{sessions.length === 0 ? 'No conversations yet' : 'No results match filters'}</p>
+            ) : filteredSessions.map((s) => {
+              const isSelected = selectedSessions.has(s.session_id)
+              const isConfirming = confirmDeleteId === s.session_id
+              return (
+                <div
+                  key={s.session_id}
+                  className={`group relative flex border-b border-gray-800/60 transition-colors ${selectedSession?.session_id === s.session_id ? 'bg-gray-800' : 'hover:bg-gray-800/60'} ${isSelected ? 'ring-1 ring-inset ring-blue-500/30 bg-blue-900/10' : ''}`}
+                >
+                  {/* Checkbox */}
+                  <div className="flex items-center px-2 py-3 shrink-0" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={e => {
+                        const next = new Set(selectedSessions)
+                        if (e.target.checked) next.add(s.session_id)
+                        else next.delete(s.session_id)
+                        setSelectedSessions(next)
+                      }}
+                      className="rounded accent-blue-500 cursor-pointer"
+                    />
+                  </div>
+                  {/* Main content */}
+                  <div className="flex-1 min-w-0 py-3 pr-8 cursor-pointer" onClick={() => setSelectedSession(s)}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-medium text-gray-200 truncate">{s.site_name}</span>
+                        <span className="text-xs font-mono text-gray-600 shrink-0">#{s.site_id}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                        {s.mode === 'human' && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" title="Human Agent mode" />}
+                        <span className="text-xs text-gray-500">{timeAgo(s.last_at)}</span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-200 truncate">{s.preview || '(no messages)'}</p>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-xs text-gray-500">{s.message_count} messages</span>
+                      {s.lead && <span className="text-xs text-green-400">● Lead captured</span>}
+                    </div>
+                  </div>
+                  {/* Trash / confirm */}
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center" onClick={e => e.stopPropagation()}>
+                    {isConfirming ? (
+                      <div className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 shadow-lg">
+                        <span className="text-xs text-gray-300">Delete?</span>
+                        <button onClick={() => deleteSession(s.session_id)} disabled={deleting} className="text-xs text-red-400 hover:text-red-300 font-semibold ml-1">Yes</button>
+                        <span className="text-xs text-gray-600 mx-0.5">·</span>
+                        <button onClick={() => setConfirmDeleteId(null)} className="text-xs text-gray-400 hover:text-gray-300">No</button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDeleteId(s.session_id)}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded-lg transition-all"
+                        title="Delete conversation"
+                      >
+                        🗑
+                      </button>
+                    )}
                   </div>
                 </div>
-                <p className="text-sm text-gray-200 truncate">{s.preview || '(no messages)'}</p>
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-xs text-gray-500">{s.message_count} messages</span>
-                  {s.lead && <span className="text-xs text-green-400">● Lead captured</span>}
-                </div>
-              </button>
-            ))}
+              )
+            })}
           </div>
 
           {/* Conversation view */}

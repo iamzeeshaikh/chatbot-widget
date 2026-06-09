@@ -22,6 +22,7 @@ export async function GET() {
     preview: string
     last_at: string
     message_count: number
+    last_role: string
     mode: string
     lead: { name: string | null; email: string | null } | null
     site_name: string
@@ -36,6 +37,7 @@ export async function GET() {
         preview: '',
         last_at: log.created_at,
         message_count: 0,
+        last_role: '',
         mode: 'bot',
         lead: null,
         site_name: site?.name ?? log.site_id,
@@ -45,6 +47,7 @@ export async function GET() {
       sessionMap[log.session_id].preview = log.message
     }
     sessionMap[log.session_id].last_at = log.created_at
+    sessionMap[log.session_id].last_role = log.role
     sessionMap[log.session_id].message_count++
   }
 
