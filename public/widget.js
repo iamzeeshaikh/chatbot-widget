@@ -346,6 +346,21 @@
       });
   }
 
+  // ─── Visitor ping ─────────────────────────────────────────────────────────
+  function sendPing(status) {
+    var body = { sessionId: sessionId, siteId: siteId, status: status || 'active' };
+    if (!status || status === 'active') {
+      body.pageUrl = window.location.href;
+      body.userAgent = navigator.userAgent;
+    }
+    fetch(baseUrl + '/api/visitor/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      keepalive: true,
+    }).catch(function () {});
+  }
+
   // ─── Init ──────────────────────────────────────────────────────────────────
   function init() {
     fetch(baseUrl + '/api/site-config?siteId=' + encodeURIComponent(siteId))
@@ -356,10 +371,16 @@
         }
         injectCSS(config.primary_color);
         buildWidget();
+        sendPing('active');
+        setInterval(function () { sendPing('active'); }, 30000);
+        window.addEventListener('beforeunload', function () { sendPing('left'); });
       })
       .catch(function () {
         injectCSS(config.primary_color);
         buildWidget();
+        sendPing('active');
+        setInterval(function () { sendPing('active'); }, 30000);
+        window.addEventListener('beforeunload', function () { sendPing('left'); });
       });
   }
 

@@ -6,6 +6,7 @@ interface Site { site_id: string; name: string; bot_name: string; primary_color:
 interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; mode: string; lead: { name: string | null; email: string | null } | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
+interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; last_seen: string; created_at: string }
 
 function timeAgo(ts: string) {
   const diff = Date.now() - new Date(ts).getTime()
@@ -34,6 +35,10 @@ export default function Dashboard() {
   const [togglingMode, setTogglingMode] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // Live visitors state
+  const [visitors, setVisitors] = useState<Visitor[]>([])
+  const prevVisitorIds = useRef<Set<string>>(new Set())
+
   useEffect(() => {
     Promise.all([
       fetch('/api/admin/sites').then((r) => r.json()).catch(() => ({ sites: [] })),
@@ -57,6 +62,35 @@ export default function Dashboard() {
     const iv = setInterval(fetchSessions, 6000)
     return () => clearInterval(iv)
   }, [tab, fetchSessions])
+
+  // ── Live visitors polling ──────────────────────────────────────────────────
+  const fetchVisitors = useCallback(async () => {
+    const data = await fetch('/api/visitor/active').then((r) => r.json()).catch(() => ({ visitors: [] }))
+    const incoming: Visitor[] = data.visitors ?? []
+    const incomingIds = new Set(incoming.map((v) => v.session_id))
+    // Beep on new visitor
+    const prev = prevVisitorIds.current
+    const isNew = incoming.some((v) => !prev.has(v.session_id))
+    if (isNew && prev.size > 0) {
+      try {
+        const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.frequency.value = 880; gain.gain.value = 0.1
+        osc.start(); osc.stop(ctx.currentTime + 0.12)
+      } catch { /* ignore audio errors */ }
+    }
+    prevVisitorIds.current = incomingIds
+    setVisitors(incoming)
+  }, [])
+
+  useEffect(() => {
+    if (tab !== 'conversations') return
+    fetchVisitors()
+    const iv = setInterval(fetchVisitors, 5000)
+    return () => clearInterval(iv)
+  }, [tab, fetchVisitors])
 
   // ── Messages polling ───────────────────────────────────────────────────────
   const fetchMessages = useCallback(async (sessionId: string) => {
@@ -90,6 +124,32 @@ export default function Dashboard() {
     setSending(false)
   }
 
+  async function openVisitorSession(visitor: Visitor) {
+    // Set to human mode then open conversation
+    await fetch('/api/admin/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: visitor.session_id, mode: 'human' }),
+    })
+    const session: Session = {
+      session_id: visitor.session_id,
+      site_id: visitor.site_id,
+      site_name: visitor.site_name,
+      preview: visitor.page_url ?? '',
+      last_at: visitor.last_seen,
+      message_count: 0,
+      mode: 'human',
+      lead: null,
+    }
+    setSelectedSession(session)
+    setSessions((prev) => {
+      const exists = prev.some((s) => s.session_id === visitor.session_id)
+      return exists
+        ? prev.map((s) => s.session_id === visitor.session_id ? { ...s, mode: 'human' } : s)
+        : [session, ...prev]
+    })
+  }
+
   async function toggleMode() {
     if (!selectedSession || togglingMode) return
     setTogglingMode(true)
@@ -118,6 +178,7 @@ export default function Dashboard() {
           <button onClick={() => setTab('conversations')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'conversations' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>
             Conversations
             {sessions.length > 0 && <span className="ml-1.5 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full">{sessions.length}</span>}
+            {visitors.length > 0 && <span className="ml-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded-full">{visitors.length} live</span>}
           </button>
         </div>
       </div>
@@ -212,6 +273,32 @@ export default function Dashboard() {
         <div className="flex h-[calc(100vh-73px)]">
           {/* Session list */}
           <div className="w-80 flex-shrink-0 border-r border-gray-800 overflow-y-auto bg-gray-900/50">
+            {/* Live Visitors */}
+            {visitors.length > 0 && (
+              <div className="border-b border-gray-800">
+                <div className="px-3 py-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                  <p className="text-xs text-green-400 font-medium uppercase tracking-wide">{visitors.length} Live Visitor{visitors.length !== 1 ? 's' : ''}</p>
+                </div>
+                {visitors.map((v) => (
+                  <button
+                    key={v.session_id}
+                    onClick={() => openVisitorSession(v)}
+                    className="w-full text-left px-3 py-2.5 border-t border-gray-800/60 hover:bg-green-900/20 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                      <span className="text-xs font-medium text-gray-200 truncate">{v.site_name}</span>
+                      <span className="text-xs text-gray-500 shrink-0 ml-auto">{timeAgo(v.last_seen)}</span>
+                    </div>
+                    {v.page_url && (
+                      <p className="text-xs text-gray-500 truncate pl-3.5">{v.page_url.replace(/^https?:\/\//, '')}</p>
+                    )}
+                    <p className="text-xs text-green-500 pl-3.5 mt-0.5">Click to take over →</p>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="p-3 border-b border-gray-800">
               <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">All Sessions ({sessions.length})</p>
             </div>
