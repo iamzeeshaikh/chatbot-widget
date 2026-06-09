@@ -7,23 +7,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
   }
 
-  const [logRes, modeRes] = await Promise.all([
-    supabase.from('chat_logs').insert({
-      site_id: siteId,
-      session_id: sessionId,
-      role: 'admin',
-      message: message.trim(),
-    }),
-    supabase.from('conversation_mode').upsert({
-      session_id: sessionId,
-      mode: 'human',
-      pending_reply: message.trim(),
-      updated_at: new Date().toISOString(),
-    }),
-  ])
+  // Save admin reply to chat_logs — delivery detection uses timestamp comparison,
+  // no pending_reply column needed
+  const { error: logError } = await supabase.from('chat_logs').insert({
+    site_id: siteId,
+    session_id: sessionId,
+    role: 'admin',
+    message: message.trim(),
+  })
 
-  if (logRes.error) return NextResponse.json({ error: logRes.error.message }, { status: 500 })
-  if (modeRes.error) return NextResponse.json({ error: modeRes.error.message }, { status: 500 })
+  if (logError) return NextResponse.json({ error: logError.message }, { status: 500 })
+
+  // Ensure conversation stays in human mode
+  await supabase.from('conversation_mode').upsert({
+    session_id: sessionId,
+    mode: 'human',
+    updated_at: new Date().toISOString(),
+  })
 
   return NextResponse.json({ success: true })
 }

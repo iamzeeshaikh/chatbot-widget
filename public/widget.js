@@ -167,7 +167,39 @@
 
   function renderText(role, text) {
     if (role !== 'bot') return escapeHtml(text);
-    return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    var s = escapeHtml(text);
+
+    // Use placeholders so bold markers are safe during italic pass
+    s = s.replace(/\*\*(.+?)\*\*/g, '\x00$1\x01');
+    s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    s = s.replace(/\x00(.+?)\x01/g, '<strong>$1</strong>');
+
+    // Numbered lists: collect consecutive `N. text` lines into <ol>
+    var lines = s.split('\n');
+    var out = [];
+    var listBuf = [];
+
+    function flushList() {
+      if (listBuf.length) {
+        out.push('<ol style="margin:6px 0 6px 18px;padding:0">' + listBuf.join('') + '</ol>');
+        listBuf = [];
+      }
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(/^\d+\.\s+(.+)$/);
+      if (m) {
+        listBuf.push('<li>' + m[1] + '</li>');
+      } else {
+        flushList();
+        out.push(lines[i]);
+      }
+    }
+    flushList();
+
+    // Join with <br>, but don't add <br> directly adjacent to block tags
+    return out.join('<br>').replace(/<br>(<ol)/g, '$1').replace(/(<\/ol>)<br>/g, '$1');
   }
 
   function appendMessage(role, text) {

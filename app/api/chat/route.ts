@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
 
     const [siteRes, modeRes] = await Promise.all([
       supabase.from('sites').select('system_prompt').eq('site_id', siteId).single(),
-      supabase.from('conversation_mode').select('mode, pending_reply').eq('session_id', sessionId).single(),
+      // Only select 'mode' — pending_reply column may not exist
+      supabase.from('conversation_mode').select('mode').eq('session_id', sessionId).single(),
     ])
 
     if (siteRes.error || !siteRes.data) {
@@ -30,8 +31,8 @@ export async function POST(req: NextRequest) {
     }
 
     const mode = modeRes.data?.mode ?? 'bot'
-    const pendingReply = modeRes.data?.pending_reply ?? null
 
+    // Save the incoming user message
     const lastUserMessage = messages[messages.length - 1]
     await supabase.from('chat_logs').insert({
       site_id: siteId,
@@ -43,15 +44,27 @@ export async function POST(req: NextRequest) {
     let reply: string
 
     if (mode === 'human') {
-      if (pendingReply) {
-        reply = pendingReply
-        await supabase
-          .from('conversation_mode')
-          .update({ pending_reply: null, updated_at: new Date().toISOString() })
-          .eq('session_id', sessionId)
-      } else {
-        reply = '⏳ Our agent will reply shortly. Please wait...'
-      }
+      // Find the latest admin message and the latest assistant message for this session.
+      // If the admin message is newer than the last assistant message, it hasn't been
+      // delivered to the user yet — return it as the reply.
+      const { data: recentLogs } = await supabase
+        .from('chat_logs')
+        .select('role, message, created_at')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false })
+        .limit(30)
+
+      const logs = recentLogs ?? []
+      const lastAdmin = logs.find((m) => m.role === 'admin')
+      const lastAssistant = logs.find((m) => m.role === 'assistant')
+
+      const hasUndelivered =
+        lastAdmin &&
+        (!lastAssistant || new Date(lastAdmin.created_at) > new Date(lastAssistant.created_at))
+
+      reply = hasUndelivered
+        ? lastAdmin!.message
+        : '⏳ Our agent will reply shortly. Please wait...'
     } else {
       reply = await generateReply(siteRes.data.system_prompt, messages)
     }
