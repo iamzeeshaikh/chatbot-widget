@@ -8,6 +8,26 @@ interface Session { session_id: string; site_id: string; site_name: string; prev
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 
+function cleanLeadMessage(msg: string | null): string {
+  if (!msg) return '-'
+  // New qualification format: "Product: X\nQuantity: Y\n..."
+  if (/^(Product|Quantity|Budget|Timeline):/i.test(msg)) {
+    const firstLine = msg.split('\n')[0]
+    const val = firstLine.slice(firstLine.indexOf(': ') + 2).trim()
+    return val || '-'
+  }
+  // Old conversation transcript format: "user: ...\nassistant: ..."
+  for (const line of msg.split('\n')) {
+    if (/^user:\s*/i.test(line)) {
+      const text = line.replace(/^user:\s*/i, '').trim()
+      if (text && !text.includes('(session started)')) return text.slice(0, 150)
+    }
+  }
+  // Fallback: first non-prefix non-empty line
+  const plain = msg.split('\n').find(l => l.trim() && !/^(user|assistant|bot):\s*/i.test(l))
+  return plain?.trim().slice(0, 150) || '-'
+}
+
 function timeAgo(ts: string) {
   const diff = Date.now() - new Date(ts).getTime()
   const m = Math.floor(diff / 60000)
@@ -45,6 +65,13 @@ export default function Dashboard() {
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  // Lead management state
+  const [confirmLeadDeleteId, setConfirmLeadDeleteId] = useState<string | null>(null)
+  const [deletingLead, setDeletingLead] = useState(false)
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', message: '' })
+  const [savingEdit, setSavingEdit] = useState(false)
 
   // Live visitors state
   const [visitors, setVisitors] = useState<Visitor[]>([])
@@ -175,6 +202,45 @@ export default function Dashboard() {
     setTogglingMode(false)
   }
 
+  // ── Lead actions ──────────────────────────────────────────────────────────
+  async function deleteLead(id: string) {
+    setDeletingLead(true)
+    await fetch('/api/admin/delete-lead', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    setLeads((prev) => prev.filter((l) => l.id !== id))
+    setConfirmLeadDeleteId(null)
+    setDeletingLead(false)
+  }
+
+  function startEditLead(lead: Lead) {
+    setEditingLeadId(lead.id)
+    setEditForm({
+      name: lead.name ?? '',
+      email: lead.email ?? '',
+      phone: lead.phone ?? '',
+      message: cleanLeadMessage(lead.message),
+    })
+  }
+
+  async function saveEditLead(id: string) {
+    setSavingEdit(true)
+    await fetch('/api/admin/edit-lead', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...editForm }),
+    })
+    setLeads((prev) =>
+      prev.map((l) =>
+        l.id === id ? { ...l, name: editForm.name || null, email: editForm.email || null, phone: editForm.phone || null, message: editForm.message || null } : l
+      )
+    )
+    setEditingLeadId(null)
+    setSavingEdit(false)
+  }
+
   // ── Derived filter values ──────────────────────────────────────────────────
   const sessionSites = Array.from(new Map(sessions.map(s => [s.site_id, s.site_name])).entries())
     .map(([id, name]) => ({ site_id: id, site_name: name }))
@@ -291,19 +357,18 @@ export default function Dashboard() {
                 <h2 className="text-xl font-semibold text-white mb-4">Recent Leads</h2>
                 <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm min-w-[1100px]">
+                    <table className="w-full text-sm min-w-[1200px]">
                       <thead>
                         <tr className="border-b border-gray-800 bg-gray-800/50">
-                          {['Score', 'Name', 'Email', 'Phone', 'Product', 'Qty', 'Budget', 'Timeline', 'Site', 'Date'].map((h) => (
+                          {['Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Budget', 'Timeline', 'Site', 'Date', ''].map((h) => (
                             <th key={h} className="text-left px-3 py-3 text-gray-400 font-medium whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {leads.length === 0 ? (
-                          <tr><td colSpan={10} className="text-center py-8 text-gray-500">No leads yet</td></tr>
+                          <tr><td colSpan={12} className="text-center py-8 text-gray-500">No leads yet</td></tr>
                         ) : leads.map((lead) => {
-                          // Parse structured data from message field as fallback for pre-migration leads
                           const msgLines: Record<string, string> = {}
                           for (const line of (lead.message ?? '').split('\n')) {
                             const colon = line.indexOf(': ')
@@ -314,24 +379,70 @@ export default function Dashboard() {
                           const budget = lead.budget ?? msgLines['budget'] ?? '-'
                           const timeline = lead.timeline ?? msgLines['timeline'] ?? '-'
                           const score = lead.qualification_score ?? null
+                          const siteName = sites.find((s) => s.site_id === lead.site_id)?.name ?? lead.site_id
+                          const isEditing = editingLeadId === lead.id
+                          const isConfirmingDelete = confirmLeadDeleteId === lead.id
+
+                          if (isEditing) {
+                            return (
+                              <tr key={lead.id} className="border-b border-gray-800/50 bg-gray-800/40">
+                                <td className="px-3 py-2">
+                                  {score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : score >= 4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-gray-700 text-gray-400'}`}>{score}/7</span> : <span className="text-gray-600 text-xs">-</span>}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-blue-300 w-full min-w-[140px] focus:outline-none focus:border-blue-500" placeholder="Email" />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-full min-w-[100px] focus:outline-none focus:border-blue-500" placeholder="Phone" />
+                                </td>
+                                <td className="px-3 py-2" colSpan={5}>
+                                  <input value={editForm.message} onChange={(e) => setEditForm({ ...editForm, message: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-full focus:outline-none focus:border-blue-500" placeholder="Message" />
+                                </td>
+                                <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{siteName}</td>
+                                <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? new Date(lead.created_at).toLocaleString() : '-'}</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex gap-1">
+                                    <button onClick={() => saveEditLead(lead.id)} disabled={savingEdit} className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded transition-colors disabled:opacity-50">{savingEdit ? '...' : 'Save'}</button>
+                                    <button onClick={() => setEditingLeadId(null)} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors">Cancel</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          }
+
                           return (
-                            <tr key={lead.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                            <tr key={lead.id} className="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
                               <td className="px-3 py-3">
-                                {score !== null ? (
-                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : score >= 4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-gray-700 text-gray-400'}`}>
-                                    {score}/7
-                                  </span>
-                                ) : <span className="text-gray-600 text-xs">-</span>}
+                                {score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : score >= 4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-gray-700 text-gray-400'}`}>{score}/7</span> : <span className="text-gray-600 text-xs">-</span>}
                               </td>
-                              <td className="px-3 py-3 text-white whitespace-nowrap">{lead.name ?? '-'}</td>
-                              <td className="px-3 py-3 text-blue-400 whitespace-nowrap">{lead.email ?? '-'}</td>
+                              <td className="px-3 py-3 text-white whitespace-nowrap">{lead.name || '-'}</td>
+                              <td className="px-3 py-3 text-blue-400 whitespace-nowrap">{lead.email || '-'}</td>
                               <td className="px-3 py-3 text-gray-300 whitespace-nowrap">{lead.phone || '-'}</td>
-                              <td className="px-3 py-3 text-gray-300 max-w-[160px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
+                              <td className="px-3 py-3 text-gray-400 max-w-[160px] truncate" title={cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined}>{cleanLeadMessage(lead.message)}</td>
+                              <td className="px-3 py-3 text-gray-300 max-w-[140px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
                               <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{quantity}</td>
                               <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{budget}</td>
                               <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{timeline}</td>
-                              <td className="px-3 py-3"><span className="bg-gray-800 text-gray-300 text-xs px-2 py-1 rounded font-mono">{lead.site_id}</span></td>
+                              <td className="px-3 py-3 text-gray-300 whitespace-nowrap">{siteName}</td>
                               <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? new Date(lead.created_at).toLocaleString() : '-'}</td>
+                              <td className="px-3 py-3">
+                                {isConfirmingDelete ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs text-gray-300">Delete?</span>
+                                    <button onClick={() => deleteLead(lead.id)} disabled={deletingLead} className="text-xs text-red-400 hover:text-red-300 font-semibold">Yes</button>
+                                    <span className="text-xs text-gray-600 mx-0.5">·</span>
+                                    <button onClick={() => setConfirmLeadDeleteId(null)} className="text-xs text-gray-400 hover:text-gray-300">No</button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-gray-700 rounded transition-colors" title="Edit lead">✏️</button>
+                                    <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded transition-colors" title="Delete lead">🗑</button>
+                                  </div>
+                                )}
+                              </td>
                             </tr>
                           )
                         })}
