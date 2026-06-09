@@ -6,7 +6,7 @@ interface Site { site_id: string; name: string; bot_name: string; primary_color:
 interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; mode: string; lead: { name: string | null; email: string | null } | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
-interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; last_seen: string; created_at: string }
+interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 
 function timeAgo(ts: string) {
   const diff = Date.now() - new Date(ts).getTime()
@@ -286,15 +286,31 @@ export default function Dashboard() {
                     onClick={() => openVisitorSession(v)}
                     className="w-full text-left px-3 py-2.5 border-t border-gray-800/60 hover:bg-green-900/20 transition-colors"
                   >
-                    <div className="flex items-center gap-2 mb-1">
+                    {/* Row 1: site + time */}
+                    <div className="flex items-center gap-2 mb-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                      <span className="text-xs font-medium text-gray-200 truncate">{v.site_name}</span>
+                      <span className="text-xs font-semibold text-gray-100 truncate">{v.site_name}</span>
                       <span className="text-xs text-gray-500 shrink-0 ml-auto">{timeAgo(v.last_seen)}</span>
                     </div>
-                    {v.page_url && (
-                      <p className="text-xs text-gray-500 truncate pl-3.5">{v.page_url.replace(/^https?:\/\//, '')}</p>
+                    {/* Row 2: device / browser / os */}
+                    <div className="flex items-center gap-2 pl-3.5 mb-1 flex-wrap">
+                      <span className="text-sm" title={v.device_type ?? ''}>
+                        {v.device_type === 'Mobile' ? '📱' : v.device_type === 'Tablet' ? '📟' : '💻'}
+                      </span>
+                      {v.browser && <span className="text-xs text-gray-400">{v.browser}</span>}
+                      {v.os && <span className="text-xs text-gray-500">/ {v.os}</span>}
+                    </div>
+                    {/* Row 3: country + city */}
+                    {(v.country || v.city) && (
+                      <p className="text-xs text-gray-400 pl-3.5 mb-1">
+                        {v.country}{v.city ? ` · ${v.city}` : ''}
+                      </p>
                     )}
-                    <p className="text-xs text-green-500 pl-3.5 mt-0.5">Click to take over →</p>
+                    {/* Row 4: page URL */}
+                    {v.page_url && (
+                      <p className="text-xs text-gray-500 truncate pl-3.5 mb-1">{v.page_url.replace(/^https?:\/\//, '')}</p>
+                    )}
+                    <p className="text-xs text-green-500 pl-3.5">Click to take over →</p>
                   </button>
                 ))}
               </div>

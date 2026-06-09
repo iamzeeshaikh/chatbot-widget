@@ -352,6 +352,7 @@
     if (!status || status === 'active') {
       body.pageUrl = window.location.href;
       body.userAgent = navigator.userAgent;
+      body.screenWidth = window.screen.width;
     }
     fetch(baseUrl + '/api/visitor/ping', {
       method: 'POST',
