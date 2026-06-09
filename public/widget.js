@@ -44,7 +44,7 @@
 #zee-chat-widget.open { transform: scale(1) translateY(0); opacity: 1; pointer-events: all; }\
 #zee-chat-header { background: ' + primaryColor + '; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }\
 #zee-chat-header-left { display: flex; align-items: center; gap: 10px; }\
-#zee-chat-avatar { width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; font-size: 16px; }\
+#zee-chat-avatar { width: 36px; height: 36px; border-radius: 50%; background: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; line-height: 1; }\
 #zee-chat-title { color: white; font-weight: 600; font-size: 15px; }\
 #zee-chat-subtitle { color: rgba(255,255,255,0.8); font-size: 11px; }\
 #zee-chat-close { background: none; border: none; cursor: pointer; color: white; padding: 4px; border-radius: 6px; display: flex; align-items: center; justify-content: center; opacity: 0.8; transition: opacity 0.2s; }\
@@ -95,7 +95,7 @@
     widget.innerHTML = '\
 <div id="zee-chat-header">\
   <div id="zee-chat-header-left">\
-    <div id="zee-chat-avatar">🤖</div>\
+    <div id="zee-chat-avatar" style="color:' + escapeHtml(config.primary_color) + '">' + escapeHtml((config.bot_name || 'A')[0].toUpperCase()) + '</div>\
     <div><div id="zee-chat-title">' + escapeHtml(config.bot_name) + '</div><div id="zee-chat-subtitle">Online · Ready to help</div></div>\
   </div>\
   <button id="zee-chat-close" aria-label="Close chat"><svg viewBox="0 0 24 24" width="20" height="20" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>\

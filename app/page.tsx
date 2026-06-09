@@ -308,7 +308,15 @@ export default function Dashboard() {
                     )}
                     {/* Row 4: page URL */}
                     {v.page_url && (
-                      <p className="text-xs text-gray-500 truncate pl-3.5 mb-1">{v.page_url.replace(/^https?:\/\//, '')}</p>
+                      <a
+                        href={v.page_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs text-blue-400 hover:text-blue-300 truncate pl-3.5 mb-1 block underline-offset-2 hover:underline"
+                      >
+                        {v.page_url.replace(/^https?:\/\//, '')}
+                      </a>
                     )}
                     <p className="text-xs text-green-500 pl-3.5">Click to take over →</p>
                   </button>
