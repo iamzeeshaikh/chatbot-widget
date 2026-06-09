@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -291,27 +291,50 @@ export default function Dashboard() {
                 <h2 className="text-xl font-semibold text-white mb-4">Recent Leads</h2>
                 <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm min-w-[1100px]">
                       <thead>
                         <tr className="border-b border-gray-800 bg-gray-800/50">
-                          {['Name', 'Email', 'Phone', 'Site', 'Message', 'Date'].map((h) => (
-                            <th key={h} className="text-left px-4 py-3 text-gray-400 font-medium">{h}</th>
+                          {['Score', 'Name', 'Email', 'Phone', 'Product', 'Qty', 'Budget', 'Timeline', 'Site', 'Date'].map((h) => (
+                            <th key={h} className="text-left px-3 py-3 text-gray-400 font-medium whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {leads.length === 0 ? (
-                          <tr><td colSpan={6} className="text-center py-8 text-gray-500">No leads yet</td></tr>
-                        ) : leads.map((lead) => (
-                          <tr key={lead.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                            <td className="px-4 py-3 text-white">{lead.name ?? '-'}</td>
-                            <td className="px-4 py-3 text-blue-400">{lead.email ?? '-'}</td>
-                            <td className="px-4 py-3 text-gray-300">{lead.phone ?? '-'}</td>
-                            <td className="px-4 py-3"><span className="bg-gray-800 text-gray-300 text-xs px-2 py-1 rounded font-mono">{lead.site_id}</span></td>
-                            <td className="px-4 py-3 text-gray-400 max-w-xs truncate">{lead.message ?? '-'}</td>
-                            <td className="px-4 py-3 text-gray-500 text-xs">{lead.created_at ? new Date(lead.created_at).toLocaleString() : '-'}</td>
-                          </tr>
-                        ))}
+                          <tr><td colSpan={10} className="text-center py-8 text-gray-500">No leads yet</td></tr>
+                        ) : leads.map((lead) => {
+                          // Parse structured data from message field as fallback for pre-migration leads
+                          const msgLines: Record<string, string> = {}
+                          for (const line of (lead.message ?? '').split('\n')) {
+                            const colon = line.indexOf(': ')
+                            if (colon > 0) msgLines[line.slice(0, colon).toLowerCase()] = line.slice(colon + 2)
+                          }
+                          const product = lead.product ?? msgLines['product'] ?? '-'
+                          const quantity = lead.quantity ?? msgLines['quantity'] ?? '-'
+                          const budget = lead.budget ?? msgLines['budget'] ?? '-'
+                          const timeline = lead.timeline ?? msgLines['timeline'] ?? '-'
+                          const score = lead.qualification_score ?? null
+                          return (
+                            <tr key={lead.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                              <td className="px-3 py-3">
+                                {score !== null ? (
+                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : score >= 4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-gray-700 text-gray-400'}`}>
+                                    {score}/7
+                                  </span>
+                                ) : <span className="text-gray-600 text-xs">-</span>}
+                              </td>
+                              <td className="px-3 py-3 text-white whitespace-nowrap">{lead.name ?? '-'}</td>
+                              <td className="px-3 py-3 text-blue-400 whitespace-nowrap">{lead.email ?? '-'}</td>
+                              <td className="px-3 py-3 text-gray-300 whitespace-nowrap">{lead.phone || '-'}</td>
+                              <td className="px-3 py-3 text-gray-300 max-w-[160px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
+                              <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{quantity}</td>
+                              <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{budget}</td>
+                              <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{timeline}</td>
+                              <td className="px-3 py-3"><span className="bg-gray-800 text-gray-300 text-xs px-2 py-1 rounded font-mono">{lead.site_id}</span></td>
+                              <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? new Date(lead.created_at).toLocaleString() : '-'}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
