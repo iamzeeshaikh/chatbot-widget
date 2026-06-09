@@ -224,8 +224,11 @@ export default function Dashboard() {
                 className={`w-full text-left px-4 py-3 border-b border-gray-800/60 hover:bg-gray-800/60 transition-colors ${selectedSession?.session_id === s.session_id ? 'bg-gray-800' : ''}`}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-mono text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">{s.site_id}</span>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-medium text-gray-200 truncate">{s.site_name}</span>
+                    <span className="text-xs font-mono text-gray-600 shrink-0">#{s.site_id}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
                     {s.mode === 'human' && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" title="Human Agent mode" />}
                     <span className="text-xs text-gray-500">{timeAgo(s.last_at)}</span>
                   </div>
