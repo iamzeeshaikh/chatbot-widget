@@ -44,27 +44,9 @@ export async function POST(req: NextRequest) {
     let reply: string
 
     if (mode === 'human') {
-      // Find the latest admin message and the latest assistant message for this session.
-      // If the admin message is newer than the last assistant message, it hasn't been
-      // delivered to the user yet — return it as the reply.
-      const { data: recentLogs } = await supabase
-        .from('chat_logs')
-        .select('role, message, created_at')
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: false })
-        .limit(30)
-
-      const logs = recentLogs ?? []
-      const lastAdmin = logs.find((m) => m.role === 'admin')
-      const lastAssistant = logs.find((m) => m.role === 'assistant')
-
-      const hasUndelivered =
-        lastAdmin &&
-        (!lastAssistant || new Date(lastAdmin.created_at) > new Date(lastAssistant.created_at))
-
-      reply = hasUndelivered
-        ? lastAdmin!.message
-        : '⏳ Our agent will reply shortly. Please wait...'
+      // Polling (GET /api/chat/poll) owns admin reply delivery in real-time.
+      // Inline chat replies in human mode just acknowledge receipt.
+      reply = '⏳ Our agent has received your message and will reply shortly...'
     } else {
       reply = await generateReply(siteRes.data.system_prompt, messages)
     }

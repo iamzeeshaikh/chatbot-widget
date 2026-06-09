@@ -26,6 +26,10 @@
   var leadCaptured = false;
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
+  // ─── Polling state ────────────────────────────────────────────────────────
+  var pollSince = new Date().toISOString();
+  var pollTimer = null;
+
   // ─── CSS ──────────────────────────────────────────────────────────────────
   function injectCSS(primaryColor) {
     var existing = document.getElementById('zee-chat-widget-css');
@@ -114,8 +118,11 @@
 
     btn.addEventListener('click', function () {
       widget.classList.toggle('open');
-      if (widget.classList.contains('open') && messages.length === 0) {
-        sendBotGreeting();
+      if (widget.classList.contains('open')) {
+        if (messages.length === 0) sendBotGreeting();
+        startPolling();
+      } else {
+        stopPolling();
       }
       btn.innerHTML = widget.classList.contains('open')
         ? '<svg viewBox="0 0 24 24" fill="white" width="26" height="26"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>'
@@ -124,6 +131,7 @@
 
     document.getElementById('zee-chat-close').addEventListener('click', function () {
       widget.classList.remove('open');
+      stopPolling();
       btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
     });
 
@@ -151,6 +159,7 @@
         widget.classList.add('open');
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white" width="26" height="26"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
         sendBotGreeting();
+        startPolling();
       }
     }, 5000);
   }
@@ -231,6 +240,34 @@
   function showLeadForm() {
     var form = document.getElementById('zee-lead-form');
     if (form) form.style.display = 'block';
+  }
+
+  // ─── Polling ──────────────────────────────────────────────────────────────
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () {
+      fetch(baseUrl + '/api/chat/poll?sessionId=' + encodeURIComponent(sessionId) +
+        '&siteId=' + encodeURIComponent(siteId) +
+        '&since=' + encodeURIComponent(pollSince))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var newMsgs = data.messages || [];
+          for (var i = 0; i < newMsgs.length; i++) {
+            appendMessage('bot', newMsgs[i].message);
+            messages.push({ role: 'assistant', content: newMsgs[i].message });
+            botMessageCount++;
+            pollSince = newMsgs[i].created_at;
+          }
+          if (newMsgs.length > 0 && botMessageCount >= 2 && !leadCaptured) {
+            showLeadForm();
+          }
+        })
+        .catch(function () {});
+    }, 4000);
+  }
+
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
   // ─── Greeting ─────────────────────────────────────────────────────────────
