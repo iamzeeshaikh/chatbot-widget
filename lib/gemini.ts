@@ -13,21 +13,39 @@ export async function generateReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
 ): Promise<string> {
+  // Strip internal system messages that confuse Gemini history
+  const clean = messages.filter((m) => m.content && m.content !== '(session started)')
+  if (clean.length === 0) return "Hello! How can I help you today?"
+
   const model = getGenAI().getGenerativeModel({
     model: 'gemini-flash-latest',
     systemInstruction: systemPrompt,
   })
 
-  const history = messages.slice(0, -1).map((m) => ({
-    role: m.role === 'user' ? 'user' : 'model',
+  // Build history from all but last message.
+  // Gemini requires: alternating user/model roles, must start with user.
+  const rawHistory = clean.slice(0, -1).map((m) => ({
+    role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
     parts: [{ text: m.content }],
   }))
 
-  const lastMessage = messages[messages.length - 1].content
+  const history: typeof rawHistory = []
+  for (const msg of rawHistory) {
+    if (history.length === 0) {
+      if (msg.role === 'user') history.push(msg) // skip leading model msgs
+    } else if (msg.role !== history[history.length - 1].role) {
+      history.push(msg) // only append on role change
+    }
+  }
+
+  const lastMessage = clean[clean.length - 1].content
+  console.log(`[Gemini] generateReply: history=${history.length} msgs, prompt="${lastMessage.slice(0, 80)}"`)
 
   const chat = model.startChat({ history })
   const result = await chat.sendMessage(lastMessage)
-  return result.response.text()
+  const text = result.response.text()
+  console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
+  return text
 }
 
 export interface LeadFields {
