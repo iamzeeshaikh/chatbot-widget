@@ -58,6 +58,47 @@ export interface LeadFields {
   timeline: string | null
 }
 
+export async function* streamReply(
+  systemPrompt: string,
+  messages: { role: string; content: string }[]
+): AsyncGenerator<string, void, unknown> {
+  const clean = messages.filter((m) => m.content && m.content !== '(session started)')
+  if (clean.length === 0) {
+    yield 'Hello! How can I help you today?'
+    return
+  }
+
+  const model = getGenAI().getGenerativeModel({
+    model: 'gemini-flash-latest',
+    systemInstruction: systemPrompt,
+  })
+
+  const rawHistory = clean.slice(0, -1).map((m) => ({
+    role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
+    parts: [{ text: m.content }],
+  }))
+
+  const history: typeof rawHistory = []
+  for (const msg of rawHistory) {
+    if (history.length === 0) {
+      if (msg.role === 'user') history.push(msg)
+    } else if (msg.role !== history[history.length - 1].role) {
+      history.push(msg)
+    }
+  }
+
+  const lastMessage = clean[clean.length - 1].content
+  console.log(`[Gemini] streamReply: history=${history.length} msgs, prompt="${lastMessage.slice(0, 80)}"`)
+
+  const chat = model.startChat({ history })
+  const result = await chat.sendMessageStream(lastMessage)
+
+  for await (const chunk of result.stream) {
+    const text = chunk.text()
+    if (text) yield text
+  }
+}
+
 export async function extractLeadFields(
   messages: { role: string; content: string }[]
 ): Promise<LeadFields> {

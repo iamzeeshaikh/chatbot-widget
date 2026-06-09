@@ -61,6 +61,8 @@
 .zee-typing span:nth-child(2) { animation-delay: 0.2s; }\
 .zee-typing span:nth-child(3) { animation-delay: 0.4s; }\
 @keyframes zeeTyping { 0%,60%,100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-6px); opacity: 1; } }\
+@keyframes zeeStreamBlink { 50% { opacity:0; } }\
+.zee-stream-cursor { display:inline-block; width:2px; height:0.9em; background:#9ca3af; animation:zeeStreamBlink 0.6s step-end infinite; vertical-align:text-bottom; margin-left:1px; }\
 #zee-chat-input-area { padding: 12px 14px; background: white; border-top: 1px solid #e5e7eb; display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }\
 #zee-chat-input { flex: 1; border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; font-size: 14px; resize: none; outline: none; max-height: 100px; line-height: 1.4; transition: border-color 0.2s; }\
 #zee-chat-input:focus { border-color: ' + primaryColor + '; }\
@@ -294,23 +296,57 @@
     appendMessage('user', text);
     messages.push({ role: 'user', content: text });
 
-    showTyping();
+    showTyping(); // immediate — before fetch starts
 
     fetch(baseUrl + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId: siteId, messages: messages, sessionId: sessionId }),
     })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        hideTyping();
-        var reply = data.reply || 'Sorry, I couldn\'t get a response. Please try again.';
-        appendMessage('bot', reply);
-        messages.push({ role: 'assistant', content: reply });
-        botMessageCount++;
-        if (botMessageCount >= 2 && !leadCaptured) {
-          showLeadForm();
+      .then(function (r) {
+        if (!r.ok || !r.body) {
+          hideTyping();
+          appendMessage('bot', 'Sorry, I couldn\'t get a response. Please try again.');
+          return;
         }
+
+        hideTyping();
+
+        // Create bot message bubble for live streaming
+        var msgsEl = document.getElementById('zee-chat-messages');
+        var msgDiv = document.createElement('div');
+        msgDiv.className = 'zee-msg bot';
+        msgsEl.appendChild(msgDiv);
+        scrollToBottom();
+
+        var reader = r.body.getReader();
+        var decoder = new TextDecoder();
+        var fullText = '';
+
+        function pump() {
+          reader.read().then(function (result) {
+            if (result.done) {
+              // Stream complete: apply full markdown rendering
+              msgDiv.innerHTML = renderText('bot', fullText);
+              scrollToBottom();
+              messages.push({ role: 'assistant', content: fullText });
+              botMessageCount++;
+              if (botMessageCount >= 2 && !leadCaptured) showLeadForm();
+              return;
+            }
+            var chunk = decoder.decode(result.value, { stream: true });
+            fullText += chunk;
+            // Raw escaped text + blinking cursor while streaming
+            msgDiv.innerHTML = escapeHtml(fullText) + '<span class="zee-stream-cursor"></span>';
+            scrollToBottom();
+            pump();
+          }).catch(function () {
+            msgDiv.innerHTML = renderText('bot', fullText || 'Oops! Something went wrong.');
+            scrollToBottom();
+          });
+        }
+
+        pump();
       })
       .catch(function () {
         hideTyping();
