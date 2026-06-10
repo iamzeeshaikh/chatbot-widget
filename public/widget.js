@@ -86,6 +86,10 @@
 
   // ─── DOM ──────────────────────────────────────────────────────────────────
   function buildWidget() {
+    if (document.getElementById('zee-chat-widget')) {
+      console.log('buildWidget: widget already in DOM, skipping');
+      return;
+    }
     var btn = document.createElement('button');
     btn.id = 'zee-chat-widget-btn';
     btn.setAttribute('aria-label', 'Open chat');
@@ -133,6 +137,7 @@
     });
 
     document.getElementById('zee-chat-close').addEventListener('click', function () {
+      console.log('widget closed by user click');
       widget.classList.remove('open');
       stopPolling();
       btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
@@ -159,8 +164,11 @@
 
     // Auto-open after 5 seconds if visitor hasn't opened manually
     setTimeout(function () {
+      console.log('widget auto-open timer fired, already open=' + widget.classList.contains('open'));
       if (!widget.classList.contains('open')) {
+        console.log('widget auto-opening');
         widget.classList.add('open');
+        console.log('widget open class set: ' + widget.classList.contains('open'));
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white" width="26" height="26"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
         sendBotGreeting();
         startPolling();
@@ -281,6 +289,9 @@
     var greeting = 'Hi! I\'m ' + config.bot_name + '. How can I help you today?';
     messages.push({ role: 'user', content: '(session started)' });
     appendMessage('bot', greeting);
+    console.log('greeting appended to DOM');
+    var msgsEl = document.getElementById('zee-chat-messages');
+    console.log('messages div children count: ' + (msgsEl ? msgsEl.children.length : 'DIV NOT FOUND'));
     messages.push({ role: 'assistant', content: greeting });
     botMessageCount++;
     greetingSent = true;
