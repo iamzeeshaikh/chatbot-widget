@@ -64,6 +64,19 @@ export default function Dashboard() {
     window.location.href = '/login'
   }
 
+  useEffect(() => {
+    const isSports = userRole === 'sports'
+    document.title = isSports ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
+    let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      document.head.appendChild(link)
+    }
+    link.type = 'image/svg+xml'
+    link.href = isSports ? '/favicon-sports.svg' : '/favicon-packaging.svg'
+  }, [userRole])
+
   // Overview state
   const [sites, setSites] = useState<Site[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
@@ -270,7 +283,7 @@ export default function Dashboard() {
   const roleLeads = leads.filter((l) => visibleSiteIds.has(l.site_id))
   const roleSessions = sessions.filter((s) => visibleSiteIds.has(s.site_id))
   const roleVisitors = visitors.filter((v) => visibleSiteIds.has(v.site_id))
-  const dashTitle = userRole === 'sports' ? 'Sports Dashboard' : 'Packaging Dashboard'
+  const dashTitle = userRole === 'sports' ? '🏆 Sports Dashboard' : '📦 Packaging Dashboard'
   const accentColor = userRole === 'sports' ? '#16a34a' : '#2563eb'
 
   // ── Derived filter values ──────────────────────────────────────────────────

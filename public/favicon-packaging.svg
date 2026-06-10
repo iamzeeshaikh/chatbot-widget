@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Box body -->
+  <rect x="15" y="42" width="70" height="48" rx="4" fill="#2563eb"/>
+  <!-- Box top flap left -->
+  <path d="M15 42 L50 30 L50 42 Z" fill="#1d4ed8"/>
+  <!-- Box top flap right -->
+  <path d="M85 42 L50 30 L50 42 Z" fill="#3b82f6"/>
+  <!-- Box top center ridge -->
+  <line x1="50" y1="30" x2="50" y2="42" stroke="#1e40af" stroke-width="1.5"/>
+  <!-- Tape strip across front -->
+  <rect x="42" y="42" width="16" height="48" rx="0" fill="#93c5fd" opacity="0.5"/>
+  <!-- Bottom fold line -->
+  <line x1="15" y1="70" x2="85" y2="70" stroke="#1d4ed8" stroke-width="1.5" opacity="0.5"/>
+</svg>
