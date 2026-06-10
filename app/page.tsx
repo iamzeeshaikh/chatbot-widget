@@ -2,6 +2,16 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 
+const PACKAGING_SITES = ['zeecustomboxes', 'zeepack', 'burgersleeves', 'leadgen']
+const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
+
+function readSession(): { role: 'packaging' | 'sports'; email: string } {
+  if (typeof document === 'undefined') return { role: 'packaging', email: '' }
+  const cookie = document.cookie.split('; ').find((r) => r.startsWith('zee-auth='))
+  if (!cookie) return { role: 'packaging', email: '' }
+  try { return JSON.parse(atob(cookie.split('=')[1])) } catch { return { role: 'packaging', email: '' } }
+}
+
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null }
@@ -40,6 +50,19 @@ function timeAgo(ts: string) {
 
 export default function Dashboard() {
   const [tab, setTab] = useState<'overview' | 'conversations'>('overview')
+
+  // Auth
+  const [userRole, setUserRole] = useState<'packaging' | 'sports'>('packaging')
+  const [userEmail, setUserEmail] = useState('')
+  useEffect(() => {
+    const s = readSession()
+    setUserRole(s.role)
+    setUserEmail(s.email)
+  }, [])
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    window.location.href = '/login'
+  }
 
   // Overview state
   const [sites, setSites] = useState<Site[]>([])
@@ -241,11 +264,20 @@ export default function Dashboard() {
     setSavingEdit(false)
   }
 
+  // ── Role-based filtering ───────────────────────────────────────────────────
+  const visibleSiteIds = new Set(userRole === 'sports' ? SPORTS_SITES : PACKAGING_SITES)
+  const roleSites = sites.filter((s) => visibleSiteIds.has(s.site_id))
+  const roleLeads = leads.filter((l) => visibleSiteIds.has(l.site_id))
+  const roleSessions = sessions.filter((s) => visibleSiteIds.has(s.site_id))
+  const roleVisitors = visitors.filter((v) => visibleSiteIds.has(v.site_id))
+  const dashTitle = userRole === 'sports' ? 'Sports Dashboard' : 'Packaging Dashboard'
+  const accentColor = userRole === 'sports' ? '#16a34a' : '#2563eb'
+
   // ── Derived filter values ──────────────────────────────────────────────────
-  const sessionSites = Array.from(new Map(sessions.map(s => [s.site_id, s.site_name])).entries())
+  const sessionSites = Array.from(new Map(roleSessions.map(s => [s.site_id, s.site_name])).entries())
     .map(([id, name]) => ({ site_id: id, site_name: name }))
 
-  const filteredSessions = sessions.filter(s => {
+  const filteredSessions = roleSessions.filter(s => {
     if (filterSite && s.site_id !== filterSite) return false
     if (filterStatus === 'bot' && s.mode !== 'bot') return false
     if (filterStatus === 'human' && s.mode !== 'human') return false
@@ -289,16 +321,29 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Header */}
       <div className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Chatbot Widget Dashboard</h1>
-          <p className="text-gray-400 text-sm mt-0.5">Manage your sites, leads, and conversations</p>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: accentColor }}>
+            <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-white">{dashTitle}</h1>
+            <p className="text-gray-500 text-xs mt-0.5">{userEmail}</p>
+          </div>
         </div>
-        <div className="flex gap-1 bg-gray-900 p-1 rounded-lg border border-gray-800">
-          <button onClick={() => setTab('overview')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'overview' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>Overview</button>
-          <button onClick={() => setTab('conversations')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'conversations' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>
-            Conversations
-            {sessions.length > 0 && <span className="ml-1.5 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full">{sessions.length}</span>}
-            {visitors.length > 0 && <span className="ml-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded-full">{visitors.length} live</span>}
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1 bg-gray-900 p-1 rounded-lg border border-gray-800">
+            <button onClick={() => setTab('overview')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'overview' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>Overview</button>
+            <button onClick={() => setTab('conversations')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'conversations' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              Conversations
+              {roleSessions.length > 0 && <span className="ml-1.5 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full">{roleSessions.length}</span>}
+              {roleVisitors.length > 0 && <span className="ml-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded-full">{roleVisitors.length} live</span>}
+            </button>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg transition-colors"
+          >
+            Sign out
           </button>
         </div>
       </div>
@@ -313,10 +358,10 @@ export default function Dashboard() {
               {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 {[
-                  { label: 'Total Sites', value: sites.length },
-                  { label: 'Total Leads', value: leads.length },
-                  { label: 'Active Bots', value: sites.length },
-                  { label: "Today's Leads", value: leads.filter((l) => l.created_at?.startsWith(new Date().toISOString().split('T')[0])).length },
+                  { label: 'Total Sites', value: roleSites.length },
+                  { label: 'Total Leads', value: roleLeads.length },
+                  { label: 'Active Bots', value: roleSites.length },
+                  { label: "Today's Leads", value: roleLeads.filter((l) => l.created_at?.startsWith(new Date().toISOString().split('T')[0])).length },
                 ].map((s) => (
                   <div key={s.label} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
                     <p className="text-gray-400 text-sm">{s.label}</p>
@@ -329,7 +374,7 @@ export default function Dashboard() {
               <div className="mb-8">
                 <h2 className="text-xl font-semibold text-white mb-4">Configured Sites</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {sites.map((site) => (
+                  {roleSites.map((site) => (
                     <div key={site.site_id} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
                       <div className="flex items-center gap-3 mb-3">
                         <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{ backgroundColor: site.primary_color }}>
@@ -342,7 +387,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-xs text-gray-500 font-mono bg-gray-800 px-2 py-1 rounded">{site.site_id}</span>
-                        <span className="text-xs text-gray-400">{leads.filter((l) => l.site_id === site.site_id).length} leads</span>
+                        <span className="text-xs text-gray-400">{roleLeads.filter((l) => l.site_id === site.site_id).length} leads</span>
                       </div>
                       <div className="mt-3 pt-3 border-t border-gray-800">
                         <p className="text-xs text-gray-500 font-mono break-all">{'?siteId=' + site.site_id}</p>
@@ -366,9 +411,9 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {leads.length === 0 ? (
+                        {roleLeads.length === 0 ? (
                           <tr><td colSpan={12} className="text-center py-8 text-gray-500">No leads yet</td></tr>
-                        ) : leads.map((lead) => {
+                        ) : roleLeads.map((lead) => {
                           const msgLines: Record<string, string> = {}
                           for (const line of (lead.message ?? '').split('\n')) {
                             const colon = line.indexOf(': ')
@@ -379,7 +424,7 @@ export default function Dashboard() {
                           const budget = lead.budget ?? msgLines['budget'] ?? '-'
                           const timeline = lead.timeline ?? msgLines['timeline'] ?? '-'
                           const score = lead.qualification_score ?? null
-                          const siteName = sites.find((s) => s.site_id === lead.site_id)?.name ?? lead.site_id
+                          const siteName = roleSites.find((s) => s.site_id === lead.site_id)?.name ?? sites.find((s) => s.site_id === lead.site_id)?.name ?? lead.site_id
                           const isEditing = editingLeadId === lead.id
                           const isConfirmingDelete = confirmLeadDeleteId === lead.id
 
@@ -462,13 +507,13 @@ export default function Dashboard() {
           {/* Session list */}
           <div className="w-80 flex-shrink-0 border-r border-gray-800 overflow-y-auto bg-gray-900/50">
             {/* Live Visitors */}
-            {visitors.length > 0 && (
+            {roleVisitors.length > 0 && (
               <div className="border-b border-gray-800">
                 <div className="px-3 py-2 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                  <p className="text-xs text-green-400 font-medium uppercase tracking-wide">{visitors.length} Live Visitor{visitors.length !== 1 ? 's' : ''}</p>
+                  <p className="text-xs text-green-400 font-medium uppercase tracking-wide">{roleVisitors.length} Live Visitor{roleVisitors.length !== 1 ? 's' : ''}</p>
                 </div>
-                {visitors.map((v) => (
+                {roleVisitors.map((v) => (
                   <button
                     key={v.session_id}
                     onClick={() => openVisitorSession(v)}
