@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { streamReply, generateReply, extractLeadFields } from '@/lib/gemini'
+import { generateReply, extractLeadFields } from '@/lib/gemini'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     const mode = modeRes.data?.mode ?? 'bot'
     const systemPrompt: string = siteRes.data.system_prompt
 
-    // Save user message before streaming starts
+    // Save user message
     const lastUserMessage = messages[messages.length - 1]
     await supabase.from('chat_logs').insert({
       site_id: siteId,
@@ -45,15 +45,13 @@ export async function POST(req: NextRequest) {
       message: lastUserMessage.content,
     })
 
-    const encoder = new TextEncoder()
-    const streamHeaders = {
+    const responseHeaders = {
       ...corsHeaders,
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'no-cache',
-      'X-Content-Type-Options': 'nosniff',
     }
 
-    // Human mode: single-chunk stream (no Gemini call)
+    // Human mode: no Gemini call
     if (mode === 'human') {
       const humanReply = '⏳ Our agent has received your message and will reply shortly...'
       after(async () => {
@@ -61,30 +59,20 @@ export async function POST(req: NextRequest) {
           site_id: siteId, session_id: sessionId, role: 'assistant', message: humanReply,
         })
       })
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode(humanReply))
-          controller.close()
-        },
-      })
-      return new Response(stream, { headers: streamHeaders })
+      return new Response(humanReply, { headers: responseHeaders })
     }
 
-    // Bot mode: streaming Gemini response
-    // Bridge Promise lets after() (registered now) await the accumulated reply
-    let resolveReply!: (reply: string) => void
-    const replyDone = new Promise<string>((res) => { resolveReply = res })
+    // Bot mode: regular generateContent (no streaming)
+    const reply = await generateReply(systemPrompt, messages)
 
-    // Register post-response work before returning stream (captures request context)
     after(async () => {
-      const fullReply = await replyDone
       await supabase.from('chat_logs').insert({
-        site_id: siteId, session_id: sessionId, role: 'assistant', message: fullReply,
+        site_id: siteId, session_id: sessionId, role: 'assistant', message: reply,
       })
       const userMsgCount = (messages as { role: string }[]).filter((m) => m.role === 'user').length
       if (userMsgCount >= 3) {
         try {
-          const allMessages = [...messages, { role: 'assistant', content: fullReply }]
+          const allMessages = [...messages, { role: 'assistant', content: reply }]
           const fields = await extractLeadFields(allMessages)
           const score = Object.values(fields).filter((v) => v !== null).length
           if (score >= 7 && fields.email) {
@@ -118,40 +106,7 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    const CONNECT_FALLBACK = 'Our team has received your message and will respond shortly. Please leave your contact details below.'
-
-    const stream = new ReadableStream({
-      async start(controller) {
-        let acc = ''
-        try {
-          for await (const chunk of streamReply(systemPrompt, messages)) {
-            acc += chunk
-            controller.enqueue(encoder.encode(chunk))
-          }
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err)
-          console.error(`[Chat] streamReply FAILED siteId=${siteId} msgCount=${messages?.length} error=${errMsg}`)
-          console.error('[Chat] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
-          if (!acc) {
-            // All streaming models failed — fall back to generateReply (tries all models too)
-            try {
-              const reply = await generateReply(systemPrompt, messages)
-              acc = reply
-              controller.enqueue(encoder.encode(reply))
-            } catch (fallbackErr) {
-              const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
-              console.error(`[Chat] generateReply fallback also failed: ${fallbackMsg}`)
-              acc = CONNECT_FALLBACK
-              controller.enqueue(encoder.encode(CONNECT_FALLBACK))
-            }
-          }
-        }
-        controller.close()
-        resolveReply(acc)
-      },
-    })
-
-    return new Response(stream, { headers: streamHeaders })
+    return new Response(reply, { headers: responseHeaders })
   } catch (err) {
     console.error('[Chat] unhandled error:', err)
     console.error('[Chat] error details:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
