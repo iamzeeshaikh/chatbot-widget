@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const MODEL = 'gemini-1.5-flash-latest'
+const MODEL = 'gemini-1.5-flash'
 
 const RATE_LIMIT_FALLBACK = 'Our team has received your message and will respond shortly. Please leave your contact details below.'
 
