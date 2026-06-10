@@ -73,7 +73,7 @@ export default function Dashboard() {
     link.rel = 'icon'
     link.type = 'image/svg+xml'
     // Cache-bust so browsers don't reuse a cached favicon on role switch
-    link.href = isSports ? '/favicon-sports.svg?v=2' : '/favicon-packaging.svg?v=2'
+    link.href = isSports ? '/favicon-sports.svg?v=3' : '/favicon-packaging.svg?v=3'
     document.head.appendChild(link)
   }, [userRole])
 
