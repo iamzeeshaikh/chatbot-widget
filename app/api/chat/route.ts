@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { streamReply, extractLeadFields } from '@/lib/gemini'
+import { streamReply, generateReply, extractLeadFields } from '@/lib/gemini'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -118,6 +118,8 @@ export async function POST(req: NextRequest) {
       }
     })
 
+    const CONNECT_FALLBACK = "I'm having trouble connecting right now. Please leave your name, email, and phone number and we'll call you back shortly!"
+
     const stream = new ReadableStream({
       async start(controller) {
         let acc = ''
@@ -129,10 +131,18 @@ export async function POST(req: NextRequest) {
         } catch (err) {
           console.error('[Chat] streamReply error:', err)
           console.error('[Chat] siteId:', siteId, 'sessionId:', sessionId, 'msgCount:', messages?.length)
-          const fallback = "Sorry, I couldn't get a response. Please try again."
           if (!acc) {
-            acc = fallback
-            controller.enqueue(encoder.encode(fallback))
+            // Streaming failed before any output — fall back to non-streaming (already has retry)
+            try {
+              await new Promise((r) => setTimeout(r, 2000))
+              const reply = await generateReply(systemPrompt, messages)
+              acc = reply
+              controller.enqueue(encoder.encode(reply))
+            } catch (fallbackErr) {
+              console.error('[Chat] generateReply fallback also failed:', fallbackErr)
+              acc = CONNECT_FALLBACK
+              controller.enqueue(encoder.encode(CONNECT_FALLBACK))
+            }
           }
         }
         controller.close()

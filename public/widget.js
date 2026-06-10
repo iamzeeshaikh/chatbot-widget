@@ -24,6 +24,7 @@
   var messages = [];
   var botMessageCount = 0;
   var leadCaptured = false;
+  var greetingShown = false;
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
   // ─── Polling state ────────────────────────────────────────────────────────
@@ -104,7 +105,7 @@
 </div>\
 <div id="zee-chat-messages"></div>\
 <div id="zee-lead-form" style="display:none">\
-  <p>✨ Leave your details and we\'ll follow up with you!</p>\
+  <p>Leave your details and we\'ll follow up with you!</p>\
   <input class="zee-lead-input" id="zee-lead-name" placeholder="Your Name *" type="text" />\
   <input class="zee-lead-input" id="zee-lead-email" placeholder="Email Address *" type="email" />\
   <input class="zee-lead-input" id="zee-lead-phone" placeholder="Phone (optional)" type="tel" />\
@@ -274,11 +275,15 @@
 
   // ─── Greeting ─────────────────────────────────────────────────────────────
   function sendBotGreeting() {
+    if (greetingShown) return;
+    greetingShown = true;
     var greeting = 'Hi! I\'m ' + config.bot_name + '. How can I help you today?';
-    messages.push({ role: 'user', content: '(session started)' });
     showTyping();
     setTimeout(function () {
       hideTyping();
+      // Push (session started) only after rendering so closing within 600ms
+      // doesn't leave messages in a half-initialised state
+      messages.push({ role: 'user', content: '(session started)' });
       appendMessage('bot', greeting);
       messages.push({ role: 'assistant', content: greeting });
       botMessageCount++;

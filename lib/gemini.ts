@@ -9,43 +9,65 @@ function getGenAI(): GoogleGenerativeAI {
   return _genAI
 }
 
+const RATE_LIMIT_FALLBACK = "I'm having trouble connecting right now. Please leave your name, email, and phone number and we'll call you back shortly!"
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms))
+}
+
+function buildHistory(messages: { role: string; content: string }[]) {
+  const clean = messages.filter((m) => m.content && m.content !== '(session started)')
+  const rawHistory = clean.slice(0, -1).map((m) => ({
+    role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
+    parts: [{ text: m.content }],
+  }))
+  const history: typeof rawHistory = []
+  for (const msg of rawHistory) {
+    if (history.length === 0) {
+      if (msg.role === 'user') history.push(msg)
+    } else if (msg.role !== history[history.length - 1].role) {
+      history.push(msg)
+    }
+  }
+  return { clean, history, lastMessage: clean[clean.length - 1].content }
+}
+
 export async function generateReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
 ): Promise<string> {
-  // Strip internal system messages that confuse Gemini history
-  const clean = messages.filter((m) => m.content && m.content !== '(session started)')
-  if (clean.length === 0) return "Hello! How can I help you today?"
+  const { clean, history, lastMessage } = buildHistory(messages)
+  if (clean.length === 0) return 'Hello! How can I help you today?'
 
   const model = getGenAI().getGenerativeModel({
     model: 'gemini-flash-latest',
     systemInstruction: systemPrompt,
   })
 
-  // Build history from all but last message.
-  // Gemini requires: alternating user/model roles, must start with user.
-  const rawHistory = clean.slice(0, -1).map((m) => ({
-    role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
-    parts: [{ text: m.content }],
-  }))
-
-  const history: typeof rawHistory = []
-  for (const msg of rawHistory) {
-    if (history.length === 0) {
-      if (msg.role === 'user') history.push(msg) // skip leading model msgs
-    } else if (msg.role !== history[history.length - 1].role) {
-      history.push(msg) // only append on role change
-    }
-  }
-
-  const lastMessage = clean[clean.length - 1].content
   console.log(`[Gemini] generateReply: history=${history.length} msgs, prompt="${lastMessage.slice(0, 80)}"`)
 
-  const chat = model.startChat({ history })
-  const result = await chat.sendMessage(lastMessage)
-  const text = result.response.text()
-  console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
-  return text
+  async function attempt() {
+    const chat = model.startChat({ history })
+    const result = await chat.sendMessage(lastMessage)
+    return result.response.text()
+  }
+
+  try {
+    const text = await attempt()
+    console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
+    return text
+  } catch (err) {
+    console.error('[Gemini] generateReply failed, retrying in 2s:', err)
+    await sleep(2000)
+    try {
+      const text = await attempt()
+      console.log(`[Gemini] retry reply: "${text.slice(0, 120)}"`)
+      return text
+    } catch (err2) {
+      console.error('[Gemini] generateReply retry also failed:', err2)
+      return RATE_LIMIT_FALLBACK
+    }
+  }
 }
 
 export interface LeadFields {
@@ -62,7 +84,7 @@ export async function* streamReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
 ): AsyncGenerator<string, void, unknown> {
-  const clean = messages.filter((m) => m.content && m.content !== '(session started)')
+  const { clean, history, lastMessage } = buildHistory(messages)
   if (clean.length === 0) {
     yield 'Hello! How can I help you today?'
     return
@@ -73,21 +95,6 @@ export async function* streamReply(
     systemInstruction: systemPrompt,
   })
 
-  const rawHistory = clean.slice(0, -1).map((m) => ({
-    role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
-    parts: [{ text: m.content }],
-  }))
-
-  const history: typeof rawHistory = []
-  for (const msg of rawHistory) {
-    if (history.length === 0) {
-      if (msg.role === 'user') history.push(msg)
-    } else if (msg.role !== history[history.length - 1].role) {
-      history.push(msg)
-    }
-  }
-
-  const lastMessage = clean[clean.length - 1].content
   console.log(`[Gemini] streamReply: history=${history.length} msgs, prompt="${lastMessage.slice(0, 80)}"`)
 
   const chat = model.startChat({ history })
