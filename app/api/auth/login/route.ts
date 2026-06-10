@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const ACCOUNTS = [
-  { email: 'packaging@zeeops.dev', password: 'packaging123', role: 'packaging' as const },
-  { email: 'sports@zeeops.dev',    password: 'sports123',    role: 'sports'    as const },
+  { email: 'packaging@zeeops.dev', password: 'uzairzia@4321', role: 'packaging' as const },
+  { email: 'sports@zeeops.dev',    password: 'uzairzia@4321', role: 'sports'    as const },
 ]
 
 export async function POST(req: NextRequest) {
