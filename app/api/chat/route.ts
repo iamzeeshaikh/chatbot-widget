@@ -129,17 +129,18 @@ export async function POST(req: NextRequest) {
             controller.enqueue(encoder.encode(chunk))
           }
         } catch (err) {
-          console.error('[Chat] streamReply error:', err)
-          console.error('[Chat] siteId:', siteId, 'sessionId:', sessionId, 'msgCount:', messages?.length)
+          const errMsg = err instanceof Error ? err.message : String(err)
+          console.error(`[Chat] streamReply FAILED siteId=${siteId} msgCount=${messages?.length} error=${errMsg}`)
+          console.error('[Chat] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
           if (!acc) {
-            // Streaming failed before any output — fall back to non-streaming (already has retry)
+            // All streaming models failed — fall back to generateReply (tries all models too)
             try {
-              await new Promise((r) => setTimeout(r, 2000))
               const reply = await generateReply(systemPrompt, messages)
               acc = reply
               controller.enqueue(encoder.encode(reply))
             } catch (fallbackErr) {
-              console.error('[Chat] generateReply fallback also failed:', fallbackErr)
+              const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+              console.error(`[Chat] generateReply fallback also failed: ${fallbackMsg}`)
               acc = CONNECT_FALLBACK
               controller.enqueue(encoder.encode(CONNECT_FALLBACK))
             }

@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const GEMINI_MODEL = 'gemini-1.5-flash-8b' // higher free-tier limits (1500/day, 100/min)
+// Models tried in order — first success wins
+const MODELS = ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.0-pro']
 
 const RATE_LIMIT_FALLBACK = 'Our team has received your message and will respond shortly. Please leave your contact details below.'
 
@@ -13,23 +14,6 @@ function getGenAI(): GoogleGenerativeAI {
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms))
-}
-
-// Exponential backoff retry: delays = [1s, 3s, 5s]
-async function withRetry<T>(fn: () => Promise<T>, delays = [1000, 3000, 5000]): Promise<T> {
-  let lastErr: unknown
-  for (let i = 0; i <= delays.length; i++) {
-    try {
-      return await fn()
-    } catch (err) {
-      lastErr = err
-      if (i < delays.length) {
-        console.error(`[Gemini] attempt ${i + 1} failed, retrying in ${delays[i]}ms:`, err)
-        await sleep(delays[i])
-      }
-    }
-  }
-  throw lastErr
 }
 
 function buildHistory(messages: { role: string; content: string }[]) {
@@ -49,6 +33,29 @@ function buildHistory(messages: { role: string; content: string }[]) {
   return { clean, history, lastMessage: clean[clean.length - 1]?.content ?? '' }
 }
 
+// Try each model in MODELS order, with 1s backoff between attempts
+async function tryModels<T>(
+  fn: (modelName: string) => Promise<T>,
+  label: string
+): Promise<T> {
+  let lastErr: unknown
+  for (const modelName of MODELS) {
+    try {
+      console.log(`[Gemini] ${label} trying model=${modelName}`)
+      const result = await fn(modelName)
+      console.log(`[Gemini] ${label} succeeded with model=${modelName}`)
+      return result
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[Gemini] ${label} model=${modelName} FAILED: ${msg}`)
+      console.error('[Gemini] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
+      lastErr = err
+      await sleep(1000)
+    }
+  }
+  throw lastErr
+}
+
 export async function generateReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
@@ -56,19 +63,20 @@ export async function generateReply(
   const { clean, history, lastMessage } = buildHistory(messages)
   if (clean.length === 0 || !lastMessage) return 'Hello! How can I help you today?'
 
-  const model = getGenAI().getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: systemPrompt })
-  console.log(`[Gemini] generateReply model=${GEMINI_MODEL} history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
+  console.log(`[Gemini] generateReply history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
 
   try {
-    const text = await withRetry(async () => {
+    return await tryModels(async (modelName) => {
+      const model = getGenAI().getGenerativeModel({ model: modelName, systemInstruction: systemPrompt })
       const chat = model.startChat({ history })
       const result = await chat.sendMessage(lastMessage)
-      return result.response.text()
-    })
-    console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
-    return text
+      const text = result.response.text()
+      console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
+      return text
+    }, 'generateReply')
   } catch (err) {
-    console.error('[Gemini] generateReply all retries failed:', err)
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[Gemini] generateReply ALL models failed. Last error: ${msg}`)
     return RATE_LIMIT_FALLBACK
   }
 }
@@ -93,25 +101,38 @@ export async function* streamReply(
     return
   }
 
-  const model = getGenAI().getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: systemPrompt })
-  console.log(`[Gemini] streamReply model=${GEMINI_MODEL} history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
+  console.log(`[Gemini] streamReply history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
 
-  const chat = model.startChat({ history })
-  const result = await chat.sendMessageStream(lastMessage)
-
-  for await (const chunk of result.stream) {
-    const text = chunk.text()
-    if (text) yield text
+  // Try each model in order for streaming
+  let lastErr: unknown
+  for (const modelName of MODELS) {
+    try {
+      console.log(`[Gemini] streamReply trying model=${modelName}`)
+      const model = getGenAI().getGenerativeModel({ model: modelName, systemInstruction: systemPrompt })
+      const chat = model.startChat({ history })
+      const result = await chat.sendMessageStream(lastMessage)
+      for await (const chunk of result.stream) {
+        const text = chunk.text()
+        if (text) yield text
+      }
+      console.log(`[Gemini] streamReply done with model=${modelName}`)
+      return
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[Gemini] streamReply model=${modelName} FAILED: ${msg}`)
+      console.error('[Gemini] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
+      lastErr = err
+      await sleep(1000)
+    }
   }
+  throw lastErr
 }
 
 export async function extractLeadFields(
   messages: { role: string; content: string }[]
 ): Promise<LeadFields> {
   const empty: LeadFields = { name: null, email: null, phone: null, product: null, quantity: null, budget: null, timeline: null }
-
   try {
-    const model = getGenAI().getGenerativeModel({ model: GEMINI_MODEL })
     const convo = messages
       .filter((m) => m.content && m.content !== '(session started)')
       .map((m) => `${m.role === 'user' ? 'Customer' : 'Bot'}: ${m.content}`)
@@ -124,10 +145,12 @@ Return ONLY valid JSON (no markdown, no explanation) with these exact keys, use 
 Conversation:
 ${convo}`
 
-    const result = await withRetry(() => model.generateContent(prompt))
-    const text = result.response.text().trim()
-    const jsonMatch = text.match(/\{[\s\S]*?\}/)
-    if (jsonMatch) {
+    return await tryModels(async (modelName) => {
+      const model = getGenAI().getGenerativeModel({ model: modelName })
+      const result = await model.generateContent(prompt)
+      const text = result.response.text().trim()
+      const jsonMatch = text.match(/\{[\s\S]*?\}/)
+      if (!jsonMatch) throw new Error('No JSON in response')
       const parsed = JSON.parse(jsonMatch[0])
       return {
         name: parsed.name || null, email: parsed.email || null,
@@ -135,7 +158,7 @@ ${convo}`
         quantity: parsed.quantity || null, budget: parsed.budget || null,
         timeline: parsed.timeline || null,
       }
-    }
-  } catch { /* extraction errors are non-fatal */ }
+    }, 'extractLeadFields')
+  } catch { /* non-fatal */ }
   return empty
 }
