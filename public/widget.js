@@ -24,7 +24,6 @@
   var messages = [];
   var botMessageCount = 0;
   var leadCaptured = false;
-  var greetingTimer = null; // tracks pending greeting timeout so we don't double-fire
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
   // ─── Polling state ────────────────────────────────────────────────────────
@@ -122,7 +121,7 @@
     btn.addEventListener('click', function () {
       widget.classList.toggle('open');
       if (widget.classList.contains('open')) {
-        if (messages.length === 0) sendBotGreeting();
+        sendBotGreeting();
         startPolling();
       } else {
         stopPolling();
@@ -157,15 +156,11 @@
 
     document.getElementById('zee-lead-submit').addEventListener('click', handleLeadSubmit);
 
-    // Fire greeting immediately into the (hidden) widget so it's ready when opened
-    setTimeout(sendBotGreeting, 800);
-
     // Auto-open after 5 seconds if visitor hasn't opened manually
     setTimeout(function () {
       if (!widget.classList.contains('open')) {
         widget.classList.add('open');
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white" width="26" height="26"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
-        // sendBotGreeting() is idempotent — if already fired above it's a no-op
         sendBotGreeting();
         startPolling();
       }
@@ -280,20 +275,13 @@
 
   // ─── Greeting ─────────────────────────────────────────────────────────────
   function sendBotGreeting() {
-    // botMessageCount > 0 means a bot message already rendered — don't repeat
-    if (botMessageCount > 0) return;
-    // greetingTimer !== null means one is already in flight — don't stack timers
-    if (greetingTimer !== null) return;
+    var el = document.getElementById('zee-chat-messages');
+    if (!el || el.children.length > 0) return;
     var greeting = 'Hi! I\'m ' + config.bot_name + '. How can I help you today?';
-    showTyping();
-    greetingTimer = setTimeout(function () {
-      greetingTimer = null;
-      hideTyping();
-      messages.push({ role: 'user', content: '(session started)' });
-      appendMessage('bot', greeting);
-      messages.push({ role: 'assistant', content: greeting });
-      botMessageCount++;
-    }, 600);
+    messages.push({ role: 'user', content: '(session started)' });
+    appendMessage('bot', greeting);
+    messages.push({ role: 'assistant', content: greeting });
+    botMessageCount++;
   }
 
   // ─── Send ──────────────────────────────────────────────────────────────────
