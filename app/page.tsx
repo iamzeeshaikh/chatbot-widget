@@ -5,6 +5,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 const PACKAGING_SITES = ['zeecustomboxes', 'zeepack', 'burgersleeves', 'leadgen']
 const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
+// Inline SVG data URIs — bypasses Next.js metadata favicon injection & browser caching
+const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="40" width="76" height="52" rx="5" fill="#2563eb"/><polygon points="12,40 50,22 88,40" fill="#1d4ed8"/><rect x="38" y="40" width="24" height="52" fill="#93c5fd" opacity="0.35"/></svg>')}`
+const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#16a34a"/><path d="M35 22 Q31 50 38 62 Q44 72 50 74 Q56 72 62 62 Q69 50 65 22Z" fill="white"/><path d="M35 30 Q20 30 20 44 Q20 56 35 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M65 30 Q80 30 80 44 Q80 56 65 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><rect x="44" y="74" width="12" height="10" rx="2" fill="white"/><rect x="32" y="84" width="36" height="8" rx="3" fill="white"/></svg>')}`
+
 function readSession(): { role: 'packaging' | 'sports'; email: string } {
   if (typeof document === 'undefined') return { role: 'packaging', email: '' }
   const cookie = document.cookie.split('; ').find((r) => r.startsWith('zee-auth='))
@@ -67,13 +71,13 @@ export default function Dashboard() {
   useEffect(() => {
     const isSports = userRole === 'sports'
     document.title = isSports ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
-    // Remove all existing icon links (including the Next.js-injected favicon.ico)
-    document.querySelectorAll("link[rel~='icon']").forEach((l) => l.remove())
+    // Remove every favicon-related link tag Next.js or the browser may have injected
+    document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']").forEach((l) => l.remove())
     const link = document.createElement('link')
     link.rel = 'icon'
     link.type = 'image/svg+xml'
-    // Cache-bust so browsers don't reuse a cached favicon on role switch
-    link.href = isSports ? '/favicon-sports.svg?v=3' : '/favicon-packaging.svg?v=3'
+    // Data URI: no HTTP request, no caching, no Next.js interference
+    link.href = isSports ? FAVICON_SPORTS : FAVICON_PACKAGING
     document.head.appendChild(link)
   }, [userRole])
 
