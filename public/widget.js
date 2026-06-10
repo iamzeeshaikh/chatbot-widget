@@ -11,7 +11,8 @@
   var urlParams = new URLSearchParams(scriptSrc.split('?')[1] || '');
   var siteId = urlParams.get('siteId') || 'default';
 
-  var baseUrl = scriptSrc ? scriptSrc.split('/widget.js')[0] : '';
+  var baseUrl = 'https://chat.zeeops.dev';
+  console.log('widget.js baseUrl=' + baseUrl + ' siteId=' + siteId);
 
   function genUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -311,60 +312,74 @@
 
     showTyping(); // immediate — before fetch starts
 
-    fetch(baseUrl + '/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: siteId, messages: messages, sessionId: sessionId }),
-    })
-      .then(function (r) {
-        if (!r.ok || !r.body) {
-          hideTyping();
-          appendMessage('bot', 'Sorry, I couldn\'t get a response. Please try again.');
-          return;
-        }
+    var chatUrl = baseUrl + '/api/chat';
+    var requestBody = { siteId: siteId, messages: messages, sessionId: sessionId };
+    console.log('Sending to:', chatUrl);
+    console.log('Request body:', JSON.stringify(requestBody));
 
-        hideTyping();
-
-        // Create bot message bubble for live streaming
-        var msgsEl = document.getElementById('zee-chat-messages');
-        var msgDiv = document.createElement('div');
-        msgDiv.className = 'zee-msg bot';
-        msgsEl.appendChild(msgDiv);
-        scrollToBottom();
-
-        var reader = r.body.getReader();
-        var decoder = new TextDecoder();
-        var fullText = '';
-
-        function pump() {
-          reader.read().then(function (result) {
-            if (result.done) {
-              // Stream complete: apply full markdown rendering
-              msgDiv.innerHTML = renderText('bot', fullText);
-              scrollToBottom();
-              messages.push({ role: 'assistant', content: fullText });
-              botMessageCount++;
-              if (botMessageCount >= 2 && !leadCaptured) showLeadForm();
-              return;
-            }
-            var chunk = decoder.decode(result.value, { stream: true });
-            fullText += chunk;
-            // Raw escaped text + blinking cursor while streaming
-            msgDiv.innerHTML = escapeHtml(fullText) + '<span class="zee-stream-cursor"></span>';
-            scrollToBottom();
-            pump();
-          }).catch(function () {
-            msgDiv.innerHTML = renderText('bot', fullText || 'Oops! Something went wrong.');
-            scrollToBottom();
-          });
-        }
-
-        pump();
+    try {
+      fetch(chatUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
       })
-      .catch(function () {
-        hideTyping();
-        appendMessage('bot', 'Oops! Something went wrong. Please try again.');
-      });
+        .then(function (r) {
+          console.log('Chat API response status:', r.status, 'ok:', r.ok);
+          if (!r.ok || !r.body) {
+            hideTyping();
+            appendMessage('bot', 'Sorry, I couldn\'t get a response. Please try again.');
+            return;
+          }
+
+          hideTyping();
+
+          // Create bot message bubble for live streaming
+          var msgsEl = document.getElementById('zee-chat-messages');
+          var msgDiv = document.createElement('div');
+          msgDiv.className = 'zee-msg bot';
+          msgsEl.appendChild(msgDiv);
+          scrollToBottom();
+
+          var reader = r.body.getReader();
+          var decoder = new TextDecoder();
+          var fullText = '';
+
+          function pump() {
+            reader.read().then(function (result) {
+              if (result.done) {
+                // Stream complete: apply full markdown rendering
+                msgDiv.innerHTML = renderText('bot', fullText);
+                scrollToBottom();
+                messages.push({ role: 'assistant', content: fullText });
+                botMessageCount++;
+                if (botMessageCount >= 2 && !leadCaptured) showLeadForm();
+                return;
+              }
+              var chunk = decoder.decode(result.value, { stream: true });
+              fullText += chunk;
+              // Raw escaped text + blinking cursor while streaming
+              msgDiv.innerHTML = escapeHtml(fullText) + '<span class="zee-stream-cursor"></span>';
+              scrollToBottom();
+              pump();
+            }).catch(function (err) {
+              console.log('Stream read error:', err);
+              msgDiv.innerHTML = renderText('bot', fullText || 'Oops! Something went wrong.');
+              scrollToBottom();
+            });
+          }
+
+          pump();
+        })
+        .catch(function (err) {
+          console.log('Fetch error:', err, 'URL was:', chatUrl);
+          hideTyping();
+          appendMessage('bot', 'Oops! Something went wrong. Please try again.');
+        });
+    } catch (err) {
+      console.log('Fetch threw synchronously:', err);
+      hideTyping();
+      appendMessage('bot', 'Oops! Something went wrong. Please try again.');
+    }
   }
 
   // ─── Lead ──────────────────────────────────────────────────────────────────
