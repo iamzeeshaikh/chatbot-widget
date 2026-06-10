@@ -24,6 +24,7 @@
   var messages = [];
   var botMessageCount = 0;
   var leadCaptured = false;
+  var greetingSent = false;
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
   // ─── Polling state ────────────────────────────────────────────────────────
@@ -275,13 +276,15 @@
 
   // ─── Greeting ─────────────────────────────────────────────────────────────
   function sendBotGreeting() {
-    var el = document.getElementById('zee-chat-messages');
-    if (!el || el.children.length > 0) return;
+    console.log('sendBotGreeting called, greetingSent=' + greetingSent);
+    if (greetingSent) return;
     var greeting = 'Hi! I\'m ' + config.bot_name + '. How can I help you today?';
     messages.push({ role: 'user', content: '(session started)' });
     appendMessage('bot', greeting);
     messages.push({ role: 'assistant', content: greeting });
     botMessageCount++;
+    greetingSent = true;
+    console.log('greeting sent');
   }
 
   // ─── Send ──────────────────────────────────────────────────────────────────
