@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ZeeOps Dashboard",
   description: "ZeeOps chatbot management dashboard",
+  icons: { icon: '/favicon-packaging.svg' },
 };
 
 export default function RootLayout({

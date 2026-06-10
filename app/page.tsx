@@ -67,14 +67,14 @@ export default function Dashboard() {
   useEffect(() => {
     const isSports = userRole === 'sports'
     document.title = isSports ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
-    let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
-    if (!link) {
-      link = document.createElement('link')
-      link.rel = 'icon'
-      document.head.appendChild(link)
-    }
+    // Remove all existing icon links (including the Next.js-injected favicon.ico)
+    document.querySelectorAll("link[rel~='icon']").forEach((l) => l.remove())
+    const link = document.createElement('link')
+    link.rel = 'icon'
     link.type = 'image/svg+xml'
-    link.href = isSports ? '/favicon-sports.svg' : '/favicon-packaging.svg'
+    // Cache-bust so browsers don't reuse a cached favicon on role switch
+    link.href = isSports ? '/favicon-sports.svg?v=2' : '/favicon-packaging.svg?v=2'
+    document.head.appendChild(link)
   }, [userRole])
 
   // Overview state
