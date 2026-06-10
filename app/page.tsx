@@ -203,12 +203,8 @@ export default function Dashboard() {
   }
 
   async function openVisitorSession(visitor: Visitor) {
-    // Set to human mode then open conversation
-    await fetch('/api/admin/mode', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: visitor.session_id, mode: 'human' }),
-    })
+    // Open the conversation for viewing — do NOT auto-set human mode.
+    // Admin must manually toggle the mode switch to take over.
     const session: Session = {
       session_id: visitor.session_id,
       site_id: visitor.site_id,
@@ -216,15 +212,13 @@ export default function Dashboard() {
       preview: visitor.page_url ?? '',
       last_at: visitor.last_seen,
       message_count: 0,
-      mode: 'human',
+      mode: 'bot',
       lead: null,
     }
     setSelectedSession(session)
     setSessions((prev) => {
       const exists = prev.some((s) => s.session_id === visitor.session_id)
-      return exists
-        ? prev.map((s) => s.session_id === visitor.session_id ? { ...s, mode: 'human' } : s)
-        : [session, ...prev]
+      return exists ? prev : [session, ...prev]
     })
   }
 

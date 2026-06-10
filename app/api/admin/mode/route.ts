@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     .from('conversation_mode')
     .select('mode')
     .eq('session_id', sessionId)
-    .single()
+    .maybeSingle()
 
   return NextResponse.json({ mode: data?.mode ?? 'bot' })
 }

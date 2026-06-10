@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     // Parallel DB fetches
     const [siteRes, modeRes] = await Promise.all([
       supabase.from('sites').select('system_prompt').eq('site_id', siteId).single(),
-      supabase.from('conversation_mode').select('mode').eq('session_id', sessionId).single(),
+      supabase.from('conversation_mode').select('mode').eq('session_id', sessionId).maybeSingle(),
     ])
 
     if (siteRes.error || !siteRes.data) {

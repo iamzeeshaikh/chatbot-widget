@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   }
 
   const [modeRes, logsRes] = await Promise.all([
-    supabase.from('conversation_mode').select('mode').eq('session_id', sessionId).single(),
+    supabase.from('conversation_mode').select('mode').eq('session_id', sessionId).maybeSingle(),
     since
       ? supabase
           .from('chat_logs')
