@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    const CONNECT_FALLBACK = "I'm having trouble connecting right now. Please leave your name, email, and phone number and we'll call you back shortly!"
+    const CONNECT_FALLBACK = 'Our team has received your message and will respond shortly. Please leave your contact details below.'
 
     const stream = new ReadableStream({
       async start(controller) {

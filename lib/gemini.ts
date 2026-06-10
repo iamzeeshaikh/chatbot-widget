@@ -1,18 +1,35 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
+const GEMINI_MODEL = 'gemini-1.5-flash-8b' // higher free-tier limits (1500/day, 100/min)
+
+const RATE_LIMIT_FALLBACK = 'Our team has received your message and will respond shortly. Please leave your contact details below.'
+
 let _genAI: GoogleGenerativeAI | null = null
 
 function getGenAI(): GoogleGenerativeAI {
-  if (!_genAI) {
-    _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-  }
+  if (!_genAI) _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
   return _genAI
 }
 
-const RATE_LIMIT_FALLBACK = "I'm having trouble connecting right now. Please leave your name, email, and phone number and we'll call you back shortly!"
-
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms))
+}
+
+// Exponential backoff retry: delays = [1s, 3s, 5s]
+async function withRetry<T>(fn: () => Promise<T>, delays = [1000, 3000, 5000]): Promise<T> {
+  let lastErr: unknown
+  for (let i = 0; i <= delays.length; i++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (i < delays.length) {
+        console.error(`[Gemini] attempt ${i + 1} failed, retrying in ${delays[i]}ms:`, err)
+        await sleep(delays[i])
+      }
+    }
+  }
+  throw lastErr
 }
 
 function buildHistory(messages: { role: string; content: string }[]) {
@@ -29,7 +46,7 @@ function buildHistory(messages: { role: string; content: string }[]) {
       history.push(msg)
     }
   }
-  return { clean, history, lastMessage: clean[clean.length - 1].content }
+  return { clean, history, lastMessage: clean[clean.length - 1]?.content ?? '' }
 }
 
 export async function generateReply(
@@ -37,36 +54,22 @@ export async function generateReply(
   messages: { role: string; content: string }[]
 ): Promise<string> {
   const { clean, history, lastMessage } = buildHistory(messages)
-  if (clean.length === 0) return 'Hello! How can I help you today?'
+  if (clean.length === 0 || !lastMessage) return 'Hello! How can I help you today?'
 
-  const model = getGenAI().getGenerativeModel({
-    model: 'gemini-flash-latest',
-    systemInstruction: systemPrompt,
-  })
-
-  console.log(`[Gemini] generateReply: history=${history.length} msgs, prompt="${lastMessage.slice(0, 80)}"`)
-
-  async function attempt() {
-    const chat = model.startChat({ history })
-    const result = await chat.sendMessage(lastMessage)
-    return result.response.text()
-  }
+  const model = getGenAI().getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: systemPrompt })
+  console.log(`[Gemini] generateReply model=${GEMINI_MODEL} history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
 
   try {
-    const text = await attempt()
+    const text = await withRetry(async () => {
+      const chat = model.startChat({ history })
+      const result = await chat.sendMessage(lastMessage)
+      return result.response.text()
+    })
     console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
     return text
   } catch (err) {
-    console.error('[Gemini] generateReply failed, retrying in 2s:', err)
-    await sleep(2000)
-    try {
-      const text = await attempt()
-      console.log(`[Gemini] retry reply: "${text.slice(0, 120)}"`)
-      return text
-    } catch (err2) {
-      console.error('[Gemini] generateReply retry also failed:', err2)
-      return RATE_LIMIT_FALLBACK
-    }
+    console.error('[Gemini] generateReply all retries failed:', err)
+    return RATE_LIMIT_FALLBACK
   }
 }
 
@@ -85,17 +88,13 @@ export async function* streamReply(
   messages: { role: string; content: string }[]
 ): AsyncGenerator<string, void, unknown> {
   const { clean, history, lastMessage } = buildHistory(messages)
-  if (clean.length === 0) {
+  if (clean.length === 0 || !lastMessage) {
     yield 'Hello! How can I help you today?'
     return
   }
 
-  const model = getGenAI().getGenerativeModel({
-    model: 'gemini-flash-latest',
-    systemInstruction: systemPrompt,
-  })
-
-  console.log(`[Gemini] streamReply: history=${history.length} msgs, prompt="${lastMessage.slice(0, 80)}"`)
+  const model = getGenAI().getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: systemPrompt })
+  console.log(`[Gemini] streamReply model=${GEMINI_MODEL} history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
 
   const chat = model.startChat({ history })
   const result = await chat.sendMessageStream(lastMessage)
@@ -112,8 +111,7 @@ export async function extractLeadFields(
   const empty: LeadFields = { name: null, email: null, phone: null, product: null, quantity: null, budget: null, timeline: null }
 
   try {
-    const model = getGenAI().getGenerativeModel({ model: 'gemini-flash-latest' })
-
+    const model = getGenAI().getGenerativeModel({ model: GEMINI_MODEL })
     const convo = messages
       .filter((m) => m.content && m.content !== '(session started)')
       .map((m) => `${m.role === 'user' ? 'Customer' : 'Bot'}: ${m.content}`)
@@ -126,23 +124,18 @@ Return ONLY valid JSON (no markdown, no explanation) with these exact keys, use 
 Conversation:
 ${convo}`
 
-    const result = await model.generateContent(prompt)
+    const result = await withRetry(() => model.generateContent(prompt))
     const text = result.response.text().trim()
     const jsonMatch = text.match(/\{[\s\S]*?\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
       return {
-        name: parsed.name || null,
-        email: parsed.email || null,
-        phone: parsed.phone || null,
-        product: parsed.product || null,
-        quantity: parsed.quantity || null,
-        budget: parsed.budget || null,
+        name: parsed.name || null, email: parsed.email || null,
+        phone: parsed.phone || null, product: parsed.product || null,
+        quantity: parsed.quantity || null, budget: parsed.budget || null,
         timeline: parsed.timeline || null,
       }
     }
-  } catch {
-    // extraction errors are non-fatal
-  }
+  } catch { /* extraction errors are non-fatal */ }
   return empty
 }
