@@ -271,8 +271,9 @@
             botMessageCount++;
             pollSince = newMsgs[i].created_at;
           }
-          if (newMsgs.length > 0 && botMessageCount >= 2 && !leadCaptured) {
-            showLeadForm();
+          if (newMsgs.length > 0) {
+            playNotificationSound();
+            if (botMessageCount >= 2 && !leadCaptured) showLeadForm();
           }
         })
         .catch(function () {});
@@ -281,6 +282,35 @@
 
   function stopPolling() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  // ─── Notification sound ───────────────────────────────────────────────────
+  function playNotificationSound() {
+    // Only play when widget is closed, or when open but page isn't focused
+    var w = document.getElementById('zee-chat-widget');
+    if (w && w.classList.contains('open') && document.hasFocus()) return;
+    try {
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      var ctx = new AudioCtx();
+      // Two-tone soft chime: A5 (880Hz) then E5 (659Hz), 150ms apart
+      [[880, 0], [659, 0.15]].forEach(function (pair) {
+        var freq = pair[0], delay = pair[1];
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        var t = ctx.currentTime + delay;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.22, t + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+        osc.start(t);
+        osc.stop(t + 0.45);
+      });
+      setTimeout(function () { ctx.close(); }, 1200);
+    } catch (e) {}
   }
 
   // ─── Greeting ─────────────────────────────────────────────────────────────
@@ -297,6 +327,7 @@
     botMessageCount++;
     greetingSent = true;
     console.log('greeting sent');
+    playNotificationSound();
   }
 
   // ─── Send ──────────────────────────────────────────────────────────────────
@@ -353,6 +384,7 @@
                 messages.push({ role: 'assistant', content: fullText });
                 botMessageCount++;
                 if (botMessageCount >= 2 && !leadCaptured) showLeadForm();
+                playNotificationSound();
                 return;
               }
               var chunk = decoder.decode(result.value, { stream: true });
