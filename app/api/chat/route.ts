@@ -62,15 +62,16 @@ export async function POST(req: NextRequest) {
       return new Response(humanReply, { headers: responseHeaders })
     }
 
-    // Bot mode: regular generateContent (no streaming)
-    const reply = await generateReply(systemPrompt, messages)
+    // Bot mode: Groq response
+    const { text: reply, error: replyError } = await generateReply(systemPrompt, messages)
 
     after(async () => {
       await supabase.from('chat_logs').insert({
         site_id: siteId, session_id: sessionId, role: 'assistant', message: reply,
       })
+      // Skip lead capture on API errors — don't extract from error messages
       const userMsgCount = (messages as { role: string }[]).filter((m) => m.role === 'user').length
-      if (userMsgCount >= 3) {
+      if (!replyError && userMsgCount >= 3) {
         try {
           const allMessages = [...messages, { role: 'assistant', content: reply }]
           const fields = await extractLeadFields(allMessages)

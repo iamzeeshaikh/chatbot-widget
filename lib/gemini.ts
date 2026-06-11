@@ -1,57 +1,71 @@
-import { GoogleGenAI } from '@google/genai'
+import Groq from 'groq-sdk'
 
-const MODEL = 'gemini-2.0-flash'
+const MODEL = 'llama-3.1-8b-instant'
 
-const RATE_LIMIT_FALLBACK = 'Our team has received your message and will respond shortly. Please leave your contact details below.'
+const ERROR_REPLY = "I'm having trouble responding right now, please try again in a moment."
 
-let _ai: GoogleGenAI | null = null
+let _groq: Groq | null = null
 
-function getAI(): GoogleGenAI {
-  if (!_ai) _ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
-  return _ai
+function getGroq(): Groq {
+  if (!_groq) _groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
+  return _groq
 }
 
-function buildHistory(messages: { role: string; content: string }[]) {
+type GroqMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+
+function buildGroqMessages(
+  systemPrompt: string,
+  messages: { role: string; content: string }[]
+): GroqMessage[] | null {
   const clean = messages.filter((m) => m.content && m.content !== '(session started)')
-  const rawHistory = clean.slice(0, -1).map((m) => ({
-    role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
-    parts: [{ text: m.content }],
-  }))
-  const history: typeof rawHistory = []
-  for (const msg of rawHistory) {
-    if (history.length === 0) {
-      if (msg.role === 'user') history.push(msg)
-    } else if (msg.role !== history[history.length - 1].role) {
-      history.push(msg)
+  if (clean.length === 0) return null
+
+  // Deduplicate consecutive same-role messages; ensure history starts with user
+  const deduped: { role: string; content: string }[] = []
+  for (const msg of clean) {
+    if (deduped.length === 0) {
+      if (msg.role === 'user') deduped.push(msg)
+    } else if (msg.role !== deduped[deduped.length - 1].role) {
+      deduped.push(msg)
     }
   }
-  return { clean, history, lastMessage: clean[clean.length - 1]?.content ?? '' }
+  if (deduped.length === 0) return null
+
+  const result: GroqMessage[] = [{ role: 'system', content: systemPrompt }]
+  for (const msg of deduped) {
+    result.push({
+      role: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+    })
+  }
+  return result
 }
 
 export async function generateReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
-): Promise<string> {
-  const { clean, history, lastMessage } = buildHistory(messages)
-  if (clean.length === 0 || !lastMessage) return 'Hello! How can I help you today?'
+): Promise<{ text: string; error: boolean }> {
+  const groqMessages = buildGroqMessages(systemPrompt, messages)
+  if (!groqMessages) return { text: 'Hello! How can I help you today?', error: false }
 
-  console.log(`[Gemini] generateReply model=${MODEL} history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
+  const lastMsg = groqMessages[groqMessages.length - 1]
+  console.log(`[Groq] generateReply model=${MODEL} msgs=${groqMessages.length} prompt="${lastMsg.content.slice(0, 80)}"`)
 
   try {
-    const chat = getAI().chats.create({
+    const completion = await getGroq().chat.completions.create({
       model: MODEL,
-      config: { systemInstruction: systemPrompt },
-      history,
+      messages: groqMessages,
+      temperature: 0.7,
+      max_tokens: 1024,
     })
-    const response = await chat.sendMessage({ message: lastMessage })
-    const text = response.text ?? ''
-    console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
-    return text
+    const text = completion.choices[0]?.message?.content ?? ''
+    console.log(`[Groq] reply: "${text.slice(0, 120)}"`)
+    return { text, error: false }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[Gemini] generateReply FAILED model=${MODEL}: ${msg}`)
-    console.error('[Gemini] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
-    return RATE_LIMIT_FALLBACK
+    console.error(`[Groq] generateReply FAILED model=${MODEL}: ${msg}`)
+    console.error('[Groq] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
+    return { text: ERROR_REPLY, error: true }
   }
 }
 
@@ -75,18 +89,22 @@ export async function extractLeadFields(
       .map((m) => `${m.role === 'user' ? 'Customer' : 'Bot'}: ${m.content}`)
       .join('\n')
 
-    const prompt = `Extract lead qualification data from this sales conversation.
-Return ONLY valid JSON (no markdown, no explanation) with these exact keys, use null for fields not clearly mentioned:
-{"name":null,"email":null,"phone":null,"product":null,"quantity":null,"budget":null,"timeline":null}
-
-Conversation:
-${convo}`
-
-    const response = await getAI().models.generateContent({
+    const completion = await getGroq().chat.completions.create({
       model: MODEL,
-      contents: prompt,
+      messages: [
+        {
+          role: 'system',
+          content: 'You extract lead data from sales conversations. Return ONLY valid JSON, no markdown.',
+        },
+        {
+          role: 'user',
+          content: `Extract lead qualification data. Return ONLY valid JSON with these exact keys, use null for fields not mentioned:\n{"name":null,"email":null,"phone":null,"product":null,"quantity":null,"budget":null,"timeline":null}\n\nConversation:\n${convo}`,
+        },
+      ],
+      temperature: 0,
+      max_tokens: 256,
     })
-    const text = (response.text ?? '').trim()
+    const text = (completion.choices[0]?.message?.content ?? '').trim()
     const jsonMatch = text.match(/\{[\s\S]*?\}/)
     if (!jsonMatch) throw new Error('No JSON in response')
     const parsed = JSON.parse(jsonMatch[0])
