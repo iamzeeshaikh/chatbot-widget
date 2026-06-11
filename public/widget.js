@@ -27,7 +27,15 @@
     });
   }
 
-  var sessionId = genUUID();
+  // Reuse existing sessionId from sessionStorage so page reloads and SPA
+  // navigations don't create a fresh session (and a duplicate dashboard row).
+  var SESSION_KEY = 'zee-session-' + siteId;
+  var sessionId = sessionStorage.getItem(SESSION_KEY);
+  if (!sessionId) {
+    sessionId = genUUID();
+    sessionStorage.setItem(SESSION_KEY, sessionId);
+  }
+
   var messages = [];
   var botMessageCount = 0;
   var leadCaptured = false;
