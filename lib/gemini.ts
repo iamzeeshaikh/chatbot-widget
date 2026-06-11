@@ -1,14 +1,14 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 
-const MODEL = 'gemini-1.5-flash'
+const MODEL = 'gemini-2.0-flash'
 
 const RATE_LIMIT_FALLBACK = 'Our team has received your message and will respond shortly. Please leave your contact details below.'
 
-let _genAI: GoogleGenerativeAI | null = null
+let _ai: GoogleGenAI | null = null
 
-function getGenAI(): GoogleGenerativeAI {
-  if (!_genAI) _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-  return _genAI
+function getAI(): GoogleGenAI {
+  if (!_ai) _ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
+  return _ai
 }
 
 function buildHistory(messages: { role: string; content: string }[]) {
@@ -38,10 +38,13 @@ export async function generateReply(
   console.log(`[Gemini] generateReply model=${MODEL} history=${history.length} prompt="${lastMessage.slice(0, 80)}"`)
 
   try {
-    const model = getGenAI().getGenerativeModel({ model: MODEL, systemInstruction: systemPrompt })
-    const chat = model.startChat({ history })
-    const result = await chat.sendMessage(lastMessage)
-    const text = result.response.text()
+    const chat = getAI().chats.create({
+      model: MODEL,
+      config: { systemInstruction: systemPrompt },
+      history,
+    })
+    const response = await chat.sendMessage({ message: lastMessage })
+    const text = response.text ?? ''
     console.log(`[Gemini] reply: "${text.slice(0, 120)}"`)
     return text
   } catch (err) {
@@ -79,9 +82,11 @@ Return ONLY valid JSON (no markdown, no explanation) with these exact keys, use 
 Conversation:
 ${convo}`
 
-    const model = getGenAI().getGenerativeModel({ model: MODEL })
-    const result = await model.generateContent(prompt)
-    const text = result.response.text().trim()
+    const response = await getAI().models.generateContent({
+      model: MODEL,
+      contents: prompt,
+    })
+    const text = (response.text ?? '').trim()
     const jsonMatch = text.match(/\{[\s\S]*?\}/)
     if (!jsonMatch) throw new Error('No JSON in response')
     const parsed = JSON.parse(jsonMatch[0])
