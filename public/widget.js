@@ -1,6 +1,12 @@
 (function () {
   'use strict';
 
+  // Prevent double-execution when WordPress or caching plugins load this script
+  // more than once on the same page — each run would generate a new sessionId
+  // causing duplicate visitor rows in the dashboard.
+  if (window.__zeeWidgetLoaded) return;
+  window.__zeeWidgetLoaded = true;
+
   // ─── Config ───────────────────────────────────────────────────────────────
   var script = document.currentScript || (function () {
     var scripts = document.getElementsByTagName('script');
