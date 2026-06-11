@@ -8,14 +8,19 @@
   window.__zeeWidgetLoaded = true;
 
   // ─── Config ───────────────────────────────────────────────────────────────
-  var script = document.currentScript || (function () {
-    var scripts = document.getElementsByTagName('script');
-    return scripts[scripts.length - 1];
-  })();
+  // document.currentScript is null for async/defer scripts (common in WordPress).
+  // Fallback to scripts[last] is unreliable — other scripts may be appended after
+  // the widget by the time this IIFE runs. querySelector('[src*="widget.js"]')
+  // finds the tag by content regardless of load order.
+  var scriptTag = document.currentScript ||
+    document.querySelector('script[src*="widget.js"]');
+  var siteId = 'default';
+  try {
+    if (scriptTag && scriptTag.src) {
+      siteId = new URL(scriptTag.src).searchParams.get('siteId') || 'default';
+    }
+  } catch (e) {}
 
-  var scriptSrc = script ? script.src : '';
-  var urlParams = new URLSearchParams(scriptSrc.split('?')[1] || '');
-  var siteId = urlParams.get('siteId') || 'default';
 
   var baseUrl = 'https://chat.zeeops.dev';
   console.log('widget.js baseUrl=' + baseUrl + ' siteId=' + siteId);
