@@ -1,29 +1,33 @@
 (function () {
   'use strict';
 
-  // Prevent double-execution when WordPress or caching plugins load this script
-  // more than once on the same page — each run would generate a new sessionId
-  // causing duplicate visitor rows in the dashboard.
-  if (window.__zeeWidgetLoaded) return;
-  window.__zeeWidgetLoaded = true;
-
-  // ─── Config ───────────────────────────────────────────────────────────────
+  // ─── siteId extraction — must happen BEFORE the duplicate-execution guard ──
   // document.currentScript is null for async/defer scripts (common in WordPress).
-  // Fallback to scripts[last] is unreliable — other scripts may be appended after
-  // the widget by the time this IIFE runs. querySelector('[src*="widget.js"]')
-  // finds the tag by content regardless of load order.
-  var scriptTag = document.currentScript ||
-    document.querySelector('script[src*="widget.js"]');
+  // querySelectorAll + last element handles pages where multiple widget.js tags
+  // exist — we want the most recently added one, which is ours.
+  var _scriptTag = document.currentScript || (function () {
+    var tags = document.querySelectorAll('script[src*="widget.js"]');
+    return tags.length ? tags[tags.length - 1] : null;
+  })();
+
   var siteId = 'default';
   try {
-    if (scriptTag && scriptTag.src) {
-      siteId = new URL(scriptTag.src).searchParams.get('siteId') || 'default';
+    if (_scriptTag && _scriptTag.src) {
+      siteId = new URL(_scriptTag.src).searchParams.get('siteId') || 'default';
     }
   } catch (e) {}
 
+  console.log('WIDGET LOADED, siteId:', siteId);
+
+  // ─── Duplicate-execution guard — keyed by siteId ─────────────────────────
+  // Must come AFTER siteId is known. Keying by siteId allows two separate
+  // sites on the same page to each initialize while still blocking the same
+  // site from being initialized twice.
+  var _guardKey = '__zeeWidget_' + siteId;
+  if (window[_guardKey]) return;
+  window[_guardKey] = true;
 
   var baseUrl = 'https://chat.zeeops.dev';
-  console.log('widget.js baseUrl=' + baseUrl + ' siteId=' + siteId);
 
   function genUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
