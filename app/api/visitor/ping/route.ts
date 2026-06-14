@@ -89,6 +89,9 @@ export async function POST(req: NextRequest) {
 
     const flag = countryToFlag(geo.country)
 
+    // UPSERT keyed on session_id: update last_seen (and details) when the
+    // session already exists, only INSERT when it's truly new — never a new row
+    // per ping.
     await supabase.from('active_visitors').upsert({
       session_id: sessionId,
       site_id: siteId,
@@ -102,7 +105,7 @@ export async function POST(req: NextRequest) {
       city: geo.city || null,
       status: 'active',
       last_seen: new Date().toISOString(),
-    })
+    }, { onConflict: 'session_id' })
 
     return NextResponse.json({ ok: true }, { headers: corsHeaders })
   } catch (err) {

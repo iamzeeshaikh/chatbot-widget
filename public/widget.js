@@ -36,13 +36,20 @@
     });
   }
 
-  // Reuse existing sessionId from sessionStorage so page reloads and SPA
-  // navigations don't create a fresh session (and a duplicate dashboard row).
+  // ONE persistent sessionId per browser, generated once and reused. Uses
+  // localStorage so it survives reloads, new tabs and multi-page navigation —
+  // this is what stops the same visitor being counted multiple times.
   var SESSION_KEY = 'zee-session-' + siteId;
-  var sessionId = sessionStorage.getItem(SESSION_KEY);
-  if (!sessionId) {
+  var sessionId;
+  try {
+    sessionId = localStorage.getItem(SESSION_KEY);
+    if (!sessionId) {
+      sessionId = genUUID();
+      localStorage.setItem(SESSION_KEY, sessionId);
+    }
+  } catch (e) {
+    // Storage blocked (e.g. private mode) — fall back to a single per-load id.
     sessionId = genUUID();
-    sessionStorage.setItem(SESSION_KEY, sessionId);
   }
 
   var messages = [];

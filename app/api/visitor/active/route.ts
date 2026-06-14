@@ -19,8 +19,9 @@ export async function GET(req: NextRequest) {
   if (!member) return NextResponse.json({ visitors: [] }, { status: 401, headers: corsHeaders })
   const scope = await siteScope(member)
 
-  // Visitors active within last 2 minutes
-  const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+  // "Live" = active within the last 60s. The widget pings every 30s, so 60s
+  // tolerates one missed ping without flicker.
+  const cutoff = new Date(Date.now() - 60 * 1000).toISOString()
 
   const [visitorsRes, sitesRes] = await Promise.all([
     supabase
@@ -32,7 +33,18 @@ export async function GET(req: NextRequest) {
     supabase.from('sites').select('site_id, name, primary_color'),
   ])
 
-  const visitors = (visitorsRes.data ?? []).filter((v) => !scope || scope.has(v.site_id))
+  // Dedupe by session_id (keep the most recent row) so a session can never
+  // appear twice, even if stale duplicate rows exist. Rows are already ordered
+  // by last_seen desc, so the first occurrence wins.
+  const seen = new Set<string>()
+  const visitors = (visitorsRes.data ?? []).filter((v) => {
+    if (!scope || scope.has(v.site_id)) {
+      if (seen.has(v.session_id)) return false
+      seen.add(v.session_id)
+      return true
+    }
+    return false
+  })
   const sites = sitesRes.data ?? []
 
   const enriched = visitors.map((v) => {
