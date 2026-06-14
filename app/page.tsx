@@ -141,6 +141,32 @@ export default function Dashboard() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [visitors, setVisitors] = useState<Visitor[]>([])
   const prevVisitorIds = useRef<Set<string>>(new Set())
+  // Track the latest visitor-message time per session to detect new incoming
+  // messages and chime for the agent. Seeded on first load so we don't alert
+  // for history.
+  const lastUserMsgAt = useRef<Record<string, string>>({})
+  const dashSoundReady = useRef(false)
+
+  // Pleasant but clearly audible two-tone chime for the agent.
+  const playDashSound = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      if (ctx.state === 'suspended') ctx.resume()
+      ;[[784, 0], [1047, 0.13]].forEach(([freq, delay]) => {
+        const osc = ctx.createOscillator(); const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.type = 'sine'; osc.frequency.value = freq
+        const t = ctx.currentTime + delay
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(0.6, t + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
+        osc.start(t); osc.stop(t + 0.5)
+      })
+      setTimeout(() => ctx.close(), 1300)
+    } catch { /* ignore */ }
+  }, [])
 
   useEffect(() => {
     Promise.all([
@@ -151,8 +177,25 @@ export default function Dashboard() {
 
   const fetchSessions = useCallback(async () => {
     const data = await fetch('/api/admin/conversations').then((r) => r.json()).catch(() => ({ sessions: [] }))
-    setSessions(data.sessions ?? [])
-  }, [])
+    const incoming: Session[] = data.sessions ?? []
+
+    // Detect new incoming visitor messages (a session whose latest message is
+    // from the visitor, with a newer timestamp than we last saw) and chime.
+    let hasNew = false
+    const nextMap: Record<string, string> = {}
+    for (const s of incoming) {
+      if (s.last_role === 'user') {
+        nextMap[s.session_id] = s.last_at
+        const prev = lastUserMsgAt.current[s.session_id]
+        if (dashSoundReady.current && prev !== s.last_at) hasNew = true
+      }
+    }
+    lastUserMsgAt.current = nextMap
+    if (hasNew) playDashSound()
+    dashSoundReady.current = true
+
+    setSessions(incoming)
+  }, [playDashSound])
 
   useEffect(() => {
     if (tab !== 'conversations') return

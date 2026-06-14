@@ -360,16 +360,17 @@
   }
 
   // ─── Notification sound ───────────────────────────────────────────────────
+  // Plays on EVERY incoming message (bot, human agent, or any message the
+  // visitor receives). It is never called for the visitor's own outgoing
+  // messages. Loud but pleasant rising two-tone chime.
   function playNotificationSound() {
-    // Only play when widget is closed, or when open but page isn't focused
-    var w = document.getElementById('zee-chat-widget');
-    if (w && w.classList.contains('open') && document.hasFocus()) return;
     try {
       var AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
       var ctx = new AudioCtx();
-      // Two-tone soft chime: A5 (880Hz) then E5 (659Hz), 150ms apart
-      [[880, 0], [659, 0.15]].forEach(function (pair) {
+      if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
+      // Pleasant rising chime: G5 (784Hz) then C6 (1047Hz), 130ms apart.
+      [[784, 0], [1047, 0.13]].forEach(function (pair) {
         var freq = pair[0], delay = pair[1];
         var osc = ctx.createOscillator();
         var gain = ctx.createGain();
@@ -379,12 +380,12 @@
         osc.frequency.value = freq;
         var t = ctx.currentTime + delay;
         gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(0.22, t + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+        gain.gain.linearRampToValueAtTime(0.6, t + 0.02);   // louder, more noticeable
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
         osc.start(t);
-        osc.stop(t + 0.45);
+        osc.stop(t + 0.5);
       });
-      setTimeout(function () { ctx.close(); }, 1200);
+      setTimeout(function () { ctx.close(); }, 1300);
     } catch (e) {}
   }
 
