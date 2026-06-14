@@ -294,11 +294,40 @@
     return n;
   }
 
-  // Only surface the lead form after some real back-and-forth — never on the
-  // user's first message. The bot should answer + ask qualifying questions first.
-  var LEAD_FORM_MIN_USER_MSGS = 3;
+  // The bot collects contact details conversationally, so the form is only a
+  // fallback convenience. Show it when the user EXPLICITLY wants to leave
+  // details, or only after a long genuine conversation AND clear buying intent.
+  var LEAD_FORM_MIN_USER_MSGS = 6;
+
+  function lastUserText() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user' && messages[i].content !== '(session started)') {
+        return (messages[i].content || '').toLowerCase();
+      }
+    }
+    return '';
+  }
+
+  // User explicitly asks to leave details / get contacted / typed an email.
+  function userWantsToLeaveDetails() {
+    var t = lastUserText();
+    return /\b(my email|my number|my phone|contact me|call me|email me|reach me|send (me )?(a |the )?(quote|proposal|details|info)|here'?s my|you can reach me)\b/.test(t)
+      || /[\w.+-]+@[\w-]+\.[\w.-]+/.test(t);
+  }
+
+  // Genuine buying intent anywhere in the conversation.
+  function hasBuyingIntent() {
+    var t = '';
+    for (var i = 0; i < messages.length; i++) {
+      if (messages[i].role === 'user') t += ' ' + (messages[i].content || '').toLowerCase();
+    }
+    return /\b(quote|price|pricing|cost|how much|order|buy|purchase|interested|quantity|bulk|moq|lead time|deliver|delivery|sample|samples|budget|get started|sign me up)\b/.test(t);
+  }
+
   function maybeShowLeadForm() {
-    if (!leadCaptured && genuineUserCount() >= LEAD_FORM_MIN_USER_MSGS) showLeadForm();
+    if (leadCaptured) return;
+    if (userWantsToLeaveDetails()) { showLeadForm(); return; }
+    if (genuineUserCount() >= LEAD_FORM_MIN_USER_MSGS && hasBuyingIntent()) showLeadForm();
   }
 
   // ─── Polling ──────────────────────────────────────────────────────────────

@@ -13,6 +13,20 @@ function getGroq(): Groq {
 
 type GroqMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
+// Shared consultative behaviour layered onto EVERY site (and any future site) on
+// top of that site's own product knowledge. This is what makes the bot act like
+// a real sales assistant instead of a form-pusher.
+const CONSULTATIVE_STYLE = `
+
+— HOW TO ASSIST —
+You are a friendly, knowledgeable sales consultant having a natural conversation. You are NOT a form.
+- Answer the customer's questions thoroughly using the product knowledge above. If you genuinely don't know a detail, say a specialist will confirm — never make up facts.
+- Recommend the best product(s) for what the customer describes, and ask relevant follow-up questions to understand their needs.
+- Be consultative and genuinely helpful, never pushy. Keep replies concise (usually 1-3 short sentences) and keep the conversation flowing.
+- Understand details (what they need, quantity, colors/branding or specs, timeline) gradually through the chat — one thing at a time, only when it fits naturally. Never interrogate or send a numbered list of questions.
+- Help the customer first; do NOT demand contact details before being useful.
+- When there is genuine buying interest, ask for contact details conversationally, e.g. "I'd love to put together a quote for you — what's the best email to send it to?" Ask for name, email and phone one at a time, not all at once.`
+
 function buildGroqMessages(
   systemPrompt: string,
   messages: { role: string; content: string }[]
@@ -45,7 +59,7 @@ export async function generateReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
 ): Promise<{ text: string; error: boolean }> {
-  const groqMessages = buildGroqMessages(systemPrompt, messages)
+  const groqMessages = buildGroqMessages(systemPrompt + CONSULTATIVE_STYLE, messages)
   if (!groqMessages) return { text: 'Hello! How can I help you today?', error: false }
 
   const lastMsg = groqMessages[groqMessages.length - 1]
