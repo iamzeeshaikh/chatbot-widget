@@ -12,14 +12,6 @@ interface Member {
 }
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 
-function readSession(): { email: string; role: 'admin' | 'standard'; workspace: 'sports' | 'packaging'; sites: string[] } {
-  const fallback = { email: '', role: 'standard' as const, workspace: 'packaging' as const, sites: [] }
-  if (typeof document === 'undefined') return fallback
-  const cookie = document.cookie.split('; ').find((r) => r.startsWith('zee-auth='))
-  if (!cookie) return fallback
-  try { return { ...fallback, ...JSON.parse(atob(cookie.split('=')[1])) } } catch { return fallback }
-}
-
 const emptyForm = { email: '', password: '', role: 'standard' as 'admin' | 'standard', sites: [] as string[] }
 
 export default function MembersPage() {
@@ -47,11 +39,15 @@ export default function MembersPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
 
   useEffect(() => {
-    const s = readSession()
-    if (s.role !== 'admin') { router.replace('/'); return }
-    setWorkspace(s.workspace)
-    setIsAdmin(true)
-    setAuthChecked(true)
+    fetch('/api/auth/me')
+      .then((r) => { if (!r.ok) throw new Error('unauth'); return r.json() })
+      .then((m) => {
+        if (m.role !== 'admin') { router.replace('/'); return }
+        setWorkspace(m.workspace)
+        setIsAdmin(true)
+        setAuthChecked(true)
+      })
+      .catch(() => { window.location.href = '/login' })
   }, [router])
 
   const load = useCallback(async () => {
