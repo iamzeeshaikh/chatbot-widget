@@ -4,7 +4,11 @@
 
 export type Workspace = 'sports' | 'packaging'
 
-export const PACKAGING_SITES = ['zeecustomboxes', 'zeepack', 'burgersleeves', 'leadgen', 'shopcardboardboxes']
+// Only shopcardboardboxes is active in the packaging workspace. The other site
+// configs (zeecustomboxes, zeepack, burgersleeves, leadgen) still exist in the
+// Supabase sites table — they're just removed from this grouping so they don't
+// show in the packaging dashboard. Re-add their ids here to bring them back.
+export const PACKAGING_SITES = ['shopcardboardboxes']
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
 export function workspaceSites(ws: Workspace): string[] {
