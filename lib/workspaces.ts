@@ -4,7 +4,7 @@
 
 export type Workspace = 'sports' | 'packaging'
 
-export const PACKAGING_SITES = ['zeecustomboxes', 'zeepack', 'burgersleeves', 'leadgen']
+export const PACKAGING_SITES = ['zeecustomboxes', 'zeepack', 'burgersleeves', 'leadgen', 'shopcardboardboxes']
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
 export function workspaceSites(ws: Workspace): string[] {
