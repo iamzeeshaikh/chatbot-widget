@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 1) Built-in workspace admins (always available, no DB needed).
-    const builtin = HARDCODED_ACCOUNTS.find((a) => a.email === email && a.password === password)
+    const builtin = HARDCODED_ACCOUNTS.find((a) => a.email === email && a.password && a.password === password)
     if (builtin) {
       const member: Member = { id: `builtin:${builtin.email}`, email: builtin.email, workspace: builtin.workspace, role: 'admin', assigned_sites: [] }
       const res = NextResponse.json({ ok: true, role: 'admin', workspace: builtin.workspace })

@@ -22,9 +22,12 @@ export interface Member {
 // Built-in workspace admins. These keep working without any DB row so the
 // dashboards never lock out, and they are the bootstrap admins that create
 // other members within their own workspace.
+// The password is provided via the BUILTIN_ADMIN_PASSWORD env var — never
+// hardcode credentials in source.
+const BUILTIN_ADMIN_PASSWORD = process.env.BUILTIN_ADMIN_PASSWORD || ''
 export const HARDCODED_ACCOUNTS: { email: string; password: string; workspace: Workspace }[] = [
-  { email: 'packaging@zeeops.dev', password: 'uzairzia@4321', workspace: 'packaging' },
-  { email: 'sports@zeeops.dev', password: 'uzairzia@4321', workspace: 'sports' },
+  { email: 'packaging@zeeops.dev', password: BUILTIN_ADMIN_PASSWORD, workspace: 'packaging' },
+  { email: 'sports@zeeops.dev', password: BUILTIN_ADMIN_PASSWORD, workspace: 'sports' },
 ]
 
 // ── Signed session token: `<payload>.<hmac>` ─────────────────────────────────
