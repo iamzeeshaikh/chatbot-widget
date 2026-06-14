@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export function middleware(req: NextRequest) {
-  const session = req.cookies.get('zee-auth')
+  const session = req.cookies.get('zee-session')
   if (!session) {
     return NextResponse.redirect(new URL('/login', req.url))
   }
@@ -9,5 +9,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/'], // protect only the dashboard root
+  matcher: ['/', '/members'], // protect the dashboard root and member management
 }

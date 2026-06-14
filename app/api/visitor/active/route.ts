@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getMember, siteScope } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,11 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders })
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const member = await getMember(req)
+  if (!member) return NextResponse.json({ visitors: [] }, { status: 401, headers: corsHeaders })
+  const scope = await siteScope(member)
+
   // Visitors active within last 2 minutes
   const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString()
 
@@ -27,7 +32,7 @@ export async function GET() {
     supabase.from('sites').select('site_id, name, primary_color'),
   ])
 
-  const visitors = visitorsRes.data ?? []
+  const visitors = (visitorsRes.data ?? []).filter((v) => !scope || scope.has(v.site_id))
   const sites = sitesRes.data ?? []
 
   const enriched = visitors.map((v) => {

@@ -2,9 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
-const PACKAGING_SITES = ['zeecustomboxes', 'zeepack', 'burgersleeves', 'leadgen']
-const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
-
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
   volleyballuniforms: 'thevolleyballuniforms.com',
@@ -32,11 +29,12 @@ const SITE_ACCENT: Record<string, string> = {
 const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="40" width="76" height="52" rx="5" fill="#2563eb"/><polygon points="12,40 50,22 88,40" fill="#1d4ed8"/><rect x="38" y="40" width="24" height="52" fill="#93c5fd" opacity="0.35"/></svg>')}`
 const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#16a34a"/><path d="M35 22 Q31 50 38 62 Q44 72 50 74 Q56 72 62 62 Q69 50 65 22Z" fill="white"/><path d="M35 30 Q20 30 20 44 Q20 56 35 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M65 30 Q80 30 80 44 Q80 56 65 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><rect x="44" y="74" width="12" height="10" rx="2" fill="white"/><rect x="32" y="84" width="36" height="8" rx="3" fill="white"/></svg>')}`
 
-function readSession(): { role: 'packaging' | 'sports'; email: string } {
-  if (typeof document === 'undefined') return { role: 'packaging', email: '' }
+function readSession(): { email: string; role: 'admin' | 'standard'; workspace: 'sports' | 'packaging'; sites: string[] } {
+  const fallback = { email: '', role: 'standard' as const, workspace: 'packaging' as const, sites: [] }
+  if (typeof document === 'undefined') return fallback
   const cookie = document.cookie.split('; ').find((r) => r.startsWith('zee-auth='))
-  if (!cookie) return { role: 'packaging', email: '' }
-  try { return JSON.parse(atob(cookie.split('=')[1])) } catch { return { role: 'packaging', email: '' } }
+  if (!cookie) return fallback
+  try { return { ...fallback, ...JSON.parse(atob(cookie.split('=')[1])) } } catch { return fallback }
 }
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
@@ -91,25 +89,30 @@ function msgDateLabel(ts: string): string {
 export default function Dashboard() {
   const [tab, setTab] = useState<'overview' | 'conversations'>('overview')
 
-  const [userRole, setUserRole] = useState<'packaging' | 'sports'>('packaging')
+  const [userRole, setUserRole] = useState<'admin' | 'standard'>('standard')
   const [userEmail, setUserEmail] = useState('')
+  const [userSites, setUserSites] = useState<string[]>([])
+  // Each member belongs to exactly one dashboard ("workspace"), which drives the
+  // whole theme — sports admins never see packaging and vice versa.
+  const [workspace, setWorkspace] = useState<'sports' | 'packaging'>('packaging')
   useEffect(() => {
-    const s = readSession(); setUserRole(s.role); setUserEmail(s.email)
+    const s = readSession(); setUserRole(s.role); setUserEmail(s.email); setUserSites(s.sites ?? []); setWorkspace(s.workspace)
   }, [])
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
     window.location.href = '/login'
   }
 
+  const brand = workspace
+
   useEffect(() => {
-    const isSports = userRole === 'sports'
-    document.title = isSports ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
+    document.title = brand === 'sports' ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
     document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']").forEach((l) => l.remove())
     const link = document.createElement('link')
     link.rel = 'icon'; link.type = 'image/svg+xml'
-    link.href = isSports ? FAVICON_SPORTS : FAVICON_PACKAGING
+    link.href = brand === 'sports' ? FAVICON_SPORTS : FAVICON_PACKAGING
     document.head.appendChild(link)
-  }, [userRole])
+  }, [brand])
 
   const [sites, setSites] = useState<Site[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
@@ -265,14 +268,17 @@ export default function Dashboard() {
     setSelectedSessions(new Set()); setConfirmBulkDelete(false); setDeleting(false)
   }
 
-  // ── Role-based filtering ───────────────────────────────────────────────────
-  const visibleSiteIds = new Set(userRole === 'sports' ? SPORTS_SITES : PACKAGING_SITES)
-  const roleSites = sites.filter((s) => visibleSiteIds.has(s.site_id))
-  const roleLeads = leads.filter((l) => visibleSiteIds.has(l.site_id))
-  const roleSessions = sessions.filter((s) => visibleSiteIds.has(s.site_id))
-  const roleVisitors = visitors.filter((v) => visibleSiteIds.has(v.site_id))
-  const dashTitle = userRole === 'sports' ? '🏆 Sports Dashboard' : '📦 Packaging Dashboard'
-  const accentColor = userRole === 'sports' ? '#16a34a' : '#2563eb'
+  // ── Workspace/role filtering ───────────────────────────────────────────────
+  // The API already scopes data to the member's sites (workspace + role); this
+  // client-side filter against the cookie's site list is a redundant guard.
+  const visibleSiteIds = new Set(userSites)
+  const inScope = (id: string) => visibleSiteIds.has(id)
+  const roleSites = sites.filter((s) => inScope(s.site_id))
+  const roleLeads = leads.filter((l) => inScope(l.site_id))
+  const roleSessions = sessions.filter((s) => inScope(s.site_id))
+  const roleVisitors = visitors.filter((v) => inScope(v.site_id))
+  const dashTitle = brand === 'sports' ? '🏆 Sports Dashboard' : '📦 Packaging Dashboard'
+  const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
   // ── Stats derived ──────────────────────────────────────────────────────────
   const todayStr = new Date().toISOString().split('T')[0]
@@ -330,7 +336,10 @@ export default function Dashboard() {
           </div>
           <div>
             <h1 className="text-base font-bold text-white leading-tight">{dashTitle}</h1>
-            <p className="text-gray-500 text-[11px]">{userEmail}</p>
+            <p className="text-gray-500 text-[11px] flex items-center gap-1.5">
+              {userEmail}
+              <span className={`px-1.5 py-px rounded-full text-[9px] font-semibold uppercase tracking-wide ${userRole === 'admin' ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-700 text-gray-400'}`}>{userRole}</span>
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -342,6 +351,11 @@ export default function Dashboard() {
               {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
             </button>
           </div>
+          {userRole === 'admin' && (
+            <a href="/members" className="px-3 py-1.5 text-xs text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg transition-colors flex items-center gap-1.5">
+              👥 Members
+            </a>
+          )}
           <button onClick={handleLogout} className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg transition-colors">
             Sign out
           </button>

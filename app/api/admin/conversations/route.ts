@@ -1,9 +1,14 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getMember, siteScope } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const member = await getMember(req)
+  if (!member) return NextResponse.json({ sessions: [] }, { status: 401 })
+  const scope = await siteScope(member)
+
   const [logsRes, leadsRes, modesRes, sitesRes] = await Promise.all([
     supabase.from('chat_logs').select('*').order('created_at', { ascending: true }).limit(2000),
     supabase.from('leads').select('*'),
@@ -68,9 +73,9 @@ export async function GET() {
     }
   }
 
-  const sessions = Object.values(sessionMap).sort(
-    (a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime()
-  )
+  const sessions = Object.values(sessionMap)
+    .filter((s) => !scope || scope.has(s.site_id))
+    .sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime())
 
   return NextResponse.json({ sessions })
 }

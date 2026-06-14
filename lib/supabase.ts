@@ -12,6 +12,16 @@ function getClient(): SupabaseClient {
   return _client
 }
 
+// Anon client — used only for password sign-in. Never persists a session
+// (auth is carried by our own signed cookie, not Supabase's session storage).
+export function createAnonClient(): SupabaseClient {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  )
+}
+
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_target, prop: string | symbol) {
     const client = getClient()

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getMember, canAccessSession } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,9 +18,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const member = await getMember(req)
+  if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { sessionId, mode } = await req.json()
   if (!sessionId || !['bot', 'human'].includes(mode)) {
     return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
+  }
+  if (!(await canAccessSession(member, sessionId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { error } = await supabase.from('conversation_mode').upsert({
