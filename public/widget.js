@@ -278,6 +278,22 @@
     if (form) form.style.display = 'block';
   }
 
+  // Number of genuine user messages (excludes the '(session started)' sentinel).
+  function genuineUserCount() {
+    var n = 0;
+    for (var i = 0; i < messages.length; i++) {
+      if (messages[i].role === 'user' && messages[i].content !== '(session started)') n++;
+    }
+    return n;
+  }
+
+  // Only surface the lead form after some real back-and-forth — never on the
+  // user's first message. The bot should answer + ask qualifying questions first.
+  var LEAD_FORM_MIN_USER_MSGS = 3;
+  function maybeShowLeadForm() {
+    if (!leadCaptured && genuineUserCount() >= LEAD_FORM_MIN_USER_MSGS) showLeadForm();
+  }
+
   // ─── Polling ──────────────────────────────────────────────────────────────
   function startPolling() {
     if (pollTimer) return;
@@ -296,7 +312,7 @@
           }
           if (newMsgs.length > 0) {
             playNotificationSound();
-            if (botMessageCount >= 2 && !leadCaptured) showLeadForm();
+            maybeShowLeadForm();
           }
         })
         .catch(function () {});
@@ -406,7 +422,7 @@
                 scrollToBottom();
                 messages.push({ role: 'assistant', content: fullText });
                 botMessageCount++;
-                if (botMessageCount >= 2 && !leadCaptured) showLeadForm();
+                maybeShowLeadForm();
                 playNotificationSound();
                 return;
               }
