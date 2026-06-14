@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
-import { getMember, canAccessSession } from '@/lib/auth'
+import { getMember, canAccessSession, siteOfSession } from '@/lib/auth'
+import { getMode, setMode } from '@/lib/mode'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,13 +8,7 @@ export async function GET(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get('sessionId')
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
-  const { data } = await supabase
-    .from('conversation_mode')
-    .select('mode')
-    .eq('session_id', sessionId)
-    .maybeSingle()
-
-  return NextResponse.json({ mode: data?.mode ?? 'bot' })
+  return NextResponse.json({ mode: await getMode(sessionId) })
 }
 
 export async function POST(req: NextRequest) {
@@ -29,12 +23,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { error } = await supabase.from('conversation_mode').upsert({
-    session_id: sessionId,
-    mode,
-    updated_at: new Date().toISOString(),
-  })
+  const siteId = await siteOfSession(sessionId)
+  if (!siteId) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await setMode(sessionId, siteId, mode)
   return NextResponse.json({ success: true })
 }

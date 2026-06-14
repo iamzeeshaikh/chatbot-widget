@@ -26,10 +26,8 @@ export async function DELETE(req: NextRequest) {
       if (sessionIds.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    await Promise.all([
-      supabase.from('chat_logs').delete().in('session_id', sessionIds),
-      supabase.from('conversation_mode').delete().in('session_id', sessionIds),
-    ])
+    // chat_logs holds messages AND the 'mode' control rows, so this clears both.
+    await supabase.from('chat_logs').delete().in('session_id', sessionIds)
 
     return NextResponse.json({ ok: true, deleted: sessionIds.length })
   } catch (err) {

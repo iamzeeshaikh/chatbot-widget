@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getMode } from '@/lib/mode'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,8 +22,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing params' }, { status: 400, headers: corsHeaders })
   }
 
-  const [modeRes, logsRes] = await Promise.all([
-    supabase.from('conversation_mode').select('mode').eq('session_id', sessionId).maybeSingle(),
+  const [mode, logsRes] = await Promise.all([
+    getMode(sessionId),
     since
       ? supabase
           .from('chat_logs')
@@ -40,7 +41,6 @@ export async function GET(req: NextRequest) {
           .limit(0), // no since = return nothing (widget sets since on open)
   ])
 
-  const mode = modeRes.data?.mode ?? 'bot'
   const messages = logsRes.data ?? []
 
   return NextResponse.json({ messages, mode }, { headers: corsHeaders })

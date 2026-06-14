@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSession } from '@/lib/auth'
+import { MODE_ROLE } from '@/lib/mode'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
     .from('chat_logs')
     .select('*')
     .eq('session_id', sessionId)
+    .neq('role', MODE_ROLE) // hide mode control rows from the message view
     .order('created_at', { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

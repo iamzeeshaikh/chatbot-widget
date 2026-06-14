@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { generateReply, extractLeadFields } from '@/lib/gemini'
+import { getMode } from '@/lib/mode'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -23,17 +24,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: corsHeaders })
     }
 
-    // Parallel DB fetches
-    const [siteRes, modeRes] = await Promise.all([
+    // Parallel DB fetches. The conversation mode (bot vs human takeover) is the
+    // authoritative gate for whether the bot may reply at all.
+    const [siteRes, mode] = await Promise.all([
       supabase.from('sites').select('system_prompt').eq('site_id', siteId).single(),
-      supabase.from('conversation_mode').select('mode').eq('session_id', sessionId).maybeSingle(),
+      getMode(sessionId),
     ])
 
     if (siteRes.error || !siteRes.data) {
       return NextResponse.json({ error: 'Site not found' }, { status: 404, headers: corsHeaders })
     }
 
-    const mode = modeRes.data?.mode ?? 'bot'
     const systemPrompt: string = siteRes.data.system_prompt
 
     // Save user message

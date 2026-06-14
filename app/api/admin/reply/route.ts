@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSite } from '@/lib/auth'
+import { getMode, setMode } from '@/lib/mode'
 
 export async function POST(req: NextRequest) {
   const member = await getMember(req)
@@ -25,12 +26,11 @@ export async function POST(req: NextRequest) {
 
   if (logError) return NextResponse.json({ error: logError.message }, { status: 500 })
 
-  // Ensure conversation stays in human mode
-  await supabase.from('conversation_mode').upsert({
-    session_id: sessionId,
-    mode: 'human',
-    updated_at: new Date().toISOString(),
-  })
+  // Ensure conversation stays in human mode (only write a control row if it
+  // isn't already human, to avoid piling up rows).
+  if ((await getMode(sessionId)) !== 'human') {
+    await setMode(sessionId, siteId, 'human')
+  }
 
   return NextResponse.json({ success: true })
 }
