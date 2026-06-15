@@ -313,10 +313,11 @@
     return n;
   }
 
-  // The bot collects contact details conversationally, so the form is only a
-  // fallback convenience. Show it when the user EXPLICITLY wants to leave
-  // details, or only after a long genuine conversation AND clear buying intent.
-  var LEAD_FORM_MIN_USER_MSGS = 6;
+  // The bot keeps chatting normally; the lead form is shown inline as an
+  // additional option. It appears once the user has sent a few genuine messages
+  // (or explicitly asks to leave details). Showing it never interrupts the
+  // conversation — the visitor can fill it in OR keep chatting, both work.
+  var LEAD_FORM_MIN_USER_MSGS = 3;
 
   function lastUserText() {
     for (var i = messages.length - 1; i >= 0; i--) {
@@ -334,19 +335,13 @@
       || /[\w.+-]+@[\w-]+\.[\w.-]+/.test(t);
   }
 
-  // Genuine buying intent anywhere in the conversation.
-  function hasBuyingIntent() {
-    var t = '';
-    for (var i = 0; i < messages.length; i++) {
-      if (messages[i].role === 'user') t += ' ' + (messages[i].content || '').toLowerCase();
-    }
-    return /\b(quote|price|pricing|cost|how much|order|buy|purchase|interested|quantity|bulk|moq|lead time|deliver|delivery|sample|samples|budget|get started|sign me up)\b/.test(t);
-  }
-
   function maybeShowLeadForm() {
     if (leadCaptured) return;
+    // Explicit intent shows it immediately; otherwise show it once the visitor
+    // has sent at least LEAD_FORM_MIN_USER_MSGS genuine messages. Either way the
+    // bot keeps chatting — the form is shown inline alongside the conversation.
     if (userWantsToLeaveDetails()) { showLeadForm(); return; }
-    if (genuineUserCount() >= LEAD_FORM_MIN_USER_MSGS && hasBuyingIntent()) showLeadForm();
+    if (genuineUserCount() >= LEAD_FORM_MIN_USER_MSGS) showLeadForm();
   }
 
   // ─── Polling ──────────────────────────────────────────────────────────────
@@ -388,23 +383,43 @@
       if (!AudioCtx) return;
       var ctx = new AudioCtx();
       if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
-      // Pleasant rising chime: G5 (784Hz) then C6 (1047Hz), 130ms apart.
+
+      // A master gain feeds a soft limiter (WaveShaper) so we can drive the
+      // tones hard and loud without harsh digital clipping.
+      var master = ctx.createGain();
+      master.gain.value = 1.0;
+      var shaper = ctx.createWaveShaper();
+      var curve = new Float32Array(1024);
+      for (var c = 0; c < 1024; c++) {
+        var x = (c / 1023) * 2 - 1;
+        curve[c] = Math.tanh(x * 1.6); // gentle saturation = loud but not crackly
+      }
+      shaper.curve = curve;
+      master.connect(shaper);
+      shaper.connect(ctx.destination);
+
+      // Rising two-note chime: G5 (784Hz) then C6 (1047Hz), 130ms apart. Each
+      // note layers a sine + a triangle an octave up for a brighter, sharper,
+      // far more attention-grabbing tone.
       [[784, 0], [1047, 0.13]].forEach(function (pair) {
         var freq = pair[0], delay = pair[1];
-        var osc = ctx.createOscillator();
-        var gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.value = freq;
         var t = ctx.currentTime + delay;
-        gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(0.6, t + 0.02);   // louder, more noticeable
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-        osc.start(t);
-        osc.stop(t + 0.5);
+        [['sine', freq, 1.0], ['triangle', freq * 2, 0.5]].forEach(function (layer) {
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(master);
+          osc.type = layer[0];
+          osc.frequency.value = layer[1];
+          var peak = layer[2];
+          gain.gain.setValueAtTime(0, t);
+          gain.gain.linearRampToValueAtTime(peak, t + 0.015); // loud, fast attack
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+          osc.start(t);
+          osc.stop(t + 0.55);
+        });
       });
-      setTimeout(function () { ctx.close(); }, 1300);
+      setTimeout(function () { ctx.close(); }, 1400);
     } catch (e) {}
   }
 

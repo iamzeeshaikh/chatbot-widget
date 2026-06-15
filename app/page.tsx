@@ -260,24 +260,40 @@ export default function Dashboard() {
   const lastUserMsgAt = useRef<Record<string, string>>({})
   const dashSoundReady = useRef(false)
 
-  // Pleasant but clearly audible two-tone chime for the agent.
+  // Loud, attention-grabbing two-tone chime for the agent. Tones are layered
+  // (sine + bright triangle an octave up) and driven hard through a soft
+  // limiter so it's clearly audible without harsh clipping.
   const playDashSound = useCallback(() => {
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       if (!AudioCtx) return
       const ctx = new AudioCtx()
       if (ctx.state === 'suspended') ctx.resume()
+
+      const master = ctx.createGain()
+      master.gain.value = 1.0
+      const shaper = ctx.createWaveShaper()
+      const curve = new Float32Array(1024)
+      for (let c = 0; c < 1024; c++) {
+        const x = (c / 1023) * 2 - 1
+        curve[c] = Math.tanh(x * 1.6)
+      }
+      shaper.curve = curve
+      master.connect(shaper); shaper.connect(ctx.destination)
+
       ;[[784, 0], [1047, 0.13]].forEach(([freq, delay]) => {
-        const osc = ctx.createOscillator(); const gain = ctx.createGain()
-        osc.connect(gain); gain.connect(ctx.destination)
-        osc.type = 'sine'; osc.frequency.value = freq
         const t = ctx.currentTime + delay
-        gain.gain.setValueAtTime(0, t)
-        gain.gain.linearRampToValueAtTime(0.6, t + 0.02)
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
-        osc.start(t); osc.stop(t + 0.5)
+        ;([['sine', freq, 1.0], ['triangle', freq * 2, 0.5]] as [OscillatorType, number, number][]).forEach(([type, f, peak]) => {
+          const osc = ctx.createOscillator(); const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(master)
+          osc.type = type; osc.frequency.value = f
+          gain.gain.setValueAtTime(0, t)
+          gain.gain.linearRampToValueAtTime(peak, t + 0.015)
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55)
+          osc.start(t); osc.stop(t + 0.55)
+        })
       })
-      setTimeout(() => ctx.close(), 1300)
+      setTimeout(() => ctx.close(), 1400)
     } catch { /* ignore */ }
   }, [])
 
