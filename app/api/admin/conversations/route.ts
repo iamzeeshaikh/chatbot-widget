@@ -4,6 +4,7 @@ import { getMember, siteScope } from '@/lib/auth'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
 import { CONTACT_ROLE, TAGS_ROLE, parseTags } from '@/lib/visitor'
 import { parseAttachment } from '@/lib/attachment'
+import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
 
   for (const log of logs) {
     if (log.role === TAGS_ROLE) { tagsBySession[log.session_id] = parseTags(log.message); continue }
-    if (log.role === MODE_ROLE || log.role === CONTACT_ROLE) continue // control rows aren't messages
+    if (log.role === MODE_ROLE || log.role === CONTACT_ROLE || log.role === LEAD_CAPTURE_ROLE) continue // control rows aren't messages
     if (!sessionMap[log.session_id]) {
       const site = sites.find((s) => s.site_id === log.site_id)
       sessionMap[log.session_id] = {

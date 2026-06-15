@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { maybeCaptureLead } from '@/lib/leadtracking'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,7 +14,7 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { siteId, name, email, phone, message } = await req.json()
+    const { siteId, sessionId, name, email, phone, message } = await req.json()
 
     if (!siteId) {
       return NextResponse.json({ error: 'siteId required' }, { status: 400, headers: corsHeaders })
@@ -24,6 +25,12 @@ export async function POST(req: NextRequest) {
     if (error) {
       console.error('Lead insert error:', error)
       return NextResponse.json({ error: 'Failed to save lead' }, { status: 500, headers: corsHeaders })
+    }
+
+    // Billing lead-capture: the lead form gives us an explicit email/name/phone.
+    // Records once per conversation on lead-tracked sites. Non-fatal.
+    if (sessionId) {
+      await maybeCaptureLead({ sessionId, siteId, email, name, phone })
     }
 
     return NextResponse.json({ success: true }, { headers: corsHeaders })

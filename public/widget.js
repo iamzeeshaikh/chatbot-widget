@@ -712,7 +712,7 @@
     fetch(baseUrl + '/api/lead', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: siteId, name: name, email: email, phone: phone, message: messages.map(function(m){return m.role+': '+m.content;}).join('\n') }),
+      body: JSON.stringify({ siteId: siteId, sessionId: sessionId, name: name, email: email, phone: phone, message: messages.map(function(m){return m.role+': '+m.content;}).join('\n') }),
     })
       .then(function () {
         leadCaptured = true;

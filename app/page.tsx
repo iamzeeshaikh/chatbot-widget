@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
+import { LEAD_TRACKED_SITES } from '@/lib/workspaces'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -38,6 +39,8 @@ interface Session { session_id: string; site_id: string; site_name: string; prev
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
+interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string }
+interface BillingData { from: string; to: string; total: number; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
 interface VisitorDetail {
   session_id: string
@@ -286,7 +289,7 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
 }
 
 export default function Dashboard() {
-  const [tab, setTab] = useState<'overview' | 'conversations'>('overview')
+  const [tab, setTab] = useState<'overview' | 'conversations' | 'billing'>('overview')
 
   const [userRole, setUserRole] = useState<'admin' | 'standard'>('standard')
   const [userEmail, setUserEmail] = useState('')
@@ -374,6 +377,10 @@ export default function Dashboard() {
   const analyzingRef = useRef(false)
   const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
   const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
+  // Billing report (lead-tracked sites). Month string "YYYY-MM"; default current.
+  const [billingMonth, setBillingMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [billing, setBilling] = useState<BillingData | null>(null)
+  const [billingLoading, setBillingLoading] = useState(false)
   const prevVisitorIds = useRef<Set<string>>(new Set())
   // Track the latest visitor-message time per session to detect new incoming
   // messages and chime for the agent. Seeded on first load so we don't alert
@@ -489,6 +496,19 @@ export default function Dashboard() {
       .then((r) => r.json()).catch(() => ({ points: [] }))
       .then((d) => setAnalytics(d.points ?? []))
   }, [tab, authReady, analyticsRange])
+
+  // Billing leads for the selected month, scoped server-side to the member.
+  useEffect(() => {
+    if (tab !== 'billing' || !authReady) return
+    const [y, m] = billingMonth.split('-').map(Number)
+    if (!y || !m) return
+    const from = new Date(y, m - 1, 1).toISOString()
+    const to = new Date(y, m, 1).toISOString()
+    setBillingLoading(true)
+    fetch(`/api/admin/leads-billing?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      .then((d) => { setBilling(d); setBillingLoading(false) })
+  }, [tab, authReady, billingMonth])
 
   const fetchSessions = useCallback(async () => {
     const data = await fetch('/api/admin/conversations').then((r) => r.json()).catch(() => ({ sessions: [] }))
@@ -752,6 +772,38 @@ export default function Dashboard() {
     setSessions((prev) => prev.some((s) => s.session_id === visitor.session_id) ? prev : [session, ...prev])
   }
 
+  // Open a conversation from the billing table: prefer the already-loaded
+  // session, otherwise synthesise a minimal one, then switch to the chat view.
+  function openConversation(lead: BillingLead) {
+    const existing = sessions.find((s) => s.session_id === lead.session_id)
+    const session: Session = existing ?? {
+      session_id: lead.session_id, site_id: lead.site_id, site_name: lead.site_name,
+      preview: lead.email, last_at: lead.captured_at, message_count: 0, mode: 'bot', lead: null,
+    }
+    if (!existing) setSessions((prev) => [session, ...prev])
+    setSelectedSession(session)
+    setTab('conversations')
+  }
+
+  // Export the current billing list as CSV for the client invoice.
+  function downloadBillingCsv() {
+    if (!billing) return
+    const esc = (v: string | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const header = ['Email', 'Name', 'Phone', 'Site', 'Date Captured']
+    const rows = billing.leads.map((l) => [
+      esc(l.email), esc(l.name), esc(l.phone), esc(l.site_name),
+      esc(new Date(l.captured_at).toISOString()),
+    ].join(','))
+    const csv = [header.join(','), ...rows].join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `leads-${billingMonth}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  }
+
   async function toggleMode() {
     if (!selectedSession || togglingMode) return
     setTogglingMode(true)
@@ -810,6 +862,8 @@ export default function Dashboard() {
   const roleLeads = leads.filter((l) => inScope(l.site_id))
   const roleSessions = sessions.filter((s) => inScope(s.site_id))
   const roleVisitors = visitors.filter((v) => inScope(v.site_id))
+  // Show the Billing tab only when the member can access a lead-tracked site.
+  const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
   const dashTitle = brand === 'sports' ? '🏆 Sports Dashboard' : '📦 Packaging Dashboard'
   const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
@@ -903,6 +957,11 @@ export default function Dashboard() {
               {roleSessions.length > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleSessions.length}</span>}
               {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
             </button>
+            {hasTrackedSite && (
+              <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+                Billing
+              </button>
+            )}
           </div>
           <button onClick={toggleSound} title={soundOn ? 'Sound on — click to mute new-message alerts' : 'Sound off — click to unmute'}
             className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-900 text-gray-200 border-gray-800 hover:bg-gray-800' : 'bg-gray-900 text-gray-500 border-gray-800 hover:text-gray-300'}`}>
@@ -1672,6 +1731,101 @@ export default function Dashboard() {
                 </div>
               )}
             </aside>
+          )}
+        </div>
+      )}
+
+      {/* ── BILLING TAB ── */}
+      {tab === 'billing' && (
+        <div className="p-6 max-w-5xl mx-auto animate-in">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+            <div>
+              <h2 className="text-base font-bold text-white">Leads &amp; Billing</h2>
+              <p className="text-gray-500 text-xs mt-0.5">Auto-captured leads (email provided) for tracked sites — for monthly client billing.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { const [y, m] = billingMonth.split('-').map(Number); const d = new Date(y, m - 2, 1); setBillingMonth(d.toISOString().slice(0, 7)) }}
+                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors" title="Previous month">◀</button>
+              <input type="month" value={billingMonth} max={new Date().toISOString().slice(0, 7)} onChange={(e) => e.target.value && setBillingMonth(e.target.value)}
+                className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-600 [color-scheme:dark]" />
+              <button onClick={() => { const [y, m] = billingMonth.split('-').map(Number); const d = new Date(y, m, 1); const next = d.toISOString().slice(0, 7); if (next <= new Date().toISOString().slice(0, 7)) setBillingMonth(next) }}
+                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors" title="Next month">▶</button>
+              <button onClick={downloadBillingCsv} disabled={!billing || billing.leads.length === 0}
+                className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-40" style={{ backgroundColor: accentColor }}>
+                ⬇ Download CSV
+              </button>
+            </div>
+          </div>
+
+          {billingLoading ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 3 }).map((_, i) => <Skel key={i} className="h-20" />)}</div>
+              <Skel className="h-64 w-full" />
+            </div>
+          ) : (
+            <>
+              {/* Totals + per-site breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+                <div className="bg-gradient-to-br from-indigo-500/10 to-indigo-600/5 rounded-2xl p-5 border border-indigo-500/20">
+                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-2">Total leads this period</p>
+                  <p className="text-[2.5rem] leading-none font-extrabold text-white tabular-nums">{billing?.total ?? 0}</p>
+                </div>
+                <div className="md:col-span-2 bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-3">By site</p>
+                  {(billing?.bySite ?? []).length === 0 ? (
+                    <p className="text-xs text-gray-600">No leads in this period.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {billing!.bySite.map((b) => (
+                        <div key={b.site_id} className="flex items-center justify-between">
+                          <span className="text-sm text-gray-200 truncate">{b.site_name}</span>
+                          <span className="text-sm font-semibold text-white tabular-nums">{b.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Detail table */}
+              <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[760px]">
+                    <thead>
+                      <tr className="border-b border-gray-800 bg-gray-800/40">
+                        {['Email', 'Name', 'Phone', 'Site', 'Date Captured', ''].map((h) => (
+                          <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(billing?.leads ?? []).length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="text-center py-10">
+                            <div className="flex flex-col items-center">
+                              <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">🧾</div>
+                              <p className="text-gray-300 text-sm font-medium">No leads captured this period</p>
+                              <p className="text-gray-600 text-xs mt-0.5">A lead is recorded when a visitor shares an email on a tracked site.</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : billing!.leads.map((l) => (
+                        <tr key={l.session_id} className="border-b border-gray-800/40 hover:bg-gray-800/25 transition-colors">
+                          <td className="px-4 py-3 text-blue-300 whitespace-nowrap">{l.email}</td>
+                          <td className="px-4 py-3 text-gray-200 whitespace-nowrap">{l.name || <span className="text-gray-600">—</span>}</td>
+                          <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{l.phone || <span className="text-gray-600">—</span>}</td>
+                          <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 border border-gray-700 text-gray-300">{l.site_name}</span></td>
+                          <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{new Date(l.captured_at).toLocaleString()}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <button onClick={() => openConversation(l)} className="text-xs text-indigo-300 hover:text-indigo-200 hover:underline">View chat →</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

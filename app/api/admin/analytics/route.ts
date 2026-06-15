@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { MODE_ROLE } from '@/lib/mode'
 import { CONTACT_ROLE, TAGS_ROLE } from '@/lib/visitor'
+import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,7 +84,7 @@ export async function GET(req: NextRequest) {
   // New chats = a session's earliest (non-control) message within the window.
   const firstSeen: Record<string, number> = {}
   for (const l of logRes.data ?? []) {
-    if (l.role === MODE_ROLE || l.role === CONTACT_ROLE || l.role === TAGS_ROLE) continue
+    if (l.role === MODE_ROLE || l.role === CONTACT_ROLE || l.role === TAGS_ROLE || l.role === LEAD_CAPTURE_ROLE) continue
     const ts = new Date(l.created_at).getTime()
     if (firstSeen[l.session_id] === undefined || ts < firstSeen[l.session_id]) firstSeen[l.session_id] = ts
   }

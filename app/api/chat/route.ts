@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { generateReply, extractLeadFields } from '@/lib/gemini'
 import { getMode } from '@/lib/mode'
+import { maybeCaptureLead } from '@/lib/leadtracking'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -45,6 +46,11 @@ export async function POST(req: NextRequest) {
       role: lastUserMessage.role,
       message: lastUserMessage.content,
     })
+
+    // Auto lead-capture (billing): if the visitor typed an email on a
+    // lead-tracked site, record it once per conversation. Runs in both bot and
+    // human modes; non-blocking and never fatal to the chat response.
+    after(() => maybeCaptureLead({ sessionId, siteId, text: lastUserMessage.content }))
 
     const responseHeaders = {
       ...corsHeaders,

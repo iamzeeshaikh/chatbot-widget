@@ -11,6 +11,14 @@ export type Workspace = 'sports' | 'packaging'
 export const PACKAGING_SITES = ['shopcardboardboxes']
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
+// Sites whose leads are counted/billed (auto lead detection + the Billing tab).
+// Data-driven: add a site_id here to start tracking it — no other code changes.
+export const LEAD_TRACKED_SITES = ['shopcardboardboxes']
+
+export function isLeadTracked(siteId: string): boolean {
+  return LEAD_TRACKED_SITES.includes(siteId)
+}
+
 export function workspaceSites(ws: Workspace): string[] {
   return ws === 'sports' ? SPORTS_SITES : PACKAGING_SITES
 }
