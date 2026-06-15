@@ -1,0 +1,110 @@
+// Visitor detail storage helpers.
+//
+// We have no DDL access, so the active_visitors row packs everything we can't
+// give a dedicated column into the single `page_url` text field as a small JSON
+// blob. This module is the one place that knows that shape so the ping writer
+// and the readers (live list + visitor detail) stay in sync.
+//
+// Packed shape: { u, t, r, v, ip, h }
+//   u  = current page url
+//   t  = current page title
+//   r  = original (first) referrer
+//   v  = visit count (page loads, persisted client-side per browser/site)
+//   ip = visitor IP (captured server-side from x-forwarded-for)
+//   h  = page history: [{ u, t, ts }] in chronological order (oldest first)
+//
+// Legacy rows may store a plain URL string instead of JSON — unpack handles both.
+
+// Agent-entered contact details (name/email/phone/notes) are persisted the same
+// way conversation mode is: as a control row in chat_logs (role = CONTACT_ROLE,
+// message = JSON). The current details are the most recent such row per session.
+// Both the conversations list and the message view filter this role out so it
+// never shows up as a chat message.
+export const CONTACT_ROLE = 'contact'
+
+export interface VisitorContact {
+  name: string
+  email: string
+  phone: string
+  notes: string
+}
+
+export const EMPTY_CONTACT: VisitorContact = { name: '', email: '', phone: '', notes: '' }
+
+export function parseContact(message: string | null | undefined): VisitorContact {
+  if (!message) return { ...EMPTY_CONTACT }
+  try {
+    const o = JSON.parse(message)
+    return {
+      name: typeof o.name === 'string' ? o.name : '',
+      email: typeof o.email === 'string' ? o.email : '',
+      phone: typeof o.phone === 'string' ? o.phone : '',
+      notes: typeof o.notes === 'string' ? o.notes : '',
+    }
+  } catch {
+    return { ...EMPTY_CONTACT }
+  }
+}
+
+export interface PageVisit {
+  u: string | null
+  t: string | null
+  ts: string
+}
+
+export interface UnpackedVisitor {
+  page_url: string | null
+  page_title: string | null
+  referrer: string | null
+  visits: number
+  ip: string | null
+  history: PageVisit[]
+}
+
+// Cap stored history so the packed blob can't grow without bound.
+export const MAX_HISTORY = 40
+
+export function unpackVisitor(raw: string | null): UnpackedVisitor {
+  if (!raw) return { page_url: null, page_title: null, referrer: null, visits: 1, ip: null, history: [] }
+  if (raw[0] === '{') {
+    try {
+      const o = JSON.parse(raw)
+      return {
+        page_url: o.u ?? null,
+        page_title: o.t ?? null,
+        referrer: o.r ?? null,
+        visits: typeof o.v === 'number' ? o.v : (parseInt(o.v, 10) || 1),
+        ip: o.ip ?? null,
+        history: Array.isArray(o.h) ? o.h : [],
+      }
+    } catch { /* fall through to legacy */ }
+  }
+  return { page_url: raw, page_title: null, referrer: null, visits: 1, ip: null, history: [] }
+}
+
+export function packVisitor(v: {
+  page_url: string | null
+  page_title: string | null
+  referrer: string | null
+  visits: number
+  ip: string | null
+  history: PageVisit[]
+}): string {
+  return JSON.stringify({
+    u: v.page_url,
+    t: v.page_title,
+    r: v.referrer,
+    v: v.visits,
+    ip: v.ip,
+    h: v.history.slice(-MAX_HISTORY),
+  })
+}
+
+// Append a page to history only when it's a new page (different URL from the
+// last one recorded), so repeated pings on the same page don't bloat the path.
+export function appendHistory(history: PageVisit[], url: string | null, title: string | null): PageVisit[] {
+  if (!url) return history
+  const last = history[history.length - 1]
+  if (last && last.u === url) return history
+  return [...history, { u: url, t: title, ts: new Date().toISOString() }].slice(-MAX_HISTORY)
+}

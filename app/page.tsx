@@ -37,6 +37,19 @@ interface Session { session_id: string; site_id: string; site_name: string; prev
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
+interface VisitorContact { name: string; email: string; phone: string; notes: string }
+interface VisitorDetail {
+  session_id: string
+  site_id: string
+  contact: VisitorContact
+  stats: { visits: number; chats: number; first_seen: string | null; last_seen: string | null }
+  path: { url: string | null; title: string | null; at: string | null }[]
+  technical: {
+    country: string | null; city: string | null; browser: string | null; os: string | null
+    device_type: string | null; ip: string | null; referrer: string | null
+    screen_width: number | null; user_agent: string | null
+  }
+}
 
 function cleanLeadMessage(msg: string | null): string {
   if (!msg) return '-'
@@ -74,6 +87,27 @@ function timeOnSite(created_at: string) {
 // Device type → icon.
 function deviceIcon(d: string | null): string {
   return d === 'Mobile' ? '📱' : d === 'Tablet' ? '📟' : '💻'
+}
+
+// Duration between two ISO timestamps as a compact human string ("3m 12s").
+function formatDuration(from: string | null, to: string | null): string {
+  if (!from || !to) return '—'
+  const s = Math.max(0, Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${m % 60}m`
+}
+
+// A page entry → readable label (title if known, else a tidy path).
+function pageLabel(p: { url: string | null; title: string | null }): string {
+  if (p.title && p.title.trim()) return p.title.trim()
+  if (!p.url) return '—'
+  try {
+    const u = new URL(p.url)
+    return (u.pathname === '/' ? u.hostname : u.pathname) + (u.search || '')
+  } catch { return p.url }
 }
 
 // Short, clean referrer source (e.g. "google.com", "chatgpt.com", "Direct").
@@ -211,6 +245,12 @@ export default function Dashboard() {
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', message: '' })
   const [savingEdit, setSavingEdit] = useState(false)
   const [visitors, setVisitors] = useState<Visitor[]>([])
+  // Visitor detail side-panel state for the currently selected conversation.
+  const [visitorDetail, setVisitorDetail] = useState<VisitorDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [contactForm, setContactForm] = useState<VisitorContact>({ name: '', email: '', phone: '', notes: '' })
+  const [savingContact, setSavingContact] = useState(false)
+  const [contactSaved, setContactSaved] = useState(false)
   const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
   const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
   const prevVisitorIds = useRef<Set<string>>(new Set())
@@ -323,6 +363,44 @@ export default function Dashboard() {
   }, [selectedSession, fetchMessages])
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  // Load the rich visitor detail whenever a conversation is opened. Refreshed on
+  // a slow interval so stats/path stay current without competing with messages.
+  const fetchVisitorDetail = useCallback(async (sessionId: string, withSpinner: boolean) => {
+    if (withSpinner) setDetailLoading(true)
+    const data = await fetch(`/api/admin/visitor?sessionId=${encodeURIComponent(sessionId)}`)
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (data?.detail) {
+      setVisitorDetail(data.detail)
+      // Only (re)seed the editable form on the initial load so we never clobber
+      // what the agent is typing during a background refresh.
+      if (withSpinner) setContactForm(data.detail.contact)
+    }
+    if (withSpinner) setDetailLoading(false)
+  }, [])
+
+  useEffect(() => {
+    if (!selectedSession) { setVisitorDetail(null); return }
+    setContactSaved(false)
+    fetchVisitorDetail(selectedSession.session_id, true)
+    const iv = setInterval(() => fetchVisitorDetail(selectedSession.session_id, false), 15000)
+    return () => clearInterval(iv)
+  }, [selectedSession, fetchVisitorDetail])
+
+  async function saveContact() {
+    if (!selectedSession || savingContact) return
+    setSavingContact(true); setContactSaved(false)
+    const res = await fetch('/api/admin/visitor', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: selectedSession.session_id, ...contactForm }),
+    })
+    setSavingContact(false)
+    if (res.ok) {
+      setContactSaved(true)
+      setVisitorDetail((d) => (d ? { ...d, contact: { ...contactForm } } : d))
+      setTimeout(() => setContactSaved(false), 2500)
+    }
+  }
 
   async function sendReply() {
     if (!selectedSession || !replyText.trim() || sending) return
@@ -1010,6 +1088,116 @@ export default function Dashboard() {
               </>
             )}
           </div>
+
+          {/* ── Visitor detail panel ── */}
+          {selectedSession && (
+            <aside className="w-[320px] xl:w-[360px] flex-shrink-0 border-l border-gray-800/80 bg-gray-900/30 overflow-y-auto">
+              <div className="px-4 py-3 border-b border-gray-800/80 bg-gray-900/40 sticky top-0 backdrop-blur z-10 flex items-center gap-2">
+                <span className="text-base">{deviceIcon(visitorDetail?.technical.device_type ?? null)}</span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white leading-tight">Visitor details</p>
+                  <p className="text-[10px] text-gray-600 font-mono truncate">{selectedSession.session_id}</p>
+                </div>
+              </div>
+
+              {detailLoading && !visitorDetail ? (
+                <div className="flex items-center gap-2 px-4 py-8 text-gray-500 text-xs">
+                  <div className="w-3.5 h-3.5 border-2 border-gray-600 border-t-gray-300 rounded-full animate-spin" />
+                  Loading visitor…
+                </div>
+              ) : (
+                <div className="p-4 space-y-5">
+
+                  {/* Contact (editable) */}
+                  <section>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Contact</h3>
+                    <div className="space-y-2">
+                      <input value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
+                        placeholder="Name"
+                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-gray-500" />
+                      <input value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+                        placeholder="Email" type="email"
+                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-gray-500" />
+                      <input value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
+                        placeholder="Phone"
+                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-gray-500" />
+                      <textarea value={contactForm.notes} onChange={(e) => setContactForm({ ...contactForm, notes: e.target.value })}
+                        placeholder="Notes…" rows={3}
+                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-600 resize-none focus:outline-none focus:border-gray-500" />
+                      <div className="flex items-center gap-2">
+                        <button onClick={saveContact} disabled={savingContact}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-white disabled:opacity-50 transition-colors"
+                          style={{ backgroundColor: accentColor }}>
+                          {savingContact ? 'Saving…' : 'Save contact'}
+                        </button>
+                        {contactSaved && <span className="text-[11px] text-green-400">✓ Saved</span>}
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Stats row */}
+                  <section>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Activity</h3>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: 'Visits', value: visitorDetail?.stats.visits ?? '—' },
+                        { label: 'Chats', value: visitorDetail?.stats.chats ?? '—' },
+                        { label: 'On site', value: formatDuration(visitorDetail?.stats.first_seen ?? null, visitorDetail?.stats.last_seen ?? null) },
+                      ].map((s) => (
+                        <div key={s.label} className="bg-gray-800/40 border border-gray-700/40 rounded-lg px-2 py-2.5 text-center">
+                          <p className="text-base font-bold text-white leading-tight">{s.value}</p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">{s.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Visitor path */}
+                  <section>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
+                      Visitor path {visitorDetail && visitorDetail.path.length > 0 && <span className="text-gray-600 normal-case font-normal">· {visitorDetail.path.length} page{visitorDetail.path.length !== 1 ? 's' : ''}</span>}
+                    </h3>
+                    {!visitorDetail || visitorDetail.path.length === 0 ? (
+                      <p className="text-xs text-gray-600">No page history captured yet</p>
+                    ) : (
+                      <ol className="relative border-l border-gray-700/60 ml-1.5 space-y-3">
+                        {visitorDetail.path.map((p, i) => (
+                          <li key={i} className="ml-3.5 relative">
+                            <span className="absolute -left-[1.18rem] top-1 w-2 h-2 rounded-full" style={{ backgroundColor: accentColor }} />
+                            <p className="text-xs text-gray-200 leading-snug break-words" title={p.url ?? undefined}>{pageLabel(p)}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] text-gray-600">{i + 1}.</span>
+                              {p.at && <span className="text-[10px] text-gray-600">{new Date(p.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+
+                  {/* Technical info */}
+                  <section>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Technical</h3>
+                    <dl className="space-y-1.5">
+                      {[
+                        { label: 'Location', value: [visitorDetail?.technical.country, visitorDetail?.technical.city].filter(Boolean).join(' · ') },
+                        { label: 'Browser', value: visitorDetail?.technical.browser },
+                        { label: 'Platform', value: visitorDetail?.technical.os },
+                        { label: 'Device', value: visitorDetail?.technical.device_type },
+                        { label: 'IP', value: visitorDetail?.technical.ip },
+                        { label: 'Referrer', value: visitorDetail ? cleanReferrer(visitorDetail.technical.referrer) : null },
+                      ].map((row) => (
+                        <div key={row.label} className="flex items-start justify-between gap-3">
+                          <dt className="text-[11px] text-gray-500 shrink-0">{row.label}</dt>
+                          <dd className="text-[11px] text-gray-200 text-right break-all">{row.value || '—'}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                </div>
+              )}
+            </aside>
+          )}
         </div>
       )}
     </div>

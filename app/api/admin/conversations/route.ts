@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
+import { CONTACT_ROLE } from '@/lib/visitor'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
   }> = {}
 
   for (const log of logs) {
-    if (log.role === MODE_ROLE) continue // control rows aren't messages
+    if (log.role === MODE_ROLE || log.role === CONTACT_ROLE) continue // control rows aren't messages
     if (!sessionMap[log.session_id]) {
       const site = sites.find((s) => s.site_id === log.site_id)
       sessionMap[log.session_id] = {

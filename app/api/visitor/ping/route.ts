@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { unpackVisitor, packVisitor, appendHistory } from '@/lib/visitor'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -90,14 +91,23 @@ export async function POST(req: NextRequest) {
     const flag = countryToFlag(geo.country)
 
     // The active_visitors table has no columns for page title / referrer / visit
-    // count, and we can't run DDL — so pack them with the URL into page_url as a
-    // small JSON blob. /api/visitor/active unpacks it. (Plain-URL legacy rows
-    // are still handled there.)
-    const packedUrl = JSON.stringify({
-      u: pageUrl ?? null,
-      t: pageTitle ?? null,
-      r: referrer ?? null,
-      v: typeof visits === 'number' ? visits : (parseInt(visits, 10) || 1),
+    // count / IP / page history, and we can't run DDL — so we pack them with the
+    // URL into page_url as a small JSON blob (see lib/visitor.ts). Read the prior
+    // row first so we can extend the page-history trail instead of overwriting it.
+    const { data: existing } = await supabase
+      .from('active_visitors')
+      .select('page_url')
+      .eq('session_id', sessionId)
+      .maybeSingle()
+    const prev = unpackVisitor(existing?.page_url ?? null)
+
+    const packedUrl = packVisitor({
+      page_url: pageUrl ?? null,
+      page_title: pageTitle ?? null,
+      referrer: referrer ?? null,
+      visits: typeof visits === 'number' ? visits : (parseInt(visits, 10) || 1),
+      ip: ip || prev.ip || null,
+      history: appendHistory(prev.history, pageUrl ?? null, pageTitle ?? null),
     })
 
     // UPSERT keyed on session_id: update last_seen (and details) when the
