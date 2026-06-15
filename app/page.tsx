@@ -145,6 +145,37 @@ const RANGES: { key: 'hourly' | 'daily' | 'weekly' | 'monthly'; label: string }[
   { key: 'monthly', label: 'Monthly' },
 ]
 
+// A single shimmering placeholder block — composed into loading skeletons so the
+// dashboard fades in smoothly instead of flashing blank or jumping layout.
+function Skel({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-gray-800/70 ${className}`} />
+}
+
+// Overview skeleton: mirrors the real layout (stat cards + chart) so nothing
+// shifts when data arrives.
+function OverviewSkeleton() {
+  return (
+    <div className="animate-in">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="rounded-2xl p-5 border border-gray-800 bg-gray-900">
+            <Skel className="h-3 w-16 mb-4" />
+            <Skel className="h-9 w-12" />
+          </div>
+        ))}
+      </div>
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 mb-6">
+        <Skel className="h-4 w-44 mb-4" />
+        <Skel className="h-[200px] w-full" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5"><Skel className="h-4 w-32 mb-4" /><Skel className="h-24 w-full" /></div>
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5"><Skel className="h-4 w-28 mb-4" /><div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skel key={i} className="h-3 w-full" />)}</div></div>
+      </div>
+    </div>
+  )
+}
+
 // Lightweight dependency-free SVG line chart: Visitors vs Chats over time.
 function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: string }) {
   const W = 760, H = 220, padL = 30, padR = 14, padT = 14, padB = 26
@@ -152,13 +183,48 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
   const maxV = Math.max(1, ...points.map((p) => Math.max(p.visitors, p.chats)))
   const x = (i: number) => padL + (n <= 1 ? 0 : (i * (W - padL - padR)) / (n - 1))
   const y = (val: number) => padT + (H - padT - padB) * (1 - val / maxV)
-  const path = (key: 'visitors' | 'chats') =>
-    points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ')
+
+  // Catmull-Rom → cubic bezier for a gently smoothed line (k tunes the curve).
+  const smooth = (key: 'visitors' | 'chats'): string => {
+    const pts = points.map((p, i) => ({ x: x(i), y: y(p[key]) }))
+    if (pts.length === 0) return ''
+    if (pts.length < 3) return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
+    const k = 0.8
+    let d = `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i]
+      const p1 = pts[i]
+      const p2 = pts[i + 1]
+      const p3 = pts[i + 2] || p2
+      const c1x = p1.x + ((p2.x - p0.x) / 6) * k
+      const c1y = p1.y + ((p2.y - p0.y) / 6) * k
+      const c2x = p2.x - ((p3.x - p1.x) / 6) * k
+      const c2y = p2.y - ((p3.y - p1.y) / 6) * k
+      d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+    }
+    return d
+  }
+  const areaFor = (key: 'visitors' | 'chats') => {
+    const line = smooth(key)
+    if (!line) return ''
+    return `${line} L${x(n - 1).toFixed(1)} ${y(0).toFixed(1)} L${x(0).toFixed(1)} ${y(0).toFixed(1)} Z`
+  }
 
   const totalVisitors = points.reduce((s, p) => s + p.visitors, 0)
   const totalChats = points.reduce((s, p) => s + p.chats, 0)
   const labelEvery = Math.max(1, Math.ceil(n / 6))
   const gridVals = [0, 0.5, 1].map((f) => Math.round(maxV * f))
+  const gid = accent.replace('#', '')
+
+  const [hover, setHover] = useState<number | null>(null)
+  const pct = (v: number, total: number) => `${(v / total) * 100}%`
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const vbX = ((e.clientX - rect.left) / rect.width) * W
+    if (n <= 1) { setHover(0); return }
+    const step = (W - padL - padR) / (n - 1)
+    setHover(Math.max(0, Math.min(n - 1, Math.round((vbX - padL) / step))))
+  }
 
   return (
     <div>
@@ -167,21 +233,53 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
         <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full bg-amber-400" /><span className="text-gray-300">Chats</span><span className="text-gray-500">({totalChats})</span></span>
       </div>
       {totalVisitors === 0 && totalChats === 0 ? (
-        <p className="text-xs text-gray-600 text-center py-12">No data for this period yet</p>
+        <div className="flex flex-col items-center justify-center py-10 text-center">
+          <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center mb-2 text-lg">📊</div>
+          <p className="text-xs text-gray-500">No activity in this period yet</p>
+        </div>
       ) : (
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }} preserveAspectRatio="none">
-          {gridVals.map((gv, i) => (
-            <g key={i}>
-              <line x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#1f2937" strokeWidth={1} />
-              <text x={4} y={y(gv) + 3} fill="#6b7280" fontSize={9}>{gv}</text>
-            </g>
-          ))}
-          {points.map((p, i) => (i % labelEvery === 0 || i === n - 1) ? (
-            <text key={i} x={x(i)} y={H - 8} fill="#6b7280" fontSize={9} textAnchor="middle">{p.label}</text>
-          ) : null)}
-          <path d={path('visitors')} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-          <path d={path('chats')} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        </svg>
+        <div className="relative" style={{ height: 220 }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }} preserveAspectRatio="none">
+            <defs>
+              <linearGradient id={`grad-v-${gid}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={accent} stopOpacity={0.22} />
+                <stop offset="100%" stopColor={accent} stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="grad-c-amber" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.16} />
+                <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            {gridVals.map((gv, i) => (
+              <g key={i}>
+                <line x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#ffffff" strokeOpacity={0.05} strokeWidth={1} strokeDasharray="3 4" />
+                <text x={4} y={y(gv) + 3} fill="#6b7280" fontSize={9}>{gv}</text>
+              </g>
+            ))}
+            {points.map((p, i) => (i % labelEvery === 0 || i === n - 1) ? (
+              <text key={i} x={x(i)} y={H - 8} fill="#6b7280" fontSize={9} textAnchor="middle">{p.label}</text>
+            ) : null)}
+            <path d={areaFor('visitors')} fill={`url(#grad-v-${gid})`} stroke="none" />
+            <path d={smooth('chats')} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={smooth('visitors')} fill="none" stroke={accent} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
+          </svg>
+          {/* Hover overlay: guide line, point dots, and an exact-value tooltip. */}
+          {hover !== null && points[hover] && (
+            <>
+              <div className="absolute top-0 bottom-0 w-px bg-white/10 pointer-events-none" style={{ left: pct(x(hover), W) }} />
+              <div className="absolute w-2.5 h-2.5 rounded-full border-2 border-gray-950 pointer-events-none" style={{ left: pct(x(hover), W), top: pct(y(points[hover].visitors), H), transform: 'translate(-50%,-50%)', backgroundColor: accent }} />
+              <div className="absolute w-2.5 h-2.5 rounded-full border-2 border-gray-950 bg-amber-400 pointer-events-none" style={{ left: pct(x(hover), W), top: pct(y(points[hover].chats), H), transform: 'translate(-50%,-50%)' }} />
+              <div className="absolute z-10 pointer-events-none -translate-x-1/2 -translate-y-full mb-2"
+                style={{ left: `min(max(${pct(x(hover), W)}, 56px), calc(100% - 56px))`, top: pct(Math.min(y(points[hover].visitors), y(points[hover].chats)), H) }}>
+                <div className="mb-2 rounded-lg border border-gray-700 bg-gray-900/95 shadow-xl px-2.5 py-1.5 backdrop-blur">
+                  <p className="text-[10px] text-gray-400 mb-0.5 whitespace-nowrap">{points[hover].label}</p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-300">Visitors</span><span className="font-semibold text-white ml-auto pl-2">{points[hover].visitors}</span></p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="text-gray-300">Chats</span><span className="font-semibold text-white ml-auto pl-2">{points[hover].chats}</span></p>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   )
@@ -228,6 +326,7 @@ export default function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [sessions, setSessions] = useState<Session[]>([])
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [replyText, setReplyText] = useState('')
@@ -354,6 +453,7 @@ export default function Dashboard() {
     dashSoundReady.current = true
 
     setSessions(incoming)
+    setSessionsLoaded(true)
   }, [playDashSound])
 
   useEffect(() => {
@@ -758,12 +858,9 @@ export default function Dashboard() {
 
       {/* ── OVERVIEW TAB ── */}
       {tab === 'overview' && (
-        <div className="p-6 max-w-6xl mx-auto">
+        <div className="p-6 max-w-6xl mx-auto animate-in">
           {overviewLoading ? (
-            <div className="flex items-center gap-3 py-12 text-gray-500">
-              <div className="w-4 h-4 border-2 border-gray-600 border-t-gray-300 rounded-full animate-spin" />
-              <span className="text-sm">Loading dashboard...</span>
-            </div>
+            <OverviewSkeleton />
           ) : (
             <>
               {/* Stats row */}
@@ -775,12 +872,12 @@ export default function Dashboard() {
                   { label: "Today's Leads", value: todayLeads, icon: '📅', color: 'from-orange-500/10 to-orange-600/5', border: 'border-orange-500/20' },
                   { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20' },
                 ].map((s) => (
-                  <div key={s.label} className={`bg-gradient-to-br ${s.color} rounded-xl p-4 border ${s.border} bg-gray-900`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-gray-400 text-xs font-medium">{s.label}</p>
-                      <span className="text-lg">{s.icon}</span>
+                  <div key={s.label} className={`group bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${s.border} bg-gray-900 transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-600/60 hover:shadow-lg hover:shadow-black/20`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
+                      <span className="text-lg opacity-80 group-hover:opacity-100 transition-opacity">{s.icon}</span>
                     </div>
-                    <p className="text-3xl font-bold text-white">{s.value}</p>
+                    <p className="text-[2.5rem] leading-none font-extrabold text-white tracking-tight tabular-nums">{s.value}</p>
                   </div>
                 ))}
               </div>
@@ -865,13 +962,13 @@ export default function Dashboard() {
               {/* Site cards */}
               <div className="mb-6">
                 <h2 className="text-sm font-semibold text-white mb-3">Configured Sites</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
                   {roleSites.map((site) => {
                     const accent = SITE_ACCENT[site.site_id] ?? site.primary_color
                     const url = SITE_URLS[site.site_id]
                     const count = roleLeads.filter((l) => l.site_id === site.site_id).length
                     return (
-                      <div key={site.site_id} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden hover:border-gray-700 transition-colors group">
+                      <div key={site.site_id} className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-700 hover:shadow-lg hover:shadow-black/20 group">
                         <div className="h-1" style={{ backgroundColor: accent }} />
                         <div className="p-4">
                           <div className="flex items-center gap-2.5 mb-3">
@@ -917,10 +1014,12 @@ export default function Dashboard() {
                       <tbody>
                         {roleLeads.length === 0 ? (
                           <tr>
-                            <td colSpan={12} className="text-center py-12">
-                              <p className="text-2xl mb-2">📭</p>
-                              <p className="text-gray-500 text-sm">No leads captured yet</p>
-                              <p className="text-gray-600 text-xs mt-1">Leads appear here when the bot qualifies a visitor</p>
+                            <td colSpan={12} className="text-center py-8">
+                              <div className="flex flex-col items-center">
+                                <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">📭</div>
+                                <p className="text-gray-300 text-sm font-medium">No leads captured yet</p>
+                                <p className="text-gray-600 text-xs mt-0.5">Leads appear here when the bot qualifies a visitor</p>
+                              </div>
                             </td>
                           </tr>
                         ) : roleLeads.map((lead) => {
@@ -997,23 +1096,24 @@ export default function Dashboard() {
 
       {/* ── CONVERSATIONS TAB ── */}
       {tab === 'conversations' && (
-        <div className="flex" style={{ height: 'calc(100vh - 57px)' }}>
+        <div className="flex animate-in" style={{ height: 'calc(100vh - 57px)' }}>
 
           {/* ── Left sidebar ── */}
           <div className="w-[300px] flex-shrink-0 border-r border-gray-800/80 flex flex-col bg-gray-900/30">
 
             {/* Live visitors */}
             {roleVisitors.length > 0 && (
-              <div className="border-b border-gray-800">
-                <div className="px-3 py-2 flex items-center gap-2 bg-green-950/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+              <div className="border-b border-gray-800 flex flex-col min-h-0 max-h-[38vh]">
+                <div className="px-3 py-2 flex items-center gap-2 bg-green-950/30 flex-shrink-0">
+                  <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 ring-2 ring-green-400/30 animate-pulse" />
                   <p className="text-[11px] text-green-400 font-semibold uppercase tracking-wider">{roleVisitors.length} Live {roleVisitors.length === 1 ? 'Visitor' : 'Visitors'}</p>
                 </div>
+                <div className="overflow-y-auto min-h-0">
                 {roleVisitors.map((v) => {
                   const accent = SITE_ACCENT[v.site_id] ?? '#16a34a'
                   return (
                     <button key={v.session_id} onClick={() => openVisitorSession(v)}
-                      className="w-full text-left px-3 py-2 border-t border-gray-800/40 hover:bg-green-900/15 transition-colors flex items-start gap-2.5"
+                      className="w-full text-left px-3 py-1.5 border-t border-gray-800/40 hover:bg-green-900/15 transition-colors flex items-start gap-2.5"
                       style={{ borderLeft: `3px solid ${accent}` }}>
                       <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
                       <div className="flex-1 min-w-0">
@@ -1041,6 +1141,7 @@ export default function Dashboard() {
                     </button>
                   )
                 })}
+                </div>
               </div>
             )}
 
@@ -1098,11 +1199,24 @@ export default function Dashboard() {
 
             {/* Session list */}
             <div className="flex-1 overflow-y-auto">
-              {filteredSessions.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12">
-                  <p className="text-3xl mb-3">🗂️</p>
-                  <p className="text-sm text-gray-400">{roleSessions.length === 0 ? 'No conversations yet' : 'No results match'}</p>
-                  <p className="text-xs text-gray-600 mt-1">{roleSessions.length === 0 ? 'Conversations appear here in real time' : 'Try adjusting your filters'}</p>
+              {!sessionsLoaded ? (
+                <div className="p-1">
+                  {Array.from({ length: 7 }).map((_, i) => (
+                    <div key={i} className="flex gap-2 px-3 py-3 border-b border-gray-800/40">
+                      <Skel className="w-2 h-2 rounded-full mt-1" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skel className="h-3 w-24" />
+                        <Skel className="h-3 w-40" />
+                        <Skel className="h-2.5 w-16" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : filteredSessions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12 animate-in">
+                  <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">🗂️</div>
+                  <p className="text-sm text-gray-300 font-medium">{roleSessions.length === 0 ? 'No conversations yet' : 'No results match'}</p>
+                  <p className="text-xs text-gray-600 mt-0.5">{roleSessions.length === 0 ? 'Conversations appear here in real time' : 'Try adjusting your filters'}</p>
                 </div>
               ) : filteredSessions.map((s) => {
                 const isSelected = selectedSessions.has(s.session_id)
@@ -1112,21 +1226,21 @@ export default function Dashboard() {
                 const hasUnread = s.last_role === 'user'
                 return (
                   <div key={s.session_id}
-                    className={`group relative flex border-b border-gray-800/40 transition-all ${isActive ? 'bg-gray-800/70' : 'hover:bg-gray-800/40'} ${isSelected ? 'ring-1 ring-inset ring-blue-500/20 bg-blue-950/20' : ''}`}
+                    className={`group relative flex border-b border-gray-800/40 transition-colors duration-150 ${isActive ? 'bg-gray-800/70' : 'hover:bg-gray-800/40'} ${isSelected ? 'ring-1 ring-inset ring-blue-500/20 bg-blue-950/20' : ''}`}
                     style={{ borderLeft: `3px solid ${isActive ? accent : 'transparent'}` }}>
-                    <div className="flex items-center px-2 py-3 shrink-0" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center px-2 py-2.5 shrink-0" onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={isSelected}
                         onChange={e => { const n = new Set(selectedSessions); if (e.target.checked) n.add(s.session_id); else n.delete(s.session_id); setSelectedSessions(n) }}
                         className="rounded accent-blue-500 cursor-pointer" />
                     </div>
-                    <div className="flex-1 min-w-0 py-2.5 pr-7 cursor-pointer" onClick={() => setSelectedSession(s)}>
+                    <div className="flex-1 min-w-0 py-2 pr-7 cursor-pointer" onClick={() => setSelectedSession(s)}>
                       <div className="flex items-center justify-between mb-0.5">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />}
+                          {hasUnread && <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 ring-2 ring-green-400/25" title="New visitor message" />}
                           <span className={`text-xs truncate ${hasUnread ? 'font-semibold text-white' : 'font-medium text-gray-300'}`}>{s.site_name}</span>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0 ml-1">
-                          {s.mode === 'human' && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" title="Human mode" />}
+                        <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                          {s.mode === 'human' && <span className="text-[9px] font-semibold text-orange-300 bg-orange-500/15 border border-orange-500/30 rounded-full px-1.5 py-px leading-none" title="Human takeover active">LIVE</span>}
                           <span className="text-[10px] text-gray-600">{timeAgo(s.last_at)}</span>
                         </div>
                       </div>
@@ -1167,12 +1281,12 @@ export default function Dashboard() {
           <div className="flex-1 flex flex-col min-w-0">
             {!selectedSession ? (
               <div className="flex-1 flex items-center justify-center">
-                <div className="text-center px-8">
-                  <div className="w-16 h-16 rounded-2xl bg-gray-800 flex items-center justify-center mx-auto mb-4 border border-gray-700">
-                    <svg viewBox="0 0 24 24" className="w-8 h-8 fill-gray-600"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                <div className="text-center px-8 max-w-xs animate-in">
+                  <div className="w-12 h-12 rounded-xl bg-gray-800/80 flex items-center justify-center mx-auto mb-3 border border-gray-700/80">
+                    <svg viewBox="0 0 24 24" className="w-6 h-6 fill-gray-600"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
                   </div>
                   <p className="text-gray-300 font-medium text-sm mb-1">Select a conversation</p>
-                  <p className="text-gray-600 text-xs">Click any session on the left to view messages and manage the conversation</p>
+                  <p className="text-gray-600 text-xs leading-relaxed">Pick a session on the left to view messages and manage the chat.</p>
                 </div>
               </div>
             ) : (
