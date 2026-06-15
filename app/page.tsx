@@ -231,7 +231,14 @@ export default function Dashboard() {
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
   const [togglingMode, setTogglingMode] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  // Scroll handling for the message panel. We track whether the agent is parked
+  // at the bottom so polling refreshes never yank them away while they read
+  // history. lastSessionRef / lastMsgIdRef let us tell "conversation opened" and
+  // "a new message arrived" apart from a plain re-render.
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
+  const atBottomRef = useRef(true)
+  const lastSessionRef = useRef<string | null>(null)
+  const lastMsgIdRef = useRef<string>('')
   const [filterSite, setFilterSite] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -378,7 +385,38 @@ export default function Dashboard() {
     return () => clearInterval(iv)
   }, [selectedSession, fetchMessages])
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  // Record whether the agent is at (or near) the bottom of the message panel,
+  // so we know whether it's safe to auto-scroll on the next update.
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesScrollRef.current
+    if (!el) return
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }, [])
+
+  // Auto-scroll the message panel ONLY when (a) the conversation was just opened
+  // or (b) a new message arrived while the agent was already at the bottom. If
+  // they've scrolled up to read history, their position is preserved across the
+  // 3s polling refreshes. We set the panel's own scrollTop (never scrollIntoView)
+  // so the page itself never jumps.
+  useEffect(() => {
+    const el = messagesScrollRef.current
+    if (!el || !selectedSession) return
+    const lastId = messages.length ? messages[messages.length - 1].id : ''
+    const sessionChanged = lastSessionRef.current !== selectedSession.session_id
+    const newMessage = lastId !== lastMsgIdRef.current
+
+    if (sessionChanged) {
+      // Conversation opened: jump to the latest message and reset bottom state.
+      el.scrollTop = el.scrollHeight
+      atBottomRef.current = true
+    } else if (newMessage && atBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+    // Otherwise (plain refresh, or new message while scrolled up): leave as-is.
+
+    lastSessionRef.current = selectedSession.session_id
+    lastMsgIdRef.current = lastId
+  }, [messages, selectedSession])
 
   // Load the rich visitor detail whenever a conversation is opened. Refreshed on
   // a slow interval so stats/path stay current without competing with messages.
@@ -1025,7 +1063,8 @@ export default function Dashboard() {
                 </div>
 
                 {/* Messages area */}
-                <div className="flex-1 overflow-y-auto px-5 py-4 bg-gray-950/50 space-y-1">
+                <div ref={messagesScrollRef} onScroll={handleMessagesScroll}
+                  className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 bg-gray-950/50 space-y-1">
                   {messageDates.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-center">
                       <p className="text-gray-600 text-sm">No messages yet</p>
@@ -1072,7 +1111,6 @@ export default function Dashboard() {
                       </div>
                     </div>
                   )}
-                  <div ref={messagesEndRef} />
                 </div>
 
                 {/* Reply input */}
