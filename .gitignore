@@ -41,6 +41,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# claude code — local machine settings may hold ad-hoc commands/credentials
+.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
