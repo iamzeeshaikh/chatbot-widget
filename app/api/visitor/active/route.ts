@@ -47,10 +47,28 @@ export async function GET(req: NextRequest) {
   })
   const sites = sitesRes.data ?? []
 
+  // page_url may hold a JSON blob {u,t,r,v} (url, title, referrer, visits) or,
+  // for legacy rows, a plain URL string. Unpack either form.
+  function unpack(raw: string | null): { page_url: string | null; page_title: string | null; referrer: string | null; visits: number } {
+    if (!raw) return { page_url: null, page_title: null, referrer: null, visits: 1 }
+    if (raw[0] === '{') {
+      try {
+        const o = JSON.parse(raw)
+        return { page_url: o.u ?? null, page_title: o.t ?? null, referrer: o.r ?? null, visits: o.v ?? 1 }
+      } catch { /* fall through */ }
+    }
+    return { page_url: raw, page_title: null, referrer: null, visits: 1 }
+  }
+
   const enriched = visitors.map((v) => {
     const site = sites.find((s) => s.site_id === v.site_id)
+    const { page_url, page_title, referrer, visits } = unpack(v.page_url)
     return {
       ...v,
+      page_url,
+      page_title,
+      referrer,
+      visits,
       site_name: site?.name ?? v.site_id,
       primary_color: site?.primary_color ?? '#2563eb',
     }

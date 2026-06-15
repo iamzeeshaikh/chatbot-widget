@@ -70,7 +70,7 @@ function countryToFlag(country: string): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { sessionId, siteId, pageUrl, userAgent, screenWidth, status } = body
+    const { sessionId, siteId, pageUrl, pageTitle, referrer, visits, userAgent, screenWidth, status } = body
     if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400, headers: corsHeaders })
 
     if (status === 'left') {
@@ -89,13 +89,24 @@ export async function POST(req: NextRequest) {
 
     const flag = countryToFlag(geo.country)
 
+    // The active_visitors table has no columns for page title / referrer / visit
+    // count, and we can't run DDL — so pack them with the URL into page_url as a
+    // small JSON blob. /api/visitor/active unpacks it. (Plain-URL legacy rows
+    // are still handled there.)
+    const packedUrl = JSON.stringify({
+      u: pageUrl ?? null,
+      t: pageTitle ?? null,
+      r: referrer ?? null,
+      v: typeof visits === 'number' ? visits : (parseInt(visits, 10) || 1),
+    })
+
     // UPSERT keyed on session_id: update last_seen (and details) when the
     // session already exists, only INSERT when it's truly new — never a new row
     // per ping.
     await supabase.from('active_visitors').upsert({
       session_id: sessionId,
       site_id: siteId,
-      page_url: pageUrl ?? null,
+      page_url: packedUrl,
       user_agent: userAgent ?? null,
       device_type,
       browser,

@@ -35,7 +35,8 @@ interface Site { site_id: string; name: string; bot_name: string; primary_color:
 interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
-interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
+interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
+interface AnalyticsPoint { label: string; visitors: number; chats: number }
 
 function cleanLeadMessage(msg: string | null): string {
   if (!msg) return '-'
@@ -70,6 +71,27 @@ function timeOnSite(created_at: string) {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+// Device type → icon.
+function deviceIcon(d: string | null): string {
+  return d === 'Mobile' ? '📱' : d === 'Tablet' ? '📟' : '💻'
+}
+
+// Short, clean referrer source (e.g. "google.com", "chatgpt.com", "Direct").
+function cleanReferrer(r: string | null): string {
+  if (!r || !r.trim()) return 'Direct'
+  try { return new URL(r).hostname.replace(/^www\./, '') || 'Direct' } catch { return 'Direct' }
+}
+
+// What the visitor is currently viewing: page title if known, else a tidy path.
+function viewingLabel(v: { page_title: string | null; page_url: string | null }): string {
+  if (v.page_title && v.page_title.trim()) return v.page_title.trim()
+  if (!v.page_url) return '—'
+  try {
+    const u = new URL(v.page_url)
+    return (u.pathname === '/' ? u.hostname : u.pathname) + (u.search || '')
+  } catch { return v.page_url }
+}
+
 function msgDateLabel(ts: string): string {
   const d = new Date(ts)
   const today = new Date()
@@ -78,6 +100,55 @@ function msgDateLabel(ts: string): string {
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
   return d.toLocaleDateString('en', { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+const RANGES: { key: 'hourly' | 'daily' | 'weekly' | 'monthly'; label: string }[] = [
+  { key: 'hourly', label: 'Hourly' },
+  { key: 'daily', label: 'Daily' },
+  { key: 'weekly', label: 'Weekly' },
+  { key: 'monthly', label: 'Monthly' },
+]
+
+// Lightweight dependency-free SVG line chart: Visitors vs Chats over time.
+function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: string }) {
+  const W = 760, H = 220, padL = 30, padR = 14, padT = 14, padB = 26
+  const n = points.length
+  const maxV = Math.max(1, ...points.map((p) => Math.max(p.visitors, p.chats)))
+  const x = (i: number) => padL + (n <= 1 ? 0 : (i * (W - padL - padR)) / (n - 1))
+  const y = (val: number) => padT + (H - padT - padB) * (1 - val / maxV)
+  const path = (key: 'visitors' | 'chats') =>
+    points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ')
+
+  const totalVisitors = points.reduce((s, p) => s + p.visitors, 0)
+  const totalChats = points.reduce((s, p) => s + p.chats, 0)
+  const labelEvery = Math.max(1, Math.ceil(n / 6))
+  const gridVals = [0, 0.5, 1].map((f) => Math.round(maxV * f))
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-3 text-[11px]">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-300">Visitors</span><span className="text-gray-500">({totalVisitors})</span></span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full bg-amber-400" /><span className="text-gray-300">Chats</span><span className="text-gray-500">({totalChats})</span></span>
+      </div>
+      {totalVisitors === 0 && totalChats === 0 ? (
+        <p className="text-xs text-gray-600 text-center py-12">No data for this period yet</p>
+      ) : (
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }} preserveAspectRatio="none">
+          {gridVals.map((gv, i) => (
+            <g key={i}>
+              <line x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#1f2937" strokeWidth={1} />
+              <text x={4} y={y(gv) + 3} fill="#6b7280" fontSize={9}>{gv}</text>
+            </g>
+          ))}
+          {points.map((p, i) => (i % labelEvery === 0 || i === n - 1) ? (
+            <text key={i} x={x(i)} y={H - 8} fill="#6b7280" fontSize={9} textAnchor="middle">{p.label}</text>
+          ) : null)}
+          <path d={path('visitors')} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          <path d={path('chats')} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+      )}
+    </div>
+  )
 }
 
 export default function Dashboard() {
@@ -140,6 +211,8 @@ export default function Dashboard() {
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', message: '' })
   const [savingEdit, setSavingEdit] = useState(false)
   const [visitors, setVisitors] = useState<Visitor[]>([])
+  const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
+  const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
   const prevVisitorIds = useRef<Set<string>>(new Set())
   // Track the latest visitor-message time per session to detect new incoming
   // messages and chime for the agent. Seeded on first load so we don't alert
@@ -174,6 +247,14 @@ export default function Dashboard() {
       fetch('/api/admin/leads-list').then((r) => r.json()).catch(() => ({ leads: [] })),
     ]).then(([s, l]) => { setSites(s.sites ?? []); setLeads(l.leads ?? []); setOverviewLoading(false) })
   }, [])
+
+  // Analytics (visitors + chats over time), scoped server-side to the workspace.
+  useEffect(() => {
+    if (tab !== 'overview' || !authReady) return
+    fetch(`/api/admin/analytics?range=${analyticsRange}`)
+      .then((r) => r.json()).catch(() => ({ points: [] }))
+      .then((d) => setAnalytics(d.points ?? []))
+  }, [tab, authReady, analyticsRange])
 
   const fetchSessions = useCallback(async () => {
     const data = await fetch('/api/admin/conversations').then((r) => r.json()).catch(() => ({ sessions: [] }))
@@ -445,6 +526,22 @@ export default function Dashboard() {
                 ))}
               </div>
 
+              {/* Analytics over time */}
+              <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 mb-6">
+                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <h2 className="text-sm font-semibold text-white">Visitors &amp; Chats Over Time</h2>
+                  <div className="flex gap-0.5 bg-gray-800/60 p-1 rounded-lg border border-gray-700/60">
+                    {RANGES.map((r) => (
+                      <button key={r.key} onClick={() => setAnalyticsRange(r.key)}
+                        className={`px-3 py-1 rounded-md text-[11px] font-medium transition-all ${analyticsRange === r.key ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <AnalyticsChart points={analytics} accent={accentColor} />
+              </div>
+
               {/* Chart + Sites row */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 {/* Bar chart */}
@@ -657,19 +754,30 @@ export default function Dashboard() {
                   const accent = SITE_ACCENT[v.site_id] ?? '#16a34a'
                   return (
                     <button key={v.session_id} onClick={() => openVisitorSession(v)}
-                      className="w-full text-left px-3 py-2 border-t border-gray-800/40 hover:bg-green-900/15 transition-colors flex items-center gap-2.5"
+                      className="w-full text-left px-3 py-2 border-t border-gray-800/40 hover:bg-green-900/15 transition-colors flex items-start gap-2.5"
                       style={{ borderLeft: `3px solid ${accent}` }}>
-                      <span className="text-base shrink-0">{v.device_type === 'Mobile' ? '📱' : v.device_type === 'Tablet' ? '📟' : '💻'}</span>
+                      <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
                           <span className="text-xs font-semibold text-gray-100 truncate">{v.site_name}</span>
-                          <span className="text-[10px] text-gray-500 shrink-0">{timeAgo(v.last_seen)}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {v.visits > 1 && (
+                              <span className="text-[9px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
+                            )}
+                            <span className="text-[10px] text-gray-500">{timeAgo(v.last_seen)}</span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          {v.country && <span className="text-[11px] text-gray-400 truncate">{v.country.split(' ').slice(-1)[0]}</span>}
-                          <span className="text-[10px] text-gray-600">·</span>
-                          <span className="text-[10px] text-green-600">on site {timeOnSite(v.created_at)}</span>
+                        {/* Currently viewing */}
+                        <div className="text-[11px] text-gray-300 truncate mt-0.5" title={v.page_url ?? undefined}>
+                          <span className="text-gray-500">Viewing:</span> {viewingLabel(v)}
                         </div>
+                        {/* Location · referrer */}
+                        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                          {v.country && <span className="text-[11px] text-gray-400 truncate">{v.country}</span>}
+                          {v.country && <span className="text-[10px] text-gray-600 shrink-0">·</span>}
+                          <span className="text-[10px] text-gray-500 truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
+                        </div>
+                        <div className="text-[10px] text-green-600 mt-0.5">on site {timeOnSite(v.created_at)}</div>
                       </div>
                     </button>
                   )

@@ -58,6 +58,25 @@
   var greetingSent = false;
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
+  // ─── Visit count + original referrer (persistent per browser/site) ──────────
+  // visitCount increments on every page load; firstReferrer is captured once on
+  // the very first visit so we always know where the visitor originally came
+  // from (later same-site navigations don't overwrite it).
+  var visitCount = 1;
+  var firstReferrer = '';
+  try {
+    visitCount = (parseInt(localStorage.getItem('zee-visits-' + siteId), 10) || 0) + 1;
+    localStorage.setItem('zee-visits-' + siteId, String(visitCount));
+    firstReferrer = localStorage.getItem('zee-ref-' + siteId);
+    if (firstReferrer === null) {
+      firstReferrer = document.referrer || '';
+      localStorage.setItem('zee-ref-' + siteId, firstReferrer);
+    }
+  } catch (e) {
+    visitCount = 1;
+    firstReferrer = document.referrer || '';
+  }
+
   // ─── Polling state ────────────────────────────────────────────────────────
   var pollSince = new Date().toISOString();
   var pollTimer = null;
@@ -523,6 +542,9 @@
     var body = { sessionId: sessionId, siteId: siteId, status: status || 'active' };
     if (!status || status === 'active') {
       body.pageUrl = window.location.href;
+      body.pageTitle = document.title || '';
+      body.referrer = firstReferrer || '';
+      body.visits = visitCount;
       body.userAgent = navigator.userAgent;
       body.screenWidth = window.screen.width;
     }
