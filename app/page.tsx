@@ -267,6 +267,12 @@ export default function Dashboard() {
   // Tags for the open conversation (locally editable; persisted on each change).
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
+  // Translation (per-conversation, off by default). msgAnalysis caches each
+  // visitor message's detected language + English translation, keyed by msg id.
+  const [translateOn, setTranslateOn] = useState(false)
+  const [translateOut, setTranslateOut] = useState(false)
+  const [msgAnalysis, setMsgAnalysis] = useState<Record<string, { langName: string; isEnglish: boolean; english: string }>>({})
+  const analyzingRef = useRef(false)
   const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
   const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
   const prevVisitorIds = useRef<Set<string>>(new Set())
@@ -446,10 +452,53 @@ export default function Dashboard() {
     if (!selectedSession) { setVisitorDetail(null); return }
     setContactSaved(false)
     setTags(selectedSession.tags ?? []); setTagInput('')
+    // Translation is per-conversation and off by default.
+    setTranslateOn(false); setTranslateOut(false); setMsgAnalysis({})
     fetchVisitorDetail(selectedSession.session_id, true)
     const iv = setInterval(() => fetchVisitorDetail(selectedSession.session_id, false), 15000)
     return () => clearInterval(iv)
   }, [selectedSession, fetchVisitorDetail])
+
+  // Detect language + fetch English translation for any visitor text messages we
+  // haven't analysed yet (batched, cached by id). Runs on message updates so new
+  // incoming messages get a "Detected" indicator and an on-demand translation.
+  useEffect(() => {
+    if (!selectedSession) return
+    const pending = messages.filter((m) =>
+      m.role === 'user' &&
+      m.message !== '(session started)' &&
+      !parseAttachment(m.message) &&
+      !(m.id in msgAnalysis),
+    )
+    if (pending.length === 0 || analyzingRef.current) return
+    analyzingRef.current = true
+    const items = pending.slice(0, 25).map((m) => ({ id: m.id, text: m.message }))
+    fetch('/api/admin/translate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'incoming', sessionId: selectedSession.session_id, items }),
+    })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      .then((data) => {
+        if (data?.results) {
+          setMsgAnalysis((prev) => {
+            const next = { ...prev }
+            for (const r of data.results) next[r.id] = { langName: r.langName, isEnglish: r.isEnglish, english: r.english }
+            return next
+          })
+        }
+      })
+      .finally(() => { analyzingRef.current = false })
+  }, [messages, selectedSession, msgAnalysis])
+
+  // The visitor's current language for outgoing replies: the most recent
+  // non-English visitor message's detected language, if any.
+  const visitorLang = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const a = msgAnalysis[messages[i].id]
+      if (messages[i].role === 'user' && a && !a.isEnglish && a.langName) return a.langName
+    }
+    return ''
+  }, [messages, msgAnalysis])
 
   async function saveContact() {
     if (!selectedSession || savingContact) return
@@ -494,9 +543,19 @@ export default function Dashboard() {
   async function sendReply() {
     if (!selectedSession || !replyText.trim() || sending) return
     setSending(true)
+    let outgoing = replyText.trim()
+    // Optionally translate the agent's English reply into the visitor's language
+    // so they read it natively. Falls back to the original on any failure.
+    if (translateOut && visitorLang) {
+      const t = await fetch('/api/admin/translate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'outgoing', sessionId: selectedSession.session_id, text: outgoing, targetLang: visitorLang }),
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      if (t?.translation) outgoing = t.translation
+    }
     await fetch('/api/admin/reply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: selectedSession.session_id, siteId: selectedSession.site_id, message: replyText.trim() }),
+      body: JSON.stringify({ sessionId: selectedSession.session_id, siteId: selectedSession.site_id, message: outgoing }),
     })
     setReplyText('')
     await fetchMessages(selectedSession.session_id)
@@ -1131,6 +1190,14 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    <button onClick={() => setTranslateOn((v) => !v)}
+                      title="Show English translations of non-English visitor messages"
+                      className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors flex items-center gap-1.5 ${
+                        translateOn ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'
+                      }`}>
+                      🌐 Translate{translateOn ? ' on' : ''}
+                    </button>
+                    <span className="w-px h-5 bg-gray-800" />
                     <span className={`text-xs font-medium ${selectedSession.mode === 'bot' ? 'text-blue-400' : 'text-gray-600'}`}>Bot</span>
                     <button onClick={toggleMode} disabled={togglingMode}
                       className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${selectedSession.mode === 'human' ? 'bg-orange-500' : 'bg-blue-600'}`}>
@@ -1202,6 +1269,24 @@ export default function Dashboard() {
                               {msg.message}
                             </div>
                           )}
+                          {/* Language detection + translation (visitor text messages only) */}
+                          {isUser && !file && (() => {
+                            const a = msgAnalysis[msg.id]
+                            if (!a || a.isEnglish) return null
+                            return (
+                              <div className="mt-1 flex flex-col items-end gap-1 max-w-sm lg:max-w-md xl:max-w-lg">
+                                <span className="text-[10px] text-indigo-300/90 bg-indigo-500/10 border border-indigo-500/20 rounded-full px-2 py-0.5">
+                                  Detected: {a.langName}
+                                </span>
+                                {translateOn && (
+                                  <div className="px-3 py-2 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap bg-indigo-950/40 border border-indigo-500/20 text-indigo-50">
+                                    <span className="block text-[10px] uppercase tracking-wide text-indigo-400/70 mb-0.5">English</span>
+                                    {a.english}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </div>
                       </div>
                     )
@@ -1226,6 +1311,13 @@ export default function Dashboard() {
                   )}
                   {uploadError && (
                     <p className="text-[11px] text-red-400 mb-2">{uploadError}</p>
+                  )}
+                  {visitorLang && (
+                    <label className="flex items-center gap-1.5 mb-2 text-[11px] text-indigo-300 cursor-pointer select-none w-fit">
+                      <input type="checkbox" checked={translateOut} onChange={(e) => setTranslateOut(e.target.checked)}
+                        className="rounded accent-indigo-500 cursor-pointer" />
+                      🌐 Translate my reply to {visitorLang} before sending
+                    </label>
                   )}
                   <div className="flex gap-2">
                     <input ref={replyFileRef} type="file" className="hidden"

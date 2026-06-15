@@ -83,6 +83,81 @@ export async function generateReply(
   }
 }
 
+// ── Translation (agent dashboard) ───────────────────────────────────────────
+// All translation runs server-side through the already-integrated Groq LLM, so
+// no new API/key/cost is introduced. analyzeMessages does detection AND
+// translation-to-English in a single batched call; translateText handles the
+// reverse (English → the visitor's language) for outgoing replies.
+
+export interface MsgAnalysis {
+  langName: string   // English name of the detected language, e.g. "German"
+  isEnglish: boolean
+  english: string    // English translation (or the original if already English)
+}
+
+// Detect language + translate to English for a batch of messages in ONE call.
+// Returns one analysis per input, in order. On any failure it degrades to
+// "treat as English" so the UI simply shows the original with no indicator.
+export async function analyzeMessages(texts: string[]): Promise<MsgAnalysis[]> {
+  const fallback = (t: string): MsgAnalysis => ({ langName: '', isEnglish: true, english: t })
+  const clean = texts.map((t) => (t ?? '').slice(0, 800))
+  if (clean.length === 0) return []
+  try {
+    const numbered = clean.map((t, i) => `${i + 1}. ${t.replace(/\n/g, ' ')}`).join('\n')
+    const completion = await getGroq().chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: 'You are a precise language detection and translation engine. You reply with ONLY valid JSON — no markdown, no commentary.' },
+        {
+          role: 'user',
+          content: `For each numbered message, detect its language and translate it to English. Return ONLY a JSON array; item i corresponds to message i, with exactly these keys: {"lang":"<English name of the language, e.g. German>","isEnglish":<true if the message is English, else false>,"english":"<the English translation; if already English, repeat it unchanged>"}.\n\nMessages:\n${numbered}`,
+        },
+      ],
+      temperature: 0,
+      max_tokens: 2048,
+    })
+    const text = (completion.choices[0]?.message?.content ?? '').trim()
+    const match = text.match(/\[[\s\S]*\]/)
+    if (!match) throw new Error('No JSON array in response')
+    const parsed = JSON.parse(match[0]) as { lang?: string; isEnglish?: boolean; english?: string }[]
+    return clean.map((t, i) => {
+      const r = parsed[i]
+      if (!r) return fallback(t)
+      const isEnglish = r.isEnglish !== false && (!r.lang || /^english$/i.test(r.lang))
+      return {
+        langName: isEnglish ? '' : (r.lang || 'Unknown'),
+        isEnglish,
+        english: typeof r.english === 'string' && r.english.trim() ? r.english : t,
+      }
+    })
+  } catch (err) {
+    console.error('[Groq] analyzeMessages failed:', err instanceof Error ? err.message : err)
+    return clean.map(fallback)
+  }
+}
+
+// Translate English (an agent's reply) into the target language. Returns the
+// original text unchanged on failure so a reply is never lost.
+export async function translateText(text: string, targetLang: string): Promise<string> {
+  const input = (text ?? '').trim()
+  if (!input || !targetLang) return input
+  try {
+    const completion = await getGroq().chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: 'You are a professional translator. You output ONLY the translated text — no quotes, no notes, no explanations.' },
+        { role: 'user', content: `Translate the following message into ${targetLang}. Preserve tone and meaning. Output only the translation.\n\n${input}` },
+      ],
+      temperature: 0.2,
+      max_tokens: 1024,
+    })
+    return (completion.choices[0]?.message?.content ?? '').trim() || input
+  } catch (err) {
+    console.error('[Groq] translateText failed:', err instanceof Error ? err.message : err)
+    return input
+  }
+}
+
 export interface LeadFields {
   name: string | null
   email: string | null
