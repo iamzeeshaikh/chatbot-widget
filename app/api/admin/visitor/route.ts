@@ -2,9 +2,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteOfSession, canAccessSite } from '@/lib/auth'
 import { MODE_ROLE } from '@/lib/mode'
-import { unpackVisitor, CONTACT_ROLE, parseContact, EMPTY_CONTACT, VisitorContact } from '@/lib/visitor'
+import { unpackVisitor, CONTACT_ROLE, parseContact, EMPTY_CONTACT, VisitorContact, TAGS_ROLE, parseTags, normalizeTags } from '@/lib/visitor'
 
 export const dynamic = 'force-dynamic'
+
+// Resolve the site a session belongs to (from its chat logs, falling back to the
+// visitor row for sessions that pinged but never chatted). Returns null when it
+// can't be determined — callers treat that as forbidden.
+async function resolveSite(sessionId: string): Promise<string | null> {
+  const fromLogs = await siteOfSession(sessionId)
+  if (fromLogs) return fromLogs
+  const { data } = await supabase
+    .from('active_visitors').select('site_id').eq('session_id', sessionId).maybeSingle()
+  return data?.site_id ?? null
+}
 
 // Rich detail for the visitor behind one chat session: editable contact,
 // stats (visits / chats / time on site), page-visit path, and technical info.
@@ -38,10 +49,12 @@ export async function GET(req: NextRequest) {
   }
   const packed = unpackVisitor(v?.page_url ?? null)
 
-  // Latest contact control row wins (logs are ascending, so last one is newest).
+  // Latest contact + tags control rows win (logs are ascending → last is newest).
   let contact: VisitorContact = { ...EMPTY_CONTACT }
+  let tags: string[] = []
   for (const log of logs) {
     if (log.role === CONTACT_ROLE) contact = parseContact(log.message)
+    else if (log.role === TAGS_ROLE) tags = parseTags(log.message)
   }
 
   // Genuine chat messages from the visitor (excludes control rows + the
@@ -49,7 +62,7 @@ export async function GET(req: NextRequest) {
   const userMessages = logs.filter(
     (l) => l.role === 'user' && l.message !== '(session started)',
   )
-  const messageLogs = logs.filter((l) => l.role !== MODE_ROLE && l.role !== CONTACT_ROLE)
+  const messageLogs = logs.filter((l) => l.role !== MODE_ROLE && l.role !== CONTACT_ROLE && l.role !== TAGS_ROLE)
 
   // Time on site: first activity (visitor row creation or first log) → last seen.
   const times = [
@@ -72,6 +85,7 @@ export async function GET(req: NextRequest) {
       session_id: sessionId,
       site_id: siteId,
       contact,
+      tags,
       stats: {
         visits: packed.visits,
         chats: userMessages.length,
@@ -103,14 +117,7 @@ export async function PATCH(req: NextRequest) {
   const sessionId: string | undefined = body.sessionId
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
-  // Resolve the site from chat logs, falling back to the visitor row for sessions
-  // that have pinged but never chatted, then authorize against it.
-  let siteId = await siteOfSession(sessionId)
-  if (!siteId) {
-    const { data } = await supabase
-      .from('active_visitors').select('site_id').eq('session_id', sessionId).maybeSingle()
-    siteId = data?.site_id ?? null
-  }
+  const siteId = await resolveSite(sessionId)
   if (!siteId || !canAccessSite(member, siteId)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
@@ -131,4 +138,31 @@ export async function PATCH(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ ok: true, contact })
+}
+
+// Save the conversation's tags as a fresh control row (latest row wins). The
+// full tag set is sent each time, so add/remove are both just a new write.
+export async function POST(req: NextRequest) {
+  const member = await getMember(req)
+  if (!member) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  const body = await req.json().catch(() => ({}))
+  const sessionId: string | undefined = body.sessionId
+  if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
+
+  const siteId = await resolveSite(sessionId)
+  if (!siteId || !canAccessSite(member, siteId)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
+
+  const tags = normalizeTags(body.tags)
+  const { error } = await supabase.from('chat_logs').insert({
+    site_id: siteId,
+    session_id: sessionId,
+    role: TAGS_ROLE,
+    message: JSON.stringify(tags),
+  })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ ok: true, tags })
 }

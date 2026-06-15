@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
-import { CONTACT_ROLE } from '@/lib/visitor'
+import { CONTACT_ROLE, TAGS_ROLE, parseTags } from '@/lib/visitor'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,9 +32,14 @@ export async function GET(req: NextRequest) {
     mode: string
     lead: { name: string | null; email: string | null } | null
     site_name: string
+    tags: string[]
   }> = {}
 
+  // Latest tags per session (logs are ascending, so the last TAGS_ROLE wins).
+  const tagsBySession: Record<string, string[]> = {}
+
   for (const log of logs) {
+    if (log.role === TAGS_ROLE) { tagsBySession[log.session_id] = parseTags(log.message); continue }
     if (log.role === MODE_ROLE || log.role === CONTACT_ROLE) continue // control rows aren't messages
     if (!sessionMap[log.session_id]) {
       const site = sites.find((s) => s.site_id === log.site_id)
@@ -48,6 +53,7 @@ export async function GET(req: NextRequest) {
         mode: 'bot',
         lead: null,
         site_name: site?.name ?? log.site_id,
+        tags: [],
       }
     }
     if (log.role === 'user' && log.message !== '(session started)' && !sessionMap[log.session_id].preview) {
@@ -60,6 +66,10 @@ export async function GET(req: NextRequest) {
 
   for (const [sessionId, mode] of Object.entries(modes)) {
     if (sessionMap[sessionId]) sessionMap[sessionId].mode = mode
+  }
+
+  for (const [sessionId, tags] of Object.entries(tagsBySession)) {
+    if (sessionMap[sessionId]) sessionMap[sessionId].tags = tags
   }
 
   for (const l of leads) {

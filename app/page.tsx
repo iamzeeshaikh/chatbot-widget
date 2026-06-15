@@ -33,7 +33,7 @@ const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="htt
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null }
-interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null }
+interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[] }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
@@ -42,6 +42,7 @@ interface VisitorDetail {
   session_id: string
   site_id: string
   contact: VisitorContact
+  tags: string[]
   stats: { visits: number; chats: number; first_seen: string | null; last_seen: string | null }
   path: { url: string | null; title: string | null; at: string | null }[]
   technical: {
@@ -241,6 +242,7 @@ export default function Dashboard() {
   const lastMsgIdRef = useRef<string>('')
   const [filterSite, setFilterSite] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
+  const [filterTag, setFilterTag] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set())
@@ -258,6 +260,9 @@ export default function Dashboard() {
   const [contactForm, setContactForm] = useState<VisitorContact>({ name: '', email: '', phone: '', notes: '' })
   const [savingContact, setSavingContact] = useState(false)
   const [contactSaved, setContactSaved] = useState(false)
+  // Tags for the open conversation (locally editable; persisted on each change).
+  const [tags, setTags] = useState<string[]>([])
+  const [tagInput, setTagInput] = useState('')
   const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
   const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
   const prevVisitorIds = useRef<Set<string>>(new Set())
@@ -426,9 +431,9 @@ export default function Dashboard() {
       .then((r) => (r.ok ? r.json() : null)).catch(() => null)
     if (data?.detail) {
       setVisitorDetail(data.detail)
-      // Only (re)seed the editable form on the initial load so we never clobber
-      // what the agent is typing during a background refresh.
-      if (withSpinner) setContactForm(data.detail.contact)
+      // Only (re)seed the editable fields on the initial load so we never clobber
+      // what the agent is typing/editing during a background refresh.
+      if (withSpinner) { setContactForm(data.detail.contact); setTags(data.detail.tags ?? []) }
     }
     if (withSpinner) setDetailLoading(false)
   }, [])
@@ -436,6 +441,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!selectedSession) { setVisitorDetail(null); return }
     setContactSaved(false)
+    setTags(selectedSession.tags ?? []); setTagInput('')
     fetchVisitorDetail(selectedSession.session_id, true)
     const iv = setInterval(() => fetchVisitorDetail(selectedSession.session_id, false), 15000)
     return () => clearInterval(iv)
@@ -454,6 +460,31 @@ export default function Dashboard() {
       setVisitorDetail((d) => (d ? { ...d, contact: { ...contactForm } } : d))
       setTimeout(() => setContactSaved(false), 2500)
     }
+  }
+
+  // Persist the full tag set for the open conversation, and reflect it on the
+  // session in the list so the tag filter/chips stay in sync without a refetch.
+  async function persistTags(next: string[]) {
+    if (!selectedSession) return
+    setTags(next)
+    setVisitorDetail((d) => (d ? { ...d, tags: next } : d))
+    setSessions((prev) => prev.map((s) => s.session_id === selectedSession.session_id ? { ...s, tags: next } : s))
+    await fetch('/api/admin/visitor', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: selectedSession.session_id, tags: next }),
+    }).catch(() => {})
+  }
+
+  function addTag(raw: string) {
+    const tag = raw.replace(/\s+/g, ' ').trim().slice(0, 40)
+    if (!tag) return
+    if (tags.some((t) => t.toLowerCase() === tag.toLowerCase())) { setTagInput(''); return }
+    persistTags([...tags, tag])
+    setTagInput('')
+  }
+
+  function removeTag(tag: string) {
+    persistTags(tags.filter((t) => t !== tag))
   }
 
   async function sendReply() {
@@ -561,12 +592,24 @@ export default function Dashboard() {
   const sessionSites = Array.from(new Map(roleSessions.map(s => [s.site_id, s.site_name])).entries())
     .map(([id, name]) => ({ site_id: id, site_name: name }))
 
+  // All distinct tags in scope (workspace-isolated — roleSessions is already
+  // filtered to the member's sites), case-insensitively de-duped, for the filter.
+  const sessionTags = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const s of roleSessions) for (const t of s.tags ?? []) {
+      const key = t.toLowerCase()
+      if (!seen.has(key)) seen.set(key, t)
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b))
+  }, [roleSessions])
+
   const filteredSessions = roleSessions.filter(s => {
     if (filterSite && s.site_id !== filterSite) return false
     if (filterStatus === 'bot' && s.mode !== 'bot') return false
     if (filterStatus === 'human' && s.mode !== 'human') return false
     if (filterStatus === 'lead' && !s.lead) return false
     if (filterStatus === 'no-response' && s.last_role !== 'user') return false
+    if (filterTag && !(s.tags ?? []).some((t) => t.toLowerCase() === filterTag.toLowerCase())) return false
     if (searchQuery && !s.preview.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
   })
@@ -934,10 +977,16 @@ export default function Dashboard() {
               </div>
               <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search…"
                 className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500" />
-              {(filterSite || filterStatus !== 'all' || searchQuery) && (
+              {sessionTags.length > 0 && (
+                <select value={filterTag} onChange={e => setFilterTag(e.target.value)} className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
+                  <option value="">🏷 All Tags</option>
+                  {sessionTags.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
+              {(filterSite || filterStatus !== 'all' || filterTag || searchQuery) && (
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-gray-500">{filteredSessions.length} result{filteredSessions.length !== 1 ? 's' : ''}</span>
-                  <button onClick={() => { setFilterSite(''); setFilterStatus('all'); setSearchQuery('') }} className="text-[11px] text-blue-400 hover:text-blue-300">Clear</button>
+                  <button onClick={() => { setFilterSite(''); setFilterStatus('all'); setFilterTag(''); setSearchQuery('') }} className="text-[11px] text-blue-400 hover:text-blue-300">Clear</button>
                 </div>
               )}
             </div>
@@ -1002,6 +1051,13 @@ export default function Dashboard() {
                         <span className="text-[10px] text-gray-600">{s.message_count} msgs</span>
                         {s.lead && <span className="text-[10px] text-green-400 font-medium">● Lead</span>}
                       </div>
+                      {(s.tags ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(s.tags ?? []).map((t) => (
+                            <span key={t} className="text-[9px] px-1.5 py-px rounded-full bg-gray-700/70 border border-gray-600/50 text-gray-300 truncate max-w-[110px]">{t}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div className="absolute right-1.5 top-1/2 -translate-y-1/2" onClick={e => e.stopPropagation()}>
                       {isConfirming ? (
@@ -1161,6 +1217,40 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="p-4 space-y-5">
+
+                  {/* Tags */}
+                  <section>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Tags</h3>
+                    {tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {tags.map((t) => (
+                          <span key={t} className="group/tag inline-flex items-center gap-1 text-[11px] pl-2 pr-1 py-0.5 rounded-full text-white"
+                            style={{ backgroundColor: `${accentColor}cc` }}>
+                            {t}
+                            <button onClick={() => removeTag(t)} title="Remove tag"
+                              className="w-3.5 h-3.5 inline-flex items-center justify-center rounded-full hover:bg-black/30 text-white/80 hover:text-white leading-none">×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); addTag(tagInput) }
+                        else if (e.key === 'Backspace' && !tagInput && tags.length) removeTag(tags[tags.length - 1])
+                      }}
+                      placeholder="Add a tag, press Enter…"
+                      className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-gray-500" />
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {['hot lead', 'got email', 'follow up', 'spam'].filter((q) => !tags.some((t) => t.toLowerCase() === q)).map((q) => (
+                        <button key={q} onClick={() => addTag(q)}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-gray-800/60 border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors">
+                          + {q}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
 
                   {/* Contact (editable) */}
                   <section>

@@ -46,6 +46,43 @@ export function parseContact(message: string | null | undefined): VisitorContact
   }
 }
 
+// Conversation tags (e.g. "hot lead", "follow up") are persisted the same way
+// as mode/contact: a control row in chat_logs (role = TAGS_ROLE, message = a
+// JSON string array). The current tags are the most recent such row per session.
+// Filtered out of the message/conversation/analytics views like other controls.
+export const TAGS_ROLE = 'tags'
+
+// Normalise a tag: trimmed, collapsed whitespace, capped length.
+export function normalizeTag(raw: string): string {
+  return String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
+}
+
+// Clean + de-duplicate (case-insensitive) a list of tags, capped to a sane max.
+export function normalizeTags(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const t of list) {
+    const tag = normalizeTag(typeof t === 'string' ? t : '')
+    if (!tag) continue
+    const key = tag.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(tag)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
+export function parseTags(message: string | null | undefined): string[] {
+  if (!message) return []
+  try {
+    return normalizeTags(JSON.parse(message))
+  } catch {
+    return []
+  }
+}
+
 export interface PageVisit {
   u: string | null
   t: string | null
