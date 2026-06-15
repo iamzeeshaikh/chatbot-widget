@@ -576,6 +576,14 @@
     fetch(baseUrl + '/api/site-config?siteId=' + encodeURIComponent(siteId))
       .then(function (r) { return r.json(); })
       .then(function (data) {
+        // Geo-gate: on packaging sites the server flags visitors from blocked
+        // countries. When blocked, render nothing at all — no bubble, no popup,
+        // no ping. The check happens here, before any UI is built, so a blocked
+        // visitor never sees the widget flash. (Server defaults blocked=false on
+        // any geo uncertainty, so we only ever hide on a definite match.)
+        if (data && data.blocked) {
+          return;
+        }
         if (data && data.bot_name) {
           config = data;
         }

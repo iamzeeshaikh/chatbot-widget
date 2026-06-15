@@ -25,3 +25,19 @@ export const WORKSPACE_LABEL: Record<Workspace, string> = {
   sports: 'Sports',
   packaging: 'Packaging',
 }
+
+// ── Widget geo-blocking ──────────────────────────────────────────────────────
+// The chat widget is hidden from visitors in these South Asian countries, but
+// ONLY on packaging sites. Sports sites are never affected. Because the decision
+// runs through siteWorkspace(), any site added to PACKAGING_SITES is covered
+// automatically. Codes are ISO 3166-1 alpha-2 (uppercase).
+export const WIDGET_BLOCKED_COUNTRIES = new Set(['PK', 'IN', 'LK', 'BD', 'NP'])
+
+// Should the widget be hidden for a visitor from `countryCode` on `siteId`?
+// Only blocks packaging sites for blocked countries; unknown country ('') is
+// never blocked (default to showing — don't block on uncertainty).
+export function isWidgetBlocked(siteId: string, countryCode: string): boolean {
+  if (!countryCode) return false
+  if (siteWorkspace(siteId) !== 'packaging') return false
+  return WIDGET_BLOCKED_COUNTRIES.has(countryCode.toUpperCase())
+}

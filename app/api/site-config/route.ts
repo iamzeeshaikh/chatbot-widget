@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { siteWorkspace, isWidgetBlocked } from '@/lib/workspaces'
+import { clientIp, lookupCountry } from '@/lib/geo'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,5 +30,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Site not found' }, { status: 404, headers: corsHeaders })
   }
 
-  return NextResponse.json(data, { headers: corsHeaders })
+  // Geo-gate: hide the widget for blocked South Asian countries on packaging
+  // sites only. The lookup is skipped entirely for sports sites (no latency hit),
+  // and any geo failure leaves `blocked` false so we never block on uncertainty.
+  let blocked = false
+  if (siteWorkspace(siteId) === 'packaging') {
+    const { code } = await lookupCountry(clientIp(req.headers))
+    blocked = isWidgetBlocked(siteId, code)
+  }
+
+  return NextResponse.json({ ...data, blocked }, { headers: corsHeaders })
 }
