@@ -120,6 +120,18 @@
 #zee-chat-send { background: ' + primaryColor + '; border: none; border-radius: 10px; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: opacity 0.2s; }\
 #zee-chat-send:hover { opacity: 0.85; }\
 #zee-chat-send svg { width: 18px; height: 18px; fill: white; }\
+#zee-chat-attach { background: #f3f4f6; border: 1.5px solid #e5e7eb; border-radius: 10px; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s, border-color 0.2s; }\
+#zee-chat-attach:hover { background: #e5e7eb; }\
+#zee-chat-attach svg { width: 18px; height: 18px; fill: #6b7280; }\
+#zee-chat-attach.uploading { opacity: 0.6; pointer-events: none; }\
+.zee-msg-att { padding: 6px !important; }\
+.zee-att-img img { display: block; max-width: 200px; max-height: 200px; border-radius: 8px; cursor: pointer; }\
+.zee-att-file { display: flex; align-items: center; gap: 8px; text-decoration: none; color: inherit; max-width: 240px; }\
+.zee-att-icon { font-size: 22px; flex-shrink: 0; }\
+.zee-att-meta { display: flex; flex-direction: column; min-width: 0; }\
+.zee-att-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; }\
+.zee-att-size { font-size: 11px; opacity: 0.7; }\
+.zee-upload-err { align-self: center; font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 6px 10px; }\
 #zee-lead-form { padding: 14px 16px; background: #f0f9ff; border-top: 1px solid #bae6fd; flex-shrink: 0; }\
 #zee-lead-form p { font-size: 13px; color: #0369a1; font-weight: 500; margin-bottom: 10px; }\
 .zee-lead-input { width: 100%; border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; outline: none; transition: border-color 0.2s; }\
@@ -166,6 +178,8 @@
   <button id="zee-lead-submit">Submit & Continue Chat</button>\
 </div>\
 <div id="zee-chat-input-area">\
+  <input id="zee-chat-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,application/pdf" style="display:none" />\
+  <button id="zee-chat-attach" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 01-8 0V5a2.5 2.5 0 015 0v10.5a1 1 0 01-2 0V6H10v9.5a2.5 2.5 0 005 0V5a4 4 0 00-8 0v12.5a5.5 5.5 0 0011 0V6h-1.5z"/></svg></button>\
   <textarea id="zee-chat-input" placeholder="Type your message..." rows="1"></textarea>\
   <button id="zee-chat-send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>\
 </div>';
@@ -209,6 +223,14 @@
     });
 
     sendBtn.addEventListener('click', handleSend);
+
+    var attachBtn = document.getElementById('zee-chat-attach');
+    var fileInput = document.getElementById('zee-chat-file');
+    attachBtn.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () {
+      if (fileInput.files && fileInput.files[0]) handleFileUpload(fileInput.files[0]);
+      fileInput.value = ''; // allow re-selecting the same file
+    });
 
     document.getElementById('zee-lead-submit').addEventListener('click', handleLeadSubmit);
 
@@ -273,12 +295,52 @@
     return out.join('<br>').replace(/<br>(<ol)/g, '$1').replace(/(<\/ol>)<br>/g, '$1');
   }
 
+  // A file message stores a JSON marker {"__file":{url,name,mime,size}} as its
+  // text. Detect + parse it so we can render a thumbnail / download link instead
+  // of raw JSON. Mirrors lib/attachment.ts on the server.
+  function parseFileMessage(text) {
+    if (!text) return null;
+    var t = String(text).replace(/^\s+/, '');
+    if (t.charAt(0) !== '{' || t.indexOf('__file') === -1) return null;
+    try {
+      var o = JSON.parse(t);
+      if (o && o.__file && typeof o.__file.url === 'string') return o.__file;
+    } catch (e) {}
+    return null;
+  }
+
+  function formatBytes(n) {
+    if (!n || n < 1024) return (n || 0) + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(0) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+
+  function attachmentHtml(file) {
+    var url = escapeHtml(file.url);
+    var name = escapeHtml(file.name || 'file');
+    var isImage = (file.mime || '').indexOf('image/') === 0;
+    if (isImage) {
+      return '<a href="' + url + '" target="_blank" rel="noopener" class="zee-att-img">' +
+        '<img src="' + url + '" alt="' + name + '" /></a>';
+    }
+    return '<a href="' + url + '" target="_blank" rel="noopener" class="zee-att-file">' +
+      '<span class="zee-att-icon">📄</span>' +
+      '<span class="zee-att-meta"><span class="zee-att-name">' + name + '</span>' +
+      '<span class="zee-att-size">' + formatBytes(file.size) + '</span></span></a>';
+  }
+
   function appendMessage(role, text) {
     var el = document.getElementById('zee-chat-messages');
     if (!el) return;
     var div = document.createElement('div');
     div.className = 'zee-msg ' + role;
-    div.innerHTML = renderText(role, text);
+    var file = parseFileMessage(text);
+    if (file) {
+      div.className += ' zee-msg-att';
+      div.innerHTML = attachmentHtml(file);
+    } else {
+      div.innerHTML = renderText(role, text);
+    }
     el.appendChild(div);
     scrollToBottom();
   }
@@ -522,6 +584,61 @@
       hideTyping();
       appendMessage('bot', 'Oops! Something went wrong. Please try again.');
     }
+  }
+
+  // ─── File upload ────────────────────────────────────────────────────────────
+  var ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf'];
+  var MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+  function showUploadError(msg) {
+    var el = document.getElementById('zee-chat-messages');
+    if (!el) return;
+    var div = document.createElement('div');
+    div.className = 'zee-upload-err';
+    div.textContent = msg;
+    el.appendChild(div);
+    scrollToBottom();
+    setTimeout(function () { if (div.parentNode) div.parentNode.removeChild(div); }, 5000);
+  }
+
+  function handleFileUpload(file) {
+    if (!file) return;
+    if (ALLOWED_UPLOAD_TYPES.indexOf(file.type) === -1) {
+      showUploadError('That file type isn\'t supported. Please send an image (JPG, PNG, GIF, WEBP, SVG) or PDF.');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      showUploadError('That file is too large. Please keep it under 10MB.');
+      return;
+    }
+
+    var attachBtn = document.getElementById('zee-chat-attach');
+    if (attachBtn) attachBtn.classList.add('uploading');
+
+    var fd = new FormData();
+    fd.append('file', file);
+    fd.append('siteId', siteId);
+    fd.append('sessionId', sessionId);
+
+    fetch(baseUrl + '/api/upload', { method: 'POST', body: fd })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (attachBtn) attachBtn.classList.remove('uploading');
+        if (!res.ok || !res.data || !res.data.file) {
+          showUploadError((res.data && res.data.error) || 'Upload failed. Please try again.');
+          return;
+        }
+        // Show the visitor their own attachment, and keep it in the message
+        // history so the bot has context that a file was shared.
+        var fileMsg = JSON.stringify({ __file: res.data.file });
+        appendMessage('user', fileMsg);
+        messages.push({ role: 'user', content: '[Sent a file: ' + (res.data.file.name || 'attachment') + ']' });
+        maybeShowLeadForm();
+      })
+      .catch(function () {
+        if (attachBtn) attachBtn.classList.remove('uploading');
+        showUploadError('Upload failed. Please check your connection and try again.');
+      });
   }
 
   // ─── Lead ──────────────────────────────────────────────────────────────────

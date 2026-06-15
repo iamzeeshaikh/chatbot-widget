@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { parseAttachment, isImageMime } from '@/lib/attachment'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -232,6 +233,9 @@ export default function Dashboard() {
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
   const [togglingMode, setTogglingMode] = useState(false)
+  const replyFileRef = useRef<HTMLInputElement>(null)
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   // Scroll handling for the message panel. We track whether the agent is parked
   // at the bottom so polling refreshes never yank them away while they read
   // history. lastSessionRef / lastMsgIdRef let us tell "conversation opened" and
@@ -497,6 +501,27 @@ export default function Dashboard() {
     setReplyText('')
     await fetchMessages(selectedSession.session_id)
     setSending(false)
+  }
+
+  // Agent sends a file to the visitor. Uploads via the same endpoint as the
+  // widget (authenticated here), which saves it as an 'admin' message and flips
+  // the conversation to human mode — so we mirror that locally too.
+  async function uploadReplyFile(file: File) {
+    if (!selectedSession || uploadingFile) return
+    setUploadError('')
+    if (file.size > 10 * 1024 * 1024) { setUploadError('File too large (max 10MB)'); return }
+    setUploadingFile(true)
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('siteId', selectedSession.site_id)
+    fd.append('sessionId', selectedSession.session_id)
+    const res = await fetch('/api/upload', { method: 'POST', body: fd })
+      .then((r) => r.json().then((d) => ({ ok: r.ok, d }))).catch(() => ({ ok: false, d: null }))
+    setUploadingFile(false)
+    if (!res.ok) { setUploadError(res.d?.error || 'Upload failed'); return }
+    setSelectedSession((s) => s ? { ...s, mode: 'human' } : s)
+    setSessions((prev) => prev.map((s) => s.session_id === selectedSession.session_id ? { ...s, mode: 'human' } : s))
+    await fetchMessages(selectedSession.session_id)
   }
 
   async function openVisitorSession(visitor: Visitor) {
@@ -1130,6 +1155,7 @@ export default function Dashboard() {
                     const isAdmin = msg.role === 'admin'
                     const showDate = (msg as typeof msg & { showDate?: boolean; dateLabel?: string }).showDate
                     const dateLabel = (msg as typeof msg & { dateLabel?: string }).dateLabel
+                    const file = parseAttachment(msg.message)
                     return (
                       <div key={msg.id}>
                         {showDate && (
@@ -1145,15 +1171,37 @@ export default function Dashboard() {
                             {isUser && <span className="text-[11px] text-gray-600">Visitor</span>}
                             <span className="text-[10px] text-gray-700">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                           </div>
-                          <div className={`max-w-sm lg:max-w-md xl:max-w-lg px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm ${
-                            isUser
-                              ? 'bg-gray-700/80 text-gray-100 rounded-tr-sm border border-gray-600/30'
-                              : isAdmin
-                              ? 'bg-amber-900/40 text-amber-100 rounded-tl-sm border border-amber-700/30'
-                              : 'bg-slate-800/80 text-gray-100 rounded-tl-sm border border-slate-700/30'
-                          }`}>
-                            {msg.message}
-                          </div>
+                          {file ? (
+                            <div className={`max-w-sm lg:max-w-md xl:max-w-lg rounded-2xl overflow-hidden shadow-sm border ${
+                              isUser ? 'border-gray-600/30 rounded-tr-sm' : isAdmin ? 'border-amber-700/30 rounded-tl-sm' : 'border-slate-700/30 rounded-tl-sm'
+                            }`}>
+                              {isImageMime(file.mime) ? (
+                                <a href={file.url} target="_blank" rel="noopener noreferrer" title={file.name}>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={file.url} alt={file.name} className="block max-h-64 w-auto object-contain bg-gray-900" />
+                                </a>
+                              ) : (
+                                <a href={file.url} target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-2.5 px-4 py-3 bg-slate-800/80 hover:bg-slate-700/80 transition-colors">
+                                  <span className="text-2xl shrink-0">📄</span>
+                                  <span className="min-w-0">
+                                    <span className="block text-sm text-blue-300 underline truncate max-w-[200px]">{file.name}</span>
+                                    <span className="block text-[10px] text-gray-500">{file.size ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ` : ''}Download</span>
+                                  </span>
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <div className={`max-w-sm lg:max-w-md xl:max-w-lg px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm ${
+                              isUser
+                                ? 'bg-gray-700/80 text-gray-100 rounded-tr-sm border border-gray-600/30'
+                                : isAdmin
+                                ? 'bg-amber-900/40 text-amber-100 rounded-tl-sm border border-amber-700/30'
+                                : 'bg-slate-800/80 text-gray-100 rounded-tl-sm border border-slate-700/30'
+                            }`}>
+                              {msg.message}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )
@@ -1173,10 +1221,24 @@ export default function Dashboard() {
                 <div className="px-4 py-3 border-t border-gray-800/80 bg-gray-900/60 flex-shrink-0">
                   {selectedSession.mode === 'bot' && (
                     <p className="text-[11px] text-blue-400/70 mb-2 flex items-center gap-1.5">
-                      <span>🤖</span> Bot is active — toggle to Human to send replies
+                      <span>🤖</span> Bot is active — toggle to Human to reply, or send a file to take over
                     </p>
                   )}
+                  {uploadError && (
+                    <p className="text-[11px] text-red-400 mb-2">{uploadError}</p>
+                  )}
                   <div className="flex gap-2">
+                    <input ref={replyFileRef} type="file" className="hidden"
+                      accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,application/pdf"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadReplyFile(f); e.target.value = '' }} />
+                    <button
+                      onClick={() => replyFileRef.current?.click()}
+                      disabled={uploadingFile}
+                      title="Attach a file"
+                      className="px-3 py-2 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl text-sm hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-40 self-end"
+                    >
+                      {uploadingFile ? '…' : '📎'}
+                    </button>
                     <textarea
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
 import { CONTACT_ROLE, TAGS_ROLE, parseTags } from '@/lib/visitor'
+import { parseAttachment } from '@/lib/attachment'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,7 +58,8 @@ export async function GET(req: NextRequest) {
       }
     }
     if (log.role === 'user' && log.message !== '(session started)' && !sessionMap[log.session_id].preview) {
-      sessionMap[log.session_id].preview = log.message
+      const att = parseAttachment(log.message)
+      sessionMap[log.session_id].preview = att ? `📎 ${att.name}` : log.message
     }
     sessionMap[log.session_id].last_at = log.created_at
     sessionMap[log.session_id].last_role = log.role
