@@ -380,16 +380,74 @@ export default function Dashboard() {
   // for history.
   const lastUserMsgAt = useRef<Record<string, string>>({})
   const dashSoundReady = useRef(false)
-
-  // Loud, attention-grabbing two-tone chime for the agent. Tones are layered
-  // (sine + bright triangle an octave up) and driven hard through a soft
-  // limiter so it's clearly audible without harsh clipping.
-  const playDashSound = useCallback(() => {
+  // One shared AudioContext, created once and resumed on the agent's first
+  // interaction (browsers block audio until then). Reusing it — instead of
+  // creating a fresh, suspended context per alert — is what makes the chime
+  // actually fire on later polls.
+  const dashCtxRef = useRef<AudioContext | null>(null)
+  const getDashCtx = useCallback((): AudioContext | null => {
+    if (dashCtxRef.current) return dashCtxRef.current
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      if (!AudioCtx) return
-      const ctx = new AudioCtx()
-      if (ctx.state === 'suspended') ctx.resume()
+      if (!AudioCtx) return null
+      dashCtxRef.current = new AudioCtx()
+    } catch { return null }
+    return dashCtxRef.current
+  }, [])
+
+  // Sound on/off, persisted; default ON. Read lazily so SSR doesn't touch window.
+  const [soundOn, setSoundOn] = useState(true)
+  useEffect(() => {
+    try { if (localStorage.getItem('zee-dash-sound') === 'off') setSoundOn(false) } catch { /* ignore */ }
+  }, [])
+  const toggleSound = useCallback(() => {
+    setSoundOn((on) => {
+      const next = !on
+      try { localStorage.setItem('zee-dash-sound', next ? 'on' : 'off') } catch { /* ignore */ }
+      // On enable, resume the context (this click is a user gesture) and play a
+      // short confirmation chime so the agent hears it's working.
+      if (next) {
+        const ctx = getDashCtx()
+        if (ctx) {
+          if (ctx.state === 'suspended' && ctx.resume) ctx.resume()
+          try {
+            const t = ctx.currentTime
+            const osc = ctx.createOscillator(); const gain = ctx.createGain()
+            osc.connect(gain); gain.connect(ctx.destination)
+            osc.type = 'sine'; osc.frequency.value = 988
+            gain.gain.setValueAtTime(0, t)
+            gain.gain.linearRampToValueAtTime(0.5, t + 0.02)
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3)
+            osc.start(t); osc.stop(t + 0.32)
+          } catch { /* ignore */ }
+        }
+      }
+      return next
+    })
+  }, [getDashCtx])
+
+  // Resume the shared context on the agent's first interaction anywhere in the
+  // dashboard, so chimes work for the rest of the session.
+  useEffect(() => {
+    const unlock = () => {
+      const ctx = getDashCtx()
+      if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume()
+      ;['pointerdown', 'keydown', 'click'].forEach((ev) => window.removeEventListener(ev, unlock, true))
+    }
+    ;['pointerdown', 'keydown', 'click'].forEach((ev) => window.addEventListener(ev, unlock, true))
+    return () => { ['pointerdown', 'keydown', 'click'].forEach((ev) => window.removeEventListener(ev, unlock, true)) }
+  }, [getDashCtx])
+
+  // LOUD, piercing alert for the agent on a new visitor message. Three layered
+  // oscillators per note (sine + bright triangle + sharp sawtooth) at max gain,
+  // driven through a soft limiter so it cuts through a noisy room without harsh
+  // digital clipping. Reuses the shared, already-unlocked context.
+  const playDashSound = useCallback(() => {
+    if (!soundOn) return
+    const ctx = getDashCtx()
+    if (!ctx) return
+    try {
+      if (ctx.state === 'suspended' && ctx.resume) ctx.resume()
 
       const master = ctx.createGain()
       master.gain.value = 1.0
@@ -397,26 +455,25 @@ export default function Dashboard() {
       const curve = new Float32Array(1024)
       for (let c = 0; c < 1024; c++) {
         const x = (c / 1023) * 2 - 1
-        curve[c] = Math.tanh(x * 1.6)
+        curve[c] = Math.tanh(x * 1.8)
       }
       shaper.curve = curve
       master.connect(shaper); shaper.connect(ctx.destination)
 
-      ;[[784, 0], [1047, 0.13]].forEach(([freq, delay]) => {
+      ;[[784, 0], [1047, 0.13], [1319, 0.26]].forEach(([freq, delay]) => {
         const t = ctx.currentTime + delay
-        ;([['sine', freq, 1.0], ['triangle', freq * 2, 0.5]] as [OscillatorType, number, number][]).forEach(([type, f, peak]) => {
+        ;([['sine', freq, 1.0], ['triangle', freq * 2, 0.6], ['sawtooth', freq, 0.35]] as [OscillatorType, number, number][]).forEach(([type, f, peak]) => {
           const osc = ctx.createOscillator(); const gain = ctx.createGain()
           osc.connect(gain); gain.connect(master)
           osc.type = type; osc.frequency.value = f
           gain.gain.setValueAtTime(0, t)
-          gain.gain.linearRampToValueAtTime(peak, t + 0.015)
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55)
+          gain.gain.linearRampToValueAtTime(peak, t + 0.012)
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
           osc.start(t); osc.stop(t + 0.55)
         })
       })
-      setTimeout(() => ctx.close(), 1400)
     } catch { /* ignore */ }
-  }, [])
+  }, [soundOn, getDashCtx])
 
   useEffect(() => {
     Promise.all([
@@ -456,12 +513,14 @@ export default function Dashboard() {
     setSessionsLoaded(true)
   }, [playDashSound])
 
+  // Poll sessions whenever signed in (not only on the Conversations tab) so the
+  // new-visitor-message alert fires even while the agent is on Overview.
   useEffect(() => {
-    if (tab !== 'conversations') return
+    if (!authReady) return
     fetchSessions()
     const iv = setInterval(fetchSessions, 6000)
     return () => clearInterval(iv)
-  }, [tab, fetchSessions])
+  }, [authReady, fetchSessions])
 
   const fetchVisitors = useCallback(async () => {
     const data = await fetch('/api/visitor/active').then((r) => r.json()).catch(() => ({ visitors: [] }))
@@ -845,6 +904,10 @@ export default function Dashboard() {
               {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
             </button>
           </div>
+          <button onClick={toggleSound} title={soundOn ? 'Sound on — click to mute new-message alerts' : 'Sound off — click to unmute'}
+            className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-900 text-gray-200 border-gray-800 hover:bg-gray-800' : 'bg-gray-900 text-gray-500 border-gray-800 hover:text-gray-300'}`}>
+            {soundOn ? '🔔' : '🔕'}
+          </button>
           {userRole === 'admin' && (
             <a href="/members" className="px-3 py-1.5 text-xs text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg transition-colors flex items-center gap-1.5">
               👥 Members

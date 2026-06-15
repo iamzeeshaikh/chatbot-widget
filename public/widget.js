@@ -81,6 +81,14 @@
   var pollSince = new Date().toISOString();
   var pollTimer = null;
 
+  // ─── Audio state ────────────────────────────────────────────────────────────
+  // One shared AudioContext, reused for every sound and resumed on the visitor's
+  // first interaction (browsers block audio until then). landingSoundPlayed makes
+  // the "chat is available" ding fire at most once per page load.
+  var audioCtx = null;
+  var landingSoundPlayed = false;
+  var interactionUnlockBound = false;
+
   // ─── CSS ──────────────────────────────────────────────────────────────────
   function injectCSS(primaryColor) {
     var existing = document.getElementById('zee-chat-widget-css');
@@ -436,18 +444,27 @@
   }
 
   // ─── Notification sound ───────────────────────────────────────────────────
-  // Plays on EVERY incoming message (bot, human agent, or any message the
-  // visitor receives). It is never called for the visitor's own outgoing
-  // messages. Loud but pleasant rising two-tone chime.
-  function playNotificationSound() {
+  // One shared, long-lived AudioContext (never closed) so every sound reuses the
+  // same context the visitor unlocked on their first interaction.
+  function getAudioCtx() {
+    if (audioCtx) return audioCtx;
     try {
       var AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      var ctx = new AudioCtx();
+      if (!AudioCtx) return null;
+      audioCtx = new AudioCtx();
+    } catch (e) { return null; }
+    return audioCtx;
+  }
+
+  // Play a pleasant rising two-tone chime at the given volume (0..1). Each note
+  // layers a sine + a brighter triangle an octave up, driven through a soft
+  // limiter so it's clearly audible without harsh clipping.
+  function playChime(volume) {
+    var ctx = getAudioCtx();
+    if (!ctx) return;
+    try {
       if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
 
-      // A master gain feeds a soft limiter (WaveShaper) so we can drive the
-      // tones hard and loud without harsh digital clipping.
       var master = ctx.createGain();
       master.gain.value = 1.0;
       var shaper = ctx.createWaveShaper();
@@ -460,9 +477,7 @@
       master.connect(shaper);
       shaper.connect(ctx.destination);
 
-      // Rising two-note chime: G5 (784Hz) then C6 (1047Hz), 130ms apart. Each
-      // note layers a sine + a triangle an octave up for a brighter, sharper,
-      // far more attention-grabbing tone.
+      // Rising two-note chime: G5 (784Hz) then C6 (1047Hz), 130ms apart.
       [[784, 0], [1047, 0.13]].forEach(function (pair) {
         var freq = pair[0], delay = pair[1];
         var t = ctx.currentTime + delay;
@@ -473,16 +488,55 @@
           gain.connect(master);
           osc.type = layer[0];
           osc.frequency.value = layer[1];
-          var peak = layer[2];
+          var peak = layer[2] * volume;
           gain.gain.setValueAtTime(0, t);
-          gain.gain.linearRampToValueAtTime(peak, t + 0.015); // loud, fast attack
+          gain.gain.linearRampToValueAtTime(peak, t + 0.015); // fast attack
           gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
           osc.start(t);
-          osc.stop(t + 0.55);
+          osc.stop(t + 0.6);
         });
       });
-      setTimeout(function () { ctx.close(); }, 1400);
     } catch (e) {}
+  }
+
+  // Incoming-message sound: full volume. Plays on EVERY incoming message (bot or
+  // human agent), never on the visitor's own outgoing messages.
+  function playNotificationSound() {
+    playChime(1.0);
+  }
+
+  // "Chat is available" ding on landing — softer/pleasant, and only once. If
+  // audio is still blocked (no interaction yet) it does nothing; the interaction
+  // unlock below will fire it on the visitor's first click/scroll/move instead.
+  function playLandingSound() {
+    if (landingSoundPlayed) return;
+    var ctx = getAudioCtx();
+    if (!ctx) { landingSoundPlayed = true; return; }
+    var resume = (ctx.state === 'suspended' && ctx.resume) ? ctx.resume() : null;
+    var go = function () {
+      if (landingSoundPlayed) return;
+      if (ctx.state !== 'running') return; // still blocked — wait for interaction
+      landingSoundPlayed = true;
+      playChime(0.55);
+    };
+    if (resume && typeof resume.then === 'function') { resume.then(go).catch(function () {}); }
+    else { go(); }
+  }
+
+  // Resume audio on the visitor's first interaction (required by autoplay
+  // policies) and, if the landing ding hasn't sounded yet, play it then. Bound
+  // once; the listeners remove themselves after the first gesture.
+  function bindInteractionUnlock() {
+    if (interactionUnlockBound) return;
+    interactionUnlockBound = true;
+    var events = ['pointerdown', 'click', 'keydown', 'scroll', 'mousemove', 'touchstart'];
+    function onFirst() {
+      var ctx = getAudioCtx();
+      if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume();
+      playLandingSound();
+      events.forEach(function (ev) { window.removeEventListener(ev, onFirst, true); });
+    }
+    events.forEach(function (ev) { window.addEventListener(ev, onFirst, true); });
   }
 
   // ─── Greeting ─────────────────────────────────────────────────────────────
@@ -499,6 +553,9 @@
     botMessageCount++;
     greetingSent = true;
     console.log('greeting sent');
+    // The greeting chime doubles as the "chat is available" cue, so don't also
+    // fire the separate landing ding afterward.
+    landingSoundPlayed = true;
     playNotificationSound();
   }
 
@@ -706,6 +763,7 @@
         }
         injectCSS(config.primary_color);
         buildWidget();
+        startSounds();
         sendPing('active');
         setInterval(function () { sendPing('active'); }, 30000);
         window.addEventListener('beforeunload', function () { sendPing('left'); });
@@ -713,10 +771,19 @@
       .catch(function () {
         injectCSS(config.primary_color);
         buildWidget();
+        startSounds();
         sendPing('active');
         setInterval(function () { sendPing('active'); }, 30000);
         window.addEventListener('beforeunload', function () { sendPing('left'); });
       });
+  }
+
+  // Announce the chat shortly after it loads: arm the first-interaction unlock,
+  // then attempt the landing ding (plays now if audio is already allowed, else
+  // on the visitor's first interaction — exactly once per page load).
+  function startSounds() {
+    bindInteractionUnlock();
+    setTimeout(function () { playLandingSound(); }, 900);
   }
 
   if (document.readyState === 'loading') {
