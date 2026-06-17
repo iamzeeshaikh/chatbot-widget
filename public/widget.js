@@ -609,6 +609,13 @@
       })
         .then(function (r) {
           console.log('Chat API response status:', r.status, 'ok:', r.ok);
+          // Scheduled bot-off / human takeover: the server stays silent and sets
+          // this header. Render NOTHING — no bubble, no ack, no sound. The visitor
+          // just sees their own message; a human agent will reply from the dashboard.
+          if (r.headers.get('X-Bot-Silent') === '1') {
+            hideTyping();
+            return;
+          }
           if (!r.ok || !r.body) {
             hideTyping();
             appendMessage('bot', 'Sorry, I couldn\'t get a response. Please try again.');

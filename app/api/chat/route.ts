@@ -64,17 +64,18 @@ export async function POST(req: NextRequest) {
     // human always wins; a schedule-off window never persists the mode, so the
     // bot resumes automatically once the window reopens (unless an agent took
     // over manually). Sports sites are never affected by the schedule.
+    //
+    // In both cases the bot stays COMPLETELY silent: the visitor's message is
+    // already saved above, and we send NO automatic reply or ack of any kind —
+    // a human agent initiates from the dashboard. The X-Bot-Silent header tells
+    // the widget to render nothing (no bubble, no sound). To the visitor it just
+    // looks like a normal live chat where they're waiting.
     const scheduleOff = isBotOffBySchedule(siteId)
     if (mode === 'human' || scheduleOff) {
-      const ack = mode === 'human'
-        ? '⏳ Our agent has received your message and will reply shortly...'
-        : '⏳ Thanks for your message! Our team is offline right now — a human will get back to you shortly.'
-      after(async () => {
-        await supabase.from('chat_logs').insert({
-          site_id: siteId, session_id: sessionId, role: 'assistant', message: ack,
-        })
+      return new Response(null, {
+        status: 200,
+        headers: { ...corsHeaders, 'X-Bot-Silent': '1', 'Access-Control-Expose-Headers': 'X-Bot-Silent' },
       })
-      return new Response(ack, { headers: responseHeaders })
     }
 
     // Bot mode: Groq response
