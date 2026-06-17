@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { generateReply, extractLeadFields } from '@/lib/gemini'
 import { getMode } from '@/lib/mode'
 import { maybeCaptureLead } from '@/lib/leadtracking'
+import { isBotOffBySchedule } from '@/lib/botschedule'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -58,15 +59,22 @@ export async function POST(req: NextRequest) {
       'Cache-Control': 'no-cache',
     }
 
-    // Human mode: no Gemini call
-    if (mode === 'human') {
-      const humanReply = '⏳ Our agent has received your message and will reply shortly...'
+    // The bot is suppressed when the conversation is in manual human takeover OR
+    // when the packaging schedule says bot-off (see lib/botschedule.ts). Manual
+    // human always wins; a schedule-off window never persists the mode, so the
+    // bot resumes automatically once the window reopens (unless an agent took
+    // over manually). Sports sites are never affected by the schedule.
+    const scheduleOff = isBotOffBySchedule(siteId)
+    if (mode === 'human' || scheduleOff) {
+      const ack = mode === 'human'
+        ? '⏳ Our agent has received your message and will reply shortly...'
+        : '⏳ Thanks for your message! Our team is offline right now — a human will get back to you shortly.'
       after(async () => {
         await supabase.from('chat_logs').insert({
-          site_id: siteId, session_id: sessionId, role: 'assistant', message: humanReply,
+          site_id: siteId, session_id: sessionId, role: 'assistant', message: ack,
         })
       })
-      return new Response(humanReply, { headers: responseHeaders })
+      return new Response(ack, { headers: responseHeaders })
     }
 
     // Bot mode: Groq response
