@@ -36,20 +36,43 @@
     });
   }
 
-  // ONE persistent sessionId per browser, generated once and reused. Uses
-  // localStorage so it survives reloads, new tabs and multi-page navigation —
-  // this is what stops the same visitor being counted multiple times.
-  var SESSION_KEY = 'zee-session-' + siteId;
-  var sessionId;
+  // ─── Session lifecycle ──────────────────────────────────────────────────────
+  // A "session" is ONE continuous visit. The sessionId is reused only while the
+  // visitor stays active; after ~30 minutes of inactivity (e.g. returning the
+  // next day) we mint a FRESH sessionId. This is critical: the live-visitor view,
+  // the "on site" timer and the linked conversation are all keyed by sessionId,
+  // so reusing an old id across days made a returning visitor merge into a stale
+  // row/conversation (wrong "on site" of 1000+ min, clicking opened yesterday's
+  // chat). A separate visitorId persists across sessions for repeat-visit counting.
+  var SESSION_GAP_MS = 30 * 60 * 1000; // 30 min inactivity ends a session
+  var SESSION_ID_KEY = 'zee-session-' + siteId;
+  var SESSION_TS_KEY = 'zee-session-last-' + siteId;
+  var VISITOR_ID_KEY = 'zee-visitor-' + siteId;
+  var sessionId, visitorId;
+
+  function touchSession() {
+    // Mark the current session as active "now" so it doesn't expire while the
+    // visitor is present (called on load and on every ping/interaction).
+    try { localStorage.setItem(SESSION_TS_KEY, String(Date.now())); } catch (e) {}
+  }
+
   try {
-    sessionId = localStorage.getItem(SESSION_KEY);
-    if (!sessionId) {
-      sessionId = genUUID();
-      localStorage.setItem(SESSION_KEY, sessionId);
+    visitorId = localStorage.getItem(VISITOR_ID_KEY);
+    if (!visitorId) { visitorId = genUUID(); localStorage.setItem(VISITOR_ID_KEY, visitorId); }
+
+    var savedId = localStorage.getItem(SESSION_ID_KEY);
+    var savedTs = parseInt(localStorage.getItem(SESSION_TS_KEY), 10) || 0;
+    if (savedId && savedTs && (Date.now() - savedTs) < SESSION_GAP_MS) {
+      sessionId = savedId; // still within the active window — same session
+    } else {
+      sessionId = genUUID(); // first visit, or returning after a gap — fresh session
+      localStorage.setItem(SESSION_ID_KEY, sessionId);
     }
+    touchSession();
   } catch (e) {
     // Storage blocked (e.g. private mode) — fall back to a single per-load id.
     sessionId = genUUID();
+    visitorId = sessionId;
   }
 
   var messages = [];
@@ -565,6 +588,7 @@
     var text = input.value.trim();
     if (!text) return;
 
+    touchSession(); // user activity keeps the session alive
     input.value = '';
     input.style.height = 'auto';
     appendMessage('user', text);
@@ -728,6 +752,9 @@
 
   // ─── Visitor ping ─────────────────────────────────────────────────────────
   function sendPing(status) {
+    // An active ping means the visitor is still present — keep the session fresh
+    // so it doesn't expire mid-visit (only a real >30min gap mints a new one).
+    if (!status || status === 'active') touchSession();
     var body = { sessionId: sessionId, siteId: siteId, status: status || 'active' };
     if (!status || status === 'active') {
       body.pageUrl = window.location.href;

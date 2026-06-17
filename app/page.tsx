@@ -1245,7 +1245,11 @@ export default function Dashboard() {
                             {v.visits > 1 && (
                               <span className="text-[9px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
                             )}
-                            <span className="text-[10px] text-gray-500">{timeAgo(v.last_seen)}</span>
+                            {/* The live list only ever contains visitors active within the
+                                last 60s (server-filtered), so these are genuinely live. */}
+                            <span className="text-[10px] text-green-400 font-medium flex items-center gap-1 shrink-0" title={`Last activity ${timeAgo(v.last_seen)}`}>
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />active now
+                            </span>
                           </div>
                         </div>
                         {/* Currently viewing */}
