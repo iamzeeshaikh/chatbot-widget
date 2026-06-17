@@ -89,6 +89,21 @@ function timeOnSite(created_at: string) {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+// ── Month helpers ("YYYY-MM") ────────────────────────────────────────────────
+// Do month math on integers (not Date→toISOString, which mixes local and UTC and
+// breaks month navigation in any timezone ahead of UTC). Year rollover is handled
+// by Date normalising an out-of-range month index, read back with LOCAL getters
+// so construction and read stay in the same timezone.
+function shiftMonth(ym: string, delta: number): string {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, (m - 1) + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+function currentMonth(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 // Device type → icon.
 function deviceIcon(d: string | null): string {
   return d === 'Mobile' ? '📱' : d === 'Tablet' ? '📟' : '💻'
@@ -1748,12 +1763,13 @@ export default function Dashboard() {
               <p className="text-gray-500 text-xs mt-0.5">Auto-captured leads (email provided) for tracked sites — for monthly client billing.</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => { const [y, m] = billingMonth.split('-').map(Number); const d = new Date(y, m - 2, 1); setBillingMonth(d.toISOString().slice(0, 7)) }}
+              <button onClick={() => setBillingMonth(shiftMonth(billingMonth, -1))}
                 className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors" title="Previous month">◀</button>
-              <input type="month" value={billingMonth} max={new Date().toISOString().slice(0, 7)} onChange={(e) => e.target.value && setBillingMonth(e.target.value)}
+              <input type="month" value={billingMonth} max={currentMonth()} onChange={(e) => e.target.value && setBillingMonth(e.target.value)}
                 className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-600 [color-scheme:dark]" />
-              <button onClick={() => { const [y, m] = billingMonth.split('-').map(Number); const d = new Date(y, m, 1); const next = d.toISOString().slice(0, 7); if (next <= new Date().toISOString().slice(0, 7)) setBillingMonth(next) }}
-                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors" title="Next month">▶</button>
+              <button onClick={() => { const next = shiftMonth(billingMonth, 1); if (next <= currentMonth()) setBillingMonth(next) }}
+                disabled={billingMonth >= currentMonth()}
+                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
               <button onClick={downloadBillingCsv} disabled={!billing || billing.leads.length === 0}
                 className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-40" style={{ backgroundColor: accentColor }}>
                 ⬇ Download CSV
