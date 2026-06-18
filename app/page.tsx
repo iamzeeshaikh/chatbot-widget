@@ -34,7 +34,7 @@ const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="
 const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#16a34a"/><path d="M35 22 Q31 50 38 62 Q44 72 50 74 Q56 72 62 62 Q69 50 65 22Z" fill="white"/><path d="M35 30 Q20 30 20 44 Q20 56 35 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M65 30 Q80 30 80 44 Q80 56 65 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><rect x="44" y="74" width="12" height="10" rx="2" fill="white"/><rect x="32" y="84" width="36" height="8" rx="3" fill="white"/></svg>')}`
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[] }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -787,17 +787,35 @@ export default function Dashboard() {
     setSessions((prev) => prev.some((s) => s.session_id === visitor.session_id) ? prev : [session, ...prev])
   }
 
-  // Open a conversation from the billing table: prefer the already-loaded
-  // session, otherwise synthesise a minimal one, then switch to the chat view.
-  function openConversation(lead: BillingLead) {
-    const existing = sessions.find((s) => s.session_id === lead.session_id)
+  // Open a specific conversation by sessionId: prefer the already-loaded session
+  // (full data), otherwise synthesise a minimal one so the chat + visitor-detail
+  // panel can load, then switch to the Conversations tab.
+  function openConversationBySession(opts: { sessionId: string; siteId: string; siteName?: string; preview?: string; lastAt?: string }) {
+    const existing = sessions.find((s) => s.session_id === opts.sessionId)
     const session: Session = existing ?? {
-      session_id: lead.session_id, site_id: lead.site_id, site_name: lead.site_name,
-      preview: lead.email, last_at: lead.captured_at, message_count: 0, mode: 'bot', lead: null,
+      session_id: opts.sessionId, site_id: opts.siteId,
+      site_name: opts.siteName ?? sites.find((s) => s.site_id === opts.siteId)?.name ?? opts.siteId,
+      preview: opts.preview ?? '', last_at: opts.lastAt ?? new Date().toISOString(),
+      message_count: 0, mode: 'bot', lead: null,
     }
     if (!existing) setSessions((prev) => [session, ...prev])
     setSelectedSession(session)
     setTab('conversations')
+  }
+
+  function openConversation(lead: BillingLead) {
+    openConversationBySession({ sessionId: lead.session_id, siteId: lead.site_id, siteName: lead.site_name, preview: lead.email, lastAt: lead.captured_at })
+  }
+
+  // Recent-Leads row → open the matched conversation (server resolves session_id
+  // by email). If no conversation could be matched, just go to the Conversations
+  // tab so the agent can find it manually.
+  function openLeadConversation(lead: Lead) {
+    if (lead.session_id) {
+      openConversationBySession({ sessionId: lead.session_id, siteId: lead.site_id, preview: lead.email ?? '', lastAt: lead.created_at })
+    } else {
+      setTab('conversations')
+    }
   }
 
   // Export the current billing list as CSV for the client invoice.
@@ -1189,7 +1207,8 @@ export default function Dashboard() {
                           )
 
                           return (
-                            <tr key={lead.id} className="group border-b border-gray-800/40 hover:bg-gray-800/25 transition-colors">
+                            <tr key={lead.id} onClick={() => openLeadConversation(lead)} title="Open this lead's conversation"
+                              className="group border-b border-gray-800/40 hover:bg-gray-800/40 transition-colors cursor-pointer">
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : score >= 4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-gray-700 text-gray-400'}`}>{score}/7</span> : <span className="text-gray-600 text-xs">-</span>}</td>
                               <td className="px-3 py-3 text-white font-medium whitespace-nowrap">{lead.name || '-'}</td>
                               <td className="px-3 py-3 text-blue-400 whitespace-nowrap">{lead.email || '-'}</td>
@@ -1203,7 +1222,7 @@ export default function Dashboard() {
                                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${accent}20`, color: accent }}>{siteName}</span>
                               </td>
                               <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? new Date(lead.created_at).toLocaleString() : '-'}</td>
-                              <td className="px-3 py-3">
+                              <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                                 {isConfirmingDelete ? (
                                   <div className="flex items-center gap-1">
                                     <span className="text-xs text-gray-300">Delete?</span>
@@ -1830,13 +1849,14 @@ export default function Dashboard() {
                           </td>
                         </tr>
                       ) : billing!.leads.map((l) => (
-                        <tr key={l.session_id} className="border-b border-gray-800/40 hover:bg-gray-800/25 transition-colors">
+                        <tr key={l.session_id} onClick={() => openConversation(l)} title="Open this lead's conversation"
+                          className="border-b border-gray-800/40 hover:bg-gray-800/40 transition-colors cursor-pointer">
                           <td className="px-4 py-3 text-blue-300 whitespace-nowrap">{l.email}</td>
                           <td className="px-4 py-3 text-gray-200 whitespace-nowrap">{l.name || <span className="text-gray-600">—</span>}</td>
                           <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{l.phone || <span className="text-gray-600">—</span>}</td>
                           <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 border border-gray-700 text-gray-300">{l.site_name}</span></td>
                           <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{new Date(l.captured_at).toLocaleString()}</td>
-                          <td className="px-4 py-3 whitespace-nowrap">
+                          <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => openConversation(l)} className="text-xs text-indigo-300 hover:text-indigo-200 hover:underline">View chat →</button>
                           </td>
                         </tr>
