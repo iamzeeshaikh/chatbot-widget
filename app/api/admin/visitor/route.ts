@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteOfSession, canAccessSite } from '@/lib/auth'
 import { MODE_ROLE } from '@/lib/mode'
-import { unpackVisitor, CONTACT_ROLE, parseContact, EMPTY_CONTACT, VisitorContact, TAGS_ROLE, parseTags, normalizeTags } from '@/lib/visitor'
+import { unpackVisitor, CONTACT_ROLE, parseContact, EMPTY_CONTACT, VisitorContact, TAGS_ROLE, parseTags, normalizeTags, asUtcIso } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
 
 export const dynamic = 'force-dynamic'
@@ -90,10 +90,10 @@ export async function GET(req: NextRequest) {
       stats: {
         visits: packed.visits,
         chats: userMessages.length,
-        first_seen: firstSeen,
-        last_seen: lastSeen,
+        first_seen: asUtcIso(firstSeen),
+        last_seen: asUtcIso(lastSeen),
       },
-      path,
+      path: path.map((p) => ({ ...p, at: asUtcIso(p.at) })),
       technical: {
         country: v?.country ?? null,
         city: v?.city ?? null,
