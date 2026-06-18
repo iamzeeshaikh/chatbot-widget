@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { unpackVisitor, packVisitor, appendHistory } from '@/lib/visitor'
+import { unpackVisitor, packVisitor, appendHistory, LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -96,10 +96,23 @@ export async function POST(req: NextRequest) {
     // row first so we can extend the page-history trail instead of overwriting it.
     const { data: existing } = await supabase
       .from('active_visitors')
-      .select('page_url')
+      .select('page_url, created_at')
       .eq('session_id', sessionId)
       .maybeSingle()
     const prev = unpackVisitor(existing?.page_url ?? null)
+
+    // Stop a passive heartbeat from keeping an ancient session "live": if this
+    // session started longer ago than the live cap, it's stale (e.g. a tab left
+    // open since yesterday still pinging the old sessionId). Mark it ended and
+    // don't refresh last_seen, so it can never resurface as "active now". A fresh
+    // sessionId (the widget rotates after inactivity) gets a clean new row.
+    if (existing?.created_at) {
+      const startedMs = new Date(asUtcIso(existing.created_at)!).getTime()
+      if (Date.now() - startedMs > LIVE_MAX_ON_SITE_MS) {
+        await supabase.from('active_visitors').update({ status: 'left' }).eq('session_id', sessionId)
+        return NextResponse.json({ ok: true, expired: true }, { headers: corsHeaders })
+      }
+    }
 
     const packedUrl = packVisitor({
       page_url: pageUrl ?? null,

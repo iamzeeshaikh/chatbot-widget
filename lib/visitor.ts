@@ -1,5 +1,19 @@
 // Visitor detail storage helpers.
 //
+// A genuinely "live" visitor session is recent. Sessions whose start (created_at)
+// is older than this are treated as stale and never shown as live — regardless of
+// last_seen — which caps "on site" time and prevents an "active now" row from
+// linking to an old conversation. Used by both the API and the dashboard.
+export const LIVE_MAX_ON_SITE_MS = 3 * 60 * 60 * 1000 // 3 hours
+
+// active_visitors timestamps are stored without a timezone (naive UTC). Append a
+// 'Z' so `new Date(...)` parses them as UTC in any browser timezone, instead of
+// misreading them as local time (which skewed "on site" / "active now" by hours).
+export function asUtcIso(ts: string | null | undefined): string | null {
+  if (!ts) return ts ?? null
+  return /[Z]|[+-]\d\d:?\d\d$/.test(ts) ? ts : ts + 'Z'
+}
+//
 // We have no DDL access, so the active_visitors row packs everything we can't
 // give a dedicated column into the single `page_url` text field as a small JSON
 // blob. This module is the one place that knows that shape so the ping writer

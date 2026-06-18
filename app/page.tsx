@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
+import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -895,7 +896,15 @@ export default function Dashboard() {
   const roleSites = sites.filter((s) => inScope(s.site_id))
   const roleLeads = leads.filter((l) => inScope(l.site_id))
   const roleSessions = sessions.filter((s) => inScope(s.site_id))
-  const roleVisitors = visitors.filter((v) => inScope(v.site_id))
+  // Only count a visitor as "live" if their session is recent. A multi-hour
+  // on-site time means a stale/carried-over session (e.g. an old open tab still
+  // pinging) — never show those as live, mirroring the server cap.
+  const roleVisitors = visitors.filter((v) => {
+    if (!inScope(v.site_id)) return false
+    const created = asUtcIso(v.created_at)
+    if (created && Date.now() - new Date(created).getTime() > LIVE_MAX_ON_SITE_MS) return false
+    return true
+  })
   // Show the Billing tab only when the member can access a lead-tracked site.
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
   const dashTitle = brand === 'sports' ? '🏆 Sports Dashboard' : '📦 Packaging Dashboard'
