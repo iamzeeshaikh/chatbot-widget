@@ -23,6 +23,11 @@ export async function GET(req: NextRequest) {
   // "Live" = active within the last 60s. The widget pings every 30s, so 60s
   // tolerates one missed ping without flicker.
   const cutoff = new Date(Date.now() - 60 * 1000).toISOString()
+  // Safeguard: a genuine session never lives longer than the widget's max age
+  // (12h), so a row whose created_at is older than this is a stale/carried-over
+  // session — never show it as "live" even if something is still pinging it.
+  // This is what stops an "active now" row from opening a days-old conversation.
+  const maxAgeStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
   const [visitorsRes, sitesRes] = await Promise.all([
     supabase
@@ -30,6 +35,7 @@ export async function GET(req: NextRequest) {
       .select('*')
       .eq('status', 'active')
       .gt('last_seen', cutoff)
+      .gt('created_at', maxAgeStart)
       .order('last_seen', { ascending: false }),
     supabase.from('sites').select('site_id, name, primary_color'),
   ])

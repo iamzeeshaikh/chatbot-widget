@@ -37,38 +37,86 @@
   }
 
   // ─── Session lifecycle ──────────────────────────────────────────────────────
-  // A "session" is ONE continuous visit. The sessionId is reused only while the
-  // visitor stays active; after ~30 minutes of inactivity (e.g. returning the
-  // next day) we mint a FRESH sessionId. This is critical: the live-visitor view,
-  // the "on site" timer and the linked conversation are all keyed by sessionId,
-  // so reusing an old id across days made a returning visitor merge into a stale
-  // row/conversation (wrong "on site" of 1000+ min, clicking opened yesterday's
-  // chat). A separate visitorId persists across sessions for repeat-visit counting.
-  var SESSION_GAP_MS = 30 * 60 * 1000; // 30 min inactivity ends a session
+  // A "session" is ONE continuous visit. It rotates to a FRESH sessionId when the
+  // visitor has been inactive past the gap (e.g. returning later/next day) or when
+  // it exceeds a hard max age. Crucially, ONLY genuine activity (page load + real
+  // interactions) extends a session — background pings do NOT. This is what stops
+  // a forgotten open tab from keeping a days-old session (and its old conversation)
+  // alive: such a tab stops pinging once idle, drops off "live", and the next real
+  // interaction starts a fresh session. The live-visitor row and the conversation
+  // it opens therefore always share the SAME current sessionId, with today's data.
+  // A separate visitorId persists across sessions for repeat-visit counting.
+  var SESSION_GAP_MS = 30 * 60 * 1000;        // 30 min of inactivity ends a session
+  var SESSION_MAX_MS = 12 * 60 * 60 * 1000;   // hard cap so created_at never gets stale
   var SESSION_ID_KEY = 'zee-session-' + siteId;
-  var SESSION_TS_KEY = 'zee-session-last-' + siteId;
+  var SESSION_ACT_KEY = 'zee-session-act-' + siteId;     // last GENUINE activity (not pings)
+  var SESSION_START_KEY = 'zee-session-start-' + siteId; // session creation time
   var VISITOR_ID_KEY = 'zee-visitor-' + siteId;
   var sessionId, visitorId;
+  var lastActWriteMs = 0; // throttle for high-frequency activity events
 
-  function touchSession() {
-    // Mark the current session as active "now" so it doesn't expire while the
-    // visitor is present (called on load and on every ping/interaction).
-    try { localStorage.setItem(SESSION_TS_KEY, String(Date.now())); } catch (e) {}
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  function startNewSession(now) {
+    sessionId = genUUID();
+    lsSet(SESSION_ID_KEY, sessionId);
+    lsSet(SESSION_START_KEY, String(now));
+  }
+
+  // Rotate to a fresh session if the visitor has been idle past the gap or the
+  // session has outlived the max age. Never extends activity by itself.
+  function ensureFreshSession() {
+    var now = Date.now();
+    if (!sessionId) sessionId = lsGet(SESSION_ID_KEY) || null;
+    var last = parseInt(lsGet(SESSION_ACT_KEY), 10) || 0;
+    var start = parseInt(lsGet(SESSION_START_KEY), 10) || 0;
+    if (!sessionId || !last || (now - last) > SESSION_GAP_MS || !start || (now - start) > SESSION_MAX_MS) {
+      startNewSession(now);
+    }
+  }
+
+  // Time since the last GENUINE activity (interaction / load) — NOT pings.
+  function idleMs() {
+    var last = parseInt(lsGet(SESSION_ACT_KEY), 10) || 0;
+    return last ? (Date.now() - last) : Infinity;
+  }
+
+  // Record genuine activity: rotate the session first if a gap elapsed, then stamp.
+  function markActivity() {
+    ensureFreshSession();
+    lsSet(SESSION_ACT_KEY, String(Date.now()));
+  }
+
+  // Track genuine presence (interactions + tab becoming visible). When the
+  // visitor was idle past the gap, this resumes a FRESH session and pings
+  // immediately; otherwise it just refreshes the activity stamp (throttled).
+  function bindActivityTracking() {
+    function onActivity() {
+      var wasIdle = idleMs() > SESSION_GAP_MS;
+      if (wasIdle) {
+        markActivity();
+        lastActWriteMs = Date.now();
+        sendPing('active'); // resume presence right away with the fresh session
+      } else if (Date.now() - lastActWriteMs > 20000) {
+        markActivity();
+        lastActWriteMs = Date.now();
+      }
+    }
+    ['pointerdown', 'keydown', 'scroll', 'mousemove', 'touchstart', 'click'].forEach(function (ev) {
+      window.addEventListener(ev, onActivity, { capture: true, passive: true });
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') onActivity();
+    });
   }
 
   try {
-    visitorId = localStorage.getItem(VISITOR_ID_KEY);
-    if (!visitorId) { visitorId = genUUID(); localStorage.setItem(VISITOR_ID_KEY, visitorId); }
-
-    var savedId = localStorage.getItem(SESSION_ID_KEY);
-    var savedTs = parseInt(localStorage.getItem(SESSION_TS_KEY), 10) || 0;
-    if (savedId && savedTs && (Date.now() - savedTs) < SESSION_GAP_MS) {
-      sessionId = savedId; // still within the active window — same session
-    } else {
-      sessionId = genUUID(); // first visit, or returning after a gap — fresh session
-      localStorage.setItem(SESSION_ID_KEY, sessionId);
-    }
-    touchSession();
+    visitorId = lsGet(VISITOR_ID_KEY);
+    if (!visitorId) { visitorId = genUUID(); lsSet(VISITOR_ID_KEY, visitorId); }
+    sessionId = lsGet(SESSION_ID_KEY);
+    ensureFreshSession();                 // reuse if recently active, else fresh
+    lsSet(SESSION_ACT_KEY, String(Date.now())); // the page load itself is activity
   } catch (e) {
     // Storage blocked (e.g. private mode) — fall back to a single per-load id.
     sessionId = genUUID();
@@ -588,7 +636,7 @@
     var text = input.value.trim();
     if (!text) return;
 
-    touchSession(); // user activity keeps the session alive
+    markActivity(); // sending is genuine activity (rotates a stale session first)
     input.value = '';
     input.style.height = 'auto';
     appendMessage('user', text);
@@ -759,9 +807,13 @@
 
   // ─── Visitor ping ─────────────────────────────────────────────────────────
   function sendPing(status) {
-    // An active ping means the visitor is still present — keep the session fresh
-    // so it doesn't expire mid-visit (only a real >30min gap mints a new one).
-    if (!status || status === 'active') touchSession();
+    if (!status || status === 'active') {
+      // Don't keep a forgotten/idle tab "live": only ping while the visitor has
+      // been genuinely active within the gap. Pings themselves never extend the
+      // session — so an idle tab stops pinging and ages out of the live list.
+      if (idleMs() > SESSION_GAP_MS) return;
+      ensureFreshSession(); // rotates if the session outlived its max age
+    }
     var body = { sessionId: sessionId, siteId: siteId, status: status || 'active' };
     if (!status || status === 'active') {
       body.pageUrl = window.location.href;
@@ -798,18 +850,23 @@
         injectCSS(config.primary_color);
         buildWidget();
         startSounds();
-        sendPing('active');
-        setInterval(function () { sendPing('active'); }, 30000);
-        window.addEventListener('beforeunload', function () { sendPing('left'); });
+        startPresence();
       })
       .catch(function () {
         injectCSS(config.primary_color);
         buildWidget();
         startSounds();
-        sendPing('active');
-        setInterval(function () { sendPing('active'); }, 30000);
-        window.addEventListener('beforeunload', function () { sendPing('left'); });
+        startPresence();
       });
+  }
+
+  // Begin presence tracking: an immediate ping, the 30s heartbeat (which pauses
+  // itself when idle), activity tracking, and a "left" ping on unload.
+  function startPresence() {
+    sendPing('active');
+    setInterval(function () { sendPing('active'); }, 30000);
+    bindActivityTracking();
+    window.addEventListener('beforeunload', function () { sendPing('left'); });
   }
 
   // Announce the chat shortly after it loads: arm the first-interaction unlock,

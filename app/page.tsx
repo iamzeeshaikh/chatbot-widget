@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES } from '@/lib/workspaces'
+import { isBotOffBySchedule } from '@/lib/botschedule'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -900,6 +901,14 @@ export default function Dashboard() {
   const dashTitle = brand === 'sports' ? '🏆 Sports Dashboard' : '📦 Packaging Dashboard'
   const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
+  // Effective bot state for the open conversation. The packaging schedule can put
+  // the bot OFF even when the conversation's stored mode is still 'bot', so the
+  // header/reply UI must reflect that the bot won't actually reply right now —
+  // matching /api/chat. Sports is never schedule-gated. (Recomputed each render,
+  // which happens on every poll, so it flips within seconds of a window boundary.)
+  const scheduledBotOff = !!selectedSession && isBotOffBySchedule(selectedSession.site_id)
+  const botEffectivelyActive = !!selectedSession && selectedSession.mode === 'bot' && !scheduledBotOff
+
   // ── Stats derived ──────────────────────────────────────────────────────────
   const todayStr = new Date().toISOString().split('T')[0]
   const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -1472,15 +1481,17 @@ export default function Dashboard() {
                       🌐 Translate{translateOn ? ' on' : ''}
                     </button>
                     <span className="w-px h-5 bg-gray-800" />
-                    <span className={`text-xs font-medium ${selectedSession.mode === 'bot' ? 'text-blue-400' : 'text-gray-600'}`}>Bot</span>
+                    <span className={`text-xs font-medium ${botEffectivelyActive ? 'text-blue-400' : 'text-gray-600'}`}>Bot</span>
                     <button onClick={toggleMode} disabled={togglingMode}
-                      className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${selectedSession.mode === 'human' ? 'bg-orange-500' : 'bg-blue-600'}`}>
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${selectedSession.mode === 'human' ? 'translate-x-5' : 'translate-x-0'}`} />
+                      className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${botEffectivelyActive ? 'bg-blue-600' : 'bg-orange-500'}`}>
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${botEffectivelyActive ? 'translate-x-0' : 'translate-x-5'}`} />
                     </button>
-                    <span className={`text-xs font-medium ${selectedSession.mode === 'human' ? 'text-orange-400' : 'text-gray-600'}`}>Human</span>
-                    {selectedSession.mode === 'human' && (
+                    <span className={`text-xs font-medium ${!botEffectivelyActive ? 'text-orange-400' : 'text-gray-600'}`}>Human</span>
+                    {scheduledBotOff && selectedSession.mode === 'bot' ? (
+                      <span className="text-[10px] bg-indigo-500/15 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/25" title="The packaging bot is off on this schedule — replies are human-only right now">🌙 Bot off (scheduled)</span>
+                    ) : selectedSession.mode === 'human' ? (
                       <span className="text-[10px] bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded-full border border-orange-500/25">AI off</span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
@@ -1578,11 +1589,15 @@ export default function Dashboard() {
 
                 {/* Reply input */}
                 <div className="px-4 py-3 border-t border-gray-800/80 bg-gray-900/60 flex-shrink-0">
-                  {selectedSession.mode === 'bot' && (
+                  {botEffectivelyActive ? (
                     <p className="text-[11px] text-blue-400/70 mb-2 flex items-center gap-1.5">
                       <span>🤖</span> Bot is active — toggle to Human to reply, or send a file to take over
                     </p>
-                  )}
+                  ) : scheduledBotOff && selectedSession.mode === 'bot' ? (
+                    <p className="text-[11px] text-indigo-300/80 mb-2 flex items-center gap-1.5">
+                      <span>🌙</span> Bot is off (scheduled) — human only. The bot won&apos;t reply right now; type to respond.
+                    </p>
+                  ) : null}
                   {uploadError && (
                     <p className="text-[11px] text-red-400 mb-2">{uploadError}</p>
                   )}
@@ -1609,14 +1624,14 @@ export default function Dashboard() {
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-                      placeholder={selectedSession.mode === 'human' ? 'Type a reply…' : 'Switch to Human to reply'}
-                      disabled={selectedSession.mode === 'bot' || sending}
+                      placeholder={botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
+                      disabled={botEffectivelyActive || sending}
                       rows={2}
                       className="flex-1 bg-gray-800/60 border border-gray-700/60 rounded-xl px-3 py-2.5 text-sm text-gray-100 placeholder-gray-600 resize-none focus:outline-none focus:border-orange-500/60 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     />
                     <button
                       onClick={sendReply}
-                      disabled={!replyText.trim() || sending || selectedSession.mode === 'bot'}
+                      disabled={!replyText.trim() || sending || botEffectivelyActive}
                       className="px-4 py-2 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 active:bg-orange-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed self-end"
                     >
                       Send
