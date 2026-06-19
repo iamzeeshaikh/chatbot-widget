@@ -129,6 +129,17 @@
   var greetingSent = false;
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
+  // ─── Safety-net lead capture ────────────────────────────────────────────────
+  // When the bot WON'T reply (scheduled off-hours OR manual human takeover) and a
+  // human agent is slow to respond, a visitor can give up and leave — a lost lead.
+  // To catch that, whenever the server tells us the bot stayed silent on a visitor
+  // message (the X-Bot-Silent header), we arm a timer. If no agent reply arrives
+  // within SAFETY_NET_DELAY_MS, we proactively show the lead form so the visitor
+  // can leave their details. An agent reply (picked up by polling) cancels it, and
+  // we never nag a visitor who already left an email.
+  var SAFETY_NET_DELAY_MS = 2 * 60 * 1000; // 2 minutes — easy to edit
+  var safetyNetTimer = null;
+
   // ─── Visit count + original referrer (persistent per browser/site) ──────────
   // visitCount increments on every page load; firstReferrer is captured once on
   // the very first visit so we always know where the visitor originally came
@@ -476,6 +487,47 @@
       || /[\w.+-]+@[\w-]+\.[\w.-]+/.test(t);
   }
 
+  // True once the visitor has given us an email — via the lead form (leadCaptured)
+  // or by typing one into the chat. Used so the safety-net never nags for details
+  // we already have.
+  function visitorHasProvidedEmail() {
+    if (leadCaptured) return true;
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m.role === 'user' && /[\w.+-]+@[\w-]+\.[\w.-]+/.test(m.content || '')) return true;
+    }
+    return false;
+  }
+
+  // ─── Safety-net timer ───────────────────────────────────────────────────────
+  function clearSafetyNetTimer() {
+    if (safetyNetTimer) { clearTimeout(safetyNetTimer); safetyNetTimer = null; }
+  }
+
+  // Arm (or restart) the no-reply timer after a visitor message the bot left
+  // unanswered. Skips entirely if we already have the visitor's email.
+  function armSafetyNetTimer() {
+    clearSafetyNetTimer();
+    if (leadCaptured || visitorHasProvidedEmail()) return;
+    safetyNetTimer = setTimeout(function () {
+      safetyNetTimer = null;
+      // Re-check at fire time: an email may have arrived in the meantime.
+      if (leadCaptured || visitorHasProvidedEmail()) return;
+      showSafetyNetForm();
+    }, SAFETY_NET_DELAY_MS);
+  }
+
+  // Show the lead form with a friendly "we'll follow up" message. Reuses the same
+  // styled form as the inline capture so the look stays consistent.
+  function showSafetyNetForm() {
+    var form = document.getElementById('zee-lead-form');
+    if (!form) return;
+    var p = form.querySelector('p');
+    if (p) p.textContent = "We'll get back to you shortly! Leave your details so our team can follow up.";
+    form.style.display = 'block';
+    scrollToBottom();
+  }
+
   function maybeShowLeadForm() {
     if (leadCaptured) return;
     // Explicit intent shows it immediately; otherwise show it once the visitor
@@ -502,6 +554,9 @@
             pollSince = newMsgs[i].created_at;
           }
           if (newMsgs.length > 0) {
+            // A human agent replied — the conversation is being handled, so cancel
+            // any pending safety-net prompt.
+            clearSafetyNetTimer();
             playNotificationSound();
             maybeShowLeadForm();
           }
@@ -662,6 +717,10 @@
           // just sees their own message; a human agent will reply from the dashboard.
           if (r.headers.get('X-Bot-Silent') === '1') {
             hideTyping();
+            // Bot won't reply (off-hours or human takeover). If no human agent
+            // answers within the threshold, the safety-net form will offer the
+            // visitor a way to leave their details so the lead isn't lost.
+            armSafetyNetTimer();
             return;
           }
           if (!r.ok || !r.body) {
@@ -795,6 +854,7 @@
     })
       .then(function () {
         leadCaptured = true;
+        clearSafetyNetTimer();
         var form = document.getElementById('zee-lead-form');
         if (form) form.style.display = 'none';
         appendMessage('bot', 'Thanks ' + name + '! We\'ve saved your details and will be in touch. Feel free to keep chatting!');
