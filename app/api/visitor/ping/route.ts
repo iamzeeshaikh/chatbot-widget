@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { unpackVisitor, packVisitor, appendHistory, LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
+import { resolveCountryCode } from '@/lib/geo'
+import { isWidgetBlocked } from '@/lib/workspaces'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +82,17 @@ export async function POST(req: NextRequest) {
         .update({ status: 'left', last_seen: new Date().toISOString() })
         .eq('session_id', sessionId)
       return NextResponse.json({ ok: true }, { headers: corsHeaders })
+    }
+
+    // Geo-block enforcement (defense-in-depth): a blocked South-Asian visitor on
+    // a packaging site must NEVER produce a live-visitor row, even if an old or
+    // cached widget keeps pinging. Country comes from the reliable Vercel edge
+    // header (ipapi fallback in dev). Sports sites are never blocked.
+    if (siteId) {
+      const code = await resolveCountryCode(req.headers)
+      if (isWidgetBlocked(siteId, code)) {
+        return NextResponse.json({ ok: true, blocked: true }, { headers: corsHeaders })
+      }
     }
 
     const { browser, os, device_type } = parseUserAgent(userAgent ?? '')
