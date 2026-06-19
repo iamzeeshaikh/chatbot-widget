@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { getMode, setMode } from '@/lib/mode'
+import { recordReplyAuthor } from '@/lib/replyauthor'
 import {
   ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, isAllowedMime,
   uniqueAttachmentPath, buildAttachmentMessage, AttachmentInfo,
@@ -74,20 +75,28 @@ export async function POST(req: NextRequest) {
     }
 
     const role = isAgent ? 'admin' : 'user'
+    // For agent uploads, set created_at explicitly so the reply-author row can
+    // pair to it by identical timestamp (mirrors /api/admin/reply).
+    const at = new Date().toISOString()
     const { error: logErr } = await supabase.from('chat_logs').insert({
       site_id: siteId,
       session_id: sessionId,
       role,
       message: buildAttachmentMessage(info),
+      ...(isAgent ? { created_at: at } : {}),
     })
     if (logErr) {
       console.error('[Upload] chat_logs error:', logErr.message)
       return NextResponse.json({ error: 'Could not save message' }, { status: 500, headers: corsHeaders })
     }
 
-    // An agent sending a file takes over the conversation, like a text reply.
-    if (isAgent && (await getMode(sessionId)) !== 'human') {
-      await setMode(sessionId, siteId, 'human')
+    // An agent sending a file takes over the conversation, like a text reply,
+    // and the reply is attributed to them for the Performance dashboard.
+    if (isAgent && member) {
+      await recordReplyAuthor(sessionId, siteId, member, at)
+      if ((await getMode(sessionId)) !== 'human') {
+        await setMode(sessionId, siteId, 'human')
+      }
     }
 
     return NextResponse.json({ ok: true, role, file: info }, { headers: corsHeaders })

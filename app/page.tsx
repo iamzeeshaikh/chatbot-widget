@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
-import { LEAD_TRACKED_SITES } from '@/lib/workspaces'
+import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 
@@ -43,6 +43,8 @@ interface Visitor { session_id: string; site_id: string; site_name: string; prim
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string }
 interface BillingData { from: string; to: string; total: number; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
+interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number }
+interface PerfData { from: string; to: string; summary: { totalConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; unattributedReplies: number }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
 interface VisitorDetail {
   session_id: string
@@ -104,6 +106,17 @@ function shiftMonth(ym: string, delta: number): string {
 function currentMonth(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+// Human-readable duration for response times: "—" / "42s" / "3m 7s" / "1h 4m".
+function formatMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return '—'
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${m % 60}m`
 }
 
 // Device type → icon.
@@ -306,7 +319,7 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
 }
 
 export default function Dashboard() {
-  const [tab, setTab] = useState<'overview' | 'conversations' | 'billing'>('overview')
+  const [tab, setTab] = useState<'overview' | 'conversations' | 'billing' | 'performance'>('overview')
 
   const [userRole, setUserRole] = useState<'admin' | 'standard'>('standard')
   const [userEmail, setUserEmail] = useState('')
@@ -398,6 +411,10 @@ export default function Dashboard() {
   const [billingMonth, setBillingMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [billing, setBilling] = useState<BillingData | null>(null)
   const [billingLoading, setBillingLoading] = useState(false)
+  // Agent performance report (admin-only). Month string "YYYY-MM"; default current.
+  const [perfMonth, setPerfMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [perf, setPerf] = useState<PerfData | null>(null)
+  const [perfLoading, setPerfLoading] = useState(false)
   const prevVisitorIds = useRef<Set<string>>(new Set())
   // Track the latest visitor-message time per session to detect new incoming
   // messages and chime for the agent. Seeded on first load so we don't alert
@@ -526,6 +543,20 @@ export default function Dashboard() {
       .then((r) => (r.ok ? r.json() : null)).catch(() => null)
       .then((d) => { setBilling(d); setBillingLoading(false) })
   }, [tab, authReady, billingMonth])
+
+  // Agent performance for the selected month, scoped server-side to the admin's
+  // workspace (the endpoint also enforces admin-only access).
+  useEffect(() => {
+    if (tab !== 'performance' || !authReady) return
+    const [y, m] = perfMonth.split('-').map(Number)
+    if (!y || !m) return
+    const from = new Date(y, m - 1, 1).toISOString()
+    const to = new Date(y, m, 1).toISOString()
+    setPerfLoading(true)
+    fetch(`/api/admin/performance?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      .then((d) => { setPerf(d); setPerfLoading(false) })
+  }, [tab, authReady, perfMonth])
 
   const fetchSessions = useCallback(async () => {
     const data = await fetch('/api/admin/conversations').then((r) => r.json()).catch(() => ({ sessions: [] }))
@@ -1011,6 +1042,11 @@ export default function Dashboard() {
             {hasTrackedSite && (
               <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
                 Billing
+              </button>
+            )}
+            {userRole === 'admin' && (
+              <button onClick={() => setTab('performance')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'performance' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+                Performance
               </button>
             )}
           </div>
@@ -1889,6 +1925,127 @@ export default function Dashboard() {
                   </table>
                 </div>
               </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === 'performance' && (
+        <div className="p-6 max-w-6xl mx-auto animate-in">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+            <div>
+              <h2 className="text-base font-bold text-white">Agent Performance</h2>
+              <p className="text-gray-500 text-xs mt-0.5">Per-agent responsiveness &amp; accountability for {WORKSPACE_LABEL[workspace]} — who&apos;s replying, who&apos;s slow, who&apos;s missing chats.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPerfMonth(shiftMonth(perfMonth, -1))}
+                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors" title="Previous month">◀</button>
+              <input type="month" value={perfMonth} max={currentMonth()} onChange={(e) => e.target.value && setPerfMonth(e.target.value)}
+                className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-600 [color-scheme:dark]" />
+              <button onClick={() => { const next = shiftMonth(perfMonth, 1); if (next <= currentMonth()) setPerfMonth(next) }}
+                disabled={perfMonth >= currentMonth()}
+                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
+            </div>
+          </div>
+
+          {perfLoading ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">{Array.from({ length: 5 }).map((_, i) => <Skel key={i} className="h-20" />)}</div>
+              <Skel className="h-64 w-full" />
+            </div>
+          ) : (
+            <>
+              {/* Workspace-level summary */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Conversations</p>
+                  <p className="text-3xl leading-none font-extrabold text-white tabular-nums">{perf?.summary.totalConversations ?? 0}</p>
+                </div>
+                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Leads</p>
+                  <p className="text-3xl leading-none font-extrabold text-emerald-300 tabular-nums">{perf?.summary.totalLeads ?? 0}</p>
+                </div>
+                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Avg response</p>
+                  <p className="text-3xl leading-none font-extrabold text-white tabular-nums">{formatMs(perf?.summary.avgResponseMs)}</p>
+                </div>
+                <div className={`rounded-2xl p-4 border ${(perf?.summary.totalMissed ?? 0) > 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-gray-900 border-gray-800'}`}>
+                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Missed (slow)</p>
+                  <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.totalMissed ?? 0) > 0 ? 'text-amber-300' : 'text-white'}`}>{perf?.summary.totalMissed ?? 0}</p>
+                </div>
+                <div className={`rounded-2xl p-4 border ${(perf?.summary.totalUnanswered ?? 0) > 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-gray-900 border-gray-800'}`}>
+                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Unanswered</p>
+                  <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.totalUnanswered ?? 0) > 0 ? 'text-red-300' : 'text-white'}`}>{perf?.summary.totalUnanswered ?? 0}</p>
+                </div>
+              </div>
+
+              {/* Attribution status — historical-estimate vs accurate-going-forward */}
+              {perf && perf.summary.totalReplies > 0 && perf.unattributedReplies > 0 && (
+                <div className="mb-4 rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-2.5 text-[11px] text-gray-400 flex items-start gap-2">
+                  <span className="text-gray-500">ℹ️</span>
+                  <span>
+                    <span className="text-gray-300 font-medium">{perf.summary.attributedReplies}</span> of <span className="text-gray-300 font-medium">{perf.summary.totalReplies}</span> agent replies this period are attributed to a specific agent.
+                    The remaining <span className="text-gray-300 font-medium">{perf.unattributedReplies}</span> were sent before per-agent tracking was added, so they aren&apos;t counted in the per-agent rows below (the workspace totals above include everything). Attribution is exact going forward.
+                  </span>
+                </div>
+              )}
+
+              {/* Per-agent table */}
+              <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[720px]">
+                    <thead>
+                      <tr className="border-b border-gray-800 bg-gray-800/40">
+                        {['Agent', 'Conversations', 'Replies', 'Avg response', 'Slow replies'].map((h, i) => (
+                          <th key={h} className={`px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(perf?.agents ?? []).length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="text-center py-10">
+                            <div className="flex flex-col items-center">
+                              <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">👥</div>
+                              <p className="text-gray-300 text-sm font-medium">No agents in this workspace</p>
+                              <p className="text-gray-600 text-xs mt-0.5">Add members to see per-agent performance.</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : perf!.agents.map((a) => {
+                        const idle = a.replies === 0
+                        const slowAvg = a.avgResponseMs !== null && a.avgResponseMs > 120000
+                        return (
+                          <tr key={a.id} className={`border-b border-gray-800/40 transition-colors ${idle ? 'opacity-60' : 'hover:bg-gray-800/40'}`}>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-200">{a.email}</span>
+                                {a.builtin && <span className="text-[9px] px-1.5 py-px rounded-full bg-purple-500/20 text-purple-300 font-semibold uppercase tracking-wide">admin</span>}
+                                {a.former && <span className="text-[9px] px-1.5 py-px rounded-full bg-gray-700 text-gray-400 font-semibold uppercase tracking-wide">former</span>}
+                                {idle && <span className="text-[9px] px-1.5 py-px rounded-full bg-amber-500/15 text-amber-300/90 font-semibold uppercase tracking-wide">no replies</span>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right text-gray-200 tabular-nums">{a.handled}</td>
+                            <td className="px-4 py-3 text-right text-gray-200 tabular-nums">{a.replies}</td>
+                            <td className={`px-4 py-3 text-right tabular-nums font-medium ${slowAvg ? 'text-red-300' : idle ? 'text-gray-500' : 'text-emerald-300'}`}>{formatMs(a.avgResponseMs)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {a.slowReplies > 0
+                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 font-semibold">{a.slowReplies}</span>
+                                : <span className="text-gray-600">0</span>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <p className="text-gray-600 text-[11px] mt-3 leading-relaxed">
+                <span className="text-gray-500 font-medium">How to read this:</span> Avg response is the time between a visitor&apos;s message and the agent&apos;s reply.
+                A reply is &quot;slow&quot; if it took longer than 2 minutes. <span className="text-amber-300/90">Missed</span> = a visitor messaged while the bot was off (human takeover or off-hours) and no agent replied within 2 minutes.
+                <span className="text-red-300/90"> Unanswered</span> = a conversation still waiting on its first agent reply. Missed &amp; unanswered are workspace-wide (no single agent owns them).
+              </p>
             </>
           )}
         </div>

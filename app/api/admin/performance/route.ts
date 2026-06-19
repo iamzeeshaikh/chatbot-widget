@@ -1,0 +1,225 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
+import { getMember, siteScope, HARDCODED_ACCOUNTS } from '@/lib/auth'
+import { MODE_ROLE } from '@/lib/mode'
+import { CONTACT_ROLE, TAGS_ROLE, asUtcIso } from '@/lib/visitor'
+import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
+import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, parseReplyAuthor, type ReplyAuthor } from '@/lib/replyauthor'
+import { isBotOffBySchedule } from '@/lib/botschedule'
+
+export const dynamic = 'force-dynamic'
+
+// Agent performance / accountability report for a date range (default: this
+// calendar month). Admin-only and strictly workspace-isolated: an admin only
+// ever sees agents and conversations within their own workspace's sites.
+//
+// Everything is derived from chat_logs (no DDL):
+//   • Agent replies are role 'admin'. Each is attributed to a member via its
+//     paired reply_author row (same session_id + created_at). Replies older than
+//     that tracking have no author row → counted as "unattributed" (historical).
+//   • Response time = an agent reply's timestamp minus the visitor message that
+//     was waiting on a reply. All timestamps are UTC-normalised (asUtcIso) so the
+//     schedule check and durations are correct in any server timezone.
+//   • "Missed" = a visitor messaged while the bot was off (manual human takeover
+//     OR the packaging off-hours schedule) and no agent replied within the SLA.
+//   • "Unanswered" = a conversation whose last message is the visitor's and which
+//     has no agent reply at all — still waiting.
+export async function GET(req: NextRequest) {
+  const member = await getMember(req)
+  if (!member) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  // Only admins see other agents' stats (standard members are excluded).
+  if (member.role !== 'admin') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+
+  const scope = siteScope(member)
+  const allowed = Array.from(scope)
+
+  const now = new Date()
+  const from = req.nextUrl.searchParams.get('from') || new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const to = req.nextUrl.searchParams.get('to') || new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
+
+  // ── Agent roster: workspace members + built-in workspace admins ─────────────
+  const { data: memberRows } = await supabase
+    .from('members')
+    .select('id, email')
+    .eq('workspace', member.workspace)
+
+  const roster = new Map<string, { id: string; email: string; builtin: boolean }>()
+  for (const a of HARDCODED_ACCOUNTS.filter((acc) => acc.workspace === member.workspace)) {
+    roster.set(`builtin:${a.email}`, { id: `builtin:${a.email}`, email: a.email, builtin: true })
+  }
+  for (const m of memberRows ?? []) roster.set(m.id, { id: m.id, email: m.email, builtin: false })
+
+  const emptySummary = {
+    totalConversations: 0, totalLeads: 0, totalMissed: 0, totalUnanswered: 0,
+    totalReplies: 0, attributedReplies: 0, avgResponseMs: null as number | null,
+  }
+  if (allowed.length === 0) {
+    return NextResponse.json({ from, to, summary: emptySummary, agents: [], unattributedReplies: 0 })
+  }
+
+  const { data: logs } = await supabase
+    .from('chat_logs')
+    .select('session_id, site_id, role, message, created_at')
+    .in('site_id', allowed)
+    .gte('created_at', from)
+    .lt('created_at', to)
+    .order('created_at', { ascending: true })
+    .limit(50000)
+
+  const rows = logs ?? []
+  const t = (ts: string) => new Date(asUtcIso(ts) as string).getTime()
+  const nowMs = Date.now()
+
+  // Author lookup: a reply_author row shares its admin reply's exact created_at.
+  const authorByKey = new Map<string, ReplyAuthor>()
+  const idToEmail = new Map<string, string>()
+  for (const r of rows) {
+    if (r.role === REPLY_AUTHOR_ROLE) {
+      const a = parseReplyAuthor(r.message)
+      if (a) { authorByKey.set(`${r.session_id}|${r.created_at}`, a); if (a.email) idToEmail.set(a.id, a.email) }
+    }
+  }
+
+  // Per-agent accumulators.
+  type Agg = { handled: Set<string>; replies: number; respSum: number; respCount: number; slow: number }
+  const agg = new Map<string, Agg>()
+  const ensure = (id: string): Agg => {
+    let a = agg.get(id)
+    if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, slow: 0 }; agg.set(id, a) }
+    return a
+  }
+
+  // Workspace-level tallies.
+  let totalReplies = 0, attributedReplies = 0, totalLeads = 0
+  let wsRespSum = 0, wsRespCount = 0
+  const conversations = new Set<string>()
+  const missedSessions = new Set<string>()
+  const unansweredSessions = new Set<string>()
+
+  // Group rows per session, preserving ascending order.
+  const bySession = new Map<string, typeof rows>()
+  for (const r of rows) {
+    if (r.role === LEAD_CAPTURE_ROLE) totalLeads++
+    let list = bySession.get(r.session_id)
+    if (!list) { list = []; bySession.set(r.session_id, list) }
+    list.push(r)
+  }
+
+  for (const [sid, evs] of bySession) {
+    let mode: 'bot' | 'human' = 'bot'
+    let pendingUserTs: number | null = null   // a visitor message awaiting a reply
+    let pendingHumanState = false             // …sent while the bot was off
+    let hasRealMsg = false
+    let lastRealRole = ''
+    let adminCount = 0
+
+    for (const ev of evs) {
+      if (ev.role === MODE_ROLE) { mode = ev.message === 'human' ? 'human' : 'bot'; continue }
+      if (ev.role === CONTACT_ROLE || ev.role === TAGS_ROLE || ev.role === LEAD_CAPTURE_ROLE || ev.role === REPLY_AUTHOR_ROLE) continue
+      if (ev.message === '(session started)') continue
+
+      hasRealMsg = true
+      lastRealRole = ev.role
+      const ts = t(ev.created_at)
+
+      if (ev.role === 'user') {
+        // Only track the FIRST unanswered visitor message in a waiting streak, so
+        // a burst of visitor messages counts as one response-time measurement.
+        if (pendingUserTs === null) {
+          pendingUserTs = ts
+          const scheduleOff = isBotOffBySchedule(ev.site_id, new Date(asUtcIso(ev.created_at) as string))
+          pendingHumanState = mode === 'human' || scheduleOff
+        }
+      } else if (ev.role === 'assistant') {
+        // The bot answered — clears the wait (normal bot-on flow, not a miss).
+        pendingUserTs = null
+        pendingHumanState = false
+      } else if (ev.role === 'admin') {
+        adminCount++
+        totalReplies++
+        const author = authorByKey.get(`${sid}|${ev.created_at}`)
+        if (author) { attributedReplies++; const a = ensure(author.id); a.replies++; a.handled.add(sid) }
+
+        if (pendingUserTs !== null) {
+          const dt = ts - pendingUserTs
+          if (dt >= 0) {
+            wsRespSum += dt; wsRespCount++
+            if (author) {
+              const a = ensure(author.id)
+              a.respSum += dt; a.respCount++
+              if (dt > RESPONSE_SLA_MS) a.slow++
+            }
+            // Dropped the ball: visitor waited (bot off) and the reply was late.
+            if (pendingHumanState && dt > RESPONSE_SLA_MS) missedSessions.add(sid)
+          }
+          pendingUserTs = null
+          pendingHumanState = false
+        }
+      }
+    }
+
+    if (hasRealMsg) conversations.add(sid)
+    // A trailing visitor message during a bot-off state that has now been waiting
+    // longer than the SLA with no reply at all → missed.
+    if (pendingUserTs !== null && pendingHumanState && nowMs - pendingUserTs > RESPONSE_SLA_MS) {
+      missedSessions.add(sid)
+    }
+    // Still waiting: last message is the visitor's and no agent ever replied.
+    if (lastRealRole === 'user' && adminCount === 0) unansweredSessions.add(sid)
+  }
+
+  // ── Build the agent table (roster ∪ anyone with attributed replies) ─────────
+  const agents: {
+    id: string; email: string; builtin: boolean; former: boolean
+    handled: number; replies: number; avgResponseMs: number | null; slowReplies: number
+  }[] = []
+  const seen = new Set<string>()
+  for (const [id, info] of roster) {
+    const a = agg.get(id)
+    agents.push({
+      id, email: info.email, builtin: info.builtin, former: false,
+      handled: a ? a.handled.size : 0,
+      replies: a ? a.replies : 0,
+      avgResponseMs: a && a.respCount ? Math.round(a.respSum / a.respCount) : null,
+      slowReplies: a ? a.slow : 0,
+    })
+    seen.add(id)
+  }
+  // Replies attributed to someone no longer in the roster (e.g. a removed member).
+  for (const [id, a] of agg) {
+    if (seen.has(id)) continue
+    agents.push({
+      id, email: idToEmail.get(id) || 'former member', builtin: id.startsWith('builtin:'), former: true,
+      handled: a.handled.size, replies: a.replies,
+      avgResponseMs: a.respCount ? Math.round(a.respSum / a.respCount) : null,
+      slowReplies: a.slow,
+    })
+  }
+
+  // Sort by responsiveness: active agents first (fastest average on top), idle
+  // agents (no replies in the period) last so "missing chats" stand out.
+  agents.sort((x, y) => {
+    const xActive = x.replies > 0 ? 0 : 1
+    const yActive = y.replies > 0 ? 0 : 1
+    if (xActive !== yActive) return xActive - yActive
+    const xa = x.avgResponseMs ?? Number.POSITIVE_INFINITY
+    const ya = y.avgResponseMs ?? Number.POSITIVE_INFINITY
+    if (xa !== ya) return xa - ya
+    return x.email.localeCompare(y.email)
+  })
+
+  return NextResponse.json({
+    from, to,
+    summary: {
+      totalConversations: conversations.size,
+      totalLeads,
+      totalMissed: missedSessions.size,
+      totalUnanswered: unansweredSessions.size,
+      totalReplies,
+      attributedReplies,
+      avgResponseMs: wsRespCount ? Math.round(wsRespSum / wsRespCount) : null,
+    },
+    agents,
+    unattributedReplies: totalReplies - attributedReplies,
+  })
+}
