@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
-import { deriveModes, MODE_ROLE } from '@/lib/mode'
+import { deriveModes } from '@/lib/mode'
 import { CONTACT_ROLE, TAGS_ROLE, parseTags, parseContact, asUtcIso } from '@/lib/visitor'
 import { parseAttachment } from '@/lib/attachment'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
+import { isControlRole } from '@/lib/controlroles'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,7 +64,9 @@ export async function GET(req: NextRequest) {
       if (c.email) emailToSession[`${log.site_id}|${c.email.toLowerCase()}`] = log.session_id
       continue
     }
-    if (log.role === MODE_ROLE) continue // control row, not a message
+    // Any remaining control row (mode, reply_author, …) is metadata, not a
+    // message — never let it become a preview or count toward the message total.
+    if (isControlRole(log.role)) continue
     if (!sessionMap[log.session_id]) {
       const site = sites.find((s) => s.site_id === log.site_id)
       sessionMap[log.session_id] = {

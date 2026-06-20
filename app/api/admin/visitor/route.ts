@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteOfSession, canAccessSite } from '@/lib/auth'
-import { MODE_ROLE } from '@/lib/mode'
 import { unpackVisitor, CONTACT_ROLE, parseContact, EMPTY_CONTACT, VisitorContact, TAGS_ROLE, parseTags, normalizeTags, asUtcIso } from '@/lib/visitor'
-import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
+import { isControlRole } from '@/lib/controlroles'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,7 +62,7 @@ export async function GET(req: NextRequest) {
   const userMessages = logs.filter(
     (l) => l.role === 'user' && l.message !== '(session started)',
   )
-  const messageLogs = logs.filter((l) => l.role !== MODE_ROLE && l.role !== CONTACT_ROLE && l.role !== TAGS_ROLE && l.role !== LEAD_CAPTURE_ROLE)
+  const messageLogs = logs.filter((l) => !isControlRole(l.role))
 
   // Time on site: first activity (visitor row creation or first log) → last seen.
   const times = [

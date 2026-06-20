@@ -70,8 +70,15 @@ export async function POST(req: NextRequest) {
     // a human agent initiates from the dashboard. The X-Bot-Silent header tells
     // the widget to render nothing (no bubble, no sound). To the visitor it just
     // looks like a normal live chat where they're waiting.
+    // The bot must ONLY ever answer a genuine visitor message. An agent/admin
+    // message must never trigger a bot reply (an agent reply is sent via
+    // /api/admin/reply, which also flips the conversation to human mode). This is
+    // a hard guard independent of mode: any non-visitor role stays silent.
+    const role = String(lastUserMessage.role || '').toLowerCase()
+    const isVisitorMessage = role === 'user' || role === 'visitor'
+
     const scheduleOff = isBotOffBySchedule(siteId)
-    if (mode === 'human' || scheduleOff) {
+    if (!isVisitorMessage || mode === 'human' || scheduleOff) {
       return new Response(null, {
         status: 200,
         headers: { ...corsHeaders, 'X-Bot-Silent': '1', 'Access-Control-Expose-Headers': 'X-Bot-Silent' },
