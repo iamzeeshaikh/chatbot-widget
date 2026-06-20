@@ -5,6 +5,7 @@ import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
+import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -161,14 +162,10 @@ function viewingLabel(v: { page_title: string | null; page_url: string | null })
   } catch { return v.page_url }
 }
 
+// Date-divider label for the message view, in Pakistan time (Asia/Karachi).
+// Keeps Today/Yesterday but appends the real date; older days show the full date.
 function msgDateLabel(ts: string): string {
-  const d = new Date(ts)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  if (d.toDateString() === today.toDateString()) return 'Today'
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return d.toLocaleDateString('en', { weekday: 'long', month: 'short', day: 'numeric' })
+  return dateDividerLabel(ts)
 }
 
 const RANGES: { key: 'hourly' | 'daily' | 'weekly' | 'monthly'; label: string }[] = [
@@ -1255,7 +1252,7 @@ export default function Dashboard() {
                               <td className="px-3 py-2"><input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-full min-w-[100px] focus:outline-none focus:border-blue-500" placeholder="Phone" /></td>
                               <td className="px-3 py-2" colSpan={5}><input value={editForm.message} onChange={(e) => setEditForm({ ...editForm, message: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-full focus:outline-none focus:border-blue-500" placeholder="Message" /></td>
                               <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{siteName}</td>
-                              <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? new Date(lead.created_at).toLocaleString() : '-'}</td>
+                              <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? formatDateTime(lead.created_at) : '-'}</td>
                               <td className="px-3 py-2"><div className="flex gap-1"><button onClick={() => saveEditLead(lead.id)} disabled={savingEdit} className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded transition-colors disabled:opacity-50">{savingEdit ? '…' : 'Save'}</button><button onClick={() => setEditingLeadId(null)} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors">Cancel</button></div></td>
                             </tr>
                           )
@@ -1275,7 +1272,7 @@ export default function Dashboard() {
                               <td className="px-3 py-3 whitespace-nowrap">
                                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${accent}20`, color: accent }}>{siteName}</span>
                               </td>
-                              <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? new Date(lead.created_at).toLocaleString() : '-'}</td>
+                              <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? formatDateTime(lead.created_at) : '-'}</td>
                               <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                                 {isConfirmingDelete ? (
                                   <div className="flex items-center gap-1">
@@ -1566,7 +1563,7 @@ export default function Dashboard() {
                           <div className="flex items-center gap-1.5 mb-1 px-1">
                             {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-400' : 'text-blue-400'}`}>{isAdmin ? '👤 Agent' : '🤖 Bot'}</span>}
                             {isUser && <span className="text-[11px] text-gray-600">Visitor</span>}
-                            <span className="text-[10px] text-gray-700">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            <span className="text-[10px] text-gray-700">{formatTime(msg.created_at)}</span>
                           </div>
                           {file ? (
                             <div className={`max-w-sm lg:max-w-md xl:max-w-lg rounded-2xl overflow-hidden shadow-sm border ${
@@ -1799,7 +1796,7 @@ export default function Dashboard() {
                             <p className="text-xs text-gray-200 leading-snug break-words" title={p.url ?? undefined}>{pageLabel(p)}</p>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-[10px] text-gray-600">{i + 1}.</span>
-                              {p.at && <span className="text-[10px] text-gray-600">{new Date(p.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                              {p.at && <span className="text-[10px] text-gray-600">{formatDateTime(p.at)}</span>}
                             </div>
                           </li>
                         ))}
@@ -1915,7 +1912,7 @@ export default function Dashboard() {
                           <td className="px-4 py-3 text-gray-200 whitespace-nowrap">{l.name || <span className="text-gray-600">—</span>}</td>
                           <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{l.phone || <span className="text-gray-600">—</span>}</td>
                           <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 border border-gray-700 text-gray-300">{l.site_name}</span></td>
-                          <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{new Date(l.captured_at).toLocaleString()}</td>
+                          <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
                           <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => openConversation(l)} className="text-xs text-indigo-300 hover:text-indigo-200 hover:underline">View chat →</button>
                           </td>
