@@ -21,6 +21,15 @@ export const REPLY_AUTHOR_ROLE = 'reply_author'
 // widget uses for its safety-net lead form (SAFETY_NET_DELAY_MS in widget.js).
 export const RESPONSE_SLA_MS = 2 * 60 * 1000
 
+// Outlier cap for the AVERAGE response-time metric. A reply that lands more than
+// this long after the visitor's message isn't a "response" any more — it's a
+// next-day / overnight re-engagement, and including it badly skews the average
+// (one ~19h reply alone dragged the packaging workspace avg from ~13m to 1h40m).
+// Pairs beyond the cap are EXCLUDED from the average only — they still count as
+// slow/missed where applicable. Negative diffs (reply before message, i.e. a
+// corrupt/naive-shifted timestamp) are always dropped, never averaged.
+export const RESPONSE_OUTLIER_CAP_MS = 8 * 60 * 60 * 1000 // 8 hours
+
 export interface ReplyAuthor {
   id: string
   email: string

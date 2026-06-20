@@ -4,7 +4,7 @@ import { getMember, siteScope, HARDCODED_ACCOUNTS } from '@/lib/auth'
 import { MODE_ROLE } from '@/lib/mode'
 import { CONTACT_ROLE, TAGS_ROLE, asUtcIso } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
-import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, parseReplyAuthor, type ReplyAuthor } from '@/lib/replyauthor'
+import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, RESPONSE_OUTLIER_CAP_MS, parseReplyAuthor, type ReplyAuthor } from '@/lib/replyauthor'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 
 export const dynamic = 'force-dynamic'
@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
   const emptySummary = {
     totalConversations: 0, totalLeads: 0, totalMissed: 0, totalUnanswered: 0,
     totalReplies: 0, attributedReplies: 0, avgResponseMs: null as number | null,
+    avgExcludedOutliers: 0,
   }
   if (allowed.length === 0) {
     return NextResponse.json({ from, to, summary: emptySummary, agents: [], unattributedReplies: 0 })
@@ -81,17 +82,20 @@ export async function GET(req: NextRequest) {
   }
 
   // Per-agent accumulators.
-  type Agg = { handled: Set<string>; replies: number; respSum: number; respCount: number; slow: number }
+  type Agg = { handled: Set<string>; replies: number; respSum: number; respCount: number; respExcluded: number; slow: number }
   const agg = new Map<string, Agg>()
   const ensure = (id: string): Agg => {
     let a = agg.get(id)
-    if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, slow: 0 }; agg.set(id, a) }
+    if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, respExcluded: 0, slow: 0 }; agg.set(id, a) }
     return a
   }
 
   // Workspace-level tallies.
   let totalReplies = 0, attributedReplies = 0, totalLeads = 0
-  let wsRespSum = 0, wsRespCount = 0
+  let wsRespSum = 0, wsRespCount = 0, wsRespExcluded = 0
+  // Diagnostic: every (visitor_msg, agent_reply, diff) pair that feeds the avg,
+  // so a corrupt/outlier pair can be eyeballed in the server logs.
+  const respPairs: { sid: string; userIso: string; adminIso: string; diffMin: number; excluded: boolean }[] = []
   const conversations = new Set<string>()
   const missedSessions = new Set<string>()
   const unansweredSessions = new Set<string>()
@@ -108,6 +112,7 @@ export async function GET(req: NextRequest) {
   for (const [sid, evs] of bySession) {
     let mode: 'bot' | 'human' = 'bot'
     let pendingUserTs: number | null = null   // a visitor message awaiting a reply
+    let pendingUserIso: string | null = null  // …its raw created_at (for diagnostics)
     let pendingHumanState = false             // …sent while the bot was off
     let hasRealMsg = false
     let lastRealRole = ''
@@ -127,12 +132,14 @@ export async function GET(req: NextRequest) {
         // a burst of visitor messages counts as one response-time measurement.
         if (pendingUserTs === null) {
           pendingUserTs = ts
+          pendingUserIso = ev.created_at
           const scheduleOff = isBotOffBySchedule(ev.site_id, new Date(asUtcIso(ev.created_at) as string))
           pendingHumanState = mode === 'human' || scheduleOff
         }
       } else if (ev.role === 'assistant') {
         // The bot answered — clears the wait (normal bot-on flow, not a miss).
         pendingUserTs = null
+        pendingUserIso = null
         pendingHumanState = false
       } else if (ev.role === 'admin') {
         adminCount++
@@ -141,18 +148,29 @@ export async function GET(req: NextRequest) {
         if (author) { attributedReplies++; const a = ensure(author.id); a.replies++; a.handled.add(sid) }
 
         if (pendingUserTs !== null) {
+          // dt = reply time − the FIRST unanswered visitor message in this waiting
+          // streak (a burst of visitor messages = one first-response measurement).
+          // pendingUserTs is always a PRECEDING message, so a reply can never pair
+          // with a message that came after it.
           const dt = ts - pendingUserTs
           if (dt >= 0) {
-            wsRespSum += dt; wsRespCount++
-            if (author) {
-              const a = ensure(author.id)
-              a.respSum += dt; a.respCount++
-              if (dt > RESPONSE_SLA_MS) a.slow++
+            // An outlier (next-day/overnight reply) still counts as slow/missed,
+            // but must NOT pollute the average. Negative diffs are dropped above.
+            const isOutlier = dt > RESPONSE_OUTLIER_CAP_MS
+            respPairs.push({ sid, userIso: pendingUserIso!, adminIso: ev.created_at, diffMin: dt / 60000, excluded: isOutlier })
+            if (isOutlier) {
+              wsRespExcluded++
+              if (author) ensure(author.id).respExcluded++
+            } else {
+              wsRespSum += dt; wsRespCount++
+              if (author) { const a = ensure(author.id); a.respSum += dt; a.respCount++ }
             }
+            if (author && dt > RESPONSE_SLA_MS) ensure(author.id).slow++
             // Dropped the ball: visitor waited (bot off) and the reply was late.
             if (pendingHumanState && dt > RESPONSE_SLA_MS) missedSessions.add(sid)
           }
           pendingUserTs = null
+          pendingUserIso = null
           pendingHumanState = false
         }
       }
@@ -166,6 +184,14 @@ export async function GET(req: NextRequest) {
     }
     // Still waiting: last message is the visitor's and no agent ever replied.
     if (lastRealRole === 'user' && adminCount === 0) unansweredSessions.add(sid)
+  }
+
+  // ── Diagnostic: dump every pair feeding the workspace average ───────────────
+  // Lets us eyeball whether the avg is real or skewed by a few bad/outlier pairs.
+  const wsAvgMin = wsRespCount ? wsRespSum / wsRespCount / 60000 : 0
+  console.log(`[Performance] ${member.workspace} ${from}..${to} — response pairs: ${respPairs.length} (${wsRespCount} averaged, ${wsRespExcluded} excluded as >${RESPONSE_OUTLIER_CAP_MS / 3600000}h outliers). avg=${wsAvgMin.toFixed(1)}min`)
+  for (const p of [...respPairs].sort((a, b) => b.diffMin - a.diffMin)) {
+    console.log(`  ${p.userIso} -> ${p.adminIso} = ${p.diffMin.toFixed(1)}min${p.excluded ? '  [EXCLUDED outlier]' : ''}  [${p.sid.slice(0, 8)}]`)
   }
 
   // ── Build the agent table (roster ∪ anyone with attributed replies) ─────────
@@ -218,6 +244,7 @@ export async function GET(req: NextRequest) {
       totalReplies,
       attributedReplies,
       avgResponseMs: wsRespCount ? Math.round(wsRespSum / wsRespCount) : null,
+      avgExcludedOutliers: wsRespExcluded,
     },
     agents,
     unattributedReplies: totalReplies - attributedReplies,
