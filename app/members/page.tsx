@@ -124,7 +124,7 @@ export default function MembersPage() {
   }
 
   if (!authChecked) {
-    return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-gray-500 text-sm">Checking access…</div>
+    return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-gray-400 text-sm">Checking access…</div>
   }
 
   return (
@@ -137,7 +137,7 @@ export default function MembersPage() {
             <h1 className="text-base font-bold text-white leading-tight flex items-center gap-2">
               {workspace === 'sports' ? '🏆 Sports' : '📦 Packaging'} Members
             </h1>
-            <p className="text-gray-500 text-[11px]">Manage who can access the {workspace} dashboard</p>
+            <p className="text-gray-400 text-[11px]">Manage who can access the {workspace} dashboard</p>
           </div>
         </div>
         <button onClick={() => { setShowAdd(true); setAddForm(emptyForm); setError('') }}
@@ -153,7 +153,7 @@ export default function MembersPage() {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-3 py-12 text-gray-500">
+          <div className="flex items-center gap-3 py-12 text-gray-400">
             <div className="w-4 h-4 border-2 border-gray-600 border-t-gray-300 rounded-full animate-spin" />
             <span className="text-sm">Loading members…</span>
           </div>
@@ -163,13 +163,13 @@ export default function MembersPage() {
               <thead>
                 <tr className="border-b border-gray-800 bg-gray-800/40">
                   {['Email', 'Role', 'Assigned Sites', 'Added', ''].map((h) => (
-                    <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide">{h}</th>
+                    <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {members.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-12 text-gray-500 text-sm">No members yet</td></tr>
+                  <tr><td colSpan={5} className="text-center py-12 text-gray-400 text-sm">No members yet</td></tr>
                 ) : members.map((m) => {
                   const isEditing = editId === m.id
                   if (isEditing) return (
@@ -184,7 +184,7 @@ export default function MembersPage() {
                       </td>
                       <td className="px-4 py-3">
                         {editForm.role === 'admin' ? (
-                          <span className="text-xs text-gray-500">All sites</span>
+                          <span className="text-xs text-gray-400">All sites</span>
                         ) : (
                           <div className="flex flex-wrap gap-1.5 max-w-md">
                             {sites.map((s) => {
@@ -200,9 +200,9 @@ export default function MembersPage() {
                         )}
                         <input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
                           placeholder="New password (optional)"
-                          className="mt-2 block w-56 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500" />
+                          className="mt-2 block w-56 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-blue-500" />
                       </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{new Date(m.created_at).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{new Date(m.created_at).toLocaleDateString()}</td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
                           <button onClick={() => saveEdit(m.id)} disabled={busyId === m.id} className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded disabled:opacity-50">{busyId === m.id ? '…' : 'Save'}</button>
@@ -222,9 +222,9 @@ export default function MembersPage() {
                       </td>
                       <td className="px-4 py-3">
                         {m.role === 'admin' ? (
-                          <span className="text-xs text-gray-500">All sites</span>
+                          <span className="text-xs text-gray-400">All sites</span>
                         ) : m.assigned_sites.length === 0 ? (
-                          <span className="text-xs text-gray-600">None assigned</span>
+                          <span className="text-xs text-gray-400">None assigned</span>
                         ) : (
                           <div className="flex flex-wrap gap-1">
                             {m.assigned_sites.map((id) => (
@@ -233,19 +233,19 @@ export default function MembersPage() {
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{new Date(m.created_at).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{new Date(m.created_at).toLocaleDateString()}</td>
                       <td className="px-4 py-3">
                         {confirmDeleteId === m.id ? (
                           <div className="flex items-center gap-1">
                             <span className="text-xs text-gray-300">Remove?</span>
                             <button onClick={() => removeMember(m.id)} disabled={busyId === m.id} className="text-xs text-red-400 hover:text-red-300 font-semibold">Yes</button>
-                            <span className="text-xs text-gray-600">·</span>
+                            <span className="text-xs text-gray-400">·</span>
                             <button onClick={() => setConfirmDeleteId(null)} className="text-xs text-gray-400 hover:text-gray-300">No</button>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => startEdit(m)} className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-gray-700/60 rounded-lg" title="Edit">✏️</button>
-                            <button onClick={() => setConfirmDeleteId(m.id)} className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-gray-700/60 rounded-lg" title="Remove">🗑</button>
+                            <button onClick={() => startEdit(m)} className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-gray-700/60 rounded-lg" title="Edit">✏️</button>
+                            <button onClick={() => setConfirmDeleteId(m.id)} className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700/60 rounded-lg" title="Remove">🗑</button>
                           </div>
                         )}
                       </td>
@@ -267,12 +267,12 @@ export default function MembersPage() {
               <div>
                 <label className="block text-xs text-gray-400 font-medium mb-1">Email</label>
                 <input type="email" required value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500" placeholder="member@example.com" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500" placeholder="member@example.com" />
               </div>
               <div>
                 <label className="block text-xs text-gray-400 font-medium mb-1">Password</label>
                 <input type="text" required minLength={6} value={addForm.password} onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500" placeholder="At least 6 characters" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500" placeholder="At least 6 characters" />
               </div>
               <div>
                 <label className="block text-xs text-gray-400 font-medium mb-1">Role</label>
