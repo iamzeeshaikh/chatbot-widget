@@ -45,8 +45,9 @@ interface Session { session_id: string; site_id: string; site_name: string; prev
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 // Visitors-history row (Zendesk-style history): a Visitor plus whether the
-// session ever chatted and its final status.
-interface HistVisitor extends Visitor { status: string; has_chat: boolean }
+// session ever chatted, whether the chat is still waiting on an agent reply
+// (accountability), and its final status.
+interface HistVisitor extends Visitor { status: string; has_chat: boolean; awaiting_reply?: boolean }
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string }
 interface BillingData { from: string; to: string; total: number; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
@@ -407,6 +408,7 @@ export default function Dashboard() {
   const [histSiteFilter, setHistSiteFilter] = useState('')
   const [histChatOnly, setHistChatOnly] = useState(false)
   const [histStatusFilter, setHistStatusFilter] = useState<'all' | 'live' | 'left'>('all')
+  const [histReplyFilter, setHistReplyFilter] = useState<'all' | 'noreply' | 'replied'>('all')
   const [histCountryFilter, setHistCountryFilter] = useState('')
   const [histDeviceFilter, setHistDeviceFilter] = useState('')
   const [histSearch, setHistSearch] = useState('')
@@ -1843,6 +1845,8 @@ export default function Dashboard() {
         const base = visitorHistory.filter((v) => {
           if (histSiteFilter && v.site_id !== histSiteFilter) return false
           if (histChatOnly && !v.has_chat) return false
+          if (histReplyFilter === 'noreply' && !(v.has_chat && v.awaiting_reply)) return false
+          if (histReplyFilter === 'replied' && !(v.has_chat && !v.awaiting_reply)) return false
           if (histCountryFilter && (v.country ?? '') !== histCountryFilter) return false
           if (histDeviceFilter && (v.device_type ?? '') !== histDeviceFilter) return false
           if (q) {
@@ -1855,6 +1859,9 @@ export default function Dashboard() {
         const liveTotal = base.filter(isLiveV).length
         const filtered = base.filter((v) =>
           histStatusFilter === 'live' ? isLiveV(v) : histStatusFilter === 'left' ? !isLiveV(v) : true)
+        // Accountability counts (whole history): chats still waiting on an agent.
+        const noReplyTotal = visitorHistory.filter((v) => v.has_chat && v.awaiting_reply).length
+        const repliedTotal = visitorHistory.filter((v) => v.has_chat && !v.awaiting_reply).length
         const histSites = Array.from(new Map(visitorHistory.map((v) => [v.site_id, v.site_name])).entries())
         const histCountries = Array.from(new Set(visitorHistory.map((v) => v.country).filter(Boolean) as string[])).sort()
         const histDevices = Array.from(new Set(visitorHistory.map((v) => v.device_type).filter(Boolean) as string[])).sort()
@@ -1864,7 +1871,7 @@ export default function Dashboard() {
         const pageCount = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
         const page = Math.min(histPage, pageCount - 1)
         const pageRows = filtered.slice(page * PER_PAGE, (page + 1) * PER_PAGE)
-        const anyFilter = histSiteFilter || histChatOnly || histStatusFilter !== 'all' || histCountryFilter || histDeviceFilter || q
+        const anyFilter = histSiteFilter || histChatOnly || histStatusFilter !== 'all' || histReplyFilter !== 'all' || histCountryFilter || histDeviceFilter || q
         let lastDay = ''
         return (
           <div className="max-w-5xl mx-auto px-5 py-6 animate-in">
@@ -1899,12 +1906,19 @@ export default function Dashboard() {
                 <option value="">All Devices</option>
                 {histDevices.map((d) => <option key={d} value={d}>{deviceIcon(d)} {d}</option>)}
               </select>
+              {/* Agent accountability: chats the team never answered. */}
+              <select value={histReplyFilter} onChange={(e) => setHistFilter(setHistReplyFilter)(e.target.value as 'all' | 'noreply' | 'replied')}
+                className={`rounded-lg px-2 py-1.5 text-xs focus:outline-none border ${histReplyFilter === 'noreply' ? 'bg-red-50 border-red-300 text-red-700 font-semibold' : 'bg-white border-gray-300 text-gray-800 focus:border-gray-400'}`}>
+                <option value="all">Any reply status</option>
+                <option value="noreply">⚠ No agent reply ({noReplyTotal})</option>
+                <option value="replied">✓ Agent replied ({repliedTotal})</option>
+              </select>
               <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
                 <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistFilter(setHistChatOnly)(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
                 With chats only
               </label>
               {anyFilter && (
-                <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistPage(0) }}
+                <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistReplyFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistPage(0) }}
                   className="text-xs text-blue-600 hover:text-blue-700 font-medium">Clear filters</button>
               )}
             </div>
@@ -1946,7 +1960,11 @@ export default function Dashboard() {
                             ) : (
                               <span className="text-[10px] text-gray-500">left · {timeAgo(v.last_seen)}</span>
                             )}
-                            {v.has_chat && <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px" title="This visitor chatted — click to open the conversation">💬 chatted</span>}
+                            {v.has_chat && (v.awaiting_reply ? (
+                              <span className="text-[10px] font-bold text-red-700 bg-red-100 border border-red-300 rounded-full px-1.5 py-px" title="The visitor messaged and NO agent has replied yet — click to open and answer">⚠ no agent reply</span>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px" title="This visitor chatted and an agent replied — click to open the conversation">💬 chatted</span>
+                            ))}
                             {v.visits > 1 && <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>}
                           </div>
                           <div className="text-[11px] text-gray-700 truncate mt-0.5" title={v.page_url ?? undefined}>

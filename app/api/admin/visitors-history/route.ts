@@ -34,9 +34,9 @@ export async function GET(req: NextRequest) {
       () => supabase.from('active_visitors').select('*').in('site_id', allowed)
         .gte('created_at', startISO).order('created_at', { ascending: false }),
       MAX_VISITOR_ROWS),
-    fetchAllPages<{ session_id: string }>(
-      () => supabase.from('chat_logs').select('session_id').in('site_id', allowed)
-        .in('role', ['user', 'visitor']).gte('created_at', startISO)
+    fetchAllPages<{ session_id: string; role: string }>(
+      () => supabase.from('chat_logs').select('session_id, role').in('site_id', allowed)
+        .in('role', ['user', 'visitor', 'admin']).gte('created_at', startISO)
         .order('created_at', { ascending: false }),
       MAX_CHAT_ROWS),
     supabase.from('sites').select('site_id, name, primary_color'),
@@ -44,7 +44,16 @@ export async function GET(req: NextRequest) {
 
   const stamped = visRows.map((v) => ({ v, ms: new Date(asUtcIso(v.created_at) ?? v.created_at).getTime() }))
   const bursts = findBurstKeys(stamped.map((s) => ({ userAgent: s.v.user_agent, tsMs: s.ms })))
-  const chatted = new Set(chatRows.map((r) => r.session_id))
+  // Per-session chat state for agent accountability. chatRows are newest-first,
+  // so the FIRST row seen per session is the conversation's latest real message:
+  //   chatted        — the visitor sent at least one message
+  //   awaiting_reply — the latest message is the visitor's (no agent reply yet)
+  const chatted = new Set<string>()
+  const lastRole = new Map<string, string>()
+  for (const r of chatRows) {
+    if (r.role === 'user' || r.role === 'visitor') chatted.add(r.session_id)
+    if (!lastRole.has(r.session_id)) lastRole.set(r.session_id, r.role)
+  }
   const sites = sitesRes.data ?? []
 
   // Rows are newest-first; keep the first (most recent) row per session.
@@ -64,6 +73,7 @@ export async function GET(req: NextRequest) {
       site_name: site?.name ?? v.site_id,
       primary_color: site?.primary_color ?? '#2563eb',
       has_chat: chatted.has(v.session_id),
+      awaiting_reply: chatted.has(v.session_id) && lastRole.get(v.session_id) !== 'admin',
     })
   }
 
