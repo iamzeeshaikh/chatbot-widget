@@ -1136,10 +1136,10 @@ export default function Dashboard() {
             <button onClick={() => setTab('conversations')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'conversations' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
               Conversations
               {roleSessions.length > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleSessions.length}</span>}
-              {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
             </button>
-            <button onClick={() => setTab('visitors')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'visitors' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+            <button onClick={() => setTab('visitors')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'visitors' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
               Visitors
+              {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
             </button>
             {hasTrackedSite && (
               <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
@@ -1411,55 +1411,9 @@ export default function Dashboard() {
         <div className="flex animate-in" style={{ height: 'calc(100vh - 57px)' }}>
 
           {/* ── Left sidebar ── */}
+          {/* (The live-visitors panel that used to sit above the filters moved
+              to the dedicated Visitors tab, which shows live + history.) */}
           <div className="w-[300px] flex-shrink-0 border-r border-gray-800/80 flex flex-col bg-gray-900/30">
-
-            {/* Live visitors */}
-            {roleVisitors.length > 0 && (
-              <div className="border-b border-gray-800 flex flex-col min-h-0 max-h-[38vh]">
-                <div className="px-3 py-2 flex items-center gap-2 bg-green-950/30 flex-shrink-0">
-                  <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 ring-2 ring-green-400/30 animate-pulse" />
-                  <p className="text-[11px] text-green-400 font-semibold uppercase tracking-wider">{roleVisitors.length} Live {roleVisitors.length === 1 ? 'Visitor' : 'Visitors'}</p>
-                </div>
-                <div className="overflow-y-auto min-h-0">
-                {roleVisitors.map((v) => {
-                  const accent = SITE_ACCENT[v.site_id] ?? '#16a34a'
-                  return (
-                    <button key={v.session_id} onClick={() => openVisitorSession(v)}
-                      className="w-full text-left px-3 py-1.5 border-t border-gray-800/40 hover:bg-green-900/15 transition-colors flex items-start gap-2.5"
-                      style={{ borderLeft: `3px solid ${accent}` }}>
-                      <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-xs font-semibold text-gray-100 truncate">{v.site_name}</span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {v.visits > 1 && (
-                              <span className="text-[9px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
-                            )}
-                            {/* The live list only ever contains visitors active within the
-                                last 60s (server-filtered), so these are genuinely live. */}
-                            <span className="text-[10px] text-green-400 font-medium flex items-center gap-1 shrink-0" title={`Last activity ${timeAgo(v.last_seen)}`}>
-                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />active now
-                            </span>
-                          </div>
-                        </div>
-                        {/* Currently viewing */}
-                        <div className="text-[11px] text-gray-300 truncate mt-0.5" title={v.page_url ?? undefined}>
-                          <span className="text-gray-400">Viewing:</span> {viewingLabel(v)}
-                        </div>
-                        {/* Location · referrer */}
-                        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                          {v.country && <span className="text-[11px] text-gray-400 truncate">{v.country}</span>}
-                          {v.country && <span className="text-[10px] text-gray-400 shrink-0">·</span>}
-                          <span className="text-[10px] text-gray-400 truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
-                        </div>
-                        <div className="text-[10px] text-green-600 mt-0.5">on site {timeOnSite(v.created_at)}</div>
-                      </div>
-                    </button>
-                  )
-                })}
-                </div>
-              </div>
-            )}
 
             {/* Filters */}
             <div className="p-2.5 border-b border-gray-800 space-y-2 flex-shrink-0">
