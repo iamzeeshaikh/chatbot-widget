@@ -1643,7 +1643,7 @@ export default function Dashboard() {
                       onClick={() => replyFileRef.current?.click()}
                       disabled={uploadingFile}
                       title="Attach a file"
-                      className="px-3 py-2 bg-gray-200 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 self-end"
+                      className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 self-end"
                     >
                       {uploadingFile ? '…' : '📎'}
                     </button>
@@ -1654,12 +1654,12 @@ export default function Dashboard() {
                       placeholder={botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
                       disabled={botEffectivelyActive || sending}
                       rows={2}
-                      className="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:border-orange-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      className="flex-1 bg-white border-2 border-orange-500 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:border-orange-600 focus:ring-2 focus:ring-orange-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     />
                     <button
                       onClick={sendReply}
                       disabled={!replyText.trim() || sending || botEffectivelyActive}
-                      className="px-4 py-2 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 active:bg-orange-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed self-end"
+                      className="px-5 py-2 bg-orange-600 text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-orange-700 active:bg-orange-800 transition-colors disabled:bg-orange-300 disabled:cursor-not-allowed self-end"
                     >
                       Send
                     </button>
