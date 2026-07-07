@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope, HARDCODED_ACCOUNTS } from '@/lib/auth'
 import { MODE_ROLE } from '@/lib/mode'
 import { CONTACT_ROLE, TAGS_ROLE, asUtcIso } from '@/lib/visitor'
@@ -59,16 +59,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ from, to, summary: emptySummary, agents: [], unattributedReplies: 0 })
   }
 
-  const { data: logs } = await supabase
-    .from('chat_logs')
-    .select('session_id, site_id, role, message, created_at')
-    .in('site_id', allowed)
-    .gte('created_at', from)
-    .lt('created_at', to)
-    .order('created_at', { ascending: true })
-    .limit(50000)
-
-  const rows = logs ?? []
+  // Paginated: a plain .limit(50000) is silently capped at 1000 rows by
+  // PostgREST, which would drop everything after the month's first 1000 rows.
+  const rows = await fetchAllPages<{ session_id: string; site_id: string; role: string; message: string; created_at: string }>(
+    () => supabase
+      .from('chat_logs')
+      .select('session_id, site_id, role, message, created_at')
+      .in('site_id', allowed)
+      .gte('created_at', from)
+      .lt('created_at', to)
+      .order('created_at', { ascending: true }),
+    50000)
   const t = (ts: string) => new Date(asUtcIso(ts) as string).getTime()
   const nowMs = Date.now()
   // Global bot kill switch: while the bot is disabled, EVERY waiting visitor

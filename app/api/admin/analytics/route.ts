@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { asUtcIso } from '@/lib/visitor'
 import { PKT_OFFSET_HOURS } from '@/lib/botschedule'
@@ -80,15 +80,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ range, points: buckets.map((b) => ({ label: b.label, visitors: 0, chats: 0 })) })
   }
 
-  const [visRes, logRes] = await Promise.all([
-    supabase.from('active_visitors').select('created_at, site_id').in('site_id', allowed).gte('created_at', startISO),
-    supabase.from('chat_logs').select('created_at, site_id, session_id, role, message').in('site_id', allowed).gte('created_at', startISO).limit(20000),
+  // Paginated (fetchAllPages): a plain query silently tops out at 1000 rows,
+  // which starved the chart of every day after the first ~1000 visitors.
+  const [visRows, logRows] = await Promise.all([
+    fetchAllPages<{ created_at: string }>(
+      () => supabase.from('active_visitors').select('created_at').in('site_id', allowed)
+        .gte('created_at', startISO).order('created_at', { ascending: true }),
+      50000),
+    fetchAllPages<{ created_at: string; session_id: string; role: string; message: string }>(
+      () => supabase.from('chat_logs').select('created_at, session_id, role, message').in('site_id', allowed)
+        .gte('created_at', startISO).order('created_at', { ascending: true }),
+      50000),
   ])
 
   // Visitors = widget sessions started in the bucket (the ping route upserts
   // exactly one active_visitors row per session, created_at = session start).
   const visitorCounts = new Array(buckets.length).fill(0)
-  for (const v of visRes.data ?? []) {
+  for (const v of visRows) {
     const idx = bucketIndex(buckets, toPktMs(v.created_at))
     if (idx >= 0) visitorCounts[idx]++
   }
@@ -99,7 +107,7 @@ export async function GET(req: NextRequest) {
   // with 1 visitor could show 19 "chats". Restricting to visitor-role rows
   // also inherently skips every control row (mode, reply_author, …).
   const firstSeen: Record<string, number> = {}
-  for (const l of logRes.data ?? []) {
+  for (const l of logRows) {
     const role = String(l.role || '').toLowerCase()
     if (role !== 'user' && role !== 'visitor') continue
     if (l.message === '(session started)') continue

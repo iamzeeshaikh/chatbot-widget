@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { deriveModes } from '@/lib/mode'
 import { CONTACT_ROLE, TAGS_ROLE, parseTags, parseContact, asUtcIso } from '@/lib/visitor'
@@ -15,16 +15,19 @@ export async function GET(req: NextRequest) {
   if (!member) return NextResponse.json({ sessions: [] }, { status: 401 })
   const scope = await siteScope(member)
 
-  const [logsRes, leadsRes, sitesRes] = await Promise.all([
+  const [logRows, leadsRes, sitesRes] = await Promise.all([
     // Fetch the NEWEST rows (descending), then process ascending — so recent
-    // conversations are always included even once the table is large. (A plain
-    // ascending limit fetched the OLDEST rows and dropped recent activity.)
-    supabase.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(3000),
+    // conversations are always included even once the table is large. Paginated
+    // via fetchAllPages because a plain .limit(3000) is silently capped at 1000
+    // rows by PostgREST, which was cutting off older conversations.
+    fetchAllPages<{ session_id: string; site_id: string; role: string; message: string; created_at: string }>(
+      () => supabase.from('chat_logs').select('*').order('created_at', { ascending: false }),
+      6000),
     supabase.from('leads').select('*'),
     supabase.from('sites').select('site_id, name, bot_name, primary_color'),
   ])
 
-  const logs = (logsRes.data ?? []).reverse() // back to ascending for last-wins logic
+  const logs = logRows.reverse() // back to ascending for last-wins logic
   const leads = leadsRes.data ?? []
   const modes = deriveModes(logs) // per-session mode from 'mode' control rows
   const sites = sitesRes.data ?? []
