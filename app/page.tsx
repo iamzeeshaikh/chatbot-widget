@@ -323,9 +323,9 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
 // goes quiet once an agent engages, the sound is muted, or the visitor message
 // is older than the freshness window (the visitor has clearly left — matches
 // the widget's 30-minute session gap, so ancient unanswered chats can't ring
-// forever). The cadence is deliberately aggressive: it should nag until the
-// chat is picked up.
-const WAITING_REPEAT_MS = 8 * 1000
+// forever). The cadence is deliberately aggressive: it rings continuously
+// until an agent actually messages the customer.
+const WAITING_REPEAT_MS = 3 * 1000
 const WAITING_FRESH_MS = 30 * 60 * 1000
 // Live-visitor poll: also the worst-case delay between a visitor landing on a
 // site and the arrival chime, so it's kept tight.
