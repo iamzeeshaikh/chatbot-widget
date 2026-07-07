@@ -3,6 +3,7 @@ import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { asUtcIso } from '@/lib/visitor'
 import { PKT_OFFSET_HOURS } from '@/lib/botschedule'
+import { findBurstKeys, burstKey } from '@/lib/botfilter'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,8 +84,8 @@ export async function GET(req: NextRequest) {
   // Paginated (fetchAllPages): a plain query silently tops out at 1000 rows,
   // which starved the chart of every day after the first ~1000 visitors.
   const [visRows, logRows] = await Promise.all([
-    fetchAllPages<{ created_at: string }>(
-      () => supabase.from('active_visitors').select('created_at').in('site_id', allowed)
+    fetchAllPages<{ created_at: string; user_agent: string | null }>(
+      () => supabase.from('active_visitors').select('created_at, user_agent').in('site_id', allowed)
         .gte('created_at', startISO).order('created_at', { ascending: true }),
       50000),
     fetchAllPages<{ created_at: string; session_id: string; role: string; message: string }>(
@@ -95,9 +96,15 @@ export async function GET(req: NextRequest) {
 
   // Visitors = widget sessions started in the bucket (the ping route upserts
   // exactly one active_visitors row per session, created_at = session start).
+  // Bot bursts — dozens of sessions with the exact same user-agent in one hour
+  // (e.g. the 557-row flood on Jul 4 2026) — are excluded so the line shows
+  // real humans (see lib/botfilter.ts).
+  const visStamped = visRows.map((v) => ({ userAgent: v.user_agent, tsMs: toPktMs(v.created_at) }))
+  const bursts = findBurstKeys(visStamped)
   const visitorCounts = new Array(buckets.length).fill(0)
-  for (const v of visRows) {
-    const idx = bucketIndex(buckets, toPktMs(v.created_at))
+  for (const v of visStamped) {
+    if (bursts.has(burstKey(v.userAgent, v.tsMs))) continue
+    const idx = bucketIndex(buckets, v.tsMs)
     if (idx >= 0) visitorCounts[idx]++
   }
 

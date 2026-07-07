@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { unpackVisitor, LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
+import { filterLiveFlood } from '@/lib/botfilter'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,7 +60,10 @@ export async function GET(req: NextRequest) {
   // filter, drop anything whose session is older than the on-site cap.
   const liveStart = Date.now() - LIVE_MAX_ON_SITE_MS
 
-  const enriched = visitors
+  // Bot-flood guard: when many "visitors" with the exact same user-agent are
+  // live at once (an automated burst), hide the whole group — otherwise the
+  // dashboard shows hundreds of fake visitors and rings nonstop for them.
+  const enriched = filterLiveFlood(visitors)
     .filter((v) => {
       const created = asUtcIso(v.created_at)
       return created ? new Date(created).getTime() >= liveStart : true
