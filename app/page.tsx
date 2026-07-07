@@ -1410,140 +1410,58 @@ export default function Dashboard() {
       {tab === 'conversations' && (
         <div className="flex animate-in" style={{ height: 'calc(100vh - 57px)' }}>
 
-          {/* ── Left sidebar ── */}
-          {/* (The live-visitors panel that used to sit above the filters moved
-              to the dedicated Visitors tab, which shows live + history.) */}
+          {/* ── Left sidebar: live visitors only ──
+              The old sessions list moved out (past visitors/chats live in the
+              Visitors tab); this page keeps live visitors so an agent can grab
+              someone the moment they're on a site. */}
           <div className="w-[300px] flex-shrink-0 border-r border-gray-800/80 flex flex-col bg-gray-900/30">
-
-            {/* Filters */}
-            <div className="p-2.5 border-b border-gray-800 space-y-2 flex-shrink-0">
-              <div className="flex gap-1.5">
-                <select value={filterSite} onChange={e => setFilterSite(e.target.value)} className="flex-1 bg-gray-800/60 border border-gray-700/60 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
-                  <option value="">All Sites</option>
-                  {sessionSites.map(s => <option key={s.site_id} value={s.site_id}>{s.site_name}</option>)}
-                </select>
-                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="flex-1 bg-gray-800/60 border border-gray-700/60 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
-                  <option value="all">All</option>
-                  {/* With the bot globally off, mode 'bot' just means "no agent
-                      has replied yet", so label the filter accordingly. */}
-                  <option value="bot">{botGlobalOff ? 'Waiting' : 'Bot'}</option>
-                  <option value="human">Human</option>
-                  <option value="lead">Lead</option>
-                  <option value="no-response">No reply</option>
-                </select>
-              </div>
-              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search…"
-                className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 placeholder-gray-400 focus:outline-none focus:border-gray-500" />
-              {sessionTags.length > 0 && (
-                <select value={filterTag} onChange={e => setFilterTag(e.target.value)} className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
-                  <option value="">🏷 All Tags</option>
-                  {sessionTags.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              )}
-              {(filterSite || filterStatus !== 'all' || filterTag || searchQuery) && (
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-gray-400">{filteredSessions.length} result{filteredSessions.length !== 1 ? 's' : ''}</span>
-                  <button onClick={() => { setFilterSite(''); setFilterStatus('all'); setFilterTag(''); setSearchQuery('') }} className="text-[11px] text-blue-400 hover:text-blue-300">Clear</button>
-                </div>
-              )}
+            <div className="px-3 py-2 flex items-center gap-2 bg-green-950/30 flex-shrink-0 border-b border-gray-800">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-green-400 ring-2 ring-green-400/30 animate-pulse' : 'bg-gray-600'}`} />
+              <p className={`text-[11px] font-semibold uppercase tracking-wider ${roleVisitors.length > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+                {roleVisitors.length > 0 ? `${roleVisitors.length} Live ${roleVisitors.length === 1 ? 'Visitor' : 'Visitors'}` : 'No live visitors'}
+              </p>
             </div>
-
-            {/* Bulk select bar */}
-            <div className="px-3 py-1.5 border-b border-gray-800/60 flex items-center gap-2 flex-shrink-0">
-              <input type="checkbox"
-                checked={filteredSessions.length > 0 && filteredSessions.every(s => selectedSessions.has(s.session_id))}
-                onChange={e => { if (e.target.checked) setSelectedSessions(new Set(filteredSessions.map(s => s.session_id))); else setSelectedSessions(new Set()) }}
-                className="rounded accent-blue-500 cursor-pointer" />
-              <span className="text-[11px] text-gray-400 flex-1">{selectedSessions.size > 0 ? `${selectedSessions.size} selected` : `${filteredSessions.length} sessions`}</span>
-              {selectedSessions.size > 0 && (
-                confirmBulkDelete ? (
-                  <div className="flex items-center gap-1">
-                    <span className="text-[11px] text-red-400">Delete {selectedSessions.size}?</span>
-                    <button onClick={deleteBulk} disabled={deleting} className="text-[11px] text-red-400 font-semibold ml-1">Yes</button>
-                    <span className="text-[11px] text-gray-400 mx-0.5">·</span>
-                    <button onClick={() => setConfirmBulkDelete(false)} className="text-[11px] text-gray-400">No</button>
-                  </div>
-                ) : (
-                  <button onClick={() => setConfirmBulkDelete(true)} className="text-[11px] text-red-400 hover:text-red-300">Delete</button>
-                )
-              )}
-            </div>
-
-            {/* Session list */}
             <div className="flex-1 overflow-y-auto">
-              {!sessionsLoaded ? (
-                <div className="p-1">
-                  {Array.from({ length: 7 }).map((_, i) => (
-                    <div key={i} className="flex gap-2 px-3 py-3 border-b border-gray-800/40">
-                      <Skel className="w-2 h-2 rounded-full mt-1" />
-                      <div className="flex-1 space-y-1.5">
-                        <Skel className="h-3 w-24" />
-                        <Skel className="h-3 w-40" />
-                        <Skel className="h-2.5 w-16" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : filteredSessions.length === 0 ? (
+              {roleVisitors.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12 animate-in">
-                  <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">🗂️</div>
-                  <p className="text-sm text-gray-300 font-medium">{roleSessions.length === 0 ? 'No conversations yet' : 'No results match'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{roleSessions.length === 0 ? 'Conversations appear here in real time' : 'Try adjusting your filters'}</p>
+                  <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">👀</div>
+                  <p className="text-sm text-gray-300 font-medium">Nobody on your sites right now</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Live visitors appear here the moment they land. Past visitors &amp; chats are in the Visitors tab.</p>
                 </div>
-              ) : filteredSessions.map((s) => {
-                const isSelected = selectedSessions.has(s.session_id)
-                const isActive = selectedSession?.session_id === s.session_id
-                const isConfirming = confirmDeleteId === s.session_id
-                const accent = SITE_ACCENT[s.site_id] ?? '#6b7280'
-                const hasUnread = s.last_role === 'user'
+              ) : roleVisitors.map((v) => {
+                const accent = SITE_ACCENT[v.site_id] ?? '#16a34a'
                 return (
-                  <div key={s.session_id}
-                    className={`group relative flex border-b border-gray-800/40 transition-colors duration-150 ${isActive ? 'bg-gray-800/70' : 'hover:bg-gray-800/40'} ${isSelected ? 'ring-1 ring-inset ring-blue-500/20 bg-blue-950/20' : ''}`}
-                    style={{ borderLeft: `3px solid ${isActive ? accent : 'transparent'}` }}>
-                    <div className="flex items-center px-2 py-2.5 shrink-0" onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={isSelected}
-                        onChange={e => { const n = new Set(selectedSessions); if (e.target.checked) n.add(s.session_id); else n.delete(s.session_id); setSelectedSessions(n) }}
-                        className="rounded accent-blue-500 cursor-pointer" />
-                    </div>
-                    <div className="flex-1 min-w-0 py-2 pr-7 cursor-pointer" onClick={() => setSelectedSession(s)}>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {hasUnread && <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 ring-2 ring-green-400/25" title="New visitor message" />}
-                          <span className={`text-xs truncate ${hasUnread ? 'font-semibold text-white' : 'font-medium text-gray-300'}`}>{s.site_name}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                          {s.mode === 'human' && <span className="text-[9px] font-semibold text-orange-300 bg-orange-500/15 border border-orange-500/30 rounded-full px-1.5 py-px leading-none" title="Human takeover active">LIVE</span>}
-                          <span className="text-[10px] text-gray-400">{timeAgo(s.last_at)}</span>
+                  <button key={v.session_id} onClick={() => openVisitorSession(v)}
+                    className="w-full text-left px-3 py-2 border-b border-gray-800/40 hover:bg-green-900/15 transition-colors flex items-start gap-2.5"
+                    style={{ borderLeft: `3px solid ${accent}` }}>
+                    <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-semibold text-gray-100 truncate">{v.site_name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {v.visits > 1 && (
+                            <span className="text-[9px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
+                          )}
+                          {/* The live list only ever contains visitors active within the
+                              last 60s (server-filtered), so these are genuinely live. */}
+                          <span className="text-[10px] text-green-400 font-medium flex items-center gap-1 shrink-0" title={`Last activity ${timeAgo(v.last_seen)}`}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />active now
+                          </span>
                         </div>
                       </div>
-                      <p className={`text-xs truncate mb-1 ${hasUnread ? 'text-gray-200' : 'text-gray-400'}`}>{s.preview || '(no messages)'}</p>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-gray-400">{s.message_count} msgs</span>
-                        {s.lead && <span className="text-[10px] text-green-400 font-medium">● Lead</span>}
+                      {/* Currently viewing */}
+                      <div className="text-[11px] text-gray-300 truncate mt-0.5" title={v.page_url ?? undefined}>
+                        <span className="text-gray-400">Viewing:</span> {viewingLabel(v)}
                       </div>
-                      {(s.tags ?? []).length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {(s.tags ?? []).map((t) => (
-                            <span key={t} className="text-[9px] px-1.5 py-px rounded-full bg-gray-700/70 border border-gray-600/50 text-gray-300 truncate max-w-[110px]">{t}</span>
-                          ))}
-                        </div>
-                      )}
+                      {/* Location · referrer */}
+                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                        {v.country && <span className="text-[11px] text-gray-400 truncate">{v.country}</span>}
+                        {v.country && <span className="text-[10px] text-gray-400 shrink-0">·</span>}
+                        <span className="text-[10px] text-gray-400 truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
+                      </div>
+                      <div className="text-[10px] text-green-600 mt-0.5">on site {timeOnSite(v.created_at)}</div>
                     </div>
-                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2" onClick={e => e.stopPropagation()}>
-                      {isConfirming ? (
-                        <div className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded-lg px-1.5 py-1 shadow-lg">
-                          <button onClick={() => deleteSession(s.session_id)} disabled={deleting} className="text-[11px] text-red-400 font-semibold">Yes</button>
-                          <span className="text-[11px] text-gray-400">·</span>
-                          <button onClick={() => setConfirmDeleteId(null)} className="text-[11px] text-gray-400">No</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setConfirmDeleteId(s.session_id)}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700/60 rounded-lg transition-all text-xs">
-                          🗑
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  </button>
                 )
               })}
             </div>
@@ -1558,7 +1476,7 @@ export default function Dashboard() {
                     <svg viewBox="0 0 24 24" className="w-6 h-6 fill-gray-600"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
                   </div>
                   <p className="text-gray-300 font-medium text-sm mb-1">Select a conversation</p>
-                  <p className="text-gray-400 text-xs leading-relaxed">Pick a session on the left to view messages and manage the chat.</p>
+                  <p className="text-gray-400 text-xs leading-relaxed">Click a live visitor on the left to open their chat, or find past visitors and chats in the Visitors tab.</p>
                 </div>
               </div>
             ) : (
