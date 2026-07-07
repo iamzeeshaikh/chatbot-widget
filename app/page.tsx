@@ -316,6 +316,17 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
   )
 }
 
+// ── Repeating waiting-chat alert ──────────────────────────────────────────────
+// A single chime per new visitor message is easy to miss. As long as ANY
+// in-scope conversation is still waiting on a human reply (its latest message
+// is the visitor's), the dashboard re-chimes at this interval and only goes
+// quiet once an agent replies, the sound is muted, or the visitor message is
+// older than the freshness window (the visitor has clearly left — matches the
+// widget's 30-minute session gap, so ancient unanswered chats can't ring
+// forever).
+const WAITING_REPEAT_MS = 20 * 1000
+const WAITING_FRESH_MS = 30 * 60 * 1000
+
 export default function Dashboard() {
   const [tab, setTab] = useState<'overview' | 'conversations' | 'billing' | 'performance'>('overview')
 
@@ -536,6 +547,25 @@ export default function Dashboard() {
       })
     } catch { /* ignore */ }
   }, [soundOn, getDashCtx])
+
+  // Re-chime while any chat is waiting for a human (see WAITING_REPEAT_MS).
+  // State is read through refs so the 20s cadence never resets on the 6s
+  // sessions poll; playDashSound itself honours the mute toggle.
+  const sessionsRef = useRef<Session[]>([])
+  const userSitesRef = useRef<string[]>([])
+  useEffect(() => { sessionsRef.current = sessions }, [sessions])
+  useEffect(() => { userSitesRef.current = userSites }, [userSites])
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const scope = new Set(userSitesRef.current)
+      const now = Date.now()
+      const waiting = sessionsRef.current.some((s) =>
+        s.last_role === 'user' && scope.has(s.site_id) &&
+        !!s.last_at && now - new Date(s.last_at).getTime() < WAITING_FRESH_MS)
+      if (waiting) playDashSound()
+    }, WAITING_REPEAT_MS)
+    return () => clearInterval(iv)
+  }, [playDashSound])
 
   useEffect(() => {
     Promise.all([
@@ -1074,7 +1104,7 @@ export default function Dashboard() {
               </button>
             )}
           </div>
-          <button onClick={toggleSound} title={soundOn ? 'Sound on — click to mute new-message alerts' : 'Sound off — click to unmute'}
+          <button onClick={toggleSound} title={soundOn ? 'Sound on — chimes repeat every 20s while a chat is waiting for a reply; click to mute' : 'Sound off — click to unmute'}
             className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-900 text-gray-200 border-gray-800 hover:bg-gray-800' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-gray-300'}`}>
             {soundOn ? '🔔' : '🔕'}
           </button>
