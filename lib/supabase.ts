@@ -44,15 +44,28 @@ interface PageQuery<T> {
   range(from: number, to: number): PromiseLike<{ data: T[] | null; error: { message: string } | null }>
 }
 
+// Pages are fetched in parallel waves of PAGE_CONCURRENCY (serial paging made
+// multi-thousand-row reads take one round trip PER page, which showed up as
+// slow tab loads). A short/empty page anywhere in a wave marks the end.
+const PAGE_CONCURRENCY = 6
+
 export async function fetchAllPages<T>(makeQuery: () => PageQuery<T>, maxRows: number): Promise<T[]> {
   const all: T[] = []
-  for (let from = 0; from < maxRows; from += SUPA_PAGE_ROWS) {
-    const to = Math.min(from + SUPA_PAGE_ROWS, maxRows) - 1
-    const { data, error } = await makeQuery().range(from, to)
-    if (error) { console.error('[supabase] fetchAllPages page failed:', error.message); break }
-    if (!data || data.length === 0) break
-    all.push(...data)
-    if (data.length < to - from + 1) break
+  for (let base = 0; base < maxRows; base += SUPA_PAGE_ROWS * PAGE_CONCURRENCY) {
+    const wave: { from: number; to: number }[] = []
+    for (let k = 0; k < PAGE_CONCURRENCY; k++) {
+      const from = base + k * SUPA_PAGE_ROWS
+      if (from >= maxRows) break
+      wave.push({ from, to: Math.min(from + SUPA_PAGE_ROWS, maxRows) - 1 })
+    }
+    const results = await Promise.all(wave.map((w) => makeQuery().range(w.from, w.to)))
+    for (let i = 0; i < results.length; i++) {
+      const { data, error } = results[i]
+      if (error) { console.error('[supabase] fetchAllPages page failed:', error.message); return all }
+      if (!data || data.length === 0) return all
+      all.push(...data)
+      if (data.length < wave[i].to - wave[i].from + 1) return all
+    }
   }
   return all
 }

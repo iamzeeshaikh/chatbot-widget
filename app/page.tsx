@@ -606,11 +606,21 @@ export default function Dashboard() {
   }, [])
 
   // Analytics (visitors + chats over time), scoped server-side to the workspace.
+  // Cached per range: switching Hourly/Daily/Weekly/Monthly shows the cached
+  // series instantly and refreshes it in the background.
+  const analyticsCache = useRef<Record<string, AnalyticsPoint[]>>({})
   useEffect(() => {
     if (tab !== 'overview' || !authReady) return
-    fetch(`/api/admin/analytics?range=${analyticsRange}`)
+    const range = analyticsRange
+    const cached = analyticsCache.current[range]
+    if (cached) setAnalytics(cached)
+    fetch(`/api/admin/analytics?range=${range}`)
       .then((r) => r.json()).catch(() => ({ points: [] }))
-      .then((d) => setAnalytics(d.points ?? []))
+      .then((d) => {
+        const points = d.points ?? []
+        analyticsCache.current[range] = points
+        setAnalytics(points)
+      })
   }, [tab, authReady, analyticsRange])
 
   // Billing leads for the selected month, scoped server-side to the member.
@@ -1197,10 +1207,11 @@ export default function Dashboard() {
               <div className="bg-gray-100 rounded-xl border border-gray-200 p-5 mb-6">
                 <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                   <h2 className="text-sm font-semibold text-gray-900">Visitors &amp; Chats Over Time</h2>
-                  <div className="flex gap-0.5 bg-white p-1 rounded-lg border border-gray-300">
+                  <div className="flex gap-1 bg-white p-1 rounded-lg border border-gray-300">
                     {RANGES.map((r) => (
                       <button key={r.key} onClick={() => setAnalyticsRange(r.key)}
-                        className={`px-3 py-1 rounded-md text-[11px] font-medium transition-all ${analyticsRange === r.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                        style={analyticsRange === r.key ? { backgroundColor: accentColor } : undefined}
+                        className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${analyticsRange === r.key ? 'text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`}>
                         {r.label}
                       </button>
                     ))}
@@ -1643,7 +1654,7 @@ export default function Dashboard() {
                       onClick={() => replyFileRef.current?.click()}
                       disabled={uploadingFile}
                       title="Attach a file"
-                      className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 self-end"
+                      className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 self-center"
                     >
                       {uploadingFile ? '…' : '📎'}
                     </button>
@@ -1659,7 +1670,7 @@ export default function Dashboard() {
                     <button
                       onClick={sendReply}
                       disabled={!replyText.trim() || sending || botEffectivelyActive}
-                      className="px-5 py-2 bg-orange-600 text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-orange-700 active:bg-orange-800 transition-colors disabled:bg-orange-300 disabled:cursor-not-allowed self-end"
+                      className="px-5 py-2.5 bg-orange-600 text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-orange-700 active:bg-orange-800 transition-colors disabled:bg-orange-300 disabled:cursor-not-allowed self-center"
                     >
                       Send
                     </button>
