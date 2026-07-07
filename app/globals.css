@@ -1,13 +1,11 @@
 @import "tailwindcss";
 
-/* The dashboard is a hard dark theme, so default/inherited text must ALWAYS be
-   light — never tied to the OS color scheme. Previously --foreground was
-   #171717 (near-black) in light mode, so every element relying on the inherited
-   body color rendered black-on-dark and was nearly invisible for any user whose
-   device was in light mode. These are now fixed dark-theme values. */
+/* The dashboard is a hard LIGHT theme (Zendesk-style white), so default/
+   inherited colors are fixed here — never tied to the OS color scheme, so a
+   device in dark mode can't flip inherited text to light-on-light. */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #f5f6f7;
+  --foreground: #1f2937;
 }
 
 @theme inline {

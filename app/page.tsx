@@ -184,7 +184,7 @@ const RANGES: { key: 'hourly' | 'daily' | 'weekly' | 'monthly'; label: string }[
 // A single shimmering placeholder block — composed into loading skeletons so the
 // dashboard fades in smoothly instead of flashing blank or jumping layout.
 function Skel({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded-lg bg-gray-800/70 ${className}`} />
+  return <div className={`animate-pulse rounded-lg bg-gray-200 ${className}`} />
 }
 
 // Overview skeleton: mirrors the real layout (stat cards + chart) so nothing
@@ -194,19 +194,19 @@ function OverviewSkeleton() {
     <div className="animate-in">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="rounded-2xl p-5 border border-gray-800 bg-gray-900">
+          <div key={i} className="rounded-2xl p-5 border border-gray-200 bg-gray-100">
             <Skel className="h-3 w-16 mb-4" />
             <Skel className="h-9 w-12" />
           </div>
         ))}
       </div>
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 mb-6">
+      <div className="bg-gray-100 rounded-xl border border-gray-200 p-5 mb-6">
         <Skel className="h-4 w-44 mb-4" />
         <Skel className="h-[200px] w-full" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5"><Skel className="h-4 w-32 mb-4" /><Skel className="h-24 w-full" /></div>
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5"><Skel className="h-4 w-28 mb-4" /><div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skel key={i} className="h-3 w-full" />)}</div></div>
+        <div className="bg-gray-100 rounded-xl border border-gray-200 p-5"><Skel className="h-4 w-32 mb-4" /><Skel className="h-24 w-full" /></div>
+        <div className="bg-gray-100 rounded-xl border border-gray-200 p-5"><Skel className="h-4 w-28 mb-4" /><div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skel key={i} className="h-3 w-full" />)}</div></div>
       </div>
     </div>
   )
@@ -265,13 +265,13 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
   return (
     <div>
       <div className="flex items-center gap-4 mb-3 text-[11px]">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-300">Visitors</span><span className="text-gray-400">({totalVisitors})</span></span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full bg-amber-400" /><span className="text-gray-300">Chats</span><span className="text-gray-400">({totalChats})</span></span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visitors</span><span className="text-gray-500">({totalVisitors})</span></span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full bg-amber-400" /><span className="text-gray-700">Chats</span><span className="text-gray-500">({totalChats})</span></span>
       </div>
       {totalVisitors === 0 && totalChats === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 text-center">
-          <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center mb-2 text-lg">📊</div>
-          <p className="text-xs text-gray-400">No activity in this period yet</p>
+          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-lg">📊</div>
+          <p className="text-xs text-gray-500">No activity in this period yet</p>
         </div>
       ) : (
         <div className="relative" style={{ height: 220 }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
@@ -288,7 +288,7 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
             </defs>
             {gridVals.map((gv, i) => (
               <g key={i}>
-                <line x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#ffffff" strokeOpacity={0.05} strokeWidth={1} strokeDasharray="3 4" />
+                <line x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#111827" strokeOpacity={0.06} strokeWidth={1} strokeDasharray="3 4" />
                 <text x={4} y={y(gv) + 3} fill="#6b7280" fontSize={9}>{gv}</text>
               </g>
             ))}
@@ -302,15 +302,15 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
           {/* Hover overlay: guide line, point dots, and an exact-value tooltip. */}
           {hover !== null && points[hover] && (
             <>
-              <div className="absolute top-0 bottom-0 w-px bg-white/10 pointer-events-none" style={{ left: pct(x(hover), W) }} />
-              <div className="absolute w-2.5 h-2.5 rounded-full border-2 border-gray-950 pointer-events-none" style={{ left: pct(x(hover), W), top: pct(y(points[hover].visitors), H), transform: 'translate(-50%,-50%)', backgroundColor: accent }} />
-              <div className="absolute w-2.5 h-2.5 rounded-full border-2 border-gray-950 bg-amber-400 pointer-events-none" style={{ left: pct(x(hover), W), top: pct(y(points[hover].chats), H), transform: 'translate(-50%,-50%)' }} />
+              <div className="absolute top-0 bottom-0 w-px bg-gray-900/10 pointer-events-none" style={{ left: pct(x(hover), W) }} />
+              <div className="absolute w-2.5 h-2.5 rounded-full border-2 border-white pointer-events-none" style={{ left: pct(x(hover), W), top: pct(y(points[hover].visitors), H), transform: 'translate(-50%,-50%)', backgroundColor: accent }} />
+              <div className="absolute w-2.5 h-2.5 rounded-full border-2 border-white bg-amber-400 pointer-events-none" style={{ left: pct(x(hover), W), top: pct(y(points[hover].chats), H), transform: 'translate(-50%,-50%)' }} />
               <div className="absolute z-10 pointer-events-none -translate-x-1/2 -translate-y-full mb-2"
                 style={{ left: `min(max(${pct(x(hover), W)}, 56px), calc(100% - 56px))`, top: pct(Math.min(y(points[hover].visitors), y(points[hover].chats)), H) }}>
-                <div className="mb-2 rounded-lg border border-gray-700 bg-gray-900/95 shadow-xl px-2.5 py-1.5 backdrop-blur">
-                  <p className="text-[10px] text-gray-400 mb-0.5 whitespace-nowrap">{points[hover].label}</p>
-                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-300">Visitors</span><span className="font-semibold text-white ml-auto pl-2">{points[hover].visitors}</span></p>
-                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="text-gray-300">Chats</span><span className="font-semibold text-white ml-auto pl-2">{points[hover].chats}</span></p>
+                <div className="mb-2 rounded-lg border border-gray-300 bg-white/95 shadow-xl px-2.5 py-1.5 backdrop-blur">
+                  <p className="text-[10px] text-gray-500 mb-0.5 whitespace-nowrap">{points[hover].label}</p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visitors</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].visitors}</span></p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="text-gray-700">Chats</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].chats}</span></p>
                 </div>
               </div>
             </>
@@ -1105,17 +1105,17 @@ export default function Dashboard() {
   // ── Render ─────────────────────────────────────────────────────────────────
   if (!authReady) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center gap-3 text-gray-400 text-sm">
-        <div className="w-4 h-4 border-2 border-gray-600 border-t-gray-300 rounded-full animate-spin" />
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center gap-3 text-gray-500 text-sm">
+        <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-300 rounded-full animate-spin" />
         Loading dashboard…
       </div>
     )
   }
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
+    <div className="min-h-screen bg-gray-100 text-gray-900">
 
       {/* ── Header ── */}
-      <div className="border-b border-gray-800/80 bg-gray-950/95 backdrop-blur px-5 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div className="border-b border-gray-200 bg-white/95 backdrop-blur px-5 py-3 flex items-center justify-between sticky top-0 z-10">
         {/* Logo + title double as a "home" button back to Overview. */}
         <button onClick={() => setTab('overview')} title="Go to Overview"
           className="flex items-center gap-3 text-left focus:outline-none group cursor-pointer">
@@ -1123,45 +1123,45 @@ export default function Dashboard() {
             <svg viewBox="0 0 24 24" className="w-4.5 h-4.5 fill-white w-5 h-5"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
           </div>
           <div>
-            <h1 className="text-base font-bold text-white leading-tight group-hover:text-gray-200">{dashTitle}</h1>
-            <p className="text-gray-400 text-[11px] flex items-center gap-1.5">
+            <h1 className="text-base font-bold text-gray-900 leading-tight group-hover:text-gray-700">{dashTitle}</h1>
+            <p className="text-gray-500 text-[11px] flex items-center gap-1.5">
               {userEmail}
-              <span className={`px-1.5 py-px rounded-full text-[9px] font-semibold uppercase tracking-wide ${userRole === 'admin' ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-700 text-gray-400'}`}>{userRole}</span>
+              <span className={`px-1.5 py-px rounded-full text-[9px] font-semibold uppercase tracking-wide ${userRole === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-500'}`}>{userRole}</span>
             </p>
           </div>
         </button>
         <div className="flex items-center gap-2">
-          <div className="flex gap-0.5 bg-gray-900 p-1 rounded-lg border border-gray-800">
-            <button onClick={() => setTab('overview')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'overview' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>Overview</button>
-            <button onClick={() => setTab('conversations')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'conversations' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+          <div className="flex gap-0.5 bg-gray-100 p-1 rounded-lg border border-gray-200">
+            <button onClick={() => setTab('overview')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'overview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Overview</button>
+            <button onClick={() => setTab('conversations')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'conversations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Conversations
               {roleSessions.length > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleSessions.length}</span>}
             </button>
-            <button onClick={() => setTab('visitors')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'visitors' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+            <button onClick={() => setTab('visitors')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'visitors' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Visitors
               {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
             </button>
             {hasTrackedSite && (
-              <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+              <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                 Billing
               </button>
             )}
             {userRole === 'admin' && (
-              <button onClick={() => setTab('performance')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'performance' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+              <button onClick={() => setTab('performance')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'performance' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                 Performance
               </button>
             )}
           </div>
           <button onClick={toggleSound} title={soundOn ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting; click to mute' : 'Sound off — click to unmute'}
-            className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-900 text-gray-200 border-gray-800 hover:bg-gray-800' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-gray-300'}`}>
+            className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200' : 'bg-gray-100 text-gray-500 border-gray-200 hover:text-gray-600'}`}>
             {soundOn ? '🔔' : '🔕'}
           </button>
           {userRole === 'admin' && (
-            <a href="/members" className="px-3 py-1.5 text-xs text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg transition-colors flex items-center gap-1.5">
+            <a href="/members" className="px-3 py-1.5 text-xs text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors flex items-center gap-1.5">
               👥 Members
             </a>
           )}
-          <button onClick={handleLogout} className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg transition-colors">
+          <button onClick={handleLogout} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors">
             Sign out
           </button>
         </div>
@@ -1177,30 +1177,30 @@ export default function Dashboard() {
               {/* Stats row */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 {[
-                  { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-500/10 to-blue-600/5', border: 'border-blue-500/20' },
-                  { label: 'Total Leads', value: roleLeads.length, icon: '👥', color: 'from-green-500/10 to-green-600/5', border: 'border-green-500/20' },
-                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-500/10 to-purple-600/5', border: 'border-purple-500/20' },
-                  { label: "Today's Leads", value: todayLeads, icon: '📅', color: 'from-orange-500/10 to-orange-600/5', border: 'border-orange-500/20' },
+                  { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-100 to-blue-50', border: 'border-blue-200' },
+                  { label: 'Total Leads', value: roleLeads.length, icon: '👥', color: 'from-green-100 to-green-50', border: 'border-green-200' },
+                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-100 to-purple-50', border: 'border-purple-200' },
+                  { label: "Today's Leads", value: todayLeads, icon: '📅', color: 'from-orange-100 to-orange-50', border: 'border-orange-200' },
                   { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20' },
                 ].map((s) => (
-                  <div key={s.label} className={`group bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${s.border} bg-gray-900 transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-600/60 hover:shadow-lg hover:shadow-black/20`}>
+                  <div key={s.label} className={`group bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${s.border} bg-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-400 hover:shadow-lg hover:shadow-black/20`}>
                     <div className="flex items-center justify-between mb-3">
-                      <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
+                      <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
                       <span className="text-lg opacity-80 group-hover:opacity-100 transition-opacity">{s.icon}</span>
                     </div>
-                    <p className="text-[2.5rem] leading-none font-extrabold text-white tracking-tight tabular-nums">{s.value}</p>
+                    <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tracking-tight tabular-nums">{s.value}</p>
                   </div>
                 ))}
               </div>
 
               {/* Analytics over time */}
-              <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 mb-6">
+              <div className="bg-gray-100 rounded-xl border border-gray-200 p-5 mb-6">
                 <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                  <h2 className="text-sm font-semibold text-white">Visitors &amp; Chats Over Time</h2>
-                  <div className="flex gap-0.5 bg-gray-800/60 p-1 rounded-lg border border-gray-700/60">
+                  <h2 className="text-sm font-semibold text-gray-900">Visitors &amp; Chats Over Time</h2>
+                  <div className="flex gap-0.5 bg-white p-1 rounded-lg border border-gray-300">
                     {RANGES.map((r) => (
                       <button key={r.key} onClick={() => setAnalyticsRange(r.key)}
-                        className={`px-3 py-1 rounded-md text-[11px] font-medium transition-all ${analyticsRange === r.key ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+                        className={`px-3 py-1 rounded-md text-[11px] font-medium transition-all ${analyticsRange === r.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                         {r.label}
                       </button>
                     ))}
@@ -1212,10 +1212,10 @@ export default function Dashboard() {
               {/* Chart + Sites row */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 {/* Bar chart */}
-                <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+                <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-semibold text-white">Leads — Last 7 Days</h2>
-                    <span className="text-xs text-gray-400">{roleLeads.length} total</span>
+                    <h2 className="text-sm font-semibold text-gray-900">Leads — Last 7 Days</h2>
+                    <span className="text-xs text-gray-500">{roleLeads.length} total</span>
                   </div>
                   <div className="flex items-end gap-2 h-24">
                     {chartDays.map((day) => {
@@ -1223,33 +1223,33 @@ export default function Dashboard() {
                       const isToday = day.key === todayStr
                       return (
                         <div key={day.key} className="flex-1 flex flex-col items-center gap-1">
-                          {day.count > 0 && <span className="text-[10px] text-gray-400">{day.count}</span>}
+                          {day.count > 0 && <span className="text-[10px] text-gray-500">{day.count}</span>}
                           <div className="w-full flex items-end" style={{ height: '72px' }}>
                             <div
                               className={`w-full rounded-t-md transition-all ${isToday ? 'opacity-100' : 'opacity-60'}`}
                               style={{
                                 height: `${Math.max(pct, day.count > 0 ? 8 : 2)}%`,
                                 minHeight: day.count > 0 ? '6px' : '2px',
-                                backgroundColor: isToday ? accentColor : '#374151',
+                                backgroundColor: isToday ? accentColor : '#d1d5db',
                               }}
                             />
                           </div>
-                          <span className={`text-[10px] ${isToday ? 'text-white font-semibold' : 'text-gray-400'}`}>{day.label}</span>
+                          <span className={`text-[10px] ${isToday ? 'text-gray-900 font-semibold' : 'text-gray-500'}`}>{day.label}</span>
                         </div>
                       )
                     })}
                   </div>
                   {roleLeads.length === 0 && (
-                    <p className="text-xs text-gray-400 text-center mt-2">No leads captured yet</p>
+                    <p className="text-xs text-gray-500 text-center mt-2">No leads captured yet</p>
                   )}
                 </div>
 
                 {/* Quick stats per site */}
-                <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
-                  <h2 className="text-sm font-semibold text-white mb-4">Leads by Site</h2>
+                <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                  <h2 className="text-sm font-semibold text-gray-900 mb-4">Leads by Site</h2>
                   <div className="space-y-2.5">
                     {roleSites.length === 0 ? (
-                      <p className="text-xs text-gray-400">No sites configured</p>
+                      <p className="text-xs text-gray-500">No sites configured</p>
                     ) : roleSites.map((site) => {
                       const count = roleLeads.filter(l => l.site_id === site.site_id).length
                       const pct = roleLeads.length > 0 ? Math.round((count / roleLeads.length) * 100) : 0
@@ -1257,10 +1257,10 @@ export default function Dashboard() {
                       return (
                         <div key={site.site_id}>
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-gray-300 truncate">{site.name}</span>
-                            <span className="text-xs text-gray-400 shrink-0 ml-2">{count} leads</span>
+                            <span className="text-xs text-gray-700 truncate">{site.name}</span>
+                            <span className="text-xs text-gray-500 shrink-0 ml-2">{count} leads</span>
                           </div>
-                          <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                          <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
                             <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent }} />
                           </div>
                         </div>
@@ -1272,14 +1272,14 @@ export default function Dashboard() {
 
               {/* Site cards */}
               <div className="mb-6">
-                <h2 className="text-sm font-semibold text-white mb-3">Configured Sites</h2>
+                <h2 className="text-sm font-semibold text-gray-900 mb-3">Configured Sites</h2>
                 <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
                   {roleSites.map((site) => {
                     const accent = SITE_ACCENT[site.site_id] ?? site.primary_color
                     const url = SITE_URLS[site.site_id]
                     const count = roleLeads.filter((l) => l.site_id === site.site_id).length
                     return (
-                      <div key={site.site_id} className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-700 hover:shadow-lg hover:shadow-black/20 group">
+                      <div key={site.site_id} className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-lg hover:shadow-black/20 group">
                         <div className="h-1" style={{ backgroundColor: accent }} />
                         <div className="p-4">
                           <div className="flex items-center gap-2.5 mb-3">
@@ -1287,19 +1287,19 @@ export default function Dashboard() {
                               {site.bot_name?.[0]?.toUpperCase() ?? 'B'}
                             </div>
                             <div className="min-w-0">
-                              <p className="font-semibold text-white text-sm truncate">{site.name}</p>
-                              <p className="text-gray-400 text-[11px] truncate">{site.bot_name}</p>
+                              <p className="font-semibold text-gray-900 text-sm truncate">{site.name}</p>
+                              <p className="text-gray-500 text-[11px] truncate">{site.bot_name}</p>
                             </div>
                           </div>
-                          <div className="flex items-center justify-between pt-2 border-t border-gray-800/60">
+                          <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                             <span className="text-xs font-medium" style={{ color: accent }}>{count} lead{count !== 1 ? 's' : ''}</span>
                             {url ? (
                               <a href={`https://${url}`} target="_blank" rel="noopener noreferrer"
-                                className="text-[11px] text-gray-400 hover:text-blue-400 transition-colors truncate max-w-[120px]" title={url}>
+                                className="text-[11px] text-gray-500 hover:text-blue-700 transition-colors truncate max-w-[120px]" title={url}>
                                 {url}
                               </a>
                             ) : (
-                              <span className="text-[11px] text-gray-400 font-mono">{site.site_id}</span>
+                              <span className="text-[11px] text-gray-500 font-mono">{site.site_id}</span>
                             )}
                           </div>
                         </div>
@@ -1311,14 +1311,14 @@ export default function Dashboard() {
 
               {/* Leads table */}
               <div>
-                <h2 className="text-sm font-semibold text-white mb-3">Recent Leads</h2>
-                <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+                <h2 className="text-sm font-semibold text-gray-900 mb-3">Recent Leads</h2>
+                <div className="bg-gray-100 rounded-xl border border-gray-200 overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[1100px]">
                       <thead>
-                        <tr className="border-b border-gray-800 bg-gray-800/40">
+                        <tr className="border-b border-gray-200 bg-gray-100">
                           {['Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Budget', 'Timeline', 'Site', 'Date', ''].map((h) => (
-                            <th key={h} className="text-left px-3 py-2.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
+                            <th key={h} className="text-left px-3 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -1327,9 +1327,9 @@ export default function Dashboard() {
                           <tr>
                             <td colSpan={12} className="text-center py-8">
                               <div className="flex flex-col items-center">
-                                <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">📭</div>
-                                <p className="text-gray-300 text-sm font-medium">No leads captured yet</p>
-                                <p className="text-gray-400 text-xs mt-0.5">Leads appear here when the bot qualifies a visitor</p>
+                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📭</div>
+                                <p className="text-gray-700 text-sm font-medium">No leads captured yet</p>
+                                <p className="text-gray-500 text-xs mt-0.5">Leads appear here when the bot qualifies a visitor</p>
                               </div>
                             </td>
                           </tr>
@@ -1350,46 +1350,46 @@ export default function Dashboard() {
                           const accent = SITE_ACCENT[lead.site_id] ?? '#6b7280'
 
                           if (isEditing) return (
-                            <tr key={lead.id} className="border-b border-gray-800/50 bg-gray-800/40">
-                              <td className="px-3 py-2">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : score >= 4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-gray-700 text-gray-400'}`}>{score}/7</span> : <span className="text-gray-400 text-xs">-</span>}</td>
-                              <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
-                              <td className="px-3 py-2"><input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-blue-300 w-full min-w-[140px] focus:outline-none focus:border-blue-500" placeholder="Email" /></td>
-                              <td className="px-3 py-2"><input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-full min-w-[100px] focus:outline-none focus:border-blue-500" placeholder="Phone" /></td>
-                              <td className="px-3 py-2" colSpan={5}><input value={editForm.message} onChange={(e) => setEditForm({ ...editForm, message: e.target.value })} className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-full focus:outline-none focus:border-blue-500" placeholder="Message" /></td>
-                              <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{siteName}</td>
-                              <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{lead.created_at ? formatDateTime(lead.created_at) : '-'}</td>
-                              <td className="px-3 py-2"><div className="flex gap-1"><button onClick={() => saveEditLead(lead.id)} disabled={savingEdit} className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded transition-colors disabled:opacity-50">{savingEdit ? '…' : 'Save'}</button><button onClick={() => setEditingLeadId(null)} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors">Cancel</button></div></td>
+                            <tr key={lead.id} className="border-b border-gray-200 bg-gray-100">
+                              <td className="px-3 py-2">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
+                              <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
+                              <td className="px-3 py-2"><input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-blue-700 w-full min-w-[140px] focus:outline-none focus:border-blue-500" placeholder="Email" /></td>
+                              <td className="px-3 py-2"><input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-700 w-full min-w-[100px] focus:outline-none focus:border-blue-500" placeholder="Phone" /></td>
+                              <td className="px-3 py-2" colSpan={5}><input value={editForm.message} onChange={(e) => setEditForm({ ...editForm, message: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-700 w-full focus:outline-none focus:border-blue-500" placeholder="Message" /></td>
+                              <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{siteName}</td>
+                              <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? formatDateTime(lead.created_at) : '-'}</td>
+                              <td className="px-3 py-2"><div className="flex gap-1"><button onClick={() => saveEditLead(lead.id)} disabled={savingEdit} className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded transition-colors disabled:opacity-50">{savingEdit ? '…' : 'Save'}</button><button onClick={() => setEditingLeadId(null)} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded transition-colors">Cancel</button></div></td>
                             </tr>
                           )
 
                           return (
                             <tr key={lead.id} onClick={() => openLeadConversation(lead)} title="Open this lead's conversation"
-                              className="group border-b border-gray-800/40 hover:bg-gray-800/40 transition-colors cursor-pointer">
-                              <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : score >= 4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-gray-700 text-gray-400'}`}>{score}/7</span> : <span className="text-gray-400 text-xs">-</span>}</td>
-                              <td className="px-3 py-3 text-white font-medium whitespace-nowrap">{lead.name || '-'}</td>
-                              <td className="px-3 py-3 text-blue-400 whitespace-nowrap">{lead.email || '-'}</td>
-                              <td className="px-3 py-3 text-gray-300 whitespace-nowrap">{lead.phone || '-'}</td>
-                              <td className="px-3 py-3 text-gray-400 max-w-[150px] truncate" title={cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined}>{cleanLeadMessage(lead.message)}</td>
-                              <td className="px-3 py-3 text-gray-300 max-w-[120px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
-                              <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{quantity}</td>
-                              <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{budget}</td>
-                              <td className="px-3 py-3 text-gray-400 whitespace-nowrap">{timeline}</td>
+                              className="group border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
+                              <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
+                              <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">{lead.name || '-'}</td>
+                              <td className="px-3 py-3 text-blue-600 whitespace-nowrap">{lead.email || '-'}</td>
+                              <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{lead.phone || '-'}</td>
+                              <td className="px-3 py-3 text-gray-500 max-w-[150px] truncate" title={cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined}>{cleanLeadMessage(lead.message)}</td>
+                              <td className="px-3 py-3 text-gray-700 max-w-[120px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
+                              <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{quantity}</td>
+                              <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{budget}</td>
+                              <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{timeline}</td>
                               <td className="px-3 py-3 whitespace-nowrap">
                                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${accent}20`, color: accent }}>{siteName}</span>
                               </td>
-                              <td className="px-3 py-3 text-gray-400 text-xs whitespace-nowrap">{lead.created_at ? formatDateTime(lead.created_at) : '-'}</td>
+                              <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? formatDateTime(lead.created_at) : '-'}</td>
                               <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                                 {isConfirmingDelete ? (
                                   <div className="flex items-center gap-1">
-                                    <span className="text-xs text-gray-300">Delete?</span>
-                                    <button onClick={() => deleteLead(lead.id)} disabled={deletingLead} className="text-xs text-red-400 hover:text-red-300 font-semibold">Yes</button>
-                                    <span className="text-xs text-gray-400 mx-0.5">·</span>
-                                    <button onClick={() => setConfirmLeadDeleteId(null)} className="text-xs text-gray-400 hover:text-gray-300">No</button>
+                                    <span className="text-xs text-gray-700">Delete?</span>
+                                    <button onClick={() => deleteLead(lead.id)} disabled={deletingLead} className="text-xs text-red-600 hover:text-red-700 font-semibold">Yes</button>
+                                    <span className="text-xs text-gray-500 mx-0.5">·</span>
+                                    <button onClick={() => setConfirmLeadDeleteId(null)} className="text-xs text-gray-500 hover:text-gray-600">No</button>
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-gray-700/60 rounded-lg transition-colors" title="Edit">✏️</button>
-                                    <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700/60 rounded-lg transition-colors" title="Delete">🗑</button>
+                                    <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit">✏️</button>
+                                    <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete">🗑</button>
                                   </div>
                                 )}
                               </td>
@@ -1414,50 +1414,50 @@ export default function Dashboard() {
               The old sessions list moved out (past visitors/chats live in the
               Visitors tab); this page keeps live visitors so an agent can grab
               someone the moment they're on a site. */}
-          <div className="w-[300px] flex-shrink-0 border-r border-gray-800/80 flex flex-col bg-gray-900/30">
-            <div className="px-3 py-2 flex items-center gap-2 bg-green-950/30 flex-shrink-0 border-b border-gray-800">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-green-400 ring-2 ring-green-400/30 animate-pulse' : 'bg-gray-600'}`} />
-              <p className={`text-[11px] font-semibold uppercase tracking-wider ${roleVisitors.length > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+          <div className="w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col bg-gray-50">
+            <div className="px-3 py-2 flex items-center gap-2 bg-green-50 flex-shrink-0 border-b border-gray-200">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-green-500 ring-2 ring-green-200 animate-pulse' : 'bg-gray-300'}`} />
+              <p className={`text-[11px] font-semibold uppercase tracking-wider ${roleVisitors.length > 0 ? 'text-green-600' : 'text-gray-500'}`}>
                 {roleVisitors.length > 0 ? `${roleVisitors.length} Live ${roleVisitors.length === 1 ? 'Visitor' : 'Visitors'}` : 'No live visitors'}
               </p>
             </div>
             <div className="flex-1 overflow-y-auto">
               {roleVisitors.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12 animate-in">
-                  <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">👀</div>
-                  <p className="text-sm text-gray-300 font-medium">Nobody on your sites right now</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Live visitors appear here the moment they land. Past visitors &amp; chats are in the Visitors tab.</p>
+                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👀</div>
+                  <p className="text-sm text-gray-700 font-medium">Nobody on your sites right now</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Live visitors appear here the moment they land. Past visitors &amp; chats are in the Visitors tab.</p>
                 </div>
               ) : roleVisitors.map((v) => {
                 const accent = SITE_ACCENT[v.site_id] ?? '#16a34a'
                 return (
                   <button key={v.session_id} onClick={() => openVisitorSession(v)}
-                    className="w-full text-left px-3 py-2 border-b border-gray-800/40 hover:bg-green-900/15 transition-colors flex items-start gap-2.5"
+                    className="w-full text-left px-3 py-2 border-b border-gray-100 hover:bg-green-50 transition-colors flex items-start gap-2.5"
                     style={{ borderLeft: `3px solid ${accent}` }}>
                     <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-gray-100 truncate">{v.site_name}</span>
+                        <span className="text-xs font-semibold text-gray-900 truncate">{v.site_name}</span>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {v.visits > 1 && (
-                            <span className="text-[9px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
+                            <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
                           )}
                           {/* The live list only ever contains visitors active within the
                               last 60s (server-filtered), so these are genuinely live. */}
-                          <span className="text-[10px] text-green-400 font-medium flex items-center gap-1 shrink-0" title={`Last activity ${timeAgo(v.last_seen)}`}>
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />active now
+                          <span className="text-[10px] text-green-600 font-medium flex items-center gap-1 shrink-0" title={`Last activity ${timeAgo(v.last_seen)}`}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />active now
                           </span>
                         </div>
                       </div>
                       {/* Currently viewing */}
-                      <div className="text-[11px] text-gray-300 truncate mt-0.5" title={v.page_url ?? undefined}>
-                        <span className="text-gray-400">Viewing:</span> {viewingLabel(v)}
+                      <div className="text-[11px] text-gray-700 truncate mt-0.5" title={v.page_url ?? undefined}>
+                        <span className="text-gray-500">Viewing:</span> {viewingLabel(v)}
                       </div>
                       {/* Location · referrer */}
                       <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                        {v.country && <span className="text-[11px] text-gray-400 truncate">{v.country}</span>}
-                        {v.country && <span className="text-[10px] text-gray-400 shrink-0">·</span>}
-                        <span className="text-[10px] text-gray-400 truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
+                        {v.country && <span className="text-[11px] text-gray-500 truncate">{v.country}</span>}
+                        {v.country && <span className="text-[10px] text-gray-500 shrink-0">·</span>}
+                        <span className="text-[10px] text-gray-500 truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
                       </div>
                       <div className="text-[10px] text-green-600 mt-0.5">on site {timeOnSite(v.created_at)}</div>
                     </div>
@@ -1472,32 +1472,32 @@ export default function Dashboard() {
             {!selectedSession ? (
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center px-8 max-w-xs animate-in">
-                  <div className="w-12 h-12 rounded-xl bg-gray-800/80 flex items-center justify-center mx-auto mb-3 border border-gray-700/80">
-                    <svg viewBox="0 0 24 24" className="w-6 h-6 fill-gray-600"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                  <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center mx-auto mb-3 border border-gray-200">
+                    <svg viewBox="0 0 24 24" className="w-6 h-6 fill-gray-300"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
                   </div>
-                  <p className="text-gray-300 font-medium text-sm mb-1">Select a conversation</p>
-                  <p className="text-gray-400 text-xs leading-relaxed">Click a live visitor on the left to open their chat, or find past visitors and chats in the Visitors tab.</p>
+                  <p className="text-gray-700 font-medium text-sm mb-1">Select a conversation</p>
+                  <p className="text-gray-500 text-xs leading-relaxed">Click a live visitor on the left to open their chat, or find past visitors and chats in the Visitors tab.</p>
                 </div>
               </div>
             ) : (
               <>
                 {/* Conversation header */}
-                <div className="px-5 py-3 border-b border-gray-800/80 bg-gray-900/40 flex items-center justify-between flex-shrink-0">
+                <div className="px-5 py-3 border-b border-gray-200 bg-white flex items-center justify-between flex-shrink-0">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-900 text-xs font-bold shrink-0"
                       style={{ backgroundColor: SITE_ACCENT[selectedSession.site_id] ?? accentColor }}>
                       {selectedSession.site_name[0]?.toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <p className="font-semibold text-white text-sm">{selectedSession.site_name}</p>
-                      <p className="text-[10px] text-gray-400 font-mono truncate">{selectedSession.session_id}</p>
+                      <p className="font-semibold text-gray-900 text-sm">{selectedSession.site_name}</p>
+                      <p className="text-[10px] text-gray-500 font-mono truncate">{selectedSession.session_id}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <button onClick={() => setTranslateOn((v) => !v)}
                       title="Show English translations of non-English visitor messages"
                       className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors flex items-center gap-1.5 ${
-                        translateOn ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'
+                        translateOn ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-gray-200 text-gray-500 border-gray-300 hover:text-gray-700'
                       }`}>
                       🌐 Translate{translateOn ? ' on' : ''}
                     </button>
@@ -1505,17 +1505,17 @@ export default function Dashboard() {
                         bot/AI wording should appear anywhere — show nothing. */}
                     {!botGlobalOff && (
                       <>
-                        <span className="w-px h-5 bg-gray-800" />
-                        <span className={`text-xs font-medium ${botEffectivelyActive ? 'text-blue-400' : 'text-gray-400'}`}>Bot</span>
+                        <span className="w-px h-5 bg-gray-200" />
+                        <span className={`text-xs font-medium ${botEffectivelyActive ? 'text-blue-600' : 'text-gray-500'}`}>Bot</span>
                         <button onClick={toggleMode} disabled={togglingMode}
                           className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${botEffectivelyActive ? 'bg-blue-600' : 'bg-orange-500'}`}>
                           <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${botEffectivelyActive ? 'translate-x-0' : 'translate-x-5'}`} />
                         </button>
-                        <span className={`text-xs font-medium ${!botEffectivelyActive ? 'text-orange-400' : 'text-gray-400'}`}>Human</span>
+                        <span className={`text-xs font-medium ${!botEffectivelyActive ? 'text-orange-600' : 'text-gray-500'}`}>Human</span>
                         {scheduledBotOff && selectedSession.mode === 'bot' ? (
-                          <span className="text-[10px] bg-indigo-500/15 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/25" title="The packaging bot is off on this schedule — replies are human-only right now">🌙 Bot off (scheduled)</span>
+                          <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200" title="The packaging bot is off on this schedule — replies are human-only right now">🌙 Bot off (scheduled)</span>
                         ) : selectedSession.mode === 'human' ? (
-                          <span className="text-[10px] bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded-full border border-orange-500/25">AI off</span>
+                          <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">AI off</span>
                         ) : null}
                       </>
                     )}
@@ -1524,10 +1524,10 @@ export default function Dashboard() {
 
                 {/* Messages area */}
                 <div ref={messagesScrollRef} onScroll={handleMessagesScroll}
-                  className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 bg-gray-950/50 space-y-1">
+                  className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 bg-gray-50 space-y-1">
                   {messageDates.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-center">
-                      <p className="text-gray-400 text-sm">No messages yet</p>
+                      <p className="text-gray-500 text-sm">No messages yet</p>
                     </div>
                   ) : messageDates.map((msg) => {
                     const isUser = msg.role === 'user'
@@ -1539,33 +1539,33 @@ export default function Dashboard() {
                       <div key={msg.id}>
                         {showDate && (
                           <div className="flex items-center gap-3 my-4">
-                            <div className="flex-1 h-px bg-gray-800" />
-                            <span className="text-[11px] text-gray-400 font-medium px-2">{dateLabel}</span>
-                            <div className="flex-1 h-px bg-gray-800" />
+                            <div className="flex-1 h-px bg-gray-200" />
+                            <span className="text-[11px] text-gray-500 font-medium px-2">{dateLabel}</span>
+                            <div className="flex-1 h-px bg-gray-200" />
                           </div>
                         )}
                         <div className={`flex flex-col mb-2 ${isUser ? 'items-end' : 'items-start'}`}>
                           <div className="flex items-center gap-1.5 mb-1 px-1">
-                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-400' : 'text-blue-400'}`}>{isAdmin ? '👤 Agent' : botGlobalOff ? '💬 Auto-reply' : '🤖 Bot'}</span>}
-                            {isUser && <span className="text-[11px] text-gray-400">Visitor</span>}
-                            <span className="text-[10px] text-gray-400">{formatTime(msg.created_at)}</span>
+                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-600' : 'text-blue-600'}`}>{isAdmin ? '👤 Agent' : botGlobalOff ? '💬 Auto-reply' : '🤖 Bot'}</span>}
+                            {isUser && <span className="text-[11px] text-gray-500">Visitor</span>}
+                            <span className="text-[10px] text-gray-500">{formatTime(msg.created_at)}</span>
                           </div>
                           {file ? (
                             <div className={`max-w-sm lg:max-w-md xl:max-w-lg rounded-2xl overflow-hidden shadow-sm border ${
-                              isUser ? 'border-gray-600/30 rounded-tr-sm' : isAdmin ? 'border-amber-700/30 rounded-tl-sm' : 'border-slate-700/30 rounded-tl-sm'
+                              isUser ? 'border-gray-300 rounded-tr-sm' : isAdmin ? 'border-amber-300 rounded-tl-sm' : 'border-gray-200 rounded-tl-sm'
                             }`}>
                               {isImageMime(file.mime) ? (
                                 <a href={file.url} target="_blank" rel="noopener noreferrer" title={file.name}>
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src={file.url} alt={file.name} className="block max-h-64 w-auto object-contain bg-gray-900" />
+                                  <img src={file.url} alt={file.name} className="block max-h-64 w-auto object-contain bg-gray-100" />
                                 </a>
                               ) : (
                                 <a href={file.url} target="_blank" rel="noopener noreferrer"
-                                  className="flex items-center gap-2.5 px-4 py-3 bg-slate-800/80 hover:bg-slate-700/80 transition-colors">
+                                  className="flex items-center gap-2.5 px-4 py-3 bg-gray-100 hover:bg-gray-200 transition-colors">
                                   <span className="text-2xl shrink-0">📄</span>
                                   <span className="min-w-0">
-                                    <span className="block text-sm text-blue-300 underline truncate max-w-[200px]">{file.name}</span>
-                                    <span className="block text-[10px] text-gray-400">{file.size ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ` : ''}Download</span>
+                                    <span className="block text-sm text-blue-700 underline truncate max-w-[200px]">{file.name}</span>
+                                    <span className="block text-[10px] text-gray-500">{file.size ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ` : ''}Download</span>
                                   </span>
                                 </a>
                               )}
@@ -1573,10 +1573,10 @@ export default function Dashboard() {
                           ) : (
                             <div className={`max-w-sm lg:max-w-md xl:max-w-lg px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm ${
                               isUser
-                                ? 'bg-gray-700/80 text-gray-100 rounded-tr-sm border border-gray-600/30'
+                                ? 'bg-gray-200 text-gray-900 rounded-tr-sm border border-gray-300'
                                 : isAdmin
-                                ? 'bg-amber-900/40 text-amber-100 rounded-tl-sm border border-amber-700/30'
-                                : 'bg-slate-800/80 text-gray-100 rounded-tl-sm border border-slate-700/30'
+                                ? 'bg-amber-100 text-amber-900 rounded-tl-sm border border-amber-300'
+                                : 'bg-gray-100 text-gray-900 rounded-tl-sm border border-gray-200'
                             }`}>
                               {msg.message}
                             </div>
@@ -1587,12 +1587,12 @@ export default function Dashboard() {
                             if (!a || a.isEnglish) return null
                             return (
                               <div className="mt-1 flex flex-col items-end gap-1 max-w-sm lg:max-w-md xl:max-w-lg">
-                                <span className="text-[10px] text-indigo-300/90 bg-indigo-500/10 border border-indigo-500/20 rounded-full px-2 py-0.5">
+                                <span className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5">
                                   Detected: {a.langName}
                                 </span>
                                 {translateOn && (
-                                  <div className="px-3 py-2 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap bg-indigo-950/40 border border-indigo-500/20 text-indigo-50">
-                                    <span className="block text-[10px] uppercase tracking-wide text-indigo-300 mb-0.5">English</span>
+                                  <div className="px-3 py-2 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap bg-indigo-50 border border-indigo-200 text-indigo-950">
+                                    <span className="block text-[10px] uppercase tracking-wide text-indigo-700 mb-0.5">English</span>
                                     {a.english}
                                   </div>
                                 )}
@@ -1605,7 +1605,7 @@ export default function Dashboard() {
                   })}
                   {sending && (
                     <div className="flex items-start gap-2 mb-2">
-                      <div className="bg-slate-800/80 border border-slate-700/30 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1.5">
+                      <div className="bg-gray-100 border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -1615,21 +1615,21 @@ export default function Dashboard() {
                 </div>
 
                 {/* Reply input */}
-                <div className="px-4 py-3 border-t border-gray-800/80 bg-gray-900/60 flex-shrink-0">
+                <div className="px-4 py-3 border-t border-gray-200 bg-white flex-shrink-0">
                   {botEffectivelyActive ? (
-                    <p className="text-[11px] text-blue-300 mb-2 flex items-center gap-1.5">
+                    <p className="text-[11px] text-blue-700 mb-2 flex items-center gap-1.5">
                       <span>🤖</span> Bot is active — toggle to Human to reply, or send a file to take over
                     </p>
                   ) : !botGlobalOff && scheduledBotOff && selectedSession.mode === 'bot' ? (
-                    <p className="text-[11px] text-indigo-300 mb-2 flex items-center gap-1.5">
+                    <p className="text-[11px] text-indigo-700 mb-2 flex items-center gap-1.5">
                       <span>🌙</span> Bot is off (scheduled) — human only. The bot won&apos;t reply right now; type to respond.
                     </p>
                   ) : null}
                   {uploadError && (
-                    <p className="text-[11px] text-red-400 mb-2">{uploadError}</p>
+                    <p className="text-[11px] text-red-600 mb-2">{uploadError}</p>
                   )}
                   {visitorLang && (
-                    <label className="flex items-center gap-1.5 mb-2 text-[11px] text-indigo-300 cursor-pointer select-none w-fit">
+                    <label className="flex items-center gap-1.5 mb-2 text-[11px] text-indigo-700 cursor-pointer select-none w-fit">
                       <input type="checkbox" checked={translateOut} onChange={(e) => setTranslateOut(e.target.checked)}
                         className="rounded accent-indigo-500 cursor-pointer" />
                       🌐 Translate my reply to {visitorLang} before sending
@@ -1643,7 +1643,7 @@ export default function Dashboard() {
                       onClick={() => replyFileRef.current?.click()}
                       disabled={uploadingFile}
                       title="Attach a file"
-                      className="px-3 py-2 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl text-sm hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-40 self-end"
+                      className="px-3 py-2 bg-gray-200 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 self-end"
                     >
                       {uploadingFile ? '…' : '📎'}
                     </button>
@@ -1654,7 +1654,7 @@ export default function Dashboard() {
                       placeholder={botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
                       disabled={botEffectivelyActive || sending}
                       rows={2}
-                      className="flex-1 bg-gray-800/60 border border-gray-700/60 rounded-xl px-3 py-2.5 text-sm text-gray-100 placeholder-gray-400 resize-none focus:outline-none focus:border-orange-500/60 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      className="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:border-orange-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     />
                     <button
                       onClick={sendReply}
@@ -1671,18 +1671,18 @@ export default function Dashboard() {
 
           {/* ── Visitor detail panel ── */}
           {selectedSession && (
-            <aside className="w-[320px] xl:w-[360px] flex-shrink-0 border-l border-gray-800/80 bg-gray-900/30 overflow-y-auto">
-              <div className="px-4 py-3 border-b border-gray-800/80 bg-gray-900/40 sticky top-0 backdrop-blur z-10 flex items-center gap-2">
+            <aside className="w-[320px] xl:w-[360px] flex-shrink-0 border-l border-gray-200 bg-gray-50 overflow-y-auto">
+              <div className="px-4 py-3 border-b border-gray-200 bg-white sticky top-0 backdrop-blur z-10 flex items-center gap-2">
                 <span className="text-base">{deviceIcon(visitorDetail?.technical.device_type ?? null)}</span>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white leading-tight">Visitor details</p>
-                  <p className="text-[10px] text-gray-400 font-mono truncate">{selectedSession.session_id}</p>
+                  <p className="text-sm font-semibold text-gray-900 leading-tight">Visitor details</p>
+                  <p className="text-[10px] text-gray-500 font-mono truncate">{selectedSession.session_id}</p>
                 </div>
               </div>
 
               {detailLoading && !visitorDetail ? (
-                <div className="flex items-center gap-2 px-4 py-8 text-gray-400 text-xs">
-                  <div className="w-3.5 h-3.5 border-2 border-gray-600 border-t-gray-300 rounded-full animate-spin" />
+                <div className="flex items-center gap-2 px-4 py-8 text-gray-500 text-xs">
+                  <div className="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-300 rounded-full animate-spin" />
                   Loading visitor…
                 </div>
               ) : (
@@ -1690,15 +1690,15 @@ export default function Dashboard() {
 
                   {/* Tags */}
                   <section>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-300 mb-2">Tags</h3>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-2">Tags</h3>
                     {tags.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mb-2">
                         {tags.map((t) => (
-                          <span key={t} className="group/tag inline-flex items-center gap-1 text-[11px] pl-2 pr-1 py-0.5 rounded-full text-white"
+                          <span key={t} className="group/tag inline-flex items-center gap-1 text-[11px] pl-2 pr-1 py-0.5 rounded-full text-gray-900"
                             style={{ backgroundColor: `${accentColor}cc` }}>
                             {t}
                             <button onClick={() => removeTag(t)} title="Remove tag"
-                              className="w-3.5 h-3.5 inline-flex items-center justify-center rounded-full hover:bg-black/30 text-white/80 hover:text-white leading-none">×</button>
+                              className="w-3.5 h-3.5 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-900 leading-none">×</button>
                           </span>
                         ))}
                       </div>
@@ -1711,11 +1711,11 @@ export default function Dashboard() {
                         else if (e.key === 'Backspace' && !tagInput && tags.length) removeTag(tags[tags.length - 1])
                       }}
                       placeholder="Add a tag, press Enter…"
-                      className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-500" />
+                      className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400" />
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {['hot lead', 'got email', 'follow up', 'spam'].filter((q) => !tags.some((t) => t.toLowerCase() === q)).map((q) => (
                         <button key={q} onClick={() => addTag(q)}
-                          className="text-[10px] px-2 py-0.5 rounded-full bg-gray-800/60 border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors">
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-white border border-gray-300 text-gray-500 hover:text-gray-700 hover:border-gray-400 transition-colors">
                           + {q}
                         </button>
                       ))}
@@ -1724,43 +1724,43 @@ export default function Dashboard() {
 
                   {/* Contact (editable) */}
                   <section>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-300 mb-2">Contact</h3>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-2">Contact</h3>
                     <div className="space-y-2">
                       <input value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
                         placeholder="Name"
-                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-500" />
+                        className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400" />
                       <input value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
                         placeholder="Email" type="email"
-                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-500" />
+                        className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400" />
                       <input value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
                         placeholder="Phone"
-                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-500" />
+                        className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400" />
                       <textarea value={contactForm.notes} onChange={(e) => setContactForm({ ...contactForm, notes: e.target.value })}
                         placeholder="Notes…" rows={3}
-                        className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-2 text-xs text-gray-100 placeholder-gray-400 resize-none focus:outline-none focus:border-gray-500" />
+                        className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:border-gray-400" />
                       <div className="flex items-center gap-2">
                         <button onClick={saveContact} disabled={savingContact}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-white disabled:opacity-50 transition-colors"
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-900 disabled:opacity-50 transition-colors"
                           style={{ backgroundColor: accentColor }}>
                           {savingContact ? 'Saving…' : 'Save contact'}
                         </button>
-                        {contactSaved && <span className="text-[11px] text-green-400">✓ Saved</span>}
+                        {contactSaved && <span className="text-[11px] text-green-600">✓ Saved</span>}
                       </div>
                     </div>
                   </section>
 
                   {/* Stats row */}
                   <section>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-300 mb-2">Activity</h3>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-2">Activity</h3>
                     <div className="grid grid-cols-3 gap-2">
                       {[
                         { label: 'Visits', value: visitorDetail?.stats.visits ?? '—' },
                         { label: 'Chats', value: visitorDetail?.stats.chats ?? '—' },
                         { label: 'On site', value: formatDuration(visitorDetail?.stats.first_seen ?? null, visitorDetail?.stats.last_seen ?? null) },
                       ].map((s) => (
-                        <div key={s.label} className="bg-gray-800/40 border border-gray-700/40 rounded-lg px-2 py-2.5 text-center">
-                          <p className="text-base font-bold text-white leading-tight">{s.value}</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">{s.label}</p>
+                        <div key={s.label} className="bg-gray-100 border border-gray-200 rounded-lg px-2 py-2.5 text-center">
+                          <p className="text-base font-bold text-gray-900 leading-tight">{s.value}</p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">{s.label}</p>
                         </div>
                       ))}
                     </div>
@@ -1768,20 +1768,20 @@ export default function Dashboard() {
 
                   {/* Visitor path */}
                   <section>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-300 mb-2">
-                      Visitor path {visitorDetail && visitorDetail.path.length > 0 && <span className="text-gray-400 normal-case font-normal">· {visitorDetail.path.length} page{visitorDetail.path.length !== 1 ? 's' : ''}</span>}
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-2">
+                      Visitor path {visitorDetail && visitorDetail.path.length > 0 && <span className="text-gray-500 normal-case font-normal">· {visitorDetail.path.length} page{visitorDetail.path.length !== 1 ? 's' : ''}</span>}
                     </h3>
                     {!visitorDetail || visitorDetail.path.length === 0 ? (
-                      <p className="text-xs text-gray-400">No page history captured yet</p>
+                      <p className="text-xs text-gray-500">No page history captured yet</p>
                     ) : (
-                      <ol className="relative border-l border-gray-700/60 ml-1.5 space-y-3">
+                      <ol className="relative border-l border-gray-300 ml-1.5 space-y-3">
                         {visitorDetail.path.map((p, i) => (
                           <li key={i} className="ml-3.5 relative">
                             <span className="absolute -left-[1.18rem] top-1 w-2 h-2 rounded-full" style={{ backgroundColor: accentColor }} />
-                            <p className="text-xs text-gray-200 leading-snug break-words" title={p.url ?? undefined}>{pageLabel(p)}</p>
+                            <p className="text-xs text-gray-800 leading-snug break-words" title={p.url ?? undefined}>{pageLabel(p)}</p>
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] text-gray-400">{i + 1}.</span>
-                              {p.at && <span className="text-[10px] text-gray-400">{formatDateTime(p.at)}</span>}
+                              <span className="text-[10px] text-gray-500">{i + 1}.</span>
+                              {p.at && <span className="text-[10px] text-gray-500">{formatDateTime(p.at)}</span>}
                             </div>
                           </li>
                         ))}
@@ -1791,7 +1791,7 @@ export default function Dashboard() {
 
                   {/* Technical info */}
                   <section>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-300 mb-2">Technical</h3>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-2">Technical</h3>
                     <dl className="space-y-1.5">
                       {[
                         { label: 'Location', value: [visitorDetail?.technical.country, visitorDetail?.technical.city].filter(Boolean).join(' · ') },
@@ -1802,8 +1802,8 @@ export default function Dashboard() {
                         { label: 'Referrer', value: visitorDetail ? cleanReferrer(visitorDetail.technical.referrer) : null },
                       ].map((row) => (
                         <div key={row.label} className="flex items-start justify-between gap-3">
-                          <dt className="text-[11px] text-gray-400 shrink-0">{row.label}</dt>
-                          <dd className="text-[11px] text-gray-200 text-right break-all">{row.value || '—'}</dd>
+                          <dt className="text-[11px] text-gray-500 shrink-0">{row.label}</dt>
+                          <dd className="text-[11px] text-gray-800 text-right break-all">{row.value || '—'}</dd>
                         </div>
                       ))}
                     </dl>
@@ -1826,16 +1826,16 @@ export default function Dashboard() {
           <div className="max-w-5xl mx-auto px-5 py-6 animate-in">
             <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
               <div>
-                <h2 className="text-lg font-bold text-white">Visitors</h2>
-                <p className="text-xs text-gray-400">Every widget session of the last 7 days — live and departed. {filtered.length} visitor{filtered.length !== 1 ? 's' : ''}{liveCount > 0 ? ` · ${liveCount} live now` : ''}</p>
+                <h2 className="text-lg font-bold text-gray-900">Visitors</h2>
+                <p className="text-xs text-gray-500">Every widget session of the last 7 days — live and departed. {filtered.length} visitor{filtered.length !== 1 ? 's' : ''}{liveCount > 0 ? ` · ${liveCount} live now` : ''}</p>
               </div>
               <div className="flex items-center gap-2">
                 <select value={histSiteFilter} onChange={(e) => setHistSiteFilter(e.target.value)}
-                  className="bg-gray-800/60 border border-gray-700/60 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
+                  className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
                   <option value="">All Sites</option>
                   {histSites.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                 </select>
-                <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
+                <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
                   <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistChatOnly(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
                   With chats only
                 </label>
@@ -1843,11 +1843,11 @@ export default function Dashboard() {
             </div>
 
             {!visitorHistoryLoaded ? (
-              <p className="text-sm text-gray-400 py-12 text-center">Loading visitors…</p>
+              <p className="text-sm text-gray-500 py-12 text-center">Loading visitors…</p>
             ) : filtered.length === 0 ? (
-              <p className="text-sm text-gray-400 py-12 text-center">No visitors in the last 7 days{histChatOnly ? ' with chats' : ''}.</p>
+              <p className="text-sm text-gray-500 py-12 text-center">No visitors in the last 7 days{histChatOnly ? ' with chats' : ''}.</p>
             ) : (
-              <div className="border border-gray-800/80 rounded-xl overflow-hidden bg-gray-900/30">
+              <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50">
                 {filtered.map((v) => {
                   const day = dateDividerLabel(v.created_at)
                   const showDay = day !== lastDay
@@ -1865,33 +1865,33 @@ export default function Dashboard() {
                   return (
                     <div key={v.session_id}>
                       {showDay && (
-                        <div className="px-4 py-1.5 bg-gray-900/80 border-b border-gray-800/60 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">{day}</div>
+                        <div className="px-4 py-1.5 bg-gray-100 border-b border-gray-200 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{day}</div>
                       )}
                       <div onClick={clickable ? open : undefined}
-                        className={`px-4 py-2.5 border-b border-gray-800/40 flex items-start gap-3 ${clickable ? 'cursor-pointer hover:bg-gray-800/40 transition-colors' : ''}`}
+                        className={`px-4 py-2.5 border-b border-gray-100 flex items-start gap-3 ${clickable ? 'cursor-pointer hover:bg-gray-100 transition-colors' : ''}`}
                         style={{ borderLeft: `3px solid ${accent}` }}>
                         <span className="text-lg shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-semibold text-gray-100">{v.site_name}</span>
+                            <span className="text-sm font-semibold text-gray-900">{v.site_name}</span>
                             {isLive ? (
-                              <span className="text-[10px] text-green-400 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />live now</span>
+                              <span className="text-[10px] text-green-600 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />live now</span>
                             ) : (
                               <span className="text-[10px] text-gray-500">left · {timeAgo(v.last_seen)}</span>
                             )}
-                            {v.has_chat && <span className="text-[10px] font-semibold text-blue-300 bg-blue-500/15 border border-blue-500/30 rounded-full px-1.5 py-px" title="This visitor chatted — click to open the conversation">💬 chatted</span>}
-                            {v.visits > 1 && <span className="text-[9px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>}
+                            {v.has_chat && <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px" title="This visitor chatted — click to open the conversation">💬 chatted</span>}
+                            {v.visits > 1 && <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>}
                           </div>
-                          <div className="text-[11px] text-gray-300 truncate mt-0.5" title={v.page_url ?? undefined}>
-                            <span className="text-gray-400">Viewed:</span> {viewingLabel(v)}
+                          <div className="text-[11px] text-gray-700 truncate mt-0.5" title={v.page_url ?? undefined}>
+                            <span className="text-gray-500">Viewed:</span> {viewingLabel(v)}
                           </div>
-                          <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-gray-400 min-w-0">
+                          <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-gray-500 min-w-0">
                             {v.country && <><span className="truncate">{v.country}{v.city ? ` · ${v.city}` : ''}</span><span>·</span></>}
                             <span className="truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="text-[11px] text-gray-300">{formatTime(v.created_at)}</div>
+                          <div className="text-[11px] text-gray-700">{formatTime(v.created_at)}</div>
                           <div className="text-[10px] text-gray-500 mt-0.5">on site {formatDuration(v.created_at, v.last_seen)}</div>
                         </div>
                       </div>
@@ -1909,17 +1909,17 @@ export default function Dashboard() {
         <div className="p-6 max-w-5xl mx-auto animate-in">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
             <div>
-              <h2 className="text-base font-bold text-white">Leads &amp; Billing</h2>
-              <p className="text-gray-400 text-xs mt-0.5">Auto-captured leads (email provided) for tracked sites — for monthly client billing.</p>
+              <h2 className="text-base font-bold text-gray-900">Leads &amp; Billing</h2>
+              <p className="text-gray-500 text-xs mt-0.5">Auto-captured leads (email provided) for tracked sites — for monthly client billing.</p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => setBillingMonth(shiftMonth(billingMonth, -1))}
-                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors" title="Previous month">◀</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month">◀</button>
               <input type="month" value={billingMonth} max={currentMonth()} onChange={(e) => e.target.value && setBillingMonth(e.target.value)}
-                className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-600 [color-scheme:dark]" />
+                className="bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400 [color-scheme:dark]" />
               <button onClick={() => { const next = shiftMonth(billingMonth, 1); if (next <= currentMonth()) setBillingMonth(next) }}
                 disabled={billingMonth >= currentMonth()}
-                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
               <button onClick={downloadBillingCsv} disabled={!billing || billing.leads.length === 0}
                 className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-40" style={{ backgroundColor: accentColor }}>
                 ⬇ Download CSV
@@ -1936,20 +1936,20 @@ export default function Dashboard() {
             <>
               {/* Totals + per-site breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-                <div className="bg-gradient-to-br from-indigo-500/10 to-indigo-600/5 rounded-2xl p-5 border border-indigo-500/20">
-                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-2">Total leads this period</p>
-                  <p className="text-[2.5rem] leading-none font-extrabold text-white tabular-nums">{billing?.total ?? 0}</p>
+                <div className="bg-gradient-to-br from-indigo-100 to-indigo-50 rounded-2xl p-5 border border-indigo-200">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">Total leads this period</p>
+                  <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{billing?.total ?? 0}</p>
                 </div>
-                <div className="md:col-span-2 bg-gray-900 rounded-2xl p-5 border border-gray-800">
-                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-3">By site</p>
+                <div className="md:col-span-2 bg-gray-100 rounded-2xl p-5 border border-gray-200">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-3">By site</p>
                   {(billing?.bySite ?? []).length === 0 ? (
-                    <p className="text-xs text-gray-400">No leads in this period.</p>
+                    <p className="text-xs text-gray-500">No leads in this period.</p>
                   ) : (
                     <div className="space-y-2">
                       {billing!.bySite.map((b) => (
                         <div key={b.site_id} className="flex items-center justify-between">
-                          <span className="text-sm text-gray-200 truncate">{b.site_name}</span>
-                          <span className="text-sm font-semibold text-white tabular-nums">{b.count}</span>
+                          <span className="text-sm text-gray-800 truncate">{b.site_name}</span>
+                          <span className="text-sm font-semibold text-gray-900 tabular-nums">{b.count}</span>
                         </div>
                       ))}
                     </div>
@@ -1958,13 +1958,13 @@ export default function Dashboard() {
               </div>
 
               {/* Detail table */}
-              <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+              <div className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[760px]">
                     <thead>
-                      <tr className="border-b border-gray-800 bg-gray-800/40">
+                      <tr className="border-b border-gray-200 bg-gray-100">
                         {['Email', 'Name', 'Phone', 'Site', 'Date Captured', ''].map((h) => (
-                          <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
+                          <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1973,22 +1973,22 @@ export default function Dashboard() {
                         <tr>
                           <td colSpan={6} className="text-center py-10">
                             <div className="flex flex-col items-center">
-                              <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">🧾</div>
-                              <p className="text-gray-300 text-sm font-medium">No leads captured this period</p>
-                              <p className="text-gray-400 text-xs mt-0.5">A lead is recorded when a visitor shares an email on a tracked site.</p>
+                              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">🧾</div>
+                              <p className="text-gray-700 text-sm font-medium">No leads captured this period</p>
+                              <p className="text-gray-500 text-xs mt-0.5">A lead is recorded when a visitor shares an email on a tracked site.</p>
                             </div>
                           </td>
                         </tr>
                       ) : billing!.leads.map((l) => (
                         <tr key={l.session_id} onClick={() => openConversation(l)} title="Open this lead's conversation"
-                          className="border-b border-gray-800/40 hover:bg-gray-800/40 transition-colors cursor-pointer">
-                          <td className="px-4 py-3 text-blue-300 whitespace-nowrap">{l.email}</td>
-                          <td className="px-4 py-3 text-gray-200 whitespace-nowrap">{l.name || <span className="text-gray-400">—</span>}</td>
-                          <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{l.phone || <span className="text-gray-400">—</span>}</td>
-                          <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 border border-gray-700 text-gray-300">{l.site_name}</span></td>
-                          <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
+                          className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
+                          <td className="px-4 py-3 text-blue-700 whitespace-nowrap">{l.email}</td>
+                          <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
+                          <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
+                          <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
+                          <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
                           <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => openConversation(l)} className="text-xs text-indigo-300 hover:text-indigo-200 hover:underline">View chat →</button>
+                            <button onClick={() => openConversation(l)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline">View chat →</button>
                           </td>
                         </tr>
                       ))}
@@ -2005,17 +2005,17 @@ export default function Dashboard() {
         <div className="p-6 max-w-6xl mx-auto animate-in">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
             <div>
-              <h2 className="text-base font-bold text-white">Agent Performance</h2>
-              <p className="text-gray-400 text-xs mt-0.5">Per-agent responsiveness &amp; accountability for {WORKSPACE_LABEL[workspace]} — who&apos;s replying, who&apos;s slow, who&apos;s missing chats.</p>
+              <h2 className="text-base font-bold text-gray-900">Agent Performance</h2>
+              <p className="text-gray-500 text-xs mt-0.5">Per-agent responsiveness &amp; accountability for {WORKSPACE_LABEL[workspace]} — who&apos;s replying, who&apos;s slow, who&apos;s missing chats.</p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => setPerfMonth(shiftMonth(perfMonth, -1))}
-                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors" title="Previous month">◀</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month">◀</button>
               <input type="month" value={perfMonth} max={currentMonth()} onChange={(e) => e.target.value && setPerfMonth(e.target.value)}
-                className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-600 [color-scheme:dark]" />
+                className="bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400 [color-scheme:dark]" />
               <button onClick={() => { const next = shiftMonth(perfMonth, 1); if (next <= currentMonth()) setPerfMonth(next) }}
                 disabled={perfMonth >= currentMonth()}
-                className="px-2.5 py-1.5 text-xs text-gray-300 bg-gray-900 border border-gray-800 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
             </div>
           </div>
 
@@ -2028,47 +2028,47 @@ export default function Dashboard() {
             <>
               {/* Workspace-level summary */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
-                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Conversations</p>
-                  <p className="text-3xl leading-none font-extrabold text-white tabular-nums">{perf?.summary.totalConversations ?? 0}</p>
+                <div className="bg-gray-100 rounded-2xl p-4 border border-gray-200">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Conversations</p>
+                  <p className="text-3xl leading-none font-extrabold text-gray-900 tabular-nums">{perf?.summary.totalConversations ?? 0}</p>
                 </div>
-                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
-                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Leads</p>
-                  <p className="text-3xl leading-none font-extrabold text-emerald-300 tabular-nums">{perf?.summary.totalLeads ?? 0}</p>
+                <div className="bg-gray-100 rounded-2xl p-4 border border-gray-200">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Leads</p>
+                  <p className="text-3xl leading-none font-extrabold text-emerald-700 tabular-nums">{perf?.summary.totalLeads ?? 0}</p>
                 </div>
-                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
-                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Avg response</p>
-                  <p className="text-3xl leading-none font-extrabold text-white tabular-nums">{formatMs(perf?.summary.avgResponseMs)}</p>
+                <div className="bg-gray-100 rounded-2xl p-4 border border-gray-200">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Avg response</p>
+                  <p className="text-3xl leading-none font-extrabold text-gray-900 tabular-nums">{formatMs(perf?.summary.avgResponseMs)}</p>
                 </div>
-                <div className={`rounded-2xl p-4 border ${(perf?.summary.totalMissed ?? 0) > 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-gray-900 border-gray-800'}`}>
-                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Missed (slow)</p>
-                  <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.totalMissed ?? 0) > 0 ? 'text-amber-300' : 'text-white'}`}>{perf?.summary.totalMissed ?? 0}</p>
+                <div className={`rounded-2xl p-4 border ${(perf?.summary.totalMissed ?? 0) > 0 ? 'bg-amber-50 border-amber-300' : 'bg-gray-100 border-gray-200'}`}>
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Missed (slow)</p>
+                  <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.totalMissed ?? 0) > 0 ? 'text-amber-700' : 'text-gray-900'}`}>{perf?.summary.totalMissed ?? 0}</p>
                 </div>
-                <div className={`rounded-2xl p-4 border ${(perf?.summary.totalUnanswered ?? 0) > 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-gray-900 border-gray-800'}`}>
-                  <p className="text-gray-400 text-[11px] font-medium uppercase tracking-wide mb-1.5">Unanswered</p>
-                  <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.totalUnanswered ?? 0) > 0 ? 'text-red-300' : 'text-white'}`}>{perf?.summary.totalUnanswered ?? 0}</p>
+                <div className={`rounded-2xl p-4 border ${(perf?.summary.totalUnanswered ?? 0) > 0 ? 'bg-red-100 border-red-300' : 'bg-gray-100 border-gray-200'}`}>
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Unanswered</p>
+                  <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.totalUnanswered ?? 0) > 0 ? 'text-red-700' : 'text-gray-900'}`}>{perf?.summary.totalUnanswered ?? 0}</p>
                 </div>
               </div>
 
               {/* Attribution status — historical-estimate vs accurate-going-forward */}
               {perf && perf.summary.totalReplies > 0 && perf.unattributedReplies > 0 && (
-                <div className="mb-4 rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-2.5 text-[11px] text-gray-400 flex items-start gap-2">
-                  <span className="text-gray-400">ℹ️</span>
+                <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-[11px] text-gray-500 flex items-start gap-2">
+                  <span className="text-gray-500">ℹ️</span>
                   <span>
-                    <span className="text-gray-300 font-medium">{perf.summary.attributedReplies}</span> of <span className="text-gray-300 font-medium">{perf.summary.totalReplies}</span> agent replies this period are attributed to a specific agent.
-                    The remaining <span className="text-gray-300 font-medium">{perf.unattributedReplies}</span> were sent before per-agent tracking was added, so they aren&apos;t counted in the per-agent rows below (the workspace totals above include everything). Attribution is exact going forward.
+                    <span className="text-gray-700 font-medium">{perf.summary.attributedReplies}</span> of <span className="text-gray-700 font-medium">{perf.summary.totalReplies}</span> agent replies this period are attributed to a specific agent.
+                    The remaining <span className="text-gray-700 font-medium">{perf.unattributedReplies}</span> were sent before per-agent tracking was added, so they aren&apos;t counted in the per-agent rows below (the workspace totals above include everything). Attribution is exact going forward.
                   </span>
                 </div>
               )}
 
               {/* Per-agent table */}
-              <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+              <div className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[720px]">
                     <thead>
-                      <tr className="border-b border-gray-800 bg-gray-800/40">
+                      <tr className="border-b border-gray-200 bg-gray-100">
                         {['Agent', 'Conversations', 'Replies', 'Avg response', 'Slow replies'].map((h, i) => (
-                          <th key={h} className={`px-4 py-2.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wide whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
+                          <th key={h} className={`px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -2077,9 +2077,9 @@ export default function Dashboard() {
                         <tr>
                           <td colSpan={5} className="text-center py-10">
                             <div className="flex flex-col items-center">
-                              <div className="w-10 h-10 rounded-full bg-gray-800/70 flex items-center justify-center text-lg mb-2">👥</div>
-                              <p className="text-gray-300 text-sm font-medium">No agents in this workspace</p>
-                              <p className="text-gray-400 text-xs mt-0.5">Add members to see per-agent performance.</p>
+                              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👥</div>
+                              <p className="text-gray-700 text-sm font-medium">No agents in this workspace</p>
+                              <p className="text-gray-500 text-xs mt-0.5">Add members to see per-agent performance.</p>
                             </div>
                           </td>
                         </tr>
@@ -2087,22 +2087,22 @@ export default function Dashboard() {
                         const idle = a.replies === 0
                         const slowAvg = a.avgResponseMs !== null && a.avgResponseMs > 120000
                         return (
-                          <tr key={a.id} className={`border-b border-gray-800/40 transition-colors ${idle ? 'opacity-60' : 'hover:bg-gray-800/40'}`}>
+                          <tr key={a.id} className={`border-b border-gray-100 transition-colors ${idle ? 'opacity-60' : 'hover:bg-gray-100'}`}>
                             <td className="px-4 py-3 whitespace-nowrap">
                               <div className="flex items-center gap-2">
-                                <span className="text-gray-200">{a.email}</span>
-                                {a.builtin && <span className="text-[9px] px-1.5 py-px rounded-full bg-purple-500/20 text-purple-300 font-semibold uppercase tracking-wide">admin</span>}
-                                {a.former && <span className="text-[9px] px-1.5 py-px rounded-full bg-gray-700 text-gray-400 font-semibold uppercase tracking-wide">former</span>}
-                                {idle && <span className="text-[9px] px-1.5 py-px rounded-full bg-amber-500/15 text-amber-300/90 font-semibold uppercase tracking-wide">no replies</span>}
+                                <span className="text-gray-800">{a.email}</span>
+                                {a.builtin && <span className="text-[9px] px-1.5 py-px rounded-full bg-purple-100 text-purple-700 font-semibold uppercase tracking-wide">admin</span>}
+                                {a.former && <span className="text-[9px] px-1.5 py-px rounded-full bg-gray-200 text-gray-500 font-semibold uppercase tracking-wide">former</span>}
+                                {idle && <span className="text-[9px] px-1.5 py-px rounded-full bg-amber-100 text-amber-700 font-semibold uppercase tracking-wide">no replies</span>}
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-gray-200 tabular-nums">{a.handled}</td>
-                            <td className="px-4 py-3 text-right text-gray-200 tabular-nums">{a.replies}</td>
-                            <td className={`px-4 py-3 text-right tabular-nums font-medium ${slowAvg ? 'text-red-300' : idle ? 'text-gray-400' : 'text-emerald-300'}`}>{formatMs(a.avgResponseMs)}</td>
+                            <td className="px-4 py-3 text-right text-gray-800 tabular-nums">{a.handled}</td>
+                            <td className="px-4 py-3 text-right text-gray-800 tabular-nums">{a.replies}</td>
+                            <td className={`px-4 py-3 text-right tabular-nums font-medium ${slowAvg ? 'text-red-700' : idle ? 'text-gray-500' : 'text-emerald-700'}`}>{formatMs(a.avgResponseMs)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">
                               {a.slowReplies > 0
-                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 font-semibold">{a.slowReplies}</span>
-                                : <span className="text-gray-400">0</span>}
+                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">{a.slowReplies}</span>
+                                : <span className="text-gray-500">0</span>}
                             </td>
                           </tr>
                         )
@@ -2112,10 +2112,10 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <p className="text-gray-400 text-[11px] mt-3 leading-relaxed">
-                <span className="text-gray-400 font-medium">How to read this:</span> Avg response is the time between a visitor&apos;s message and the agent&apos;s reply.
-                A reply is &quot;slow&quot; if it took longer than 2 minutes. <span className="text-amber-300/90">Missed</span> = a visitor messaged while the bot was off (human takeover or off-hours) and no agent replied within 2 minutes.
-                <span className="text-red-300/90"> Unanswered</span> = a conversation still waiting on its first agent reply. Missed &amp; unanswered are workspace-wide (no single agent owns them).
+              <p className="text-gray-500 text-[11px] mt-3 leading-relaxed">
+                <span className="text-gray-500 font-medium">How to read this:</span> Avg response is the time between a visitor&apos;s message and the agent&apos;s reply.
+                A reply is &quot;slow&quot; if it took longer than 2 minutes. <span className="text-amber-700">Missed</span> = a visitor messaged while the bot was off (human takeover or off-hours) and no agent replied within 2 minutes.
+                <span className="text-red-600"> Unanswered</span> = a conversation still waiting on its first agent reply. Missed &amp; unanswered are workspace-wide (no single agent owns them).
               </p>
             </>
           )}
