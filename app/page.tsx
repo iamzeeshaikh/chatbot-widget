@@ -448,6 +448,7 @@ export default function Dashboard() {
   const [perf, setPerf] = useState<PerfData | null>(null)
   const [perfLoading, setPerfLoading] = useState(false)
   const prevVisitorIds = useRef<Set<string>>(new Set())
+  const visitorsSeeded = useRef(false)
   // Track the latest visitor-message time per session to detect new incoming
   // messages and chime for the agent. Seeded on first load so we don't alert
   // for history.
@@ -548,21 +549,37 @@ export default function Dashboard() {
     } catch { /* ignore */ }
   }, [soundOn, getDashCtx])
 
-  // Re-chime while any chat is waiting for a human (see WAITING_REPEAT_MS).
-  // State is read through refs so the 20s cadence never resets on the 6s
-  // sessions poll; playDashSound itself honours the mute toggle.
+  // Re-chime while anything needs a human (see WAITING_REPEAT_MS): a chat whose
+  // latest message is the visitor's, OR a live visitor nobody has engaged yet.
+  // "Engaged" = the last message in their session is an agent's — so ringing
+  // stops when an agent replies (or proactively messages a browsing visitor),
+  // resumes when the visitor speaks again, and ends when the visitor leaves the
+  // site (they drop off the live list). State is read through refs so the 20s
+  // cadence never resets on the 5–6s polls; playDashSound honours the mute
+  // toggle.
   const sessionsRef = useRef<Session[]>([])
+  const visitorsRef = useRef<Visitor[]>([])
   const userSitesRef = useRef<string[]>([])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
+  useEffect(() => { visitorsRef.current = visitors }, [visitors])
   useEffect(() => { userSitesRef.current = userSites }, [userSites])
   useEffect(() => {
     const iv = setInterval(() => {
       const scope = new Set(userSitesRef.current)
       const now = Date.now()
-      const waiting = sessionsRef.current.some((s) =>
+      const waitingChat = sessionsRef.current.some((s) =>
         s.last_role === 'user' && scope.has(s.site_id) &&
         !!s.last_at && now - new Date(s.last_at).getTime() < WAITING_FRESH_MS)
-      if (waiting) playDashSound()
+      const lastRoleBySession = new Map(sessionsRef.current.map((s) => [s.session_id, s.last_role]))
+      const unengagedVisitor = visitorsRef.current.some((v) => {
+        if (!scope.has(v.site_id)) return false
+        // Same staleness cap the live list uses — a carried-over old session
+        // pinging from a forgotten tab must not ring.
+        const created = asUtcIso(v.created_at)
+        if (created && now - new Date(created).getTime() > LIVE_MAX_ON_SITE_MS) return false
+        return lastRoleBySession.get(v.session_id) !== 'admin'
+      })
+      if (waitingChat || unengagedVisitor) playDashSound()
     }, WAITING_REPEAT_MS)
     return () => clearInterval(iv)
   }, [playDashSound])
@@ -646,26 +663,26 @@ export default function Dashboard() {
     const data = await fetch('/api/visitor/active').then((r) => r.json()).catch(() => ({ visitors: [] }))
     const incoming: Visitor[] = data.visitors ?? []
     const incomingIds = new Set(incoming.map((v) => v.session_id))
-    const prev = prevVisitorIds.current
-    if (incoming.some((v) => !prev.has(v.session_id)) && prev.size > 0) {
-      try {
-        const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-        const osc = ctx.createOscillator(); const gain = ctx.createGain()
-        osc.connect(gain); gain.connect(ctx.destination)
-        osc.frequency.value = 880; gain.gain.value = 0.1
-        osc.start(); osc.stop(ctx.currentTime + 0.12)
-      } catch { /* ignore */ }
+    // Any BRAND-NEW live visitor gets the full loud chime. (The old inline beep
+    // created a fresh AudioContext per beep — browsers keep those suspended, so
+    // it was usually silent — and its prev.size>0 guard skipped the 0→1 visitor
+    // case entirely.) Seeded silently on the first fetch so a dashboard load
+    // doesn't alert for visitors already known.
+    if (visitorsSeeded.current && incoming.some((v) => !prevVisitorIds.current.has(v.session_id))) {
+      playDashSound()
     }
+    visitorsSeeded.current = true
     prevVisitorIds.current = incomingIds
     setVisitors(incoming)
-  }, [])
+  }, [playDashSound])
 
+  // Poll on EVERY tab (not just Conversations) so visitor alerts always fire.
   useEffect(() => {
-    if (tab !== 'conversations') return
+    if (!authReady) return
     fetchVisitors()
     const iv = setInterval(fetchVisitors, 5000)
     return () => clearInterval(iv)
-  }, [tab, fetchVisitors])
+  }, [authReady, fetchVisitors])
 
   const fetchMessages = useCallback(async (sessionId: string) => {
     const data = await fetch(`/api/admin/messages?sessionId=${sessionId}`).then((r) => r.json()).catch(() => ({ messages: [] }))
