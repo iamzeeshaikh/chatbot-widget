@@ -6,6 +6,7 @@ import { CONTACT_ROLE, TAGS_ROLE, asUtcIso } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
 import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, RESPONSE_OUTLIER_CAP_MS, parseReplyAuthor, type ReplyAuthor } from '@/lib/replyauthor'
 import { isBotOffBySchedule } from '@/lib/botschedule'
+import { isBotEnabled } from '@/lib/botflag'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,6 +71,11 @@ export async function GET(req: NextRequest) {
   const rows = logs ?? []
   const t = (ts: string) => new Date(asUtcIso(ts) as string).getTime()
   const nowMs = Date.now()
+  // Global bot kill switch: while the bot is disabled, EVERY waiting visitor
+  // message is a human agent's responsibility, so it feeds the missed/SLA logic
+  // like manual takeover does. Historical rows from when the bot was on aren't
+  // distorted: back then the bot's 'assistant' reply cleared the pending state.
+  const botDisabled = !isBotEnabled()
 
   // Author lookup: a reply_author row shares its admin reply's exact created_at.
   const authorByKey = new Map<string, ReplyAuthor>()
@@ -134,7 +140,7 @@ export async function GET(req: NextRequest) {
           pendingUserTs = ts
           pendingUserIso = ev.created_at
           const scheduleOff = isBotOffBySchedule(ev.site_id, new Date(asUtcIso(ev.created_at) as string))
-          pendingHumanState = mode === 'human' || scheduleOff
+          pendingHumanState = botDisabled || mode === 'human' || scheduleOff
         }
       } else if (ev.role === 'assistant') {
         // The bot answered — clears the wait (normal bot-on flow, not a miss).

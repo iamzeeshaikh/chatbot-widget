@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { siteWorkspace, isWidgetBlocked } from '@/lib/workspaces'
 import { resolveCountryCode } from '@/lib/geo'
+import { isBotEnabled } from '@/lib/botflag'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,5 +40,7 @@ export async function GET(req: NextRequest) {
     blocked = isWidgetBlocked(siteId, code)
   }
 
-  return NextResponse.json({ ...data, blocked }, { headers: corsHeaders })
+  // bot_enabled lets the widget swap the bot-persona greeting for a neutral
+  // "our team" one while the bot is globally off (lib/botflag.ts).
+  return NextResponse.json({ ...data, blocked, bot_enabled: isBotEnabled() }, { headers: corsHeaders })
 }

@@ -4,6 +4,7 @@ import { generateReply, extractLeadFields } from '@/lib/gemini'
 import { getMode } from '@/lib/mode'
 import { maybeCaptureLead } from '@/lib/leadtracking'
 import { isBotOffBySchedule } from '@/lib/botschedule'
+import { isBotEnabled, BOT_OFF_ACK_MESSAGE } from '@/lib/botflag'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -59,17 +60,21 @@ export async function POST(req: NextRequest) {
       'Cache-Control': 'no-cache',
     }
 
-    // The bot is suppressed when the conversation is in manual human takeover OR
-    // when the packaging schedule says bot-off (see lib/botschedule.ts). Manual
+    // The bot is suppressed when it is globally disabled (lib/botflag.ts — both
+    // workspaces, every site), OR the conversation is in manual human takeover,
+    // OR the packaging schedule says bot-off (see lib/botschedule.ts). Manual
     // human always wins; a schedule-off window never persists the mode, so the
     // bot resumes automatically once the window reopens (unless an agent took
     // over manually). Sports sites are never affected by the schedule.
     //
-    // In both cases the bot stays COMPLETELY silent: the visitor's message is
-    // already saved above, and we send NO automatic reply or ack of any kind —
-    // a human agent initiates from the dashboard. The X-Bot-Silent header tells
-    // the widget to render nothing (no bubble, no sound). To the visitor it just
-    // looks like a normal live chat where they're waiting.
+    // In all cases the bot sends NO LLM-generated reply: the visitor's message
+    // is already saved above, and a human agent replies from the dashboard. The
+    // X-Bot-Silent header tells the widget to render nothing (no bubble, no
+    // sound). To the visitor it just looks like a normal live chat where
+    // they're waiting. The one exception: when the bot is GLOBALLY disabled,
+    // the very first visitor message of a conversation gets a one-time static
+    // ack (X-Bot-Ack + body) so the visitor knows a human will follow up. The
+    // ack is widget-rendered only, never stored in chat_logs.
     // The bot must ONLY ever answer a genuine visitor message. An agent/admin
     // message must never trigger a bot reply (an agent reply is sent via
     // /api/admin/reply, which also flips the conversation to human mode). This is
@@ -77,12 +82,31 @@ export async function POST(req: NextRequest) {
     const role = String(lastUserMessage.role || '').toLowerCase()
     const isVisitorMessage = role === 'user' || role === 'visitor'
 
+    const botDisabled = !isBotEnabled()
     const scheduleOff = isBotOffBySchedule(siteId)
-    if (!isVisitorMessage || mode === 'human' || scheduleOff) {
-      return new Response(null, {
-        status: 200,
-        headers: { ...corsHeaders, 'X-Bot-Silent': '1', 'Access-Control-Expose-Headers': 'X-Bot-Silent' },
-      })
+    if (!isVisitorMessage || botDisabled || mode === 'human' || scheduleOff) {
+      const silentHeaders = {
+        ...corsHeaders,
+        'X-Bot-Silent': '1',
+        'Access-Control-Expose-Headers': 'X-Bot-Silent, X-Bot-Ack',
+      }
+      // One-time ack, only in global bot-off mode and only on the conversation's
+      // FIRST genuine visitor message (the one saved above counts as 1).
+      if (botDisabled && isVisitorMessage) {
+        const { count } = await supabase
+          .from('chat_logs')
+          .select('id', { count: 'exact', head: true })
+          .eq('session_id', sessionId)
+          .eq('role', 'user')
+          .neq('message', '(session started)')
+        if ((count ?? 0) <= 1) {
+          return new Response(BOT_OFF_ACK_MESSAGE, {
+            status: 200,
+            headers: { ...silentHeaders, 'X-Bot-Ack': '1', 'Content-Type': 'text/plain; charset=utf-8' },
+          })
+        }
+      }
+      return new Response(null, { status: 200, headers: silentHeaders })
     }
 
     // Bot mode: Groq response

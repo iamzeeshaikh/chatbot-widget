@@ -669,7 +669,11 @@
   function sendBotGreeting() {
     console.log('sendBotGreeting called, greetingSent=' + greetingSent);
     if (greetingSent) return;
-    var greeting = 'Hi! I\'m ' + config.bot_name + '. How can I help you today?';
+    // With the bot globally disabled (config.bot_enabled === false from
+    // site-config), don't greet as a bot persona — a human team is replying.
+    var greeting = config.bot_enabled === false
+      ? 'Hi! How can we help you today?'
+      : 'Hi! I\'m ' + config.bot_name + '. How can I help you today?';
     messages.push({ role: 'user', content: '(session started)' });
     appendMessage('bot', greeting);
     console.log('greeting appended to DOM');
@@ -717,10 +721,22 @@
           // just sees their own message; a human agent will reply from the dashboard.
           if (r.headers.get('X-Bot-Silent') === '1') {
             hideTyping();
-            // Bot won't reply (off-hours or human takeover). If no human agent
-            // answers within the threshold, the safety-net form will offer the
-            // visitor a way to leave their details so the lead isn't lost.
+            // Bot won't reply (globally disabled, off-hours or human takeover).
+            // If no human agent answers within the threshold, the safety-net form
+            // will offer the visitor a way to leave their details so the lead
+            // isn't lost.
             armSafetyNetTimer();
+            // Global bot-off only: the server sends a ONE-TIME static ack with
+            // the visitor's first message so they know a human will follow up.
+            // It's rendered here only — never stored server-side.
+            if (r.headers.get('X-Bot-Ack') === '1') {
+              r.text().then(function (ack) {
+                if (!ack) return;
+                appendMessage('bot', ack);
+                messages.push({ role: 'assistant', content: ack });
+                playNotificationSound();
+              }).catch(function () {});
+            }
             return;
           }
           if (!r.ok || !r.body) {
