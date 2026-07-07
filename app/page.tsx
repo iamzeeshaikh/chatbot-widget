@@ -1838,11 +1838,11 @@ export default function Dashboard() {
         const now = Date.now()
         const isLiveV = (v: HistVisitor) => v.status === 'active' && now - new Date(v.last_seen).getTime() < 90000
         const q = histSearch.trim().toLowerCase()
-        const filtered = visitorHistory.filter((v) => {
+        // Everything except the status filter — so the status dropdown can show
+        // live/left counts that match what selecting each option would yield.
+        const base = visitorHistory.filter((v) => {
           if (histSiteFilter && v.site_id !== histSiteFilter) return false
           if (histChatOnly && !v.has_chat) return false
-          if (histStatusFilter === 'live' && !isLiveV(v)) return false
-          if (histStatusFilter === 'left' && isLiveV(v)) return false
           if (histCountryFilter && (v.country ?? '') !== histCountryFilter) return false
           if (histDeviceFilter && (v.device_type ?? '') !== histDeviceFilter) return false
           if (q) {
@@ -1852,6 +1852,9 @@ export default function Dashboard() {
           }
           return true
         })
+        const liveTotal = base.filter(isLiveV).length
+        const filtered = base.filter((v) =>
+          histStatusFilter === 'live' ? isLiveV(v) : histStatusFilter === 'left' ? !isLiveV(v) : true)
         const histSites = Array.from(new Map(visitorHistory.map((v) => [v.site_id, v.site_name])).entries())
         const histCountries = Array.from(new Set(visitorHistory.map((v) => v.country).filter(Boolean) as string[])).sort()
         const histDevices = Array.from(new Set(visitorHistory.map((v) => v.device_type).filter(Boolean) as string[])).sort()
@@ -1882,9 +1885,9 @@ export default function Dashboard() {
               </select>
               <select value={histStatusFilter} onChange={(e) => setHistFilter(setHistStatusFilter)(e.target.value as 'all' | 'live' | 'left')}
                 className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
-                <option value="all">Live &amp; left</option>
-                <option value="live">🟢 Live now</option>
-                <option value="left">Left</option>
+                <option value="all">All ({base.length})</option>
+                <option value="live">🟢 Live now ({liveTotal})</option>
+                <option value="left">Left ({base.length - liveTotal})</option>
               </select>
               <select value={histCountryFilter} onChange={(e) => setHistFilter(setHistCountryFilter)(e.target.value)}
                 className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
