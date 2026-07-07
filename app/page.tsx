@@ -406,6 +406,13 @@ export default function Dashboard() {
   const [visitorHistoryLoaded, setVisitorHistoryLoaded] = useState(false)
   const [histSiteFilter, setHistSiteFilter] = useState('')
   const [histChatOnly, setHistChatOnly] = useState(false)
+  const [histStatusFilter, setHistStatusFilter] = useState<'all' | 'live' | 'left'>('all')
+  const [histCountryFilter, setHistCountryFilter] = useState('')
+  const [histDeviceFilter, setHistDeviceFilter] = useState('')
+  const [histSearch, setHistSearch] = useState('')
+  const [histPage, setHistPage] = useState(0)
+  // Any filter change goes back to page 1.
+  const setHistFilter = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setHistPage(0) }
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [replyText, setReplyText] = useState('')
@@ -1828,29 +1835,75 @@ export default function Dashboard() {
 
       {/* ── VISITORS TAB (Zendesk-style history) ── */}
       {tab === 'visitors' && (() => {
-        const filtered = visitorHistory.filter((v) =>
-          (!histSiteFilter || v.site_id === histSiteFilter) && (!histChatOnly || v.has_chat))
+        const now = Date.now()
+        const isLiveV = (v: HistVisitor) => v.status === 'active' && now - new Date(v.last_seen).getTime() < 90000
+        const q = histSearch.trim().toLowerCase()
+        const filtered = visitorHistory.filter((v) => {
+          if (histSiteFilter && v.site_id !== histSiteFilter) return false
+          if (histChatOnly && !v.has_chat) return false
+          if (histStatusFilter === 'live' && !isLiveV(v)) return false
+          if (histStatusFilter === 'left' && isLiveV(v)) return false
+          if (histCountryFilter && (v.country ?? '') !== histCountryFilter) return false
+          if (histDeviceFilter && (v.device_type ?? '') !== histDeviceFilter) return false
+          if (q) {
+            const hay = [v.page_title, v.page_url, v.referrer, v.country, v.city, v.site_name, v.browser, v.os]
+              .filter(Boolean).join(' ').toLowerCase()
+            if (!hay.includes(q)) return false
+          }
+          return true
+        })
         const histSites = Array.from(new Map(visitorHistory.map((v) => [v.site_id, v.site_name])).entries())
-        const liveCount = filtered.filter((v) => v.status === 'active' && Date.now() - new Date(v.last_seen).getTime() < 90000).length
+        const histCountries = Array.from(new Set(visitorHistory.map((v) => v.country).filter(Boolean) as string[])).sort()
+        const histDevices = Array.from(new Set(visitorHistory.map((v) => v.device_type).filter(Boolean) as string[])).sort()
+        const liveCount = filtered.filter(isLiveV).length
+        // Client-side pagination so a week of visitors doesn't render 1000+ rows.
+        const PER_PAGE = 50
+        const pageCount = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
+        const page = Math.min(histPage, pageCount - 1)
+        const pageRows = filtered.slice(page * PER_PAGE, (page + 1) * PER_PAGE)
+        const anyFilter = histSiteFilter || histChatOnly || histStatusFilter !== 'all' || histCountryFilter || histDeviceFilter || q
         let lastDay = ''
         return (
           <div className="max-w-5xl mx-auto px-5 py-6 animate-in">
-            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">Visitors</h2>
                 <p className="text-xs text-gray-500">Every widget session of the last 7 days — live and departed. {filtered.length} visitor{filtered.length !== 1 ? 's' : ''}{liveCount > 0 ? ` · ${liveCount} live now` : ''}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <select value={histSiteFilter} onChange={(e) => setHistSiteFilter(e.target.value)}
-                  className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
-                  <option value="">All Sites</option>
-                  {histSites.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-                </select>
-                <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
-                  <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistChatOnly(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
-                  With chats only
-                </label>
-              </div>
+            </div>
+            {/* Filters */}
+            <div className="flex items-center gap-2 flex-wrap mb-4">
+              <input value={histSearch} onChange={(e) => setHistFilter(setHistSearch)(e.target.value)} placeholder="Search page, referrer, country…"
+                className="w-56 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-400" />
+              <select value={histSiteFilter} onChange={(e) => setHistFilter(setHistSiteFilter)(e.target.value)}
+                className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
+                <option value="">All Sites</option>
+                {histSites.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+              </select>
+              <select value={histStatusFilter} onChange={(e) => setHistFilter(setHistStatusFilter)(e.target.value as 'all' | 'live' | 'left')}
+                className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
+                <option value="all">Live &amp; left</option>
+                <option value="live">🟢 Live now</option>
+                <option value="left">Left</option>
+              </select>
+              <select value={histCountryFilter} onChange={(e) => setHistFilter(setHistCountryFilter)(e.target.value)}
+                className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
+                <option value="">All Countries</option>
+                {histCountries.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={histDeviceFilter} onChange={(e) => setHistFilter(setHistDeviceFilter)(e.target.value)}
+                className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
+                <option value="">All Devices</option>
+                {histDevices.map((d) => <option key={d} value={d}>{deviceIcon(d)} {d}</option>)}
+              </select>
+              <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
+                <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistFilter(setHistChatOnly)(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
+                With chats only
+              </label>
+              {anyFilter && (
+                <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistPage(0) }}
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium">Clear filters</button>
+              )}
             </div>
 
             {!visitorHistoryLoaded ? (
@@ -1859,11 +1912,11 @@ export default function Dashboard() {
               <p className="text-sm text-gray-500 py-12 text-center">No visitors in the last 7 days{histChatOnly ? ' with chats' : ''}.</p>
             ) : (
               <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50">
-                {filtered.map((v) => {
+                {pageRows.map((v) => {
                   const day = dateDividerLabel(v.created_at)
                   const showDay = day !== lastDay
                   lastDay = day
-                  const isLive = v.status === 'active' && Date.now() - new Date(v.last_seen).getTime() < 90000
+                  const isLive = isLiveV(v)
                   const accent = SITE_ACCENT[v.site_id] ?? v.primary_color ?? '#2563eb'
                   const clickable = v.has_chat || isLive
                   const open = () => {
@@ -1909,6 +1962,22 @@ export default function Dashboard() {
                     </div>
                   )
                 })}
+              </div>
+            )}
+
+            {/* Pagination */}
+            {filtered.length > PER_PAGE && (
+              <div className="flex items-center justify-between mt-4">
+                <span className="text-xs text-gray-500">
+                  Showing {page * PER_PAGE + 1}–{Math.min((page + 1) * PER_PAGE, filtered.length)} of {filtered.length}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => setHistPage(Math.max(0, page - 1))} disabled={page === 0}
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">◀ Prev</button>
+                  <span className="text-xs text-gray-600 px-2">Page {page + 1} / {pageCount}</span>
+                  <button onClick={() => setHistPage(Math.min(pageCount - 1, page + 1))} disabled={page >= pageCount - 1}
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next ▶</button>
+                </div>
               </div>
             )}
           </div>
