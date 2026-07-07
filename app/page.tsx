@@ -32,6 +32,8 @@ const SITE_ACCENT: Record<string, string> = {
   burgersleeves: '#d97706',
   leadgen: '#6366f1',
   shopcardboardboxes: '#b45309',
+  thetubepackaging: '#0f766e',
+  kraftboxpack: '#855f35',
 }
 
 const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="40" width="76" height="52" rx="5" fill="#2563eb"/><polygon points="12,40 50,22 88,40" fill="#1d4ed8"/><rect x="38" y="40" width="24" height="52" fill="#93c5fd" opacity="0.35"/></svg>')}`
@@ -42,6 +44,9 @@ interface Lead { id: string; site_id: string; name: string | null; email: string
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[] }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
+// Visitors-history row (Zendesk-style history): a Visitor plus whether the
+// session ever chatted and its final status.
+interface HistVisitor extends Visitor { status: string; has_chat: boolean }
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string }
 interface BillingData { from: string; to: string; total: number; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
@@ -332,7 +337,7 @@ const WAITING_FRESH_MS = 30 * 60 * 1000
 const VISITOR_POLL_MS = 3 * 1000
 
 export default function Dashboard() {
-  const [tab, setTab] = useState<'overview' | 'conversations' | 'billing' | 'performance'>('overview')
+  const [tab, setTab] = useState<'overview' | 'conversations' | 'visitors' | 'billing' | 'performance'>('overview')
 
   const [userRole, setUserRole] = useState<'admin' | 'standard'>('standard')
   const [userEmail, setUserEmail] = useState('')
@@ -366,7 +371,7 @@ export default function Dashboard() {
     if (!authReady || tabRestored.current) return
     tabRestored.current = true
     const saved = localStorage.getItem('zee-dash-tab')
-    if (saved === 'overview' || saved === 'conversations'
+    if (saved === 'overview' || saved === 'conversations' || saved === 'visitors'
       || (saved === 'billing' && userSites.some((id) => LEAD_TRACKED_SITES.includes(id)))
       || (saved === 'performance' && userRole === 'admin')) {
       setTab(saved as typeof tab)
@@ -396,6 +401,11 @@ export default function Dashboard() {
   // every conversations poll refreshes it with the server's view (which also
   // honours a BOT_ENABLED env override the client bundle can't see).
   const [botGlobalOff, setBotGlobalOff] = useState(() => !isBotEnabled())
+  // Visitors tab (Zendesk-style history of every widget session, last 7 days).
+  const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
+  const [visitorHistoryLoaded, setVisitorHistoryLoaded] = useState(false)
+  const [histSiteFilter, setHistSiteFilter] = useState('')
+  const [histChatOnly, setHistChatOnly] = useState(false)
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [replyText, setReplyText] = useState('')
@@ -687,6 +697,20 @@ export default function Dashboard() {
     const iv = setInterval(fetchVisitors, VISITOR_POLL_MS)
     return () => clearInterval(iv)
   }, [authReady, fetchVisitors])
+
+  // Visitor history: fetched when the Visitors tab opens, refreshed every 30s
+  // while it stays open (history is not latency-critical like the live list).
+  useEffect(() => {
+    if (tab !== 'visitors' || !authReady) return
+    const load = async () => {
+      const data = await fetch('/api/admin/visitors-history').then((r) => r.json()).catch(() => ({ visitors: [] }))
+      setVisitorHistory(data.visitors ?? [])
+      setVisitorHistoryLoaded(true)
+    }
+    load()
+    const iv = setInterval(load, 30000)
+    return () => clearInterval(iv)
+  }, [tab, authReady])
 
   const fetchMessages = useCallback(async (sessionId: string) => {
     const data = await fetch(`/api/admin/messages?sessionId=${sessionId}`).then((r) => r.json()).catch(() => ({ messages: [] }))
@@ -1113,6 +1137,9 @@ export default function Dashboard() {
               Conversations
               {roleSessions.length > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleSessions.length}</span>}
               {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
+            </button>
+            <button onClick={() => setTab('visitors')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'visitors' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
+              Visitors
             </button>
             {hasTrackedSite && (
               <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>
@@ -1915,6 +1942,95 @@ export default function Dashboard() {
           )}
         </div>
       )}
+
+      {/* ── VISITORS TAB (Zendesk-style history) ── */}
+      {tab === 'visitors' && (() => {
+        const filtered = visitorHistory.filter((v) =>
+          (!histSiteFilter || v.site_id === histSiteFilter) && (!histChatOnly || v.has_chat))
+        const histSites = Array.from(new Map(visitorHistory.map((v) => [v.site_id, v.site_name])).entries())
+        const liveCount = filtered.filter((v) => v.status === 'active' && Date.now() - new Date(v.last_seen).getTime() < 90000).length
+        let lastDay = ''
+        return (
+          <div className="max-w-5xl mx-auto px-5 py-6 animate-in">
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-white">Visitors</h2>
+                <p className="text-xs text-gray-400">Every widget session of the last 7 days — live and departed. {filtered.length} visitor{filtered.length !== 1 ? 's' : ''}{liveCount > 0 ? ` · ${liveCount} live now` : ''}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select value={histSiteFilter} onChange={(e) => setHistSiteFilter(e.target.value)}
+                  className="bg-gray-800/60 border border-gray-700/60 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
+                  <option value="">All Sites</option>
+                  {histSites.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
+                  <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistChatOnly(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
+                  With chats only
+                </label>
+              </div>
+            </div>
+
+            {!visitorHistoryLoaded ? (
+              <p className="text-sm text-gray-400 py-12 text-center">Loading visitors…</p>
+            ) : filtered.length === 0 ? (
+              <p className="text-sm text-gray-400 py-12 text-center">No visitors in the last 7 days{histChatOnly ? ' with chats' : ''}.</p>
+            ) : (
+              <div className="border border-gray-800/80 rounded-xl overflow-hidden bg-gray-900/30">
+                {filtered.map((v) => {
+                  const day = dateDividerLabel(v.created_at)
+                  const showDay = day !== lastDay
+                  lastDay = day
+                  const isLive = v.status === 'active' && Date.now() - new Date(v.last_seen).getTime() < 90000
+                  const accent = SITE_ACCENT[v.site_id] ?? v.primary_color ?? '#2563eb'
+                  const clickable = v.has_chat || isLive
+                  const open = () => {
+                    if (v.has_chat) {
+                      openConversationBySession({ sessionId: v.session_id, siteId: v.site_id, siteName: v.site_name, lastAt: v.last_seen })
+                    } else if (isLive) {
+                      openVisitorSession(v); setTab('conversations')
+                    }
+                  }
+                  return (
+                    <div key={v.session_id}>
+                      {showDay && (
+                        <div className="px-4 py-1.5 bg-gray-900/80 border-b border-gray-800/60 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">{day}</div>
+                      )}
+                      <div onClick={clickable ? open : undefined}
+                        className={`px-4 py-2.5 border-b border-gray-800/40 flex items-start gap-3 ${clickable ? 'cursor-pointer hover:bg-gray-800/40 transition-colors' : ''}`}
+                        style={{ borderLeft: `3px solid ${accent}` }}>
+                        <span className="text-lg shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-gray-100">{v.site_name}</span>
+                            {isLive ? (
+                              <span className="text-[10px] text-green-400 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />live now</span>
+                            ) : (
+                              <span className="text-[10px] text-gray-500">left · {timeAgo(v.last_seen)}</span>
+                            )}
+                            {v.has_chat && <span className="text-[10px] font-semibold text-blue-300 bg-blue-500/15 border border-blue-500/30 rounded-full px-1.5 py-px" title="This visitor chatted — click to open the conversation">💬 chatted</span>}
+                            {v.visits > 1 && <span className="text-[9px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>}
+                          </div>
+                          <div className="text-[11px] text-gray-300 truncate mt-0.5" title={v.page_url ?? undefined}>
+                            <span className="text-gray-400">Viewed:</span> {viewingLabel(v)}
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-gray-400 min-w-0">
+                            {v.country && <><span className="truncate">{v.country}{v.city ? ` · ${v.city}` : ''}</span><span>·</span></>}
+                            <span className="truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-[11px] text-gray-300">{formatTime(v.created_at)}</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">on site {formatDuration(v.created_at, v.last_seen)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── BILLING TAB ── */}
       {tab === 'billing' && (
