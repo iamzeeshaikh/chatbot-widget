@@ -342,6 +342,25 @@ export default function Dashboard() {
     window.location.href = '/login'
   }
 
+  // Keep the active tab across reloads (a hard refresh used to always land on
+  // Overview). Restored once auth is ready so the saved tab can be validated
+  // against this member's access; saving starts only after the restore so the
+  // initial 'overview' can never clobber the stored value.
+  const tabRestored = useRef(false)
+  useEffect(() => {
+    if (!authReady || tabRestored.current) return
+    tabRestored.current = true
+    const saved = localStorage.getItem('zee-dash-tab')
+    if (saved === 'overview' || saved === 'conversations'
+      || (saved === 'billing' && userSites.some((id) => LEAD_TRACKED_SITES.includes(id)))
+      || (saved === 'performance' && userRole === 'admin')) {
+      setTab(saved as typeof tab)
+    }
+  }, [authReady, userSites, userRole]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (tabRestored.current) localStorage.setItem('zee-dash-tab', tab)
+  }, [tab])
+
   const brand = workspace
 
   useEffect(() => {
@@ -941,7 +960,7 @@ export default function Dashboard() {
   })
   // Show the Billing tab only when the member can access a lead-tracked site.
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
-  const dashTitle = brand === 'sports' ? '🏆 Sports Dashboard' : '📦 Packaging Dashboard'
+  const dashTitle = 'ZeeOps Chat Widget'
   const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
   // Effective bot state for the open conversation. The packaging schedule can put
@@ -1022,18 +1041,20 @@ export default function Dashboard() {
 
       {/* ── Header ── */}
       <div className="border-b border-gray-800/80 bg-gray-950/95 backdrop-blur px-5 py-3 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-lg" style={{ backgroundColor: accentColor }}>
+        {/* Logo + title double as a "home" button back to Overview. */}
+        <button onClick={() => setTab('overview')} title="Go to Overview"
+          className="flex items-center gap-3 text-left focus:outline-none group cursor-pointer">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-lg transition-transform group-hover:scale-105" style={{ backgroundColor: accentColor }}>
             <svg viewBox="0 0 24 24" className="w-4.5 h-4.5 fill-white w-5 h-5"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
           </div>
           <div>
-            <h1 className="text-base font-bold text-white leading-tight">{dashTitle}</h1>
+            <h1 className="text-base font-bold text-white leading-tight group-hover:text-gray-200">{dashTitle}</h1>
             <p className="text-gray-400 text-[11px] flex items-center gap-1.5">
               {userEmail}
               <span className={`px-1.5 py-px rounded-full text-[9px] font-semibold uppercase tracking-wide ${userRole === 'admin' ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-700 text-gray-400'}`}>{userRole}</span>
             </p>
           </div>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           <div className="flex gap-0.5 bg-gray-900 p-1 rounded-lg border border-gray-800">
             <button onClick={() => setTab('overview')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'overview' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}>Overview</button>
@@ -1530,13 +1551,11 @@ export default function Dashboard() {
                       }`}>
                       🌐 Translate{translateOn ? ' on' : ''}
                     </button>
-                    <span className="w-px h-5 bg-gray-800" />
-                    {botGlobalOff ? (
-                      // Global kill switch on: there is no bot to toggle — every
-                      // conversation is human-handled, so show one static badge.
-                      <span className="text-[10px] bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded-full border border-orange-500/25" title="The AI bot is disabled globally (lib/botflag.ts) — human agents are the only reply path">👤 Human only — AI disabled</span>
-                    ) : (
+                    {/* Global kill switch on: there is no bot to toggle and no
+                        bot/AI wording should appear anywhere — show nothing. */}
+                    {!botGlobalOff && (
                       <>
+                        <span className="w-px h-5 bg-gray-800" />
                         <span className={`text-xs font-medium ${botEffectivelyActive ? 'text-blue-400' : 'text-gray-400'}`}>Bot</span>
                         <button onClick={toggleMode} disabled={togglingMode}
                           className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${botEffectivelyActive ? 'bg-blue-600' : 'bg-orange-500'}`}>
@@ -1577,7 +1596,7 @@ export default function Dashboard() {
                         )}
                         <div className={`flex flex-col mb-2 ${isUser ? 'items-end' : 'items-start'}`}>
                           <div className="flex items-center gap-1.5 mb-1 px-1">
-                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-400' : 'text-blue-400'}`}>{isAdmin ? '👤 Agent' : '🤖 Bot'}</span>}
+                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-400' : 'text-blue-400'}`}>{isAdmin ? '👤 Agent' : botGlobalOff ? '💬 Auto-reply' : '🤖 Bot'}</span>}
                             {isUser && <span className="text-[11px] text-gray-400">Visitor</span>}
                             <span className="text-[10px] text-gray-400">{formatTime(msg.created_at)}</span>
                           </div>
