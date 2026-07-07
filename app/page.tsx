@@ -51,8 +51,8 @@ interface HistVisitor extends Visitor { status: string; has_chat: boolean; await
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string }
 interface BillingData { from: string; to: string; total: number; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
-interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number }
-interface PerfData { from: string; to: string; summary: { totalConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; unattributedReplies: number }
+interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; lastReplyAt: string | null }
+interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; unattributedReplies: number }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
 interface VisitorDetail {
   session_id: string
@@ -2128,11 +2128,24 @@ export default function Dashboard() {
           ) : (
             <>
               {/* Workspace-level summary */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
                 <div className="bg-gray-100 rounded-2xl p-4 border border-gray-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Conversations</p>
                   <p className="text-3xl leading-none font-extrabold text-gray-900 tabular-nums">{perf?.summary.totalConversations ?? 0}</p>
                 </div>
+                {(() => {
+                  const total = perf?.summary.totalConversations ?? 0
+                  const answered = perf?.summary.answeredConversations ?? 0
+                  const pct = total ? Math.round((answered / total) * 100) : 0
+                  const bad = total > 0 && pct < 80
+                  return (
+                    <div className={`rounded-2xl p-4 border ${bad ? 'bg-red-100 border-red-300' : 'bg-gray-100 border-gray-200'}`} title="Conversations that got at least one agent reply">
+                      <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Answered</p>
+                      <p className={`text-3xl leading-none font-extrabold tabular-nums ${bad ? 'text-red-700' : 'text-gray-900'}`}>{pct}%</p>
+                      <p className="text-[10px] text-gray-500 mt-1">{answered} of {total}</p>
+                    </div>
+                  )
+                })()}
                 <div className="bg-gray-100 rounded-2xl p-4 border border-gray-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Leads</p>
                   <p className="text-3xl leading-none font-extrabold text-emerald-700 tabular-nums">{perf?.summary.totalLeads ?? 0}</p>
@@ -2168,7 +2181,7 @@ export default function Dashboard() {
                   <table className="w-full text-sm min-w-[720px]">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-100">
-                        {['Agent', 'Conversations', 'Replies', 'Avg response', 'Slow replies'].map((h, i) => (
+                        {['Agent', 'Conversations', 'Replies', 'Leads', 'Avg response', 'Slow replies', 'Dropped', 'Last active'].map((h, i) => (
                           <th key={h} className={`px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
                         ))}
                       </tr>
@@ -2176,7 +2189,7 @@ export default function Dashboard() {
                     <tbody>
                       {(perf?.agents ?? []).length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="text-center py-10">
+                          <td colSpan={8} className="text-center py-10">
                             <div className="flex flex-col items-center">
                               <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👥</div>
                               <p className="text-gray-700 text-sm font-medium">No agents in this workspace</p>
@@ -2199,11 +2212,26 @@ export default function Dashboard() {
                             </td>
                             <td className="px-4 py-3 text-right text-gray-800 tabular-nums">{a.handled}</td>
                             <td className="px-4 py-3 text-right text-gray-800 tabular-nums">{a.replies}</td>
-                            <td className={`px-4 py-3 text-right tabular-nums font-medium ${slowAvg ? 'text-red-700' : idle ? 'text-gray-500' : 'text-emerald-700'}`}>{formatMs(a.avgResponseMs)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">
-                              {a.slowReplies > 0
-                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">{a.slowReplies}</span>
+                              {a.leads > 0
+                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">{a.leads}</span>
                                 : <span className="text-gray-500">0</span>}
+                            </td>
+                            <td className={`px-4 py-3 text-right tabular-nums font-medium ${slowAvg ? 'text-red-700' : idle ? 'text-gray-500' : 'text-emerald-700'}`}>{formatMs(a.avgResponseMs)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                              {a.slowReplies > 0
+                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold" title={`${a.slowReplies} of ${a.measuredReplies} measured replies took over 2 minutes`}>{a.slowReplies}{a.measuredReplies > 0 ? ` (${Math.round((a.slowReplies / a.measuredReplies) * 100)}%)` : ''}</span>
+                                : <span className="text-gray-500">0</span>}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {a.dropped > 0
+                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold" title="Conversations where this agent replied last, the visitor followed up, and nobody answered">{a.dropped}</span>
+                                : <span className="text-gray-500">0</span>}
+                            </td>
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              {a.lastReplyAt
+                                ? <span className={Date.now() - new Date(a.lastReplyAt).getTime() > 24 * 60 * 60 * 1000 ? 'text-amber-700 font-medium' : 'text-gray-600'} title={formatDateTime(a.lastReplyAt)}>{timeAgo(a.lastReplyAt)}</span>
+                                : <span className="text-gray-400">—</span>}
                             </td>
                           </tr>
                         )
@@ -2215,8 +2243,11 @@ export default function Dashboard() {
 
               <p className="text-gray-500 text-[11px] mt-3 leading-relaxed">
                 <span className="text-gray-500 font-medium">How to read this:</span> Avg response is the time between a visitor&apos;s message and the agent&apos;s reply.
-                A reply is &quot;slow&quot; if it took longer than 2 minutes. <span className="text-amber-700">Missed</span> = a visitor messaged while the bot was off (human takeover or off-hours) and no agent replied within 2 minutes.
-                <span className="text-red-600"> Unanswered</span> = a conversation still waiting on its first agent reply. Missed &amp; unanswered are workspace-wide (no single agent owns them).
+                A reply is &quot;slow&quot; if it took longer than 2 minutes. <span className="text-emerald-700">Leads</span> = conversations the agent handled that captured a lead.
+                <span className="text-red-600"> Dropped</span> = the agent replied last in a conversation, the visitor followed up, and nobody ever answered — owned by that agent.
+                <span className="text-gray-700"> Last active</span> = the agent&apos;s most recent reply (amber if over a day ago).
+                <span className="text-amber-700"> Missed</span> = a visitor messaged while the bot was off and no agent replied within 2 minutes.
+                <span className="text-red-600"> Unanswered</span> = a conversation still waiting on its first agent reply. Missed &amp; unanswered are workspace-wide (no single agent owns them); <span className="text-gray-700">Answered %</span> is the share of conversations that got at least one agent reply.
               </p>
             </>
           )}

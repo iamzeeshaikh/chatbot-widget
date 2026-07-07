@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
   for (const m of memberRows ?? []) roster.set(m.id, { id: m.id, email: m.email, builtin: false })
 
   const emptySummary = {
-    totalConversations: 0, totalLeads: 0, totalMissed: 0, totalUnanswered: 0,
+    totalConversations: 0, answeredConversations: 0, totalLeads: 0, totalMissed: 0, totalUnanswered: 0,
     totalReplies: 0, attributedReplies: 0, avgResponseMs: null as number | null,
     avgExcludedOutliers: 0,
   }
@@ -88,12 +88,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Per-agent accumulators.
-  type Agg = { handled: Set<string>; replies: number; respSum: number; respCount: number; respExcluded: number; slow: number }
+  // Per-agent accumulators. Beyond responsiveness (respSum/slow), each agent is
+  // also measured on: leads (handled conversations that captured a lead),
+  // hanging (conversations where THEIR last reply was followed by a visitor
+  // message nobody answered — they dropped the ball), and lastReplyMs (most
+  // recent activity, exposing agents who've gone quiet).
+  type Agg = { handled: Set<string>; replies: number; respSum: number; respCount: number; respExcluded: number; slow: number; leads: number; hanging: number; lastReplyMs: number }
   const agg = new Map<string, Agg>()
   const ensure = (id: string): Agg => {
     let a = agg.get(id)
-    if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, respExcluded: 0, slow: 0 }; agg.set(id, a) }
+    if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, respExcluded: 0, slow: 0, leads: 0, hanging: 0, lastReplyMs: 0 }; agg.set(id, a) }
     return a
   }
 
@@ -104,13 +108,15 @@ export async function GET(req: NextRequest) {
   // so a corrupt/outlier pair can be eyeballed in the server logs.
   const respPairs: { sid: string; userIso: string; adminIso: string; diffMin: number; excluded: boolean }[] = []
   const conversations = new Set<string>()
+  const answeredSessions = new Set<string>()
   const missedSessions = new Set<string>()
   const unansweredSessions = new Set<string>()
+  const leadSessions = new Set<string>()
 
   // Group rows per session, preserving ascending order.
   const bySession = new Map<string, typeof rows>()
   for (const r of rows) {
-    if (r.role === LEAD_CAPTURE_ROLE) totalLeads++
+    if (r.role === LEAD_CAPTURE_ROLE) { totalLeads++; leadSessions.add(r.session_id) }
     let list = bySession.get(r.session_id)
     if (!list) { list = []; bySession.set(r.session_id, list) }
     list.push(r)
@@ -124,6 +130,7 @@ export async function GET(req: NextRequest) {
     let hasRealMsg = false
     let lastRealRole = ''
     let adminCount = 0
+    let lastAdminAuthor: string | null = null // who sent the session's final agent reply
 
     for (const ev of evs) {
       if (ev.role === MODE_ROLE) { mode = ev.message === 'human' ? 'human' : 'bot'; continue }
@@ -152,7 +159,12 @@ export async function GET(req: NextRequest) {
         adminCount++
         totalReplies++
         const author = authorByKey.get(`${sid}|${ev.created_at}`)
-        if (author) { attributedReplies++; const a = ensure(author.id); a.replies++; a.handled.add(sid) }
+        if (author) {
+          attributedReplies++
+          const a = ensure(author.id); a.replies++; a.handled.add(sid)
+          if (ts > a.lastReplyMs) a.lastReplyMs = ts
+          lastAdminAuthor = author.id
+        }
 
         if (pendingUserTs !== null) {
           // dt = reply time − the FIRST unanswered visitor message in this waiting
@@ -184,13 +196,23 @@ export async function GET(req: NextRequest) {
     }
 
     if (hasRealMsg) conversations.add(sid)
+    if (hasRealMsg && adminCount > 0) answeredSessions.add(sid)
     // A trailing visitor message during a bot-off state that has now been waiting
     // longer than the SLA with no reply at all → missed.
     if (pendingUserTs !== null && pendingHumanState && nowMs - pendingUserTs > RESPONSE_SLA_MS) {
       missedSessions.add(sid)
     }
+    // Dropped: the agent who replied LAST in this conversation left the
+    // visitor's follow-up hanging past the SLA. Owned by that specific agent.
+    if (pendingUserTs !== null && lastAdminAuthor && nowMs - pendingUserTs > RESPONSE_SLA_MS) {
+      ensure(lastAdminAuthor).hanging++
+    }
     // Still waiting: last message is the visitor's and no agent ever replied.
     if (lastRealRole === 'user' && adminCount === 0) unansweredSessions.add(sid)
+    // Lead credit: every agent who replied in a lead-capturing conversation.
+    if (leadSessions.has(sid)) {
+      for (const a of agg.values()) if (a.handled.has(sid)) a.leads++
+    }
   }
 
   // ── Diagnostic: dump every pair feeding the workspace average ───────────────
@@ -202,31 +224,30 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Build the agent table (roster ∪ anyone with attributed replies) ─────────
-  const agents: {
-    id: string; email: string; builtin: boolean; former: boolean
-    handled: number; replies: number; avgResponseMs: number | null; slowReplies: number
-  }[] = []
+  const agentRow = (id: string, email: string, builtin: boolean, former: boolean, a: Agg | undefined) => ({
+    id, email, builtin, former,
+    handled: a ? a.handled.size : 0,
+    replies: a ? a.replies : 0,
+    avgResponseMs: a && a.respCount ? Math.round(a.respSum / a.respCount) : null,
+    slowReplies: a ? a.slow : 0,
+    // All measured response pairs, INCLUDING outliers (they're excluded from
+    // the average but still count as slow) — keeps slow ≤ measured.
+    measuredReplies: a ? a.respCount + a.respExcluded : 0,
+    leads: a ? a.leads : 0,
+    dropped: a ? a.hanging : 0,
+    lastReplyAt: a && a.lastReplyMs ? new Date(a.lastReplyMs).toISOString() : null,
+  })
+  type AgentRow = ReturnType<typeof agentRow>
+  const agents: AgentRow[] = []
   const seen = new Set<string>()
   for (const [id, info] of roster) {
-    const a = agg.get(id)
-    agents.push({
-      id, email: info.email, builtin: info.builtin, former: false,
-      handled: a ? a.handled.size : 0,
-      replies: a ? a.replies : 0,
-      avgResponseMs: a && a.respCount ? Math.round(a.respSum / a.respCount) : null,
-      slowReplies: a ? a.slow : 0,
-    })
+    agents.push(agentRow(id, info.email, info.builtin, false, agg.get(id)))
     seen.add(id)
   }
   // Replies attributed to someone no longer in the roster (e.g. a removed member).
   for (const [id, a] of agg) {
     if (seen.has(id)) continue
-    agents.push({
-      id, email: idToEmail.get(id) || 'former member', builtin: id.startsWith('builtin:'), former: true,
-      handled: a.handled.size, replies: a.replies,
-      avgResponseMs: a.respCount ? Math.round(a.respSum / a.respCount) : null,
-      slowReplies: a.slow,
-    })
+    agents.push(agentRow(id, idToEmail.get(id) || 'former member', id.startsWith('builtin:'), true, a))
   }
 
   // Sort by responsiveness: active agents first (fastest average on top), idle
@@ -245,6 +266,7 @@ export async function GET(req: NextRequest) {
     from, to,
     summary: {
       totalConversations: conversations.size,
+      answeredConversations: answeredSessions.size,
       totalLeads,
       totalMissed: missedSessions.size,
       totalUnanswered: unansweredSessions.size,
