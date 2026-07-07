@@ -316,16 +316,20 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
   )
 }
 
-// ── Repeating waiting-chat alert ──────────────────────────────────────────────
-// A single chime per new visitor message is easy to miss. As long as ANY
-// in-scope conversation is still waiting on a human reply (its latest message
-// is the visitor's), the dashboard re-chimes at this interval and only goes
-// quiet once an agent replies, the sound is muted, or the visitor message is
-// older than the freshness window (the visitor has clearly left — matches the
-// widget's 30-minute session gap, so ancient unanswered chats can't ring
-// forever).
-const WAITING_REPEAT_MS = 20 * 1000
+// ── Repeating waiting-chat/visitor alert ──────────────────────────────────────
+// A single chime is easy to miss. As long as ANY in-scope conversation is
+// still waiting on a human reply (its latest message is the visitor's) or a
+// live visitor is unengaged, the dashboard re-chimes at this interval and only
+// goes quiet once an agent engages, the sound is muted, or the visitor message
+// is older than the freshness window (the visitor has clearly left — matches
+// the widget's 30-minute session gap, so ancient unanswered chats can't ring
+// forever). The cadence is deliberately aggressive: it should nag until the
+// chat is picked up.
+const WAITING_REPEAT_MS = 8 * 1000
 const WAITING_FRESH_MS = 30 * 60 * 1000
+// Live-visitor poll: also the worst-case delay between a visitor landing on a
+// site and the arrival chime, so it's kept tight.
+const VISITOR_POLL_MS = 3 * 1000
 
 export default function Dashboard() {
   const [tab, setTab] = useState<'overview' | 'conversations' | 'billing' | 'performance'>('overview')
@@ -554,9 +558,9 @@ export default function Dashboard() {
   // "Engaged" = the last message in their session is an agent's — so ringing
   // stops when an agent replies (or proactively messages a browsing visitor),
   // resumes when the visitor speaks again, and ends when the visitor leaves the
-  // site (they drop off the live list). State is read through refs so the 20s
-  // cadence never resets on the 5–6s polls; playDashSound honours the mute
-  // toggle.
+  // site (they drop off the live list). State is read through refs so the
+  // repeat cadence never resets on the poll updates; playDashSound honours the
+  // mute toggle.
   const sessionsRef = useRef<Session[]>([])
   const visitorsRef = useRef<Visitor[]>([])
   const userSitesRef = useRef<string[]>([])
@@ -680,7 +684,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!authReady) return
     fetchVisitors()
-    const iv = setInterval(fetchVisitors, 5000)
+    const iv = setInterval(fetchVisitors, VISITOR_POLL_MS)
     return () => clearInterval(iv)
   }, [authReady, fetchVisitors])
 
@@ -1121,7 +1125,7 @@ export default function Dashboard() {
               </button>
             )}
           </div>
-          <button onClick={toggleSound} title={soundOn ? 'Sound on — chimes repeat every 20s while a chat is waiting for a reply; click to mute' : 'Sound off — click to unmute'}
+          <button onClick={toggleSound} title={soundOn ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting; click to mute' : 'Sound off — click to unmute'}
             className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-900 text-gray-200 border-gray-800 hover:bg-gray-800' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-gray-300'}`}>
             {soundOn ? '🔔' : '🔕'}
           </button>
