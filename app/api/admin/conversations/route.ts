@@ -6,6 +6,7 @@ import { CONTACT_ROLE, TAGS_ROLE, parseTags, parseContact, asUtcIso } from '@/li
 import { parseAttachment } from '@/lib/attachment'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
 import { isControlRole } from '@/lib/controlroles'
+import { isBotEnabled } from '@/lib/botflag'
 
 export const dynamic = 'force-dynamic'
 
@@ -123,5 +124,7 @@ export async function GET(req: NextRequest) {
     .map((s) => ({ ...s, last_at: asUtcIso(s.last_at) })) // normalise naive-UTC so "X ago" is correct
     .sort((a, b) => new Date(b.last_at!).getTime() - new Date(a.last_at!).getTime())
 
-  return NextResponse.json({ sessions })
+  // bot_enabled carries the SERVER's view of the global kill switch (including
+  // any BOT_ENABLED env override) to the dashboard so its bot UI stays truthful.
+  return NextResponse.json({ sessions, bot_enabled: isBotEnabled() })
 }

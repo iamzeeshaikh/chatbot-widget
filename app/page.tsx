@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
+import { isBotEnabled } from '@/lib/botflag'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 
@@ -357,6 +358,10 @@ export default function Dashboard() {
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [sessions, setSessions] = useState<Session[]>([])
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  // Global bot kill switch (lib/botflag.ts). Initialised from the code default;
+  // every conversations poll refreshes it with the server's view (which also
+  // honours a BOT_ENABLED env override the client bundle can't see).
+  const [botGlobalOff, setBotGlobalOff] = useState(() => !isBotEnabled())
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [replyText, setReplyText] = useState('')
@@ -576,6 +581,7 @@ export default function Dashboard() {
 
     setSessions(incoming)
     setSessionsLoaded(true)
+    if (typeof data.bot_enabled === 'boolean') setBotGlobalOff(!data.bot_enabled)
   }, [playDashSound])
 
   // Poll sessions whenever signed in (not only on the Conversations tab) so the
@@ -944,7 +950,7 @@ export default function Dashboard() {
   // matching /api/chat. Sports is never schedule-gated. (Recomputed each render,
   // which happens on every poll, so it flips within seconds of a window boundary.)
   const scheduledBotOff = !!selectedSession && isBotOffBySchedule(selectedSession.site_id)
-  const botEffectivelyActive = !!selectedSession && selectedSession.mode === 'bot' && !scheduledBotOff
+  const botEffectivelyActive = !botGlobalOff && !!selectedSession && selectedSession.mode === 'bot' && !scheduledBotOff
 
   // ── Stats derived ──────────────────────────────────────────────────────────
   const todayStr = new Date().toISOString().split('T')[0]
@@ -1074,7 +1080,7 @@ export default function Dashboard() {
                 {[
                   { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-500/10 to-blue-600/5', border: 'border-blue-500/20' },
                   { label: 'Total Leads', value: roleLeads.length, icon: '👥', color: 'from-green-500/10 to-green-600/5', border: 'border-green-500/20' },
-                  { label: 'Active Bots', value: roleSites.length, icon: '🤖', color: 'from-purple-500/10 to-purple-600/5', border: 'border-purple-500/20' },
+                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-500/10 to-purple-600/5', border: 'border-purple-500/20' },
                   { label: "Today's Leads", value: todayLeads, icon: '📅', color: 'from-orange-500/10 to-orange-600/5', border: 'border-orange-500/20' },
                   { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20' },
                 ].map((s) => (
@@ -1365,7 +1371,9 @@ export default function Dashboard() {
                 </select>
                 <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="flex-1 bg-gray-800/60 border border-gray-700/60 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-500">
                   <option value="all">All</option>
-                  <option value="bot">Bot</option>
+                  {/* With the bot globally off, mode 'bot' just means "no agent
+                      has replied yet", so label the filter accordingly. */}
+                  <option value="bot">{botGlobalOff ? 'Waiting' : 'Bot'}</option>
                   <option value="human">Human</option>
                   <option value="lead">Lead</option>
                   <option value="no-response">No reply</option>
@@ -1523,17 +1531,25 @@ export default function Dashboard() {
                       🌐 Translate{translateOn ? ' on' : ''}
                     </button>
                     <span className="w-px h-5 bg-gray-800" />
-                    <span className={`text-xs font-medium ${botEffectivelyActive ? 'text-blue-400' : 'text-gray-400'}`}>Bot</span>
-                    <button onClick={toggleMode} disabled={togglingMode}
-                      className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${botEffectivelyActive ? 'bg-blue-600' : 'bg-orange-500'}`}>
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${botEffectivelyActive ? 'translate-x-0' : 'translate-x-5'}`} />
-                    </button>
-                    <span className={`text-xs font-medium ${!botEffectivelyActive ? 'text-orange-400' : 'text-gray-400'}`}>Human</span>
-                    {scheduledBotOff && selectedSession.mode === 'bot' ? (
-                      <span className="text-[10px] bg-indigo-500/15 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/25" title="The packaging bot is off on this schedule — replies are human-only right now">🌙 Bot off (scheduled)</span>
-                    ) : selectedSession.mode === 'human' ? (
-                      <span className="text-[10px] bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded-full border border-orange-500/25">AI off</span>
-                    ) : null}
+                    {botGlobalOff ? (
+                      // Global kill switch on: there is no bot to toggle — every
+                      // conversation is human-handled, so show one static badge.
+                      <span className="text-[10px] bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded-full border border-orange-500/25" title="The AI bot is disabled globally (lib/botflag.ts) — human agents are the only reply path">👤 Human only — AI disabled</span>
+                    ) : (
+                      <>
+                        <span className={`text-xs font-medium ${botEffectivelyActive ? 'text-blue-400' : 'text-gray-400'}`}>Bot</span>
+                        <button onClick={toggleMode} disabled={togglingMode}
+                          className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${botEffectivelyActive ? 'bg-blue-600' : 'bg-orange-500'}`}>
+                          <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${botEffectivelyActive ? 'translate-x-0' : 'translate-x-5'}`} />
+                        </button>
+                        <span className={`text-xs font-medium ${!botEffectivelyActive ? 'text-orange-400' : 'text-gray-400'}`}>Human</span>
+                        {scheduledBotOff && selectedSession.mode === 'bot' ? (
+                          <span className="text-[10px] bg-indigo-500/15 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/25" title="The packaging bot is off on this schedule — replies are human-only right now">🌙 Bot off (scheduled)</span>
+                        ) : selectedSession.mode === 'human' ? (
+                          <span className="text-[10px] bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded-full border border-orange-500/25">AI off</span>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1635,7 +1651,7 @@ export default function Dashboard() {
                     <p className="text-[11px] text-blue-300 mb-2 flex items-center gap-1.5">
                       <span>🤖</span> Bot is active — toggle to Human to reply, or send a file to take over
                     </p>
-                  ) : scheduledBotOff && selectedSession.mode === 'bot' ? (
+                  ) : !botGlobalOff && scheduledBotOff && selectedSession.mode === 'bot' ? (
                     <p className="text-[11px] text-indigo-300 mb-2 flex items-center gap-1.5">
                       <span>🌙</span> Bot is off (scheduled) — human only. The bot won&apos;t reply right now; type to respond.
                     </p>
