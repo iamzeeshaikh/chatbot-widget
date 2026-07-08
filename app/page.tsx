@@ -419,7 +419,6 @@ export default function Dashboard() {
   const [histSiteFilter, setHistSiteFilter] = useState('')
   const [histChatOnly, setHistChatOnly] = useState(false)
   const [histStatusFilter, setHistStatusFilter] = useState<'all' | 'live' | 'left'>('all')
-  const [histReplyFilter, setHistReplyFilter] = useState<'all' | 'noreply' | 'replied'>('all')
   const [histCountryFilter, setHistCountryFilter] = useState('')
   const [histDeviceFilter, setHistDeviceFilter] = useState('')
   const [histSearch, setHistSearch] = useState('')
@@ -1914,8 +1913,6 @@ export default function Dashboard() {
         const base = visitorHistory.filter((v) => {
           if (histSiteFilter && v.site_id !== histSiteFilter) return false
           if (histChatOnly && !v.has_chat) return false
-          if (histReplyFilter === 'noreply' && !(v.has_chat && v.awaiting_reply)) return false
-          if (histReplyFilter === 'replied' && !(v.has_chat && !v.awaiting_reply)) return false
           if (histHotOnly && !isHotVisitor(v)) return false
           if (histCountryFilter && (v.country ?? '') !== histCountryFilter) return false
           if (histDeviceFilter && (v.device_type ?? '') !== histDeviceFilter) return false
@@ -1929,9 +1926,6 @@ export default function Dashboard() {
         const liveTotal = base.filter(isLiveV).length
         const filtered = base.filter((v) =>
           histStatusFilter === 'live' ? isLiveV(v) : histStatusFilter === 'left' ? !isLiveV(v) : true)
-        // Accountability counts (whole history): chats still waiting on an agent.
-        const noReplyTotal = visitorHistory.filter((v) => v.has_chat && v.awaiting_reply).length
-        const repliedTotal = visitorHistory.filter((v) => v.has_chat && !v.awaiting_reply).length
         const histSites = Array.from(new Map(visitorHistory.map((v) => [v.site_id, v.site_name])).entries())
         const histCountries = Array.from(new Set(visitorHistory.map((v) => v.country).filter(Boolean) as string[])).sort()
         const histDevices = Array.from(new Set(visitorHistory.map((v) => v.device_type).filter(Boolean) as string[])).sort()
@@ -1941,7 +1935,7 @@ export default function Dashboard() {
         const pageCount = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
         const page = Math.min(histPage, pageCount - 1)
         const pageRows = filtered.slice(page * PER_PAGE, (page + 1) * PER_PAGE)
-        const anyFilter = histSiteFilter || histChatOnly || histStatusFilter !== 'all' || histReplyFilter !== 'all' || histCountryFilter || histDeviceFilter || histHotOnly || q
+        const anyFilter = histSiteFilter || histChatOnly || histStatusFilter !== 'all' || histCountryFilter || histDeviceFilter || histHotOnly || q
         let lastDay = ''
         return (
           <div className="max-w-5xl mx-auto px-5 py-6 animate-in">
@@ -1976,13 +1970,6 @@ export default function Dashboard() {
                 <option value="">All Devices</option>
                 {histDevices.map((d) => <option key={d} value={d}>{deviceIcon(d)} {d}</option>)}
               </select>
-              {/* Agent accountability: chats the team never answered. */}
-              <select value={histReplyFilter} onChange={(e) => setHistFilter(setHistReplyFilter)(e.target.value as 'all' | 'noreply' | 'replied')}
-                className={`rounded-lg px-2 py-1.5 text-xs focus:outline-none border ${histReplyFilter === 'noreply' ? 'bg-red-50 border-red-300 text-red-700 font-semibold' : 'bg-white border-gray-300 text-gray-800 focus:border-gray-400'}`}>
-                <option value="all">Any reply status</option>
-                <option value="noreply">⚠ No agent reply ({noReplyTotal})</option>
-                <option value="replied">✓ Agent replied ({repliedTotal})</option>
-              </select>
               <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
                 <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistFilter(setHistChatOnly)(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
                 With chats only
@@ -1992,7 +1979,7 @@ export default function Dashboard() {
                 🔥 Hot only
               </label>
               {anyFilter && (
-                <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistReplyFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistHotOnly(false); setHistPage(0) }}
+                <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistHotOnly(false); setHistPage(0) }}
                   className="text-xs text-blue-600 hover:text-blue-700 font-medium">Clear filters</button>
               )}
             </div>
