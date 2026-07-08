@@ -64,12 +64,16 @@ export async function GET(req: NextRequest) {
     if (seen.has(v.session_id)) continue
     seen.add(v.session_id)
     const site = sites.find((s) => s.site_id === v.site_id)
-    const { page_url, page_title, referrer, visits } = unpackVisitor(v.page_url)
+    const { page_url, page_title, referrer, visits, history } = unpackVisitor(v.page_url)
     visitors.push({
       ...v,
       created_at: asUtcIso(v.created_at),
       last_seen: asUtcIso(v.last_seen),
       page_url, page_title, referrer, visits,
+      // Browsing trail (chronological) + page count — feeds the hot-visitor
+      // score and the expandable pages list. Capped to keep the payload small.
+      pages: Math.max(history.length, page_url ? 1 : 0),
+      history: history.slice(-15),
       site_name: site?.name ?? v.site_id,
       primary_color: site?.primary_color ?? '#2563eb',
       has_chat: chatted.has(v.session_id),

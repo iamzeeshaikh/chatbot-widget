@@ -48,7 +48,17 @@ interface Visitor { session_id: string; site_id: string; site_name: string; prim
 // Visitors-history row (Zendesk-style history): a Visitor plus whether the
 // session ever chatted, whether the chat is still waiting on an agent reply
 // (accountability), and its final status.
-interface HistVisitor extends Visitor { status: string; has_chat: boolean; awaiting_reply?: boolean }
+interface HistVisitor extends Visitor { status: string; has_chat: boolean; awaiting_reply?: boolean; pages: number; history: { u: string | null; t: string | null; ts: string }[] }
+
+// Buying-intent score for a visitor: pages browsed + time on site + return
+// visits. 3+ points = a 🔥 hot visitor worth proactively messaging first.
+function hotPoints(v: { pages: number; visits: number; created_at: string; last_seen: string }): number {
+  const durMs = new Date(v.last_seen).getTime() - new Date(v.created_at).getTime()
+  return (v.pages >= 6 ? 2 : v.pages >= 3 ? 1 : 0)
+    + (durMs >= 8 * 60000 ? 2 : durMs >= 3 * 60000 ? 1 : 0)
+    + (v.visits >= 4 ? 2 : v.visits >= 2 ? 1 : 0)
+}
+const isHotVisitor = (v: { pages: number; visits: number; created_at: string; last_seen: string }) => hotPoints(v) >= 3
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null }
 interface BillingData { from: string; to: string; total: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
@@ -413,6 +423,8 @@ export default function Dashboard() {
   const [histCountryFilter, setHistCountryFilter] = useState('')
   const [histDeviceFilter, setHistDeviceFilter] = useState('')
   const [histSearch, setHistSearch] = useState('')
+  const [histHotOnly, setHistHotOnly] = useState(false)
+  const [expandedVisitor, setExpandedVisitor] = useState<string | null>(null)
   const [histPage, setHistPage] = useState(0)
   // Any filter change goes back to page 1.
   const setHistFilter = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setHistPage(0) }
@@ -1904,6 +1916,7 @@ export default function Dashboard() {
           if (histChatOnly && !v.has_chat) return false
           if (histReplyFilter === 'noreply' && !(v.has_chat && v.awaiting_reply)) return false
           if (histReplyFilter === 'replied' && !(v.has_chat && !v.awaiting_reply)) return false
+          if (histHotOnly && !isHotVisitor(v)) return false
           if (histCountryFilter && (v.country ?? '') !== histCountryFilter) return false
           if (histDeviceFilter && (v.device_type ?? '') !== histDeviceFilter) return false
           if (q) {
@@ -1928,7 +1941,7 @@ export default function Dashboard() {
         const pageCount = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
         const page = Math.min(histPage, pageCount - 1)
         const pageRows = filtered.slice(page * PER_PAGE, (page + 1) * PER_PAGE)
-        const anyFilter = histSiteFilter || histChatOnly || histStatusFilter !== 'all' || histReplyFilter !== 'all' || histCountryFilter || histDeviceFilter || q
+        const anyFilter = histSiteFilter || histChatOnly || histStatusFilter !== 'all' || histReplyFilter !== 'all' || histCountryFilter || histDeviceFilter || histHotOnly || q
         let lastDay = ''
         return (
           <div className="max-w-5xl mx-auto px-5 py-6 animate-in">
@@ -1974,8 +1987,12 @@ export default function Dashboard() {
                 <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistFilter(setHistChatOnly)(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
                 With chats only
               </label>
+              <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none" title="High buying intent: browsed several pages, stayed a while, or keeps coming back">
+                <input type="checkbox" checked={histHotOnly} onChange={(e) => setHistFilter(setHistHotOnly)(e.target.checked)} className="rounded accent-orange-500 cursor-pointer" />
+                🔥 Hot only
+              </label>
               {anyFilter && (
-                <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistReplyFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistPage(0) }}
+                <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistReplyFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistHotOnly(false); setHistPage(0) }}
                   className="text-xs text-blue-600 hover:text-blue-700 font-medium">Clear filters</button>
               )}
             </div>
@@ -2022,7 +2039,15 @@ export default function Dashboard() {
                             ) : (
                               <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px" title="This visitor chatted and an agent replied — click to open the conversation">💬 chatted</span>
                             ))}
+                            {isHotVisitor(v) && <span className="text-[10px] font-bold text-orange-700 bg-orange-100 border border-orange-300 rounded-full px-1.5 py-px" title={`High buying intent: ${v.pages} page${v.pages !== 1 ? 's' : ''}, ${formatDuration(v.created_at, v.last_seen)} on site, ${v.visits} visit${v.visits !== 1 ? 's' : ''}`}>🔥 hot</span>}
                             {v.visits > 1 && <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>}
+                            {v.pages > 1 && (
+                              <button onClick={(e) => { e.stopPropagation(); setExpandedVisitor(expandedVisitor === v.session_id ? null : v.session_id) }}
+                                className="text-[10px] font-medium text-gray-600 bg-gray-100 border border-gray-300 rounded-full px-1.5 py-px hover:bg-gray-200 transition-colors"
+                                title="Show the pages this visitor browsed, in order">
+                                📄 {v.pages} pages {expandedVisitor === v.session_id ? '▴' : '▾'}
+                              </button>
+                            )}
                           </div>
                           <div className="text-[11px] text-gray-700 truncate mt-0.5" title={v.page_url ?? undefined}>
                             <span className="text-gray-500">Viewed:</span> {viewingLabel(v)}
@@ -2037,6 +2062,21 @@ export default function Dashboard() {
                           <div className="text-[10px] text-gray-500 mt-0.5">on site {formatDuration(v.created_at, v.last_seen)}</div>
                         </div>
                       </div>
+                      {/* Browsing trail (expanded via the pages chip) */}
+                      {expandedVisitor === v.session_id && v.history.length > 0 && (
+                        <div className="pl-12 pr-4 pb-2.5 bg-gray-100/60 border-b border-gray-100 animate-in">
+                          {v.history.map((p, i) => (
+                            <div key={i} className="flex items-center gap-2 text-[11px] py-0.5 min-w-0">
+                              <span className="text-gray-400 tabular-nums shrink-0 w-4 text-right">{i + 1}.</span>
+                              <a href={p.u ?? undefined} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                className="text-gray-700 truncate hover:text-blue-700 hover:underline" title={p.u ?? undefined}>
+                                {pageLabel({ url: p.u, title: p.t })}
+                              </a>
+                              <span className="text-gray-400 shrink-0">{formatTime(p.ts)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
