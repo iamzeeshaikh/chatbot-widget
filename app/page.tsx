@@ -5,6 +5,7 @@ import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
+import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadstatus'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 
@@ -49,8 +50,8 @@ interface Visitor { session_id: string; site_id: string; site_name: string; prim
 // (accountability), and its final status.
 interface HistVisitor extends Visitor { status: string; has_chat: boolean; awaiting_reply?: boolean }
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
-interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string }
-interface BillingData { from: string; to: string; total: number; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
+interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null }
+interface BillingData { from: string; to: string; total: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
 interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; ignoredVisitors: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; unattributedReplies: number }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
@@ -967,13 +968,29 @@ export default function Dashboard() {
     }
   }
 
+  // Set a lead's pipeline status: optimistic update, then persist.
+  async function setLeadStatus(lead: BillingLead, status: LeadStatus) {
+    setBilling((prev) => {
+      if (!prev) return prev
+      const leads = prev.leads.map((l) => l.session_id === lead.session_id ? { ...l, status } : l)
+      const byStatus: Record<string, number> = {}
+      for (const l of leads) byStatus[l.status] = (byStatus[l.status] ?? 0) + 1
+      return { ...prev, leads, byStatus }
+    })
+    await fetch('/api/admin/lead-status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lead.session_id, siteId: lead.site_id, status }),
+    }).catch(() => {})
+  }
+
   // Export the current billing list as CSV for the client invoice.
   function downloadBillingCsv() {
     if (!billing) return
     const esc = (v: string | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const header = ['Email', 'Name', 'Phone', 'Site', 'Date Captured']
+    const header = ['Email', 'Name', 'Phone', 'Site', 'Status', 'Agent', 'Country', 'Source', 'Date Captured']
     const rows = billing.leads.map((l) => [
       esc(l.email), esc(l.name), esc(l.phone), esc(l.site_name),
+      esc(l.status), esc(l.agent), esc(l.country), esc(cleanReferrer(l.referrer)),
       esc(new Date(l.captured_at).toISOString()),
     ].join(','))
     const csv = [header.join(','), ...rows].join('\r\n')
@@ -2080,6 +2097,25 @@ export default function Dashboard() {
                 <div className="bg-gradient-to-br from-indigo-100 to-indigo-50 rounded-2xl p-5 border border-indigo-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">Total leads this period</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{billing?.total ?? 0}</p>
+                  {billing && (
+                    <p className="text-[11px] text-gray-500 mt-2">
+                      Last month: <span className="font-semibold text-gray-700">{billing.prevTotal}</span>
+                      {billing.prevTotal > 0 && (
+                        <span className={`ml-1.5 font-semibold ${billing.total >= billing.prevTotal ? 'text-green-600' : 'text-red-600'}`}>
+                          {billing.total >= billing.prevTotal ? '▲' : '▼'} {Math.abs(Math.round(((billing.total - billing.prevTotal) / billing.prevTotal) * 100))}%
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {billing && billing.total > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {LEAD_STATUSES.map((s) => {
+                        const n = billing.byStatus?.[s] ?? 0
+                        if (n === 0) return null
+                        return <span key={s} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${LEAD_STATUS_STYLE[s]}`}>{s} {n}</span>
+                      })}
+                    </div>
+                  )}
                 </div>
                 <div className="md:col-span-2 bg-gray-100 rounded-2xl p-5 border border-gray-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-3">By site</p>
@@ -2101,10 +2137,10 @@ export default function Dashboard() {
               {/* Detail table */}
               <div className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[760px]">
+                  <table className="w-full text-sm min-w-[1050px]">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-100">
-                        {['Email', 'Name', 'Phone', 'Site', 'Date Captured', ''].map((h) => (
+                        {['Email', 'Name', 'Phone', 'Site', 'Source', 'Agent', 'Status', 'Date Captured', ''].map((h) => (
                           <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -2112,7 +2148,7 @@ export default function Dashboard() {
                     <tbody>
                       {(billing?.leads ?? []).length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="text-center py-10">
+                          <td colSpan={9} className="text-center py-10">
                             <div className="flex flex-col items-center">
                               <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">🧾</div>
                               <p className="text-gray-700 text-sm font-medium">No leads captured this period</p>
@@ -2127,6 +2163,19 @@ export default function Dashboard() {
                           <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
                           <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
                           <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
+                          <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap" title={l.referrer ?? 'Direct'}>
+                            {l.country ? <span>{l.country}</span> : <span className="text-gray-400">—</span>}
+                            <span className="text-gray-400"> · </span>{cleanReferrer(l.referrer)}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap" title={l.agent ?? undefined}>
+                            {l.agent ? l.agent.split('@')[0] : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <select value={l.status} onChange={(e) => setLeadStatus(l, e.target.value as LeadStatus)}
+                              className={`text-[11px] font-semibold px-2 py-1 rounded-full border capitalize cursor-pointer focus:outline-none ${LEAD_STATUS_STYLE[l.status]}`}>
+                              {LEAD_STATUSES.map((s) => <option key={s} value={s} className="bg-white text-gray-800 capitalize">{s}</option>)}
+                            </select>
+                          </td>
                           <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
                           <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => openConversation(l)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline">View chat →</button>

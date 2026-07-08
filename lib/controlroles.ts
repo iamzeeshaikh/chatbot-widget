@@ -13,6 +13,7 @@ import { MODE_ROLE } from './mode'
 import { CONTACT_ROLE, TAGS_ROLE } from './visitor'
 import { LEAD_CAPTURE_ROLE } from './leadtracking'
 import { REPLY_AUTHOR_ROLE } from './replyauthor'
+import { LEAD_STATUS_ROLE } from './leadstatus'
 
 export const CONTROL_ROLES = [
   MODE_ROLE,
@@ -20,6 +21,7 @@ export const CONTROL_ROLES = [
   TAGS_ROLE,
   LEAD_CAPTURE_ROLE,
   REPLY_AUTHOR_ROLE,
+  LEAD_STATUS_ROLE,
 ] as const
 
 const CONTROL_ROLE_SET: ReadonlySet<string> = new Set(CONTROL_ROLES)
