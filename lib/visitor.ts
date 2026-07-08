@@ -114,6 +114,9 @@ export interface UnpackedVisitor {
   referrer: string | null
   visits: number
   ip: string | null
+  // Persistent per-browser visitor id (the widget's localStorage id) — lets
+  // analytics count UNIQUE people, not just sessions. Null for old rows.
+  vid: string | null
   history: PageVisit[]
 }
 
@@ -121,7 +124,7 @@ export interface UnpackedVisitor {
 export const MAX_HISTORY = 40
 
 export function unpackVisitor(raw: string | null): UnpackedVisitor {
-  if (!raw) return { page_url: null, page_title: null, referrer: null, visits: 1, ip: null, history: [] }
+  if (!raw) return { page_url: null, page_title: null, referrer: null, visits: 1, ip: null, vid: null, history: [] }
   if (raw[0] === '{') {
     try {
       const o = JSON.parse(raw)
@@ -131,11 +134,12 @@ export function unpackVisitor(raw: string | null): UnpackedVisitor {
         referrer: o.r ?? null,
         visits: typeof o.v === 'number' ? o.v : (parseInt(o.v, 10) || 1),
         ip: o.ip ?? null,
+        vid: typeof o.vid === 'string' && o.vid ? o.vid : null,
         history: Array.isArray(o.h) ? o.h : [],
       }
     } catch { /* fall through to legacy */ }
   }
-  return { page_url: raw, page_title: null, referrer: null, visits: 1, ip: null, history: [] }
+  return { page_url: raw, page_title: null, referrer: null, visits: 1, ip: null, vid: null, history: [] }
 }
 
 export function packVisitor(v: {
@@ -144,6 +148,7 @@ export function packVisitor(v: {
   referrer: string | null
   visits: number
   ip: string | null
+  vid?: string | null
   history: PageVisit[]
 }): string {
   return JSON.stringify({
@@ -152,6 +157,7 @@ export function packVisitor(v: {
     r: v.referrer,
     v: v.visits,
     ip: v.ip,
+    vid: v.vid ?? null,
     h: v.history.slice(-MAX_HISTORY),
   })
 }

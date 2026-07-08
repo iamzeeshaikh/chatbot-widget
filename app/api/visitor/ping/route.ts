@@ -74,7 +74,7 @@ function countryToFlag(country: string): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { sessionId, siteId, pageUrl, pageTitle, referrer, visits, userAgent, screenWidth, status } = body
+    const { sessionId, siteId, pageUrl, pageTitle, referrer, visits, userAgent, screenWidth, status, visitorId } = body
     if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400, headers: corsHeaders })
 
     if (status === 'left') {
@@ -140,6 +140,7 @@ export async function POST(req: NextRequest) {
       referrer: referrer ?? null,
       visits: typeof visits === 'number' ? visits : (parseInt(visits, 10) || 1),
       ip: ip || prev.ip || null,
+      vid: (typeof visitorId === 'string' && visitorId) || prev.vid || null,
       history: appendHistory(prev.history, pageUrl ?? null, pageTitle ?? null),
     })
 

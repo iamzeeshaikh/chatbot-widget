@@ -914,7 +914,7 @@
       if (idleMs() > SESSION_GAP_MS) return;
       ensureFreshSession(); // rotates if the session outlived its max age
     }
-    var body = { sessionId: sessionId, siteId: siteId, status: status || 'active' };
+    var body = { sessionId: sessionId, siteId: siteId, status: status || 'active', visitorId: visitorId };
     if (!status || status === 'active') {
       body.pageUrl = window.location.href;
       body.pageTitle = document.title || '';

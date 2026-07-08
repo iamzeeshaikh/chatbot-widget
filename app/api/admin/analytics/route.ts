@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
-import { asUtcIso } from '@/lib/visitor'
+import { asUtcIso, unpackVisitor } from '@/lib/visitor'
 import { PKT_OFFSET_HOURS } from '@/lib/botschedule'
 import { findBurstKeys, burstKey } from '@/lib/botfilter'
 
@@ -80,14 +80,14 @@ export async function GET(req: NextRequest) {
 
   // Empty scope (standard member with no sites) → nothing to show.
   if (allowed.length === 0) {
-    return NextResponse.json({ range, points: buckets.map((b) => ({ label: b.label, visitors: 0, chats: 0 })) })
+    return NextResponse.json({ range, points: buckets.map((b) => ({ label: b.label, visitors: 0, unique: 0, chats: 0 })), totalUnique: 0 })
   }
 
   // Paginated (fetchAllPages): a plain query silently tops out at 1000 rows,
   // which starved the chart of every day after the first ~1000 visitors.
   const [visRows, logRows] = await Promise.all([
-    fetchAllPages<{ created_at: string; user_agent: string | null }>(
-      () => supabase.from('active_visitors').select('created_at, user_agent').in('site_id', allowed)
+    fetchAllPages<{ created_at: string; user_agent: string | null; session_id: string; page_url: string | null }>(
+      () => supabase.from('active_visitors').select('created_at, user_agent, session_id, page_url').in('site_id', allowed)
         .gte('created_at', startISO).order('created_at', { ascending: true }),
       50000),
     fetchAllPages<{ created_at: string; session_id: string; role: string; message: string }>(
@@ -101,13 +101,22 @@ export async function GET(req: NextRequest) {
   // Bot bursts — dozens of sessions with the exact same user-agent in one hour
   // (e.g. the 557-row flood on Jul 4 2026) — are excluded so the line shows
   // real humans (see lib/botfilter.ts).
-  const visStamped = visRows.map((v) => ({ userAgent: v.user_agent, tsMs: toPktMs(v.created_at) }))
+  const visStamped = visRows.map((v) => ({ v, userAgent: v.user_agent, tsMs: toPktMs(v.created_at) }))
   const bursts = findBurstKeys(visStamped)
   const visitorCounts = new Array(buckets.length).fill(0)
-  for (const v of visStamped) {
-    if (bursts.has(burstKey(v.userAgent, v.tsMs))) continue
-    const idx = bucketIndex(buckets, v.tsMs)
-    if (idx >= 0) visitorCounts[idx]++
+  // Unique people per bucket: keyed by the widget's persistent visitor id
+  // (falling back to IP, then session, for rows recorded before vid existed).
+  const uniqueSets: Set<string>[] = buckets.map(() => new Set())
+  const windowUnique = new Set<string>()
+  for (const s of visStamped) {
+    if (bursts.has(burstKey(s.userAgent, s.tsMs))) continue
+    const idx = bucketIndex(buckets, s.tsMs)
+    if (idx < 0) continue
+    visitorCounts[idx]++
+    const { vid, ip } = unpackVisitor(s.v.page_url)
+    const key = vid || ip || s.v.session_id
+    uniqueSets[idx].add(key)
+    windowUnique.add(key)
   }
 
   // New chats = a session's FIRST genuine visitor message. Counting any
@@ -129,6 +138,6 @@ export async function GET(req: NextRequest) {
     if (idx >= 0) chatCounts[idx]++
   }
 
-  const points = buckets.map((b, i) => ({ label: b.label, visitors: visitorCounts[i], chats: chatCounts[i] }))
-  return NextResponse.json({ range, points })
+  const points = buckets.map((b, i) => ({ label: b.label, visitors: visitorCounts[i], unique: uniqueSets[i].size, chats: chatCounts[i] }))
+  return NextResponse.json({ range, points, totalUnique: windowUnique.size })
 }

@@ -60,7 +60,7 @@ function hotPoints(v: { pages: number; visits: number; created_at: string; last_
     + (v.visits >= 4 ? 2 : v.visits >= 2 ? 1 : 0)
 }
 const isHotVisitor = (v: { pages: number; visits: number; created_at: string; last_seen: string }) => hotPoints(v) >= 3
-interface AnalyticsPoint { label: string; visitors: number; chats: number }
+interface AnalyticsPoint { label: string; visitors: number; unique: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null }
 interface BillingData { from: string; to: string; total: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
@@ -227,7 +227,9 @@ function OverviewSkeleton() {
 }
 
 // Lightweight dependency-free SVG line chart: Visitors vs Chats over time.
-function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: string }) {
+const UNIQUE_COLOR = '#8b5cf6'
+
+function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoint[]; accent: string; totalUnique: number }) {
   const W = 760, H = 220, padL = 30, padR = 14, padT = 14, padB = 26
   const n = points.length
   const maxV = Math.max(1, ...points.map((p) => Math.max(p.visitors, p.chats)))
@@ -235,8 +237,8 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
   const y = (val: number) => padT + (H - padT - padB) * (1 - val / maxV)
 
   // Catmull-Rom → cubic bezier for a gently smoothed line (k tunes the curve).
-  const smooth = (key: 'visitors' | 'chats'): string => {
-    const pts = points.map((p, i) => ({ x: x(i), y: y(p[key]) }))
+  const smooth = (key: 'visitors' | 'chats' | 'unique'): string => {
+    const pts = points.map((p, i) => ({ x: x(i), y: y(p[key] ?? 0) }))
     if (pts.length === 0) return ''
     if (pts.length < 3) return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
     const k = 0.8
@@ -279,7 +281,10 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
   return (
     <div>
       <div className="flex items-center gap-4 mb-3 text-[11px]">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visitors</span><span className="text-gray-500">({totalVisitors})</span></span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visits</span><span className="text-gray-500">({totalVisitors})</span></span>
+        <span className="flex items-center gap-1.5" title="Distinct people (persistent browser id; a returning person counts once) — the dashed line">
+          <span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: UNIQUE_COLOR }} /><span className="text-gray-700">Unique visitors</span><span className="text-gray-500">({totalUnique})</span>
+        </span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full bg-amber-400" /><span className="text-gray-700">Chats</span><span className="text-gray-500">({totalChats})</span></span>
       </div>
       {totalVisitors === 0 && totalChats === 0 ? (
@@ -305,6 +310,7 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
             ))}
             <path d={areaFor('visitors')} fill={`url(#grad-v-${gid})`} stroke="none" />
             <path d={smooth('chats')} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={smooth('unique')} fill="none" stroke={UNIQUE_COLOR} strokeWidth={1.75} strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" />
             <path d={smooth('visitors')} fill="none" stroke={accent} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
           </svg>
           {/* Axis labels live in HTML, not the SVG: the SVG is stretched with
@@ -328,7 +334,8 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
                 style={{ left: `min(max(${pct(x(hover), W)}, 56px), calc(100% - 56px))`, top: pct(Math.min(y(points[hover].visitors), y(points[hover].chats)), H) }}>
                 <div className="mb-2 rounded-lg border border-gray-300 bg-white/95 shadow-xl px-2.5 py-1.5 backdrop-blur">
                   <p className="text-[10px] text-gray-500 mb-0.5 whitespace-nowrap">{points[hover].label}</p>
-                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visitors</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].visitors}</span></p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visits</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].visitors}</span></p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: UNIQUE_COLOR }} /><span className="text-gray-700">Unique</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].unique ?? 0}</span></p>
                   <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="text-gray-700">Chats</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].chats}</span></p>
                 </div>
               </div>
@@ -537,6 +544,7 @@ export default function Dashboard() {
   const analyzingRef = useRef(false)
   const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
   const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
+  const [analyticsUnique, setAnalyticsUnique] = useState(0)
   // Billing report (lead-tracked sites). Month string "YYYY-MM"; default current.
   const [billingMonth, setBillingMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [billing, setBilling] = useState<BillingData | null>(null)
@@ -566,6 +574,23 @@ export default function Dashboard() {
       dashCtxRef.current = new AudioCtx()
     } catch { return null }
     return dashCtxRef.current
+  }, [])
+
+  // Dark mode, persisted; default light. Applied as a class on <html> which
+  // globals.css remaps the light utilities under.
+  const [darkMode, setDarkMode] = useState(false)
+  useEffect(() => {
+    const dark = localStorage.getItem('zee-dash-theme') === 'dark'
+    setDarkMode(dark)
+    document.documentElement.classList.toggle('dark', dark)
+  }, [])
+  const toggleTheme = useCallback(() => {
+    setDarkMode((d) => {
+      const next = !d
+      try { localStorage.setItem('zee-dash-theme', next ? 'dark' : 'light') } catch { /* ignore */ }
+      document.documentElement.classList.toggle('dark', next)
+      return next
+    })
   }, [])
 
   // Sound on/off, persisted; default ON. Read lazily so SSR doesn't touch window.
@@ -694,18 +719,19 @@ export default function Dashboard() {
   // Analytics (visitors + chats over time), scoped server-side to the workspace.
   // Cached per range: switching Hourly/Daily/Weekly/Monthly shows the cached
   // series instantly and refreshes it in the background.
-  const analyticsCache = useRef<Record<string, AnalyticsPoint[]>>({})
+  const analyticsCache = useRef<Record<string, { points: AnalyticsPoint[]; totalUnique: number }>>({})
   useEffect(() => {
     if (tab !== 'overview' || !authReady) return
     const range = analyticsRange
     const cached = analyticsCache.current[range]
-    if (cached) setAnalytics(cached)
+    if (cached) { setAnalytics(cached.points); setAnalyticsUnique(cached.totalUnique) }
     fetch(`/api/admin/analytics?range=${range}`)
       .then((r) => r.json()).catch(() => ({ points: [] }))
       .then((d) => {
-        const points = d.points ?? []
-        analyticsCache.current[range] = points
-        setAnalytics(points)
+        const entry = { points: d.points ?? [], totalUnique: d.totalUnique ?? 0 }
+        analyticsCache.current[range] = entry
+        setAnalytics(entry.points)
+        setAnalyticsUnique(entry.totalUnique)
       })
   }, [tab, authReady, analyticsRange])
 
@@ -1296,6 +1322,10 @@ export default function Dashboard() {
               </button>
             )}
           </div>
+          <button onClick={toggleTheme} title={darkMode ? 'Dark mode on — click for light mode' : 'Light mode — click for dark mode'}
+            className="px-2.5 py-1.5 text-xs rounded-lg border bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200 transition-colors">
+            {darkMode ? '☀️' : '🌙'}
+          </button>
           <button onClick={toggleSound} title={soundOn ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting; click to mute' : 'Sound off — click to unmute'}
             className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200' : 'bg-gray-100 text-gray-500 border-gray-200 hover:text-gray-600'}`}>
             {soundOn ? '🔔' : '🔕'}
@@ -1351,7 +1381,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-                <AnalyticsChart points={analytics} accent={accentColor} />
+                <AnalyticsChart points={analytics} accent={accentColor} totalUnique={analyticsUnique} />
               </div>
 
               {/* Chart + Sites row */}
