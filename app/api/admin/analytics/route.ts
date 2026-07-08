@@ -31,7 +31,9 @@ function buildBuckets(range: Range): Bucket[] {
     for (let i = 23; i >= 0; i--) {
       const start = new Date(base); start.setUTCHours(base.getUTCHours() - i)
       const end = new Date(start); end.setUTCHours(start.getUTCHours() + 1)
-      buckets.push({ start: start.getTime(), end: end.getTime(), label: `${String(start.getUTCHours()).padStart(2, '0')}:00` })
+      // 12-hour PKT labels ("9 PM"), matching every other dashboard timestamp.
+      const h = start.getUTCHours()
+      buckets.push({ start: start.getTime(), end: end.getTime(), label: `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}` })
     }
   } else if (range === 'daily') {
     const base = new Date(now); base.setUTCHours(0, 0, 0, 0)

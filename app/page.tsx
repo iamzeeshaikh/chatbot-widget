@@ -299,18 +299,23 @@ function AnalyticsChart({ points, accent }: { points: AnalyticsPoint[]; accent: 
               </linearGradient>
             </defs>
             {gridVals.map((gv, i) => (
-              <g key={i}>
-                <line x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#111827" strokeOpacity={0.06} strokeWidth={1} strokeDasharray="3 4" />
-                <text x={4} y={y(gv) + 3} fill="#6b7280" fontSize={9}>{gv}</text>
-              </g>
+              <line key={i} x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#111827" strokeOpacity={0.06} strokeWidth={1} strokeDasharray="3 4" />
             ))}
-            {points.map((p, i) => (i % labelEvery === 0 || i === n - 1) ? (
-              <text key={i} x={x(i)} y={H - 8} fill="#6b7280" fontSize={9} textAnchor="middle">{p.label}</text>
-            ) : null)}
             <path d={areaFor('visitors')} fill={`url(#grad-v-${gid})`} stroke="none" />
             <path d={smooth('chats')} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             <path d={smooth('visitors')} fill="none" stroke={accent} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
           </svg>
+          {/* Axis labels live in HTML, not the SVG: the SVG is stretched with
+              preserveAspectRatio="none", which horizontally distorts any text
+              inside it on wide screens. */}
+          {gridVals.map((gv, i) => (
+            <span key={`y${i}`} className="absolute text-[10px] text-gray-500 tabular-nums pointer-events-none"
+              style={{ left: 2, top: pct(y(gv), H), transform: 'translateY(-50%)' }}>{gv}</span>
+          ))}
+          {points.map((p, i) => (i % labelEvery === 0 || i === n - 1) ? (
+            <span key={`x${i}`} className="absolute bottom-0 text-[10px] text-gray-500 whitespace-nowrap pointer-events-none"
+              style={{ left: pct(x(i), W), transform: i === 0 ? 'none' : i === n - 1 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{p.label}</span>
+          ) : null)}
           {/* Hover overlay: guide line, point dots, and an exact-value tooltip. */}
           {hover !== null && points[hover] && (
             <>
