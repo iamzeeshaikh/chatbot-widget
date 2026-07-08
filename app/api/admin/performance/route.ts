@@ -7,6 +7,7 @@ import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
 import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, RESPONSE_OUTLIER_CAP_MS, parseReplyAuthor, type ReplyAuthor } from '@/lib/replyauthor'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
+import { findBurstKeys, burstKey } from '@/lib/botfilter'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
 
   const emptySummary = {
     totalConversations: 0, answeredConversations: 0, totalLeads: 0, totalMissed: 0, totalUnanswered: 0,
-    totalReplies: 0, attributedReplies: 0, avgResponseMs: null as number | null,
+    ignoredVisitors: 0, totalReplies: 0, attributedReplies: 0, avgResponseMs: null as number | null,
     avgExcludedOutliers: 0,
   }
   if (allowed.length === 0) {
@@ -61,15 +62,28 @@ export async function GET(req: NextRequest) {
 
   // Paginated: a plain .limit(50000) is silently capped at 1000 rows by
   // PostgREST, which would drop everything after the month's first 1000 rows.
-  const rows = await fetchAllPages<{ session_id: string; site_id: string; role: string; message: string; created_at: string }>(
-    () => supabase
-      .from('chat_logs')
-      .select('session_id, site_id, role, message, created_at')
-      .in('site_id', allowed)
-      .gte('created_at', from)
-      .lt('created_at', to)
-      .order('created_at', { ascending: true }),
-    50000)
+  const [rows, visitorRows] = await Promise.all([
+    fetchAllPages<{ session_id: string; site_id: string; role: string; message: string; created_at: string }>(
+      () => supabase
+        .from('chat_logs')
+        .select('session_id, site_id, role, message, created_at')
+        .in('site_id', allowed)
+        .gte('created_at', from)
+        .lt('created_at', to)
+        .order('created_at', { ascending: true }),
+      50000),
+    // Every widget session of the period (for the ignored-visitors count),
+    // with user_agent so bot bursts can be excluded like everywhere else.
+    fetchAllPages<{ session_id: string; user_agent: string | null; created_at: string }>(
+      () => supabase
+        .from('active_visitors')
+        .select('session_id, user_agent, created_at')
+        .in('site_id', allowed)
+        .gte('created_at', from)
+        .lt('created_at', to)
+        .order('created_at', { ascending: true }),
+      50000),
+  ])
   const t = (ts: string) => new Date(asUtcIso(ts) as string).getTime()
   const nowMs = Date.now()
   // Global bot kill switch: while the bot is disabled, EVERY waiting visitor
@@ -93,11 +107,11 @@ export async function GET(req: NextRequest) {
   // hanging (conversations where THEIR last reply was followed by a visitor
   // message nobody answered — they dropped the ball), and lastReplyMs (most
   // recent activity, exposing agents who've gone quiet).
-  type Agg = { handled: Set<string>; replies: number; respSum: number; respCount: number; respExcluded: number; slow: number; leads: number; hanging: number; lastReplyMs: number }
+  type Agg = { handled: Set<string>; replies: number; respSum: number; respCount: number; respExcluded: number; slow: number; leads: number; hanging: number; lastReplyMs: number; proactive: number }
   const agg = new Map<string, Agg>()
   const ensure = (id: string): Agg => {
     let a = agg.get(id)
-    if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, respExcluded: 0, slow: 0, leads: 0, hanging: 0, lastReplyMs: 0 }; agg.set(id, a) }
+    if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, respExcluded: 0, slow: 0, leads: 0, hanging: 0, lastReplyMs: 0, proactive: 0 }; agg.set(id, a) }
     return a
   }
 
@@ -129,8 +143,10 @@ export async function GET(req: NextRequest) {
     let pendingHumanState = false             // …sent while the bot was off
     let hasRealMsg = false
     let lastRealRole = ''
+    let firstRealRole = ''                    // 'admin' first = a proactive chat
     let adminCount = 0
     let lastAdminAuthor: string | null = null // who sent the session's final agent reply
+    let firstAdminAuthor: string | null = null // who sent the session's FIRST agent message
 
     for (const ev of evs) {
       if (ev.role === MODE_ROLE) { mode = ev.message === 'human' ? 'human' : 'bot'; continue }
@@ -138,6 +154,7 @@ export async function GET(req: NextRequest) {
       if (ev.message === '(session started)') continue
 
       hasRealMsg = true
+      if (!firstRealRole) firstRealRole = ev.role
       lastRealRole = ev.role
       const ts = t(ev.created_at)
 
@@ -164,6 +181,7 @@ export async function GET(req: NextRequest) {
           const a = ensure(author.id); a.replies++; a.handled.add(sid)
           if (ts > a.lastReplyMs) a.lastReplyMs = ts
           lastAdminAuthor = author.id
+          if (!firstAdminAuthor) firstAdminAuthor = author.id
         }
 
         if (pendingUserTs !== null) {
@@ -213,6 +231,26 @@ export async function GET(req: NextRequest) {
     if (leadSessions.has(sid)) {
       for (const a of agg.values()) if (a.handled.has(sid)) a.leads++
     }
+    // Proactive: the conversation's very first message was an agent's (they
+    // reached out to a browsing visitor instead of waiting).
+    if (firstRealRole === 'admin' && firstAdminAuthor) ensure(firstAdminAuthor).proactive++
+  }
+
+  // ── Ignored visitors (workspace-wide) ───────────────────────────────────────
+  // Sessions that pinged as visitors this period but have NO real chat message
+  // at all: the visitor never typed AND no agent ever reached out. Bot bursts
+  // are excluded with the shared heuristic. No single agent owns these.
+  const vStamped = visitorRows.map((v) => ({ v, ms: new Date(asUtcIso(v.created_at) ?? v.created_at).getTime() }))
+  const vBursts = findBurstKeys(vStamped.map((s) => ({ userAgent: s.v.user_agent, tsMs: s.ms })))
+  const seenVisitorSessions = new Set<string>()
+  let ignoredVisitors = 0
+  for (const { v, ms } of vStamped) {
+    if (vBursts.has(burstKey(v.user_agent, ms))) continue
+    if (seenVisitorSessions.has(v.session_id)) continue
+    seenVisitorSessions.add(v.session_id)
+    // `conversations` = sessions with at least one REAL message (visitor or
+    // agent), so control-row-only sessions still count as ignored.
+    if (!conversations.has(v.session_id)) ignoredVisitors++
   }
 
   // ── Diagnostic: dump every pair feeding the workspace average ───────────────
@@ -235,6 +273,7 @@ export async function GET(req: NextRequest) {
     measuredReplies: a ? a.respCount + a.respExcluded : 0,
     leads: a ? a.leads : 0,
     dropped: a ? a.hanging : 0,
+    proactive: a ? a.proactive : 0,
     lastReplyAt: a && a.lastReplyMs ? new Date(a.lastReplyMs).toISOString() : null,
   })
   type AgentRow = ReturnType<typeof agentRow>
@@ -270,6 +309,7 @@ export async function GET(req: NextRequest) {
       totalLeads,
       totalMissed: missedSessions.size,
       totalUnanswered: unansweredSessions.size,
+      ignoredVisitors,
       totalReplies,
       attributedReplies,
       avgResponseMs: wsRespCount ? Math.round(wsRespSum / wsRespCount) : null,

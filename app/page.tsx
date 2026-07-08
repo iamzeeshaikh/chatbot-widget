@@ -51,8 +51,8 @@ interface HistVisitor extends Visitor { status: string; has_chat: boolean; await
 interface AnalyticsPoint { label: string; visitors: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string }
 interface BillingData { from: string; to: string; total: number; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
-interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; lastReplyAt: string | null }
-interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; unattributedReplies: number }
+interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
+interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; ignoredVisitors: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; unattributedReplies: number }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
 interface VisitorDetail {
   session_id: string
@@ -2128,7 +2128,7 @@ export default function Dashboard() {
           ) : (
             <>
               {/* Workspace-level summary */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-5">
                 <div className="bg-gray-100 rounded-2xl p-4 border border-gray-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Conversations</p>
                   <p className="text-3xl leading-none font-extrabold text-gray-900 tabular-nums">{perf?.summary.totalConversations ?? 0}</p>
@@ -2162,6 +2162,11 @@ export default function Dashboard() {
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Unanswered</p>
                   <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.totalUnanswered ?? 0) > 0 ? 'text-red-700' : 'text-gray-900'}`}>{perf?.summary.totalUnanswered ?? 0}</p>
                 </div>
+                <div className={`rounded-2xl p-4 border ${(perf?.summary.ignoredVisitors ?? 0) > 0 ? 'bg-red-100 border-red-300' : 'bg-gray-100 border-gray-200'}`}
+                  title="Visitors who came to a site this period and left without a single message — they never typed AND no agent ever reached out">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-1.5">Ignored visitors</p>
+                  <p className={`text-3xl leading-none font-extrabold tabular-nums ${(perf?.summary.ignoredVisitors ?? 0) > 0 ? 'text-red-700' : 'text-gray-900'}`}>{perf?.summary.ignoredVisitors ?? 0}</p>
+                </div>
               </div>
 
               {/* Attribution status — historical-estimate vs accurate-going-forward */}
@@ -2181,7 +2186,7 @@ export default function Dashboard() {
                   <table className="w-full text-sm min-w-[720px]">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-100">
-                        {['Agent', 'Conversations', 'Replies', 'Leads', 'Avg response', 'Slow replies', 'Dropped', 'Last active'].map((h, i) => (
+                        {['Agent', 'Conversations', 'Proactive', 'Replies', 'Leads', 'Avg response', 'Slow replies', 'Dropped', 'Last active'].map((h, i) => (
                           <th key={h} className={`px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
                         ))}
                       </tr>
@@ -2189,7 +2194,7 @@ export default function Dashboard() {
                     <tbody>
                       {(perf?.agents ?? []).length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="text-center py-10">
+                          <td colSpan={9} className="text-center py-10">
                             <div className="flex flex-col items-center">
                               <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👥</div>
                               <p className="text-gray-700 text-sm font-medium">No agents in this workspace</p>
@@ -2211,6 +2216,11 @@ export default function Dashboard() {
                               </div>
                             </td>
                             <td className="px-4 py-3 text-right text-gray-800 tabular-nums">{a.handled}</td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {a.proactive > 0
+                                ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold" title="Chats this agent started themselves by messaging a browsing visitor first">{a.proactive}</span>
+                                : <span className="text-gray-500">0</span>}
+                            </td>
                             <td className="px-4 py-3 text-right text-gray-800 tabular-nums">{a.replies}</td>
                             <td className="px-4 py-3 text-right tabular-nums">
                               {a.leads > 0
@@ -2247,7 +2257,10 @@ export default function Dashboard() {
                 <span className="text-red-600"> Dropped</span> = the agent replied last in a conversation, the visitor followed up, and nobody ever answered — owned by that agent.
                 <span className="text-gray-700"> Last active</span> = the agent&apos;s most recent reply (amber if over a day ago).
                 <span className="text-amber-700"> Missed</span> = a visitor messaged while the bot was off and no agent replied within 2 minutes.
-                <span className="text-red-600"> Unanswered</span> = a conversation still waiting on its first agent reply. Missed &amp; unanswered are workspace-wide (no single agent owns them); <span className="text-gray-700">Answered %</span> is the share of conversations that got at least one agent reply.
+                <span className="text-red-600"> Unanswered</span> = a conversation still waiting on its first agent reply.
+                <span className="text-red-600"> Ignored visitors</span> = visitors who came and left without a single message — they never typed and no agent ever reached out.
+                <span className="text-blue-700"> Proactive</span> = chats the agent started themselves by messaging a browsing visitor first.
+                Missed, unanswered &amp; ignored are workspace-wide (no single agent owns them); <span className="text-gray-700">Answered %</span> is the share of conversations that got at least one agent reply.
               </p>
             </>
           )}
