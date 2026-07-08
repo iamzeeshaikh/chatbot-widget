@@ -435,6 +435,9 @@ export default function Dashboard() {
   // every conversations poll refreshes it with the server's view (which also
   // honours a BOT_ENABLED env override the client bundle can't see).
   const [botGlobalOff, setBotGlobalOff] = useState(() => !isBotEnabled())
+  // Overview: clicking a site in "Leads by Site" filters the Recent Leads table.
+  const [overviewLeadSite, setOverviewLeadSite] = useState('')
+  const leadsTableRef = useRef<HTMLDivElement | null>(null)
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
   const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
   const [visitorHistoryLoaded, setVisitorHistoryLoaded] = useState(false)
@@ -1364,16 +1367,23 @@ export default function Dashboard() {
                       const count = roleLeads.filter(l => l.site_id === site.site_id).length
                       const pct = roleLeads.length > 0 ? Math.round((count / roleLeads.length) * 100) : 0
                       const accent = SITE_ACCENT[site.site_id] ?? accentColor
+                      const active = overviewLeadSite === site.site_id
                       return (
-                        <div key={site.site_id}>
+                        <button key={site.site_id}
+                          onClick={() => {
+                            setOverviewLeadSite(active ? '' : site.site_id)
+                            if (!active) leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                          }}
+                          title={active ? 'Clear this site filter' : `Show ${site.name}'s leads in the table below`}
+                          className={`block w-full text-left rounded-lg px-2 py-1.5 -mx-2 transition-colors ${active ? 'bg-white ring-1 ring-gray-300' : 'hover:bg-white/70'}`}>
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-gray-700 truncate">{site.name}</span>
-                            <span className="text-xs text-gray-500 shrink-0 ml-2">{count} leads</span>
+                            <span className={`text-xs truncate ${active ? 'text-gray-900 font-semibold' : 'text-gray-700'}`}>{site.name}</span>
+                            <span className="text-xs text-gray-500 shrink-0 ml-2">{count} leads {active ? '✕' : '→'}</span>
                           </div>
                           <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
                             <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent }} />
                           </div>
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
@@ -1420,8 +1430,17 @@ export default function Dashboard() {
               </div>
 
               {/* Leads table */}
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900 mb-3">Recent Leads</h2>
+              <div ref={leadsTableRef}>
+                <div className="flex items-center gap-2 mb-3">
+                  <h2 className="text-sm font-semibold text-gray-900">Recent Leads</h2>
+                  {overviewLeadSite && (
+                    <button onClick={() => setOverviewLeadSite('')}
+                      className="text-[11px] font-medium text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5 hover:bg-blue-200 transition-colors"
+                      title="Clear the site filter">
+                      {roleSites.find((s) => s.site_id === overviewLeadSite)?.name ?? overviewLeadSite} ✕
+                    </button>
+                  )}
+                </div>
                 <div className="bg-gray-100 rounded-xl border border-gray-200 overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[1100px]">
@@ -1433,7 +1452,7 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {roleLeads.length === 0 ? (
+                        {(overviewLeadSite ? roleLeads.filter((l) => l.site_id === overviewLeadSite) : roleLeads).length === 0 ? (
                           <tr>
                             <td colSpan={12} className="text-center py-8">
                               <div className="flex flex-col items-center">
@@ -1443,7 +1462,7 @@ export default function Dashboard() {
                               </div>
                             </td>
                           </tr>
-                        ) : roleLeads.map((lead) => {
+                        ) : (overviewLeadSite ? roleLeads.filter((l) => l.site_id === overviewLeadSite) : roleLeads).map((lead) => {
                           const msgLines: Record<string, string> = {}
                           for (const line of (lead.message ?? '').split('\n')) {
                             const colon = line.indexOf(': ')
