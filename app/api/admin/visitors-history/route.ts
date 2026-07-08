@@ -4,6 +4,7 @@ import { getMember, siteScope } from '@/lib/auth'
 import { unpackVisitor, asUtcIso } from '@/lib/visitor'
 import { findBurstKeys, burstKey } from '@/lib/botfilter'
 import { getBlockedIps } from '@/lib/blocklist'
+import { isClosingMessage } from '@/lib/closing'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,8 +36,8 @@ export async function GET(req: NextRequest) {
       () => supabase.from('active_visitors').select('*').in('site_id', allowed)
         .gte('created_at', startISO).order('created_at', { ascending: false }),
       MAX_VISITOR_ROWS),
-    fetchAllPages<{ session_id: string; role: string }>(
-      () => supabase.from('chat_logs').select('session_id, role').in('site_id', allowed)
+    fetchAllPages<{ session_id: string; role: string; message: string }>(
+      () => supabase.from('chat_logs').select('session_id, role, message').in('site_id', allowed)
         .in('role', ['user', 'visitor', 'admin']).gte('created_at', startISO)
         .order('created_at', { ascending: false }),
       MAX_CHAT_ROWS),
@@ -49,12 +50,17 @@ export async function GET(req: NextRequest) {
   // Per-session chat state for agent accountability. chatRows are newest-first,
   // so the FIRST row seen per session is the conversation's latest real message:
   //   chatted        — the visitor sent at least one message
-  //   awaiting_reply — the latest message is the visitor's (no agent reply yet)
+  //   awaiting_reply — the latest message is the visitor's (no agent reply yet),
+  //                    UNLESS it's just a closing pleasantry ("Thank you!")
+  //                    after an agent already replied — that chat is done.
   const chatted = new Set<string>()
+  const hasAdmin = new Set<string>()
   const lastRole = new Map<string, string>()
+  const lastMsg = new Map<string, string>()
   for (const r of chatRows) {
     if (r.role === 'user' || r.role === 'visitor') chatted.add(r.session_id)
-    if (!lastRole.has(r.session_id)) lastRole.set(r.session_id, r.role)
+    if (r.role === 'admin') hasAdmin.add(r.session_id)
+    if (!lastRole.has(r.session_id)) { lastRole.set(r.session_id, r.role); lastMsg.set(r.session_id, r.message) }
   }
   const sites = sitesRes.data ?? []
 
@@ -81,7 +87,8 @@ export async function GET(req: NextRequest) {
       site_name: site?.name ?? v.site_id,
       primary_color: site?.primary_color ?? '#2563eb',
       has_chat: chatted.has(v.session_id),
-      awaiting_reply: chatted.has(v.session_id) && lastRole.get(v.session_id) !== 'admin',
+      awaiting_reply: chatted.has(v.session_id) && lastRole.get(v.session_id) !== 'admin'
+        && !(hasAdmin.has(v.session_id) && isClosingMessage(lastMsg.get(v.session_id))),
     })
   }
 

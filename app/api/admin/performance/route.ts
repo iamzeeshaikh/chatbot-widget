@@ -8,6 +8,7 @@ import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, RESPONSE_OUTLIER_CAP_MS, parseReply
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
 import { findBurstKeys, burstKey } from '@/lib/botfilter'
+import { isClosingMessage } from '@/lib/closing'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,6 +162,10 @@ export async function GET(req: NextRequest) {
 
       if (ev.role === 'user') {
         chattedSessions.add(sid)
+        // A closing pleasantry ("Thank you!") after an agent has already
+        // replied doesn't start a waiting streak — the conversation is done,
+        // so it can't count as dropped/missed/slow.
+        if (adminCount > 0 && pendingUserTs === null && isClosingMessage(ev.message)) continue
         // Only track the FIRST unanswered visitor message in a waiting streak, so
         // a burst of visitor messages counts as one response-time measurement.
         if (pendingUserTs === null) {

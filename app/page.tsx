@@ -6,6 +6,7 @@ import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
 import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadstatus'
+import { isClosingMessage } from '@/lib/closing'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 
@@ -667,6 +668,7 @@ export default function Dashboard() {
       const now = Date.now()
       const waitingChat = sessionsRef.current.some((s) =>
         s.last_role === 'user' && scope.has(s.site_id) &&
+        !(s.mode === 'human' && isClosingMessage(s.preview)) &&
         !!s.last_at && now - new Date(s.last_at).getTime() < WAITING_FRESH_MS)
       const lastRoleBySession = new Map(sessionsRef.current.map((s) => [s.session_id, s.last_role]))
       const unengagedVisitor = visitorsRef.current.some((v) => {
@@ -1575,8 +1577,10 @@ export default function Dashboard() {
               is the customer's, oldest wait first (the same chats the alert
               chime rings for). Past visitors/chats live in the Visitors tab. */}
           {(() => {
+            // Waiting = customer's message is last AND it isn't just a closing
+            // pleasantry after an agent already handled them ("Thank you!").
             const waitingChats = roleSessions
-              .filter((s) => s.last_role === 'user')
+              .filter((s) => s.last_role === 'user' && !(s.mode === 'human' && isClosingMessage(s.preview)))
               .sort((a, b) => new Date(a.last_at).getTime() - new Date(b.last_at).getTime())
             return (
           <div className="w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col bg-gray-50">
