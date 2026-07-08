@@ -1430,10 +1430,16 @@ export default function Dashboard() {
       {tab === 'conversations' && (
         <div className="flex animate-in" style={{ height: 'calc(100vh - 57px)' }}>
 
-          {/* ── Left sidebar: live visitors only ──
-              The old sessions list moved out (past visitors/chats live in the
-              Visitors tab); this page keeps live visitors so an agent can grab
-              someone the moment they're on a site. */}
+          {/* ── Left sidebar: live visitors + waiting chats ──
+              Top: live visitors, so an agent can grab someone the moment they're
+              on a site. Bottom: the reply queue — every chat whose last message
+              is the customer's, oldest wait first (the same chats the alert
+              chime rings for). Past visitors/chats live in the Visitors tab. */}
+          {(() => {
+            const waitingChats = roleSessions
+              .filter((s) => s.last_role === 'user')
+              .sort((a, b) => new Date(a.last_at).getTime() - new Date(b.last_at).getTime())
+            return (
           <div className="w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col bg-gray-50">
             <div className="px-3 py-2 flex items-center gap-2 bg-green-50 flex-shrink-0 border-b border-gray-200">
               <span className={`w-2 h-2 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-green-500 ring-2 ring-green-200 animate-pulse' : 'bg-gray-300'}`} />
@@ -1441,9 +1447,9 @@ export default function Dashboard() {
                 {roleVisitors.length > 0 ? `${roleVisitors.length} Live ${roleVisitors.length === 1 ? 'Visitor' : 'Visitors'}` : 'No live visitors'}
               </p>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className={`${waitingChats.length > 0 ? 'flex-1' : 'flex-1'} min-h-0 overflow-y-auto`} style={waitingChats.length > 0 ? { flexBasis: '45%' } : undefined}>
               {roleVisitors.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12 animate-in">
+                <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8 animate-in">
                   <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👀</div>
                   <p className="text-sm text-gray-700 font-medium">Nobody on your sites right now</p>
                   <p className="text-xs text-gray-500 mt-0.5">Live visitors appear here the moment they land. Past visitors &amp; chats are in the Visitors tab.</p>
@@ -1485,7 +1491,41 @@ export default function Dashboard() {
                 )
               })}
             </div>
+
+            {/* Waiting-for-reply queue */}
+            {waitingChats.length > 0 && (
+              <>
+                <div className="px-3 py-2 flex items-center gap-2 bg-orange-50 flex-shrink-0 border-y border-orange-200">
+                  <span className="text-[11px]">⚠️</span>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700">{waitingChats.length} Waiting for reply</p>
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  {waitingChats.map((s) => {
+                    const accent = SITE_ACCENT[s.site_id] ?? '#6b7280'
+                    const waitMs = Date.now() - new Date(s.last_at).getTime()
+                    const overSla = waitMs > 2 * 60 * 1000
+                    const isActive = selectedSession?.session_id === s.session_id
+                    return (
+                      <button key={s.session_id} onClick={() => setSelectedSession(s)}
+                        className={`w-full text-left px-3 py-2 border-b border-gray-100 transition-colors ${isActive ? 'bg-gray-100' : 'hover:bg-orange-50'}`}
+                        style={{ borderLeft: `3px solid ${accent}` }}>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-semibold text-gray-900 truncate">{s.site_name}</span>
+                          <span className={`text-[10px] font-semibold shrink-0 ${overSla ? 'text-red-600' : 'text-orange-600'}`}
+                            title={`Customer's last message: ${formatDateTime(s.last_at)}`}>
+                            ⏱ {timeAgo(s.last_at)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 truncate mt-0.5">{s.preview || '(no messages)'}</p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </div>
+            )
+          })()}
 
           {/* ── Right panel ── */}
           <div className="flex-1 flex flex-col min-w-0">
@@ -1496,7 +1536,7 @@ export default function Dashboard() {
                     <svg viewBox="0 0 24 24" className="w-6 h-6 fill-gray-300"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
                   </div>
                   <p className="text-gray-700 font-medium text-sm mb-1">Select a conversation</p>
-                  <p className="text-gray-500 text-xs leading-relaxed">Click a live visitor on the left to open their chat, or find past visitors and chats in the Visitors tab.</p>
+                  <p className="text-gray-500 text-xs leading-relaxed">Click a live visitor or a waiting chat on the left, or find past visitors and chats in the Visitors tab.</p>
                 </div>
               </div>
             ) : (
