@@ -382,11 +382,24 @@ export default function Dashboard() {
   // Keep the active tab across reloads (a hard refresh used to always land on
   // Overview). Restored once auth is ready so the saved tab can be validated
   // against this member's access; saving starts only after the restore so the
-  // initial 'overview' can never clobber the stored value.
+  // initial 'overview' can never clobber the stored value. A ?tab=/&session=
+  // in the URL (deep link / open-in-new-tab / back-forward) beats the saved tab.
   const tabRestored = useRef(false)
   useEffect(() => {
     if (!authReady || tabRestored.current) return
     tabRestored.current = true
+    const params = new URLSearchParams(window.location.search)
+    const urlTab = params.get('tab')
+    const urlSession = params.get('session')
+    const urlSite = params.get('site')
+    if (urlSession && urlSite) {
+      openConversationBySession({ sessionId: urlSession, siteId: urlSite })
+      return
+    }
+    if (urlTab === 'overview' || urlTab === 'conversations' || urlTab === 'visitors' || urlTab === 'billing' || urlTab === 'performance') {
+      setTab(urlTab)
+      return
+    }
     const saved = localStorage.getItem('zee-dash-tab')
     if (saved === 'overview' || saved === 'conversations' || saved === 'visitors'
       || (saved === 'billing' && userSites.some((id) => LEAD_TRACKED_SITES.includes(id)))
@@ -397,6 +410,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (tabRestored.current) localStorage.setItem('zee-dash-tab', tab)
   }, [tab])
+
+  const applyingHistory = useRef(false)
+  const historySynced = useRef(false)
+  const openBySessionRef = useRef<(opts: { sessionId: string; siteId: string }) => void>(() => {})
 
   const brand = workspace
 
@@ -433,6 +450,39 @@ export default function Dashboard() {
   // Any filter change goes back to page 1.
   const setHistFilter = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setHistPage(0) }
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
+
+  // ── Browser history integration ─────────────────────────────────────────────
+  // Every tab switch / conversation open pushes a URL (?tab=…&session=…), so
+  // the browser Back button walks back through the dashboard (e.g. lead →
+  // Back → Billing) instead of leaving the app, and any conversation can be
+  // opened in a new tab via a real link.
+  useEffect(() => {
+    if (!authReady || !tabRestored.current) return
+    if (applyingHistory.current) { applyingHistory.current = false; return }
+    const url = tab === 'conversations' && selectedSession
+      ? `/?tab=conversations&session=${encodeURIComponent(selectedSession.session_id)}&site=${encodeURIComponent(selectedSession.site_id)}`
+      : `/?tab=${tab}`
+    if (`${window.location.pathname}${window.location.search}` === url) return
+    if (historySynced.current) window.history.pushState(null, '', url)
+    else { window.history.replaceState(null, '', url); historySynced.current = true }
+  }, [tab, selectedSession, authReady])
+  useEffect(() => {
+    const onPop = () => {
+      applyingHistory.current = true
+      const p = new URLSearchParams(window.location.search)
+      const t = p.get('tab')
+      const sess = p.get('session')
+      const site = p.get('site')
+      if (t === 'conversations' && sess && site) {
+        openBySessionRef.current({ sessionId: sess, siteId: site })
+        return
+      }
+      setSelectedSession(null)
+      if (t === 'overview' || t === 'conversations' || t === 'visitors' || t === 'billing' || t === 'performance') setTab(t)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
@@ -968,6 +1018,13 @@ export default function Dashboard() {
     setSelectedSession(session)
     setTab('conversations')
   }
+  // Keep the popstate handler pointed at the latest closure (it's bound once).
+  openBySessionRef.current = openConversationBySession
+
+  // Real link target for a conversation — lets rows be middle/right-clicked
+  // into a new tab, and gives pushState a canonical URL shape.
+  const conversationHref = (sessionId: string, siteId: string) =>
+    `/?tab=conversations&session=${encodeURIComponent(sessionId)}&site=${encodeURIComponent(siteId)}`
 
   function openConversation(lead: BillingLead) {
     openConversationBySession({ sessionId: lead.session_id, siteId: lead.site_id, siteName: lead.site_name, preview: lead.email, lastAt: lead.captured_at })
@@ -2191,7 +2248,12 @@ export default function Dashboard() {
                       ) : billing!.leads.map((l) => (
                         <tr key={l.session_id} onClick={() => openConversation(l)} title="Open this lead's conversation"
                           className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
-                          <td className="px-4 py-3 text-blue-700 whitespace-nowrap">{l.email}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <a href={conversationHref(l.session_id, l.site_id)} className="text-blue-700 hover:underline"
+                              onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { e.stopPropagation(); return } e.preventDefault(); e.stopPropagation(); openConversation(l) }}>
+                              {l.email}
+                            </a>
+                          </td>
                           <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
                           <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
                           <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
@@ -2210,7 +2272,8 @@ export default function Dashboard() {
                           </td>
                           <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
                           <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => openConversation(l)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline">View chat →</button>
+                            <a href={conversationHref(l.session_id, l.site_id)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline"
+                              onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openConversation(l) }}>View chat →</a>
                           </td>
                         </tr>
                       ))}
