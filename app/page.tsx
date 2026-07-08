@@ -63,7 +63,8 @@ interface AnalyticsPoint { label: string; visitors: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null }
 interface BillingData { from: string; to: string; total: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
-interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; ignoredVisitors: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; unattributedReplies: number }
+interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number }
+interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; ignoredVisitors: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; daily: PerfDaily[]; unattributedReplies: number }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
 interface VisitorDetail {
   session_id: string
@@ -2453,6 +2454,53 @@ export default function Dashboard() {
                   </table>
                 </div>
               </div>
+
+              {/* Daily pickup table: visitors that came each day vs how many the
+                  team actually engaged (replied to or proactively messaged). */}
+              {(perf?.daily ?? []).length > 0 && (
+                <div className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden mt-5">
+                  <div className="px-4 pt-4 pb-1">
+                    <h3 className="text-sm font-bold text-gray-900">Daily performance</h3>
+                    <p className="text-[11px] text-gray-500 mt-0.5">Per day (Pakistan time): visitors that came, how many the team picked up (replied or proactively messaged), and how many got no contact at all.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[640px]">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-100">
+                          {['Date', 'Visitors', 'Chats', 'Picked up', 'Not picked', 'Pickup %'].map((h, i) => (
+                            <th key={h} className={`px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {perf!.daily.map((d) => {
+                          const isToday = d.date === new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10)
+                          const pct = d.visitors ? Math.round((d.picked / d.visitors) * 100) : 0
+                          const label = new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+                          return (
+                            <tr key={d.date} className={`border-b border-gray-100 ${isToday ? 'bg-blue-50/60' : ''}`}>
+                              <td className="px-4 py-2.5 text-gray-800 whitespace-nowrap">{label}{isToday && <span className="ml-1.5 text-[9px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px">today</span>}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-800 tabular-nums">{d.visitors}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-800 tabular-nums">{d.chats}</td>
+                              <td className="px-4 py-2.5 text-right tabular-nums">
+                                {d.picked > 0
+                                  ? <span className="inline-block px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">{d.picked}</span>
+                                  : <span className="text-gray-500">0</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-right tabular-nums">
+                                {d.notPicked > 0
+                                  ? <span className={`font-semibold ${d.picked === 0 ? 'text-red-600' : 'text-gray-700'}`}>{d.notPicked}</span>
+                                  : <span className="text-gray-500">0</span>}
+                              </td>
+                              <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${pct === 0 ? 'text-red-600' : pct < 10 ? 'text-amber-700' : 'text-green-700'}`}>{pct}%</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               <p className="text-gray-500 text-[11px] mt-3 leading-relaxed">
                 <span className="text-gray-500 font-medium">How to read this:</span> Avg response is the time between a visitor&apos;s message and the agent&apos;s reply.

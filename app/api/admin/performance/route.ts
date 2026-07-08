@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     avgExcludedOutliers: 0,
   }
   if (allowed.length === 0) {
-    return NextResponse.json({ from, to, summary: emptySummary, agents: [], unattributedReplies: 0 })
+    return NextResponse.json({ from, to, summary: emptySummary, agents: [], daily: [], unattributedReplies: 0 })
   }
 
   // Paginated: a plain .limit(50000) is silently capped at 1000 rows by
@@ -122,7 +122,8 @@ export async function GET(req: NextRequest) {
   // so a corrupt/outlier pair can be eyeballed in the server logs.
   const respPairs: { sid: string; userIso: string; adminIso: string; diffMin: number; excluded: boolean }[] = []
   const conversations = new Set<string>()
-  const answeredSessions = new Set<string>()
+  const answeredSessions = new Set<string>()   // sessions with ≥1 agent message
+  const chattedSessions = new Set<string>()    // sessions where the visitor typed
   const missedSessions = new Set<string>()
   const unansweredSessions = new Set<string>()
   const leadSessions = new Set<string>()
@@ -159,6 +160,7 @@ export async function GET(req: NextRequest) {
       const ts = t(ev.created_at)
 
       if (ev.role === 'user') {
+        chattedSessions.add(sid)
         // Only track the FIRST unanswered visitor message in a waiting streak, so
         // a burst of visitor messages counts as one response-time measurement.
         if (pendingUserTs === null) {
@@ -244,6 +246,10 @@ export async function GET(req: NextRequest) {
   const vBursts = findBurstKeys(vStamped.map((s) => ({ userAgent: s.v.user_agent, tsMs: s.ms })))
   const seenVisitorSessions = new Set<string>()
   let ignoredVisitors = 0
+  // Daily breakdown (PKT days): visitors that came, how many an agent engaged
+  // (any agent message in the session — reply or proactive), how many chatted.
+  const PKT_DAY_MS = 5 * 60 * 60 * 1000
+  const daily = new Map<string, { visitors: number; chats: number; picked: number }>()
   for (const { v, ms } of vStamped) {
     if (vBursts.has(burstKey(v.user_agent, ms))) continue
     if (seenVisitorSessions.has(v.session_id)) continue
@@ -251,7 +257,16 @@ export async function GET(req: NextRequest) {
     // `conversations` = sessions with at least one REAL message (visitor or
     // agent), so control-row-only sessions still count as ignored.
     if (!conversations.has(v.session_id)) ignoredVisitors++
+    const day = new Date(ms + PKT_DAY_MS).toISOString().slice(0, 10)
+    let d = daily.get(day)
+    if (!d) { d = { visitors: 0, chats: 0, picked: 0 }; daily.set(day, d) }
+    d.visitors++
+    if (chattedSessions.has(v.session_id)) d.chats++
+    if (answeredSessions.has(v.session_id)) d.picked++
   }
+  const dailyRows = Array.from(daily.entries())
+    .map(([date, d]) => ({ date, ...d, notPicked: d.visitors - d.picked }))
+    .sort((a, b) => b.date.localeCompare(a.date))
 
   // ── Diagnostic: dump every pair feeding the workspace average ───────────────
   // Lets us eyeball whether the avg is real or skewed by a few bad/outlier pairs.
@@ -316,6 +331,7 @@ export async function GET(req: NextRequest) {
       avgExcludedOutliers: wsRespExcluded,
     },
     agents,
+    daily: dailyRows,
     unattributedReplies: totalReplies - attributedReplies,
   })
 }
