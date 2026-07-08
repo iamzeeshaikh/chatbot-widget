@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSession } from '@/lib/auth'
 import { asUtcIso } from '@/lib/visitor'
 import { CONTROL_ROLES_IN } from '@/lib/controlroles'
+import { readTyping, VISITOR_TYPING_KEY } from '@/lib/typing'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,17 +17,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ messages: [] }, { status: 403 })
   }
 
-  const { data, error } = await supabase
-    .from('chat_logs')
-    .select('*')
-    .eq('session_id', sessionId)
-    .not('role', 'in', `(${CONTROL_ROLES_IN})`) // hide ALL control rows from the message view
-    .order('created_at', { ascending: true })
+  const [{ data, error }, visitorTyping] = await Promise.all([
+    supabase
+      .from('chat_logs')
+      .select('*')
+      .eq('session_id', sessionId)
+      .not('role', 'in', `(${CONTROL_ROLES_IN})`) // hide ALL control rows from the message view
+      .order('created_at', { ascending: true }),
+    readTyping(sessionId, VISITOR_TYPING_KEY),
+  ])
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   // Normalise naive-UTC timestamps so bubble times / date separators render in
   // the correct timezone (a bare timestamp was misread as local, skewing hours).
   const messages = (data ?? []).map((m) => ({ ...m, created_at: asUtcIso(m.created_at) }))
-  return NextResponse.json({ messages })
+  return NextResponse.json({ messages, visitorTyping })
 }

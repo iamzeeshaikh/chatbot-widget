@@ -48,7 +48,7 @@ interface Visitor { session_id: string; site_id: string; site_name: string; prim
 // Visitors-history row (Zendesk-style history): a Visitor plus whether the
 // session ever chatted, whether the chat is still waiting on an agent reply
 // (accountability), and its final status.
-interface HistVisitor extends Visitor { status: string; has_chat: boolean; awaiting_reply?: boolean; pages: number; history: { u: string | null; t: string | null; ts: string }[] }
+interface HistVisitor extends Visitor { status: string; has_chat: boolean; awaiting_reply?: boolean; pages: number; history: { u: string | null; t: string | null; ts: string }[]; ip: string | null; ip_blocked: boolean }
 
 // Buying-intent score for a visitor: pages browsed + time on site + return
 // visits. 3+ points = a 🔥 hot visitor worth proactively messaging first.
@@ -442,6 +442,7 @@ export default function Dashboard() {
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
   const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
   const [visitorHistoryLoaded, setVisitorHistoryLoaded] = useState(false)
+  const [blockedIps, setBlockedIps] = useState<string[]>([])
   const [histSiteFilter, setHistSiteFilter] = useState('')
   const [histChatOnly, setHistChatOnly] = useState(false)
   const [histStatusFilter, setHistStatusFilter] = useState<'all' | 'live' | 'left'>('all')
@@ -488,6 +489,8 @@ export default function Dashboard() {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [visitorTyping, setVisitorTyping] = useState(false)
+  const lastAgentTypingPing = useRef(0)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
   const [togglingMode, setTogglingMode] = useState(false)
@@ -540,6 +543,7 @@ export default function Dashboard() {
   // Agent performance report (admin-only). Month string "YYYY-MM"; default current.
   const [perfMonth, setPerfMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [perf, setPerf] = useState<PerfData | null>(null)
+  const [attendance, setAttendance] = useState<{ date: string; email: string; first: string | null; last: string | null; secs: number }[]>([])
   const [perfLoading, setPerfLoading] = useState(false)
   const prevVisitorIds = useRef<Set<string>>(new Set())
   const visitorsSeeded = useRef(false)
@@ -728,7 +732,20 @@ export default function Dashboard() {
     fetch(`/api/admin/performance?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
       .then((r) => (r.ok ? r.json() : null)).catch(() => null)
       .then((d) => { setPerf(d); setPerfLoading(false) })
+    fetch(`/api/admin/attendance?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      .then((r) => (r.ok ? r.json() : { days: [] })).catch(() => ({ days: [] }))
+      .then((d) => setAttendance(d.days ?? []))
   }, [tab, authReady, perfMonth])
+
+  // Duty-hours heartbeat: while the dashboard is open, tell the server this
+  // member is online (once a minute) — feeds the attendance register.
+  useEffect(() => {
+    if (!authReady) return
+    const beat = () => fetch('/api/admin/presence', { method: 'POST' }).catch(() => {})
+    beat()
+    const iv = setInterval(beat, 60000)
+    return () => clearInterval(iv)
+  }, [authReady])
 
   const fetchSessions = useCallback(async () => {
     const data = await fetch('/api/admin/conversations').then((r) => r.json()).catch(() => ({ sessions: [] }))
@@ -795,6 +812,7 @@ export default function Dashboard() {
     const load = async () => {
       const data = await fetch('/api/admin/visitors-history').then((r) => r.json()).catch(() => ({ visitors: [] }))
       setVisitorHistory(data.visitors ?? [])
+      setBlockedIps(data.blockedIps ?? [])
       setVisitorHistoryLoaded(true)
     }
     load()
@@ -805,6 +823,7 @@ export default function Dashboard() {
   const fetchMessages = useCallback(async (sessionId: string) => {
     const data = await fetch(`/api/admin/messages?sessionId=${sessionId}`).then((r) => r.json()).catch(() => ({ messages: [] }))
     setMessages(data.messages ?? [])
+    setVisitorTyping(data.visitorTyping === true)
   }, [])
 
   useEffect(() => {
@@ -1029,6 +1048,16 @@ export default function Dashboard() {
   // into a new tab, and gives pushState a canonical URL shape.
   const conversationHref = (sessionId: string, siteId: string) =>
     `/?tab=conversations&session=${encodeURIComponent(sessionId)}&site=${encodeURIComponent(siteId)}`
+
+  // Block / unblock a visitor IP (admin only); optimistic UI update.
+  async function toggleIpBlock(ip: string, block: boolean) {
+    setBlockedIps((prev) => block ? Array.from(new Set([...prev, ip])).sort() : prev.filter((x) => x !== ip))
+    setVisitorHistory((prev) => prev.map((v) => v.ip === ip ? { ...v, ip_blocked: block } : v))
+    await fetch('/api/admin/block', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, block }),
+    }).catch(() => {})
+  }
 
   function openConversation(lead: BillingLead) {
     openConversationBySession({ sessionId: lead.session_id, siteId: lead.site_id, siteName: lead.site_name, preview: lead.email, lastAt: lead.captured_at })
@@ -1782,6 +1811,16 @@ export default function Dashboard() {
                       </div>
                     </div>
                   )}
+                  {visitorTyping && (
+                    <div className="flex flex-col items-end mb-2 animate-in">
+                      <div className="bg-gray-200 border border-gray-300 rounded-2xl rounded-tr-sm px-4 py-3 flex items-center gap-1.5">
+                        <span className="text-[11px] text-gray-500 mr-1">Visitor is typing</span>
+                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Reply input */}
@@ -1819,7 +1858,18 @@ export default function Dashboard() {
                     </button>
                     <textarea
                       value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
+                      onChange={(e) => {
+                        setReplyText(e.target.value)
+                        // Throttled "agent is typing" ping → shows dots in the widget.
+                        const now = Date.now()
+                        if (selectedSession && e.target.value.trim() && now - lastAgentTypingPing.current > 3000) {
+                          lastAgentTypingPing.current = now
+                          fetch('/api/admin/typing', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sessionId: selectedSession.session_id }),
+                          }).catch(() => {})
+                        }
+                      }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
                       placeholder={botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
                       disabled={botEffectivelyActive || sending}
@@ -2066,6 +2116,18 @@ export default function Dashboard() {
               )}
             </div>
 
+            {userRole === 'admin' && blockedIps.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                <span className="text-[11px] text-gray-500 font-medium">🚫 Blocked IPs:</span>
+                {blockedIps.map((ip) => (
+                  <button key={ip} onClick={() => { if (confirm(`Unblock ${ip}?`)) toggleIpBlock(ip, false) }}
+                    className="text-[11px] font-mono text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5 hover:bg-red-100 transition-colors" title="Click to unblock">
+                    {ip} ✕
+                  </button>
+                ))}
+              </div>
+            )}
+
             {!visitorHistoryLoaded ? (
               <p className="text-sm text-gray-500 py-12 text-center">Loading visitors…</p>
             ) : filtered.length === 0 ? (
@@ -2115,6 +2177,20 @@ export default function Dashboard() {
                                 className="text-[10px] font-medium text-gray-600 bg-gray-100 border border-gray-300 rounded-full px-1.5 py-px hover:bg-gray-200 transition-colors"
                                 title="Show the pages this visitor browsed, in order">
                                 📄 {v.pages} pages {expandedVisitor === v.session_id ? '▴' : '▾'}
+                              </button>
+                            )}
+                            {v.ip_blocked && (
+                              <button onClick={(e) => { e.stopPropagation(); if (userRole === 'admin' && confirm(`Unblock ${v.ip}?`)) toggleIpBlock(v.ip!, false) }}
+                                className="text-[10px] font-bold text-red-700 bg-red-100 border border-red-300 rounded-full px-1.5 py-px"
+                                title={userRole === 'admin' ? `Blocked (${v.ip}) — click to unblock` : `This visitor's IP is blocked`}>
+                                🚫 blocked
+                              </button>
+                            )}
+                            {userRole === 'admin' && v.ip && !v.ip_blocked && (
+                              <button onClick={(e) => { e.stopPropagation(); if (confirm(`Block ${v.ip}?\n\nThis visitor won't see the widget or be able to chat on ANY of your sites until unblocked.`)) toggleIpBlock(v.ip!, true) }}
+                                className="text-[10px] text-gray-400 hover:text-red-600 transition-colors"
+                                title={`Block this visitor's IP (${v.ip}) — hides the widget and drops their messages on all sites`}>
+                                🚫
                               </button>
                             )}
                           </div>
@@ -2499,6 +2575,44 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </div>
+                </div>
+              )}
+
+              {/* Attendance register: when each agent was online, per PKT day. */}
+              {attendance.length > 0 && (
+                <div className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden mt-5">
+                  <div className="px-4 pt-4 pb-1">
+                    <h3 className="text-sm font-bold text-gray-900">Agent attendance</h3>
+                    <p className="text-[11px] text-gray-500 mt-0.5">Dashboard online time per agent per day (Pakistan time) — when they signed on, when they were last seen, and total hours with the dashboard open.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[640px]">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-100">
+                          {['Date', 'Agent', 'First seen', 'Last seen', 'Online time'].map((h, i) => (
+                            <th key={h} className={`px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap ${i < 2 ? 'text-left' : 'text-right'}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {attendance.map((a, i) => {
+                          const showDate = i === 0 || attendance[i - 1].date !== a.date
+                          const label = new Date(`${a.date}T00:00:00Z`).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+                          const hours = a.secs >= 3600 ? `${Math.floor(a.secs / 3600)}h ${Math.round((a.secs % 3600) / 60)}m` : `${Math.round(a.secs / 60)}m`
+                          return (
+                            <tr key={`${a.date}|${a.email}`} className="border-b border-gray-100">
+                              <td className="px-4 py-2.5 text-gray-800 whitespace-nowrap">{showDate ? label : ''}</td>
+                              <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{a.email.split('@')[0]}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-600 text-xs whitespace-nowrap">{formatTime(a.first)}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-600 text-xs whitespace-nowrap">{formatTime(a.last)}</td>
+                              <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-800">{hours}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="px-4 py-2 text-[10px] text-gray-400">Tracking starts today — days before this feature shipped have no data. An agent only accrues time while their dashboard tab is open.</p>
                 </div>
               )}
 

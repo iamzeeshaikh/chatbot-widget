@@ -6,6 +6,11 @@
 // linking to an old conversation. Used by both the API and the dashboard.
 export const LIVE_MAX_ON_SITE_MS = 3 * 60 * 60 * 1000 // 3 hours
 
+// Reserved site_id for agent duty-hours heartbeat rows in active_visitors (no
+// DDL). Every visitor-facing query filters by real site ids, so these rows can
+// never appear as visitors.
+export const AGENT_DUTY_SITE = 'zeeops-agent-duty'
+
 // active_visitors timestamps are stored without a timezone (naive UTC). Append a
 // 'Z' so `new Date(...)` parses them as UTC in any browser timezone, instead of
 // misreading them as local time (which skewed "on site" / "active now" by hours).

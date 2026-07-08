@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { siteWorkspace, isWidgetBlocked } from '@/lib/workspaces'
 import { resolveCountryCode } from '@/lib/geo'
 import { isBotEnabled } from '@/lib/botflag'
+import { getBlockedIps, requestIp } from '@/lib/blocklist'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,6 +39,11 @@ export async function GET(req: NextRequest) {
   if (siteWorkspace(siteId) === 'packaging') {
     const code = await resolveCountryCode(req.headers)
     blocked = isWidgetBlocked(siteId, code)
+  }
+  // Admin IP blocklist: a blocked visitor never even sees the widget.
+  if (!blocked) {
+    const ip = requestIp(req.headers)
+    if (ip && (await getBlockedIps()).has(ip)) blocked = true
   }
 
   // bot_enabled lets the widget swap the bot-persona greeting for a neutral

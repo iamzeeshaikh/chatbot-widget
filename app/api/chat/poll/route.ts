@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMode } from '@/lib/mode'
+import { typingActive, AGENT_TYPING_KEY } from '@/lib/typing'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,8 +23,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing params' }, { status: 400, headers: corsHeaders })
   }
 
-  const [mode, logsRes] = await Promise.all([
+  const [mode, visRes, logsRes] = await Promise.all([
     getMode(sessionId),
+    supabase.from('active_visitors').select('page_url').eq('session_id', sessionId).maybeSingle(),
     since
       ? supabase
           .from('chat_logs')
@@ -42,6 +44,8 @@ export async function GET(req: NextRequest) {
   ])
 
   const messages = logsRes.data ?? []
+  // Typing indicator: an agent stamped 'aty' within the freshness window.
+  const agentTyping = typingActive(visRes.data?.page_url ?? null, AGENT_TYPING_KEY)
 
-  return NextResponse.json({ messages, mode }, { headers: corsHeaders })
+  return NextResponse.json({ messages, mode, agentTyping }, { headers: corsHeaders })
 }

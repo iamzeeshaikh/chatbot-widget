@@ -3,6 +3,7 @@ import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { unpackVisitor, asUtcIso } from '@/lib/visitor'
 import { findBurstKeys, burstKey } from '@/lib/botfilter'
+import { getBlockedIps } from '@/lib/blocklist'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest) {
     supabase.from('sites').select('site_id, name, primary_color'),
   ])
 
+  const blockedIps = await getBlockedIps()
   const stamped = visRows.map((v) => ({ v, ms: new Date(asUtcIso(v.created_at) ?? v.created_at).getTime() }))
   const bursts = findBurstKeys(stamped.map((s) => ({ userAgent: s.v.user_agent, tsMs: s.ms })))
   // Per-session chat state for agent accountability. chatRows are newest-first,
@@ -64,8 +66,10 @@ export async function GET(req: NextRequest) {
     if (seen.has(v.session_id)) continue
     seen.add(v.session_id)
     const site = sites.find((s) => s.site_id === v.site_id)
-    const { page_url, page_title, referrer, visits, history } = unpackVisitor(v.page_url)
+    const { page_url, page_title, referrer, visits, history, ip } = unpackVisitor(v.page_url)
     visitors.push({
+      ip,
+      ip_blocked: !!ip && blockedIps.has(ip),
       ...v,
       created_at: asUtcIso(v.created_at),
       last_seen: asUtcIso(v.last_seen),
@@ -81,5 +85,5 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  return NextResponse.json({ visitors })
+  return NextResponse.json({ visitors, blockedIps: member.role === 'admin' ? Array.from(blockedIps).sort() : [] })
 }

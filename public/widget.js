@@ -162,6 +162,8 @@
   // ─── Polling state ────────────────────────────────────────────────────────
   var pollSince = new Date().toISOString();
   var pollTimer = null;
+  var lastTypingPingMs = 0;      // throttle for visitor-typing pings
+  var agentTypingShown = false;  // typing dots currently shown for agent typing
 
   // ─── Audio state ────────────────────────────────────────────────────────────
   // One shared AudioContext, reused for every sound and resumed on the visitor's
@@ -310,6 +312,18 @@
     input.addEventListener('input', function () {
       this.style.height = 'auto';
       this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+      // Typing indicator: tell the server (throttled) so the agent dashboard
+      // can show "visitor is typing…".
+      var now = Date.now();
+      if (this.value.trim() && now - lastTypingPingMs > 3000) {
+        lastTypingPingMs = now;
+        fetch(baseUrl + '/api/chat/typing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: sessionId }),
+          keepalive: true,
+        }).catch(function () {});
+      }
     });
 
     sendBtn.addEventListener('click', handleSend);
@@ -559,6 +573,16 @@
             clearSafetyNetTimer();
             playNotificationSound();
             maybeShowLeadForm();
+            // The reply arrived — drop the typing dots so they don't sit above it.
+            if (agentTypingShown) { hideTyping(); agentTypingShown = false; }
+          }
+          // Agent-typing indicator: show/hide the dots based on the server flag.
+          if (data.agentTyping && !agentTypingShown && !document.getElementById('zee-typing-indicator')) {
+            showTyping();
+            agentTypingShown = true;
+          } else if (!data.agentTyping && agentTypingShown) {
+            hideTyping();
+            agentTypingShown = false;
           }
         })
         .catch(function () {});

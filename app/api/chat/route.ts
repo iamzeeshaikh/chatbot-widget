@@ -5,6 +5,7 @@ import { getMode } from '@/lib/mode'
 import { maybeCaptureLead } from '@/lib/leadtracking'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled, BOT_OFF_ACK_MESSAGE } from '@/lib/botflag'
+import { getBlockedIps, requestIp } from '@/lib/blocklist'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,16 @@ export async function POST(req: NextRequest) {
 
     if (!siteId || !messages || !sessionId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: corsHeaders })
+    }
+
+    // Admin IP blocklist: drop silently (same shape as the bot-silent response,
+    // so the widget renders nothing and the message is never stored).
+    const reqIp = requestIp(req.headers)
+    if (reqIp && (await getBlockedIps()).has(reqIp)) {
+      return new Response(null, {
+        status: 200,
+        headers: { ...corsHeaders, 'X-Bot-Silent': '1', 'Access-Control-Expose-Headers': 'X-Bot-Silent' },
+      })
     }
 
     // Parallel DB fetches. The conversation mode (bot vs human takeover) is the

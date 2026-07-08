@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { unpackVisitor, packVisitor, appendHistory, LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { resolveCountryCode } from '@/lib/geo'
 import { isWidgetBlocked } from '@/lib/workspaces'
+import { getBlockedIps, requestIp } from '@/lib/blocklist'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -82,6 +83,12 @@ export async function POST(req: NextRequest) {
         .update({ status: 'left', last_seen: new Date().toISOString() })
         .eq('session_id', sessionId)
       return NextResponse.json({ ok: true }, { headers: corsHeaders })
+    }
+
+    // Admin IP blocklist: a blocked visitor never records presence.
+    const reqIp = requestIp(req.headers)
+    if (reqIp && (await getBlockedIps()).has(reqIp)) {
+      return NextResponse.json({ ok: true, blocked: true }, { headers: corsHeaders })
     }
 
     // Geo-block enforcement (defense-in-depth): a blocked South-Asian visitor on
