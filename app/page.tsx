@@ -1324,7 +1324,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-100 text-gray-900">
 
       {/* ── Header ── */}
-      <div className="border-b border-gray-200 bg-white/95 backdrop-blur px-5 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div className="border-b border-gray-200 bg-white/95 backdrop-blur px-3 sm:px-5 py-3 flex items-center justify-between flex-wrap gap-y-2 gap-x-3 sticky top-0 z-10">
         {/* Logo + title double as a "home" button back to Overview. */}
         <button onClick={() => setTab('overview')} title="Go to Overview"
           className="flex items-center gap-3 text-left focus:outline-none group cursor-pointer">
@@ -1339,8 +1339,8 @@ export default function Dashboard() {
             </p>
           </div>
         </button>
-        <div className="flex items-center gap-2">
-          <div className="flex gap-0.5 bg-gray-100 p-1 rounded-lg border border-gray-200">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <div className="flex gap-0.5 bg-gray-100 p-1 rounded-lg border border-gray-200 overflow-x-auto max-w-full">
             <button onClick={() => setTab('overview')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'overview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Overview</button>
             <button onClick={() => setTab('conversations')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'conversations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Conversations
@@ -1659,7 +1659,9 @@ export default function Dashboard() {
               .filter((s) => s.last_role === 'user' && !(s.mode === 'human' && isClosingMessage(s.preview)))
               .sort((a, b) => new Date(a.last_at).getTime() - new Date(b.last_at).getTime())
             return (
-          <div className="w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col bg-gray-50">
+          {/* On phones the sidebar IS the page until a chat is opened; the chat
+              then takes over with a ← back button. md+ shows both side by side. */}
+          <div className={`w-full md:w-[300px] flex-shrink-0 border-r border-gray-200 flex-col bg-gray-50 ${selectedSession ? 'hidden md:flex' : 'flex'}`}>
             <div className="px-3 py-2 flex items-center gap-2 bg-green-50 flex-shrink-0 border-b border-gray-200">
               <span className={`w-2 h-2 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-green-500 ring-2 ring-green-200 animate-pulse' : 'bg-gray-300'}`} />
               <p className={`text-[11px] font-semibold uppercase tracking-wider ${roleVisitors.length > 0 ? 'text-green-600' : 'text-gray-500'}`}>
@@ -1747,7 +1749,7 @@ export default function Dashboard() {
           })()}
 
           {/* ── Right panel ── */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className={`flex-1 flex-col min-w-0 ${selectedSession ? 'flex' : 'hidden md:flex'}`}>
             {!selectedSession ? (
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center px-8 max-w-xs animate-in">
@@ -1761,8 +1763,10 @@ export default function Dashboard() {
             ) : (
               <>
                 {/* Conversation header */}
-                <div className="px-5 py-3 border-b border-gray-200 bg-white flex items-center justify-between flex-shrink-0">
-                  <div className="flex items-center gap-3 min-w-0">
+                <div className="px-3 sm:px-5 py-3 border-b border-gray-200 bg-white flex items-center justify-between flex-shrink-0">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <button onClick={() => setSelectedSession(null)}
+                      className="md:hidden shrink-0 p-1.5 -ml-1 rounded-lg text-gray-600 hover:bg-gray-100 text-lg leading-none" title="Back to list">←</button>
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-900 text-xs font-bold shrink-0"
                       style={{ backgroundColor: SITE_ACCENT[selectedSession.site_id] ?? accentColor }}>
                       {selectedSession.site_name[0]?.toUpperCase()}
@@ -1971,7 +1975,7 @@ export default function Dashboard() {
 
           {/* ── Visitor detail panel ── */}
           {selectedSession && (
-            <aside className="w-[320px] xl:w-[360px] flex-shrink-0 border-l border-gray-200 bg-gray-50 overflow-y-auto">
+            <aside className="hidden lg:block w-[320px] xl:w-[360px] flex-shrink-0 border-l border-gray-200 bg-gray-50 overflow-y-auto">
               <div className="px-4 py-3 border-b border-gray-200 bg-white sticky top-0 backdrop-blur z-10 flex items-center gap-2">
                 <span className="text-base">{deviceIcon(visitorDetail?.technical.device_type ?? null)}</span>
                 <div className="min-w-0">

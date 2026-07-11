@@ -79,6 +79,9 @@ export default function LoginPage() {
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+        <p className="text-center mt-4">
+          <a href="/install" className="text-xs text-blue-600 hover:text-blue-700 font-medium">📲 Install this dashboard as an app</a>
+        </p>
       </div>
     </div>
   )
