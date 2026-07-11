@@ -444,6 +444,21 @@ export default function Dashboard() {
   // every conversations poll refreshes it with the server's view (which also
   // honours a BOT_ENABLED env override the client bundle can't see).
   const [botGlobalOff, setBotGlobalOff] = useState(() => !isBotEnabled())
+  // The header wraps to multiple rows on narrow screens, so the Conversations
+  // pane must size itself against the MEASURED header height (a fixed 57px
+  // pushed the reply box below the fold on phones). dvh (not vh) keeps the
+  // composer visible above mobile browser chrome.
+  const headerRef = useRef<HTMLDivElement | null>(null)
+  const [headerH, setHeaderH] = useState(57)
+  useEffect(() => {
+    const el = headerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setHeaderH(el.offsetHeight))
+    ro.observe(el)
+    setHeaderH(el.offsetHeight)
+    return () => ro.disconnect()
+  }, [authReady])
+
   // Overview: clicking a site in "Leads by Site" filters the Recent Leads table.
   const [overviewLeadSite, setOverviewLeadSite] = useState('')
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
@@ -1324,7 +1339,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-100 text-gray-900">
 
       {/* ── Header ── */}
-      <div className="border-b border-gray-200 bg-white/95 backdrop-blur px-3 sm:px-5 py-3 flex items-center justify-between flex-wrap gap-y-2 gap-x-3 sticky top-0 z-10">
+      <div ref={headerRef} className="border-b border-gray-200 bg-white/95 backdrop-blur px-3 sm:px-5 py-3 flex items-center justify-between flex-wrap gap-y-2 gap-x-3 sticky top-0 z-10">
         {/* Logo + title double as a "home" button back to Overview. */}
         <button onClick={() => setTab('overview')} title="Go to Overview"
           className="flex items-center gap-3 text-left focus:outline-none group cursor-pointer">
@@ -1645,7 +1660,7 @@ export default function Dashboard() {
 
       {/* ── CONVERSATIONS TAB ── */}
       {tab === 'conversations' && (
-        <div className="flex animate-in" style={{ height: 'calc(100vh - 57px)' }}>
+        <div className="flex animate-in" style={{ height: `calc(100dvh - ${headerH}px)` }}>
 
           {/* ── Left sidebar: live visitors + waiting chats ──
               Top: live visitors, so an agent can grab someone the moment they're
