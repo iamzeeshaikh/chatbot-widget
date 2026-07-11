@@ -1658,9 +1658,9 @@ export default function Dashboard() {
             const waitingChats = roleSessions
               .filter((s) => s.last_role === 'user' && !(s.mode === 'human' && isClosingMessage(s.preview)))
               .sort((a, b) => new Date(a.last_at).getTime() - new Date(b.last_at).getTime())
+            // On phones the sidebar IS the page until a chat is opened; the
+            // chat then takes over with a ← back button. md+ shows both.
             return (
-          {/* On phones the sidebar IS the page until a chat is opened; the chat
-              then takes over with a ← back button. md+ shows both side by side. */}
           <div className={`w-full md:w-[300px] flex-shrink-0 border-r border-gray-200 flex-col bg-gray-50 ${selectedSession ? 'hidden md:flex' : 'flex'}`}>
             <div className="px-3 py-2 flex items-center gap-2 bg-green-50 flex-shrink-0 border-b border-gray-200">
               <span className={`w-2 h-2 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-green-500 ring-2 ring-green-200 animate-pulse' : 'bg-gray-300'}`} />
