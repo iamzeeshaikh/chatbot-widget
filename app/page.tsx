@@ -593,6 +593,45 @@ export default function Dashboard() {
     })
   }, [])
 
+  // Web Push: 'unsupported' | 'off' | 'on'. Subscribing needs a user gesture
+  // (required on iOS), so it's driven by the header 📳 button.
+  const [pushState, setPushState] = useState<'unsupported' | 'off' | 'on'>('unsupported')
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+    navigator.serviceWorker.ready.then(async (reg) => {
+      const sub = await reg.pushManager.getSubscription()
+      setPushState(sub ? 'on' : 'off')
+    }).catch(() => setPushState('off'))
+  }, [])
+  const togglePush = useCallback(async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready
+      const existing = await reg.pushManager.getSubscription()
+      if (existing) {
+        await fetch('/api/admin/push-subscribe', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remove: true, endpoint: existing.endpoint }),
+        }).catch(() => {})
+        await existing.unsubscribe()
+        setPushState('off')
+        return
+      }
+      const perm = await Notification.requestPermission()
+      if (perm !== 'granted') { alert('Notifications are blocked for this site — allow them in your browser settings to get chat alerts.'); return }
+      const { publicKey } = await fetch('/api/admin/push-subscribe').then((r) => r.json())
+      if (!publicKey) { alert('Push is not configured on the server.'); return }
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: publicKey })
+      await fetch('/api/admin/push-subscribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: sub.toJSON() }),
+      })
+      setPushState('on')
+    } catch (err) {
+      console.error('push subscribe failed:', err)
+      alert('Could not enable notifications on this device. On iPhone, install the app to your Home Screen first (Share → Add to Home Screen), then enable from inside the app.')
+    }
+  }, [])
+
   // Sound on/off, persisted; default ON. Read lazily so SSR doesn't touch window.
   const [soundOn, setSoundOn] = useState(true)
   useEffect(() => {
@@ -1322,6 +1361,13 @@ export default function Dashboard() {
               </button>
             )}
           </div>
+          {pushState !== 'unsupported' && (
+            <button onClick={togglePush}
+              title={pushState === 'on' ? 'Push notifications ON for this device — new chats ping you even with the app closed. Click to turn off.' : 'Enable push notifications on this device — get pinged about new chats even when the app is closed'}
+              className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${pushState === 'on' ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'}`}>
+              {pushState === 'on' ? '📳 On' : '📳'}
+            </button>
+          )}
           <button onClick={toggleTheme} title={darkMode ? 'Dark mode on — click for light mode' : 'Light mode — click for dark mode'}
             className="px-2.5 py-1.5 text-xs rounded-lg border bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200 transition-colors">
             {darkMode ? '☀️' : '🌙'}

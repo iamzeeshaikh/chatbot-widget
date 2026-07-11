@@ -6,6 +6,8 @@ import { maybeCaptureLead } from '@/lib/leadtracking'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled, BOT_OFF_ACK_MESSAGE } from '@/lib/botflag'
 import { getBlockedIps, requestIp } from '@/lib/blocklist'
+import { sendPushToWorkspace } from '@/lib/push'
+import { siteWorkspace } from '@/lib/workspaces'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -41,7 +43,7 @@ export async function POST(req: NextRequest) {
     // Parallel DB fetches. The conversation mode (bot vs human takeover) is the
     // authoritative gate for whether the bot may reply at all.
     const [siteRes, mode] = await Promise.all([
-      supabase.from('sites').select('system_prompt').eq('site_id', siteId).single(),
+      supabase.from('sites').select('system_prompt, name').eq('site_id', siteId).single(),
       getMode(sessionId),
     ])
 
@@ -64,6 +66,22 @@ export async function POST(req: NextRequest) {
     // lead-tracked site, record it once per conversation. Runs in both bot and
     // human modes; non-blocking and never fatal to the chat response.
     after(() => maybeCaptureLead({ sessionId, siteId, text: lastUserMessage.content }))
+
+    // Push a notification to the workspace's agents' devices (works with the
+    // dashboard/app closed). Tagged by session so a burst of messages from the
+    // same customer collapses into one notification on the phone.
+    const pushWs = siteWorkspace(siteId)
+    const pushRole = String(lastUserMessage.role || '').toLowerCase()
+    if (pushWs && (pushRole === 'user' || pushRole === 'visitor')) {
+      const siteName = siteRes.data.name || siteId
+      const text = String(lastUserMessage.content || '').slice(0, 120)
+      after(() => sendPushToWorkspace(pushWs, {
+        title: `💬 ${siteName}`,
+        body: text,
+        url: `/?tab=conversations&session=${encodeURIComponent(sessionId)}&site=${encodeURIComponent(siteId)}`,
+        tag: `chat-${sessionId}`,
+      }))
+    }
 
     const responseHeaders = {
       ...corsHeaders,

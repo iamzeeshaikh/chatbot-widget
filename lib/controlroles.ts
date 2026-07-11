@@ -15,9 +15,10 @@ import { LEAD_CAPTURE_ROLE } from './leadtracking'
 import { REPLY_AUTHOR_ROLE } from './replyauthor'
 import { LEAD_STATUS_ROLE } from './leadstatus'
 
-// NOTE: kept as a literal (not imported from lib/blocklist.ts) so this module
-// stays importable from client code — blocklist imports the supabase client.
+// NOTE: kept as literals (not imported from lib/blocklist.ts / lib/push.ts) so
+// this module stays importable without pulling in server-only dependencies.
 const BLOCKED_VISITOR_ROLE = 'blocked_visitor'
+const PUSH_SUB_ROLE = 'push_sub'
 
 export const CONTROL_ROLES = [
   MODE_ROLE,
@@ -27,6 +28,7 @@ export const CONTROL_ROLES = [
   REPLY_AUTHOR_ROLE,
   LEAD_STATUS_ROLE,
   BLOCKED_VISITOR_ROLE,
+  PUSH_SUB_ROLE,
 ] as const
 
 const CONTROL_ROLE_SET: ReadonlySet<string> = new Set(CONTROL_ROLES)
