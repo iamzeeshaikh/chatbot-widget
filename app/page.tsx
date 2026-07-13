@@ -37,6 +37,7 @@ const SITE_ACCENT: Record<string, string> = {
   thetubepackaging: '#0f766e',
   kraftboxpack: '#855f35',
   thecandlepackaging: '#ff5e14',
+  theburgerboxes: '#c0392b',
 }
 
 const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="40" width="76" height="52" rx="5" fill="#2563eb"/><polygon points="12,40 50,22 88,40" fill="#1d4ed8"/><rect x="38" y="40" width="24" height="52" fill="#93c5fd" opacity="0.35"/></svg>')}`
