@@ -462,8 +462,11 @@ export default function Dashboard() {
     return () => ro.disconnect()
   }, [authReady])
 
-  // Overview: clicking a site in "Leads by Site" filters the Recent Leads table.
+  // Overview: clicking a site in "Leads by Site" (or a stat tile) filters the
+  // Recent Leads table. Date filter has no 'yesterday' stat tile, so it's a
+  // dropdown; 'today'/'week' can also be set by clicking their tiles.
   const [overviewLeadSite, setOverviewLeadSite] = useState('')
+  const [overviewLeadDate, setOverviewLeadDate] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all')
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
   const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
@@ -1278,8 +1281,23 @@ export default function Dashboard() {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const startOfWeek = new Date(today)
   startOfWeek.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1))
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
+  const yesterdayStr = yesterday.toISOString().split('T')[0]
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
   const todayLeads = roleLeads.filter(l => l.created_at?.startsWith(todayStr)).length
   const thisWeekLeads = roleLeads.filter(l => new Date(l.created_at) >= startOfWeek).length
+
+  // Recent Leads table: site chip (from "Leads by Site") + date range, combined.
+  const dateFilteredLeads = roleLeads.filter((l) => {
+    if (!l.created_at) return overviewLeadDate === 'all'
+    const d = new Date(l.created_at)
+    if (overviewLeadDate === 'today') return l.created_at.startsWith(todayStr)
+    if (overviewLeadDate === 'yesterday') return l.created_at.startsWith(yesterdayStr)
+    if (overviewLeadDate === 'week') return d >= startOfWeek
+    if (overviewLeadDate === 'month') return d >= startOfMonth
+    return true
+  })
+  const overviewFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
 
   // ── Bar chart: leads per day last 7 days ──────────────────────────────────
   const chartDays = useMemo(() => {
@@ -1412,23 +1430,35 @@ export default function Dashboard() {
             <OverviewSkeleton />
           ) : (
             <>
-              {/* Stats row */}
+              {/* Stats row. Today's Leads / This Week double as filter shortcuts
+                  for the Recent Leads table below (click again to clear). */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 {[
-                  { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-100 to-blue-50', border: 'border-blue-200' },
-                  { label: 'Total Leads', value: roleLeads.length, icon: '👥', color: 'from-green-100 to-green-50', border: 'border-green-200' },
-                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-100 to-purple-50', border: 'border-purple-200' },
-                  { label: "Today's Leads", value: todayLeads, icon: '📅', color: 'from-orange-100 to-orange-50', border: 'border-orange-200' },
-                  { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20' },
-                ].map((s) => (
-                  <div key={s.label} className={`group bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${s.border} bg-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-400 hover:shadow-lg hover:shadow-black/20`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
-                      <span className="text-lg opacity-80 group-hover:opacity-100 transition-opacity">{s.icon}</span>
-                    </div>
-                    <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tracking-tight tabular-nums">{s.value}</p>
-                  </div>
-                ))}
+                  { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
+                  { label: 'Total Leads', value: roleLeads.length, icon: '👥', color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
+                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
+                  { label: "Today's Leads", value: todayLeads, icon: '📅', color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
+                  { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20', dateFilter: 'week' as const },
+                ].map((s) => {
+                  const clickable = s.dateFilter !== undefined
+                  const active = clickable && overviewLeadDate === s.dateFilter
+                  return (
+                    <button key={s.label} disabled={!clickable}
+                      onClick={() => {
+                        if (!s.dateFilter) return
+                        setOverviewLeadDate(active ? 'all' : s.dateFilter)
+                        leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }}
+                      title={clickable ? (active ? 'Clear this date filter' : `Show ${s.label.toLowerCase()} in the leads table below`) : undefined}
+                      className={`group text-left bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${active ? 'border-gray-400 ring-2 ring-gray-300' : s.border} bg-gray-100 transition-all duration-200 ${clickable ? 'hover:-translate-y-0.5 hover:border-gray-400 hover:shadow-lg hover:shadow-black/20 cursor-pointer' : ''}`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
+                        <span className="text-lg opacity-80 group-hover:opacity-100 transition-opacity">{s.icon}</span>
+                      </div>
+                      <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tracking-tight tabular-nums">{s.value}</p>
+                    </button>
+                  )
+                })}
               </div>
 
               {/* Analytics over time */}
@@ -1557,14 +1587,25 @@ export default function Dashboard() {
 
               {/* Leads table */}
               <div ref={leadsTableRef}>
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <h2 className="text-sm font-semibold text-gray-900">Recent Leads</h2>
+                  <select value={overviewLeadDate} onChange={(e) => setOverviewLeadDate(e.target.value as typeof overviewLeadDate)}
+                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadDate !== 'all' ? 'bg-orange-100 border-orange-300 text-orange-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
+                    <option value="all">All time</option>
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="week">This week</option>
+                    <option value="month">This month</option>
+                  </select>
                   {overviewLeadSite && (
                     <button onClick={() => setOverviewLeadSite('')}
                       className="text-[11px] font-medium text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5 hover:bg-blue-200 transition-colors"
                       title="Clear the site filter">
                       {roleSites.find((s) => s.site_id === overviewLeadSite)?.name ?? overviewLeadSite} ✕
                     </button>
+                  )}
+                  {(overviewLeadSite || overviewLeadDate !== 'all') && (
+                    <span className="text-[11px] text-gray-500">{overviewFilteredLeads.length} result{overviewFilteredLeads.length !== 1 ? 's' : ''}</span>
                   )}
                 </div>
                 <div className="bg-gray-100 rounded-xl border border-gray-200 overflow-hidden">
@@ -1578,17 +1619,17 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(overviewLeadSite ? roleLeads.filter((l) => l.site_id === overviewLeadSite) : roleLeads).length === 0 ? (
+                        {overviewFilteredLeads.length === 0 ? (
                           <tr>
                             <td colSpan={12} className="text-center py-8">
                               <div className="flex flex-col items-center">
                                 <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📭</div>
-                                <p className="text-gray-700 text-sm font-medium">No leads captured yet</p>
-                                <p className="text-gray-500 text-xs mt-0.5">Leads appear here when the bot qualifies a visitor</p>
+                                <p className="text-gray-700 text-sm font-medium">{(overviewLeadSite || overviewLeadDate !== 'all') ? 'No leads match this filter' : 'No leads captured yet'}</p>
+                                <p className="text-gray-500 text-xs mt-0.5">{(overviewLeadSite || overviewLeadDate !== 'all') ? 'Try a different date range or site' : 'Leads appear here when the bot qualifies a visitor'}</p>
                               </div>
                             </td>
                           </tr>
-                        ) : (overviewLeadSite ? roleLeads.filter((l) => l.site_id === overviewLeadSite) : roleLeads).map((lead) => {
+                        ) : overviewFilteredLeads.map((lead) => {
                           const msgLines: Record<string, string> = {}
                           for (const line of (lead.message ?? '').split('\n')) {
                             const colon = line.indexOf(': ')
