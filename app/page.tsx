@@ -1437,7 +1437,7 @@ export default function Dashboard() {
                   { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
                   { label: 'Total Leads', value: roleLeads.length, icon: '👥', color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
                   { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
-                  { label: "Today's Leads", value: todayLeads, icon: '📅', color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
+                  { label: "Today's Leads", value: todayLeads, icon: '☀️', color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
                   { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20', dateFilter: 'week' as const },
                 ].map((s) => {
                   const clickable = s.dateFilter !== undefined
