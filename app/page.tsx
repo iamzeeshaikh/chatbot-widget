@@ -467,7 +467,9 @@ export default function Dashboard() {
   // dropdown; 'today'/'week' can also be set by clicking their tiles.
   const [overviewLeadSite, setOverviewLeadSite] = useState('')
   const [overviewLeadDate, setOverviewLeadDate] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all')
+  const [overviewLeadPage, setOverviewLeadPage] = useState(0)
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
+  const OVERVIEW_LEADS_PER_PAGE = 40
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
   const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
   const [visitorHistoryLoaded, setVisitorHistoryLoaded] = useState(false)
@@ -1298,6 +1300,10 @@ export default function Dashboard() {
     return true
   })
   const overviewFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
+  const overviewLeadPageCount = Math.max(1, Math.ceil(overviewFilteredLeads.length / OVERVIEW_LEADS_PER_PAGE))
+  const overviewLeadPageClamped = Math.min(overviewLeadPage, overviewLeadPageCount - 1)
+  const overviewLeadsPageRows = overviewFilteredLeads.slice(
+    overviewLeadPageClamped * OVERVIEW_LEADS_PER_PAGE, (overviewLeadPageClamped + 1) * OVERVIEW_LEADS_PER_PAGE)
 
   // ── Bar chart: leads per day last 7 days ──────────────────────────────────
   const chartDays = useMemo(() => {
@@ -1447,6 +1453,7 @@ export default function Dashboard() {
                       onClick={() => {
                         if (!s.dateFilter) return
                         setOverviewLeadDate(active ? 'all' : s.dateFilter)
+                        setOverviewLeadPage(0)
                         leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                       }}
                       title={clickable ? (active ? 'Clear this date filter' : `Show ${s.label.toLowerCase()} in the leads table below`) : undefined}
@@ -1528,6 +1535,7 @@ export default function Dashboard() {
                         <button key={site.site_id}
                           onClick={() => {
                             setOverviewLeadSite(active ? '' : site.site_id)
+                            setOverviewLeadPage(0)
                             if (!active) leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                           }}
                           title={active ? 'Clear this site filter' : `Show ${site.name}'s leads in the table below`}
@@ -1589,7 +1597,7 @@ export default function Dashboard() {
               <div ref={leadsTableRef}>
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <h2 className="text-sm font-semibold text-gray-900">Recent Leads</h2>
-                  <select value={overviewLeadDate} onChange={(e) => setOverviewLeadDate(e.target.value as typeof overviewLeadDate)}
+                  <select value={overviewLeadDate} onChange={(e) => { setOverviewLeadDate(e.target.value as typeof overviewLeadDate); setOverviewLeadPage(0) }}
                     className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadDate !== 'all' ? 'bg-orange-100 border-orange-300 text-orange-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All time</option>
                     <option value="today">Today</option>
@@ -1598,7 +1606,7 @@ export default function Dashboard() {
                     <option value="month">This month</option>
                   </select>
                   {overviewLeadSite && (
-                    <button onClick={() => setOverviewLeadSite('')}
+                    <button onClick={() => { setOverviewLeadSite(''); setOverviewLeadPage(0) }}
                       className="text-[11px] font-medium text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5 hover:bg-blue-200 transition-colors"
                       title="Clear the site filter">
                       {roleSites.find((s) => s.site_id === overviewLeadSite)?.name ?? overviewLeadSite} ✕
@@ -1629,7 +1637,7 @@ export default function Dashboard() {
                               </div>
                             </td>
                           </tr>
-                        ) : overviewFilteredLeads.map((lead) => {
+                        ) : overviewLeadsPageRows.map((lead) => {
                           const msgLines: Record<string, string> = {}
                           for (const line of (lead.message ?? '').split('\n')) {
                             const colon = line.indexOf(': ')
@@ -1696,6 +1704,21 @@ export default function Dashboard() {
                     </table>
                   </div>
                 </div>
+                {/* Pagination */}
+                {overviewFilteredLeads.length > OVERVIEW_LEADS_PER_PAGE && (
+                  <div className="flex items-center justify-between mt-3">
+                    <span className="text-xs text-gray-500">
+                      Showing {overviewLeadPageClamped * OVERVIEW_LEADS_PER_PAGE + 1}–{Math.min((overviewLeadPageClamped + 1) * OVERVIEW_LEADS_PER_PAGE, overviewFilteredLeads.length)} of {overviewFilteredLeads.length}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setOverviewLeadPage(Math.max(0, overviewLeadPageClamped - 1))} disabled={overviewLeadPageClamped === 0}
+                        className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">◀ Prev</button>
+                      <span className="text-xs text-gray-600 px-2">Page {overviewLeadPageClamped + 1} / {overviewLeadPageCount}</span>
+                      <button onClick={() => setOverviewLeadPage(Math.min(overviewLeadPageCount - 1, overviewLeadPageClamped + 1))} disabled={overviewLeadPageClamped >= overviewLeadPageCount - 1}
+                        className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next ▶</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
