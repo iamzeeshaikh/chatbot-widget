@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { CONTACT_ROLE, parseContact } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
@@ -12,17 +12,19 @@ export async function GET(req: NextRequest) {
   const scope = await siteScope(member)
   const allowed = Array.from(scope)
 
-  let query = supabase
-    .from('leads')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(100)
-
-  if (scope) query = query.in('site_id', allowed)
-
-  const { data, error } = await query
-  if (error) return NextResponse.json({ leads: [] })
-  const leads = data ?? []
+  // The Overview tab's Total/Today/This-Week tiles and the site breakdown are
+  // all computed client-side from this full list — a `.limit(100)` here
+  // silently capped "Total Leads" well below the real count once quote-lead
+  // ingestion pushed this table past a few hundred rows (found showing "100"
+  // when the true total was 982). Page through everything in scope instead.
+  const leads = await fetchAllPages(
+    () => {
+      let q = supabase.from('leads').select('*').order('created_at', { ascending: false })
+      if (scope) q = q.in('site_id', allowed)
+      return q
+    },
+    20000
+  )
 
   // The leads table has no session_id, so resolve each lead's conversation by
   // matching its email against chat rows for the same site — preferring the
