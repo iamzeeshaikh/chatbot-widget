@@ -39,6 +39,7 @@ const SITE_ACCENT: Record<string, string> = {
   thecandlepackaging: '#ff5e14',
   theburgerboxes: '#c0392b',
   smallfoodboxes: '#2e7d32',
+  thepapercups: '#6d4c2f',
 }
 
 const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="40" width="76" height="52" rx="5" fill="#2563eb"/><polygon points="12,40 50,22 88,40" fill="#1d4ed8"/><rect x="38" y="40" width="24" height="52" fill="#93c5fd" opacity="0.35"/></svg>')}`
@@ -64,7 +65,7 @@ function hotPoints(v: { pages: number; visits: number; created_at: string; last_
 }
 const isHotVisitor = (v: { pages: number; visits: number; created_at: string; last_seen: string }) => hotPoints(v) >= 3
 interface AnalyticsPoint { label: string; visitors: number; unique: number; chats: number }
-interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null }
+interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null; source: 'chat' | 'quote'; quote_message?: string }
 interface BillingData { from: string; to: string; total: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
 interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number }
@@ -1183,9 +1184,9 @@ export default function Dashboard() {
   function downloadBillingCsv() {
     if (!billing) return
     const esc = (v: string | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const header = ['Email', 'Name', 'Phone', 'Site', 'Status', 'Agent', 'Country', 'Source', 'Date Captured']
+    const header = ['Type', 'Email', 'Name', 'Phone', 'Site', 'Status', 'Agent', 'Country', 'Origin', 'Date Captured']
     const rows = billing.leads.map((l) => [
-      esc(l.email), esc(l.name), esc(l.phone), esc(l.site_name),
+      esc(l.source === 'quote' ? 'Custom Quote' : 'Chat'), esc(l.email), esc(l.name), esc(l.phone), esc(l.site_name),
       esc(l.status), esc(l.agent), esc(l.country), esc(cleanReferrer(l.referrer)),
       esc(new Date(l.captured_at).toISOString()),
     ].join(','))
@@ -2491,7 +2492,7 @@ export default function Dashboard() {
                   <table className="w-full text-sm min-w-[1050px]">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-100">
-                        {['Email', 'Name', 'Phone', 'Site', 'Source', 'Agent', 'Status', 'Date Captured', ''].map((h) => (
+                        {['Type', 'Email', 'Name', 'Phone', 'Site', 'Source', 'Agent', 'Status', 'Date Captured', ''].map((h) => (
                           <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -2499,29 +2500,45 @@ export default function Dashboard() {
                     <tbody>
                       {(billing?.leads ?? []).length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="text-center py-10">
+                          <td colSpan={10} className="text-center py-10">
                             <div className="flex flex-col items-center">
                               <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">🧾</div>
                               <p className="text-gray-700 text-sm font-medium">No leads captured this period</p>
-                              <p className="text-gray-500 text-xs mt-0.5">A lead is recorded when a visitor shares an email on a tracked site.</p>
+                              <p className="text-gray-500 text-xs mt-0.5">A lead is recorded when a visitor shares an email on a tracked site, or a custom-quote email comes in.</p>
                             </div>
                           </td>
                         </tr>
-                      ) : billing!.leads.map((l) => (
-                        <tr key={l.session_id} onClick={() => openConversation(l)} title="Open this lead's conversation"
-                          className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
+                      ) : billing!.leads.map((l) => {
+                        const isQuote = l.source === 'quote'
+                        return (
+                        <tr key={l.session_id} onClick={() => { if (!isQuote) openConversation(l) }}
+                          title={isQuote ? (l.quote_message || 'Custom-quote email lead') : "Open this lead's conversation"}
+                          className={`border-b border-gray-100 transition-colors ${isQuote ? '' : 'hover:bg-gray-100 cursor-pointer'}`}>
                           <td className="px-4 py-3 whitespace-nowrap">
-                            <a href={conversationHref(l.session_id, l.site_id)} className="text-blue-700 hover:underline"
-                              onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { e.stopPropagation(); return } e.preventDefault(); e.stopPropagation(); openConversation(l) }}>
-                              {l.email}
-                            </a>
+                            {isQuote
+                              ? <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">📧 Quote</span>
+                              : <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">💬 Chat</span>}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => isQuote && e.stopPropagation()}>
+                            {isQuote ? (
+                              <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
+                            ) : (
+                              <a href={conversationHref(l.session_id, l.site_id)} className="text-blue-700 hover:underline"
+                                onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { e.stopPropagation(); return } e.preventDefault(); e.stopPropagation(); openConversation(l) }}>
+                                {l.email}
+                              </a>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
                           <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
                           <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
                           <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap" title={l.referrer ?? 'Direct'}>
-                            {l.country ? <span>{l.country}</span> : <span className="text-gray-400">—</span>}
-                            <span className="text-gray-400"> · </span>{cleanReferrer(l.referrer)}
+                            {isQuote ? <span className="text-gray-400">Email form</span> : (
+                              <>
+                                {l.country ? <span>{l.country}</span> : <span className="text-gray-400">—</span>}
+                                <span className="text-gray-400"> · </span>{cleanReferrer(l.referrer)}
+                              </>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap" title={l.agent ?? undefined}>
                             {l.agent ? l.agent.split('@')[0] : <span className="text-gray-400">—</span>}
@@ -2534,11 +2551,14 @@ export default function Dashboard() {
                           </td>
                           <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
                           <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <a href={conversationHref(l.session_id, l.site_id)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline"
-                              onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openConversation(l) }}>View chat →</a>
+                            {isQuote
+                              ? <span className="text-xs text-gray-400">—</span>
+                              : <a href={conversationHref(l.session_id, l.site_id)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline"
+                                  onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openConversation(l) }}>View chat →</a>}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>

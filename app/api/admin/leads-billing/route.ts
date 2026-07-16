@@ -5,6 +5,7 @@ import { LEAD_CAPTURE_ROLE, parseLeadCapture, LEAD_TRACKED_SITES } from '@/lib/l
 import { LEAD_STATUS_ROLE, parseLeadStatus, type LeadStatus } from '@/lib/leadstatus'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
 import { unpackVisitor } from '@/lib/visitor'
+import { QUOTE_TAG, stripQuoteTag, quoteSessionId } from '@/lib/quoteintake'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,11 +24,22 @@ export async function GET(req: NextRequest) {
   const from = fromParam || new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const to = toParam || new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
 
-  const [rowsRes, sitesRes] = await Promise.all([
+  const [rowsRes, quoteRowsRes, sitesRes] = await Promise.all([
     supabase
       .from('chat_logs')
       .select('session_id, site_id, message, created_at')
       .eq('role', LEAD_CAPTURE_ROLE)
+      .gte('created_at', from)
+      .lt('created_at', to)
+      .order('created_at', { ascending: false }),
+    // Custom-quote leads (WordPress form emails, ingested via the Google Apps
+    // Script → /api/quote-intake — see lib/quoteintake.ts). Same `leads`
+    // table the bot's own qualification writes to, told apart by the message
+    // prefix since there's no separate table/column for it.
+    supabase
+      .from('leads')
+      .select('id, site_id, name, email, phone, message, created_at')
+      .ilike('message', `${QUOTE_TAG}%`)
       .gte('created_at', from)
       .lt('created_at', to)
       .order('created_at', { ascending: false }),
@@ -39,16 +51,23 @@ export async function GET(req: NextRequest) {
 
   // Only sites the member can access (workspace + assigned-site isolation).
   const rows = (rowsRes.data ?? []).filter((r) => scope.has(r.site_id))
+  const quoteRows = (quoteRowsRes.data ?? []).filter((r) => scope.has(r.site_id))
 
   // Enrichment for the period's lead sessions (queried by session id, NOT the
   // date window — a status can be set long after the lead was captured):
   //   status   — latest lead_status control row per session
   //   agent    — the member with the most attributed replies in the session
   //   origin   — country + referrer from the visitor row (where the lead came from)
-  // ['-'] placeholder keeps .in() valid when the period has no leads.
-  const sessionIds = rows.length ? Array.from(new Set(rows.map((r) => r.session_id))) : ['-']
+  // ['-'] placeholder keeps .in() valid when the period has no leads. Quote
+  // leads' synthetic session ids are included so a lead_status row set on one
+  // (via the same /api/admin/lead-status endpoint chat leads use) is picked up
+  // below — author/origin lookups simply find nothing for them, which is
+  // correct: a quote lead has no chat session or agent reply attached.
+  const quoteSessionIds = quoteRows.map((r) => quoteSessionId(r.id))
+  const sessionIds = (rows.length || quoteRows.length)
+    ? Array.from(new Set([...rows.map((r) => r.session_id), ...quoteSessionIds])) : ['-']
   const prevFrom = new Date(new Date(from).getTime() - (new Date(to).getTime() - new Date(from).getTime())).toISOString()
-  const [statusRes, authorRes, visRes, prevRes] = await Promise.all([
+  const [statusRes, authorRes, visRes, prevRes, prevQuoteRes] = await Promise.all([
     supabase.from('chat_logs').select('session_id, message, created_at')
       .eq('role', LEAD_STATUS_ROLE).in('session_id', sessionIds)
       .order('created_at', { ascending: true }),
@@ -59,6 +78,8 @@ export async function GET(req: NextRequest) {
     // Previous period's lead count, for the month-over-month comparison.
     supabase.from('chat_logs').select('session_id, site_id')
       .eq('role', LEAD_CAPTURE_ROLE).gte('created_at', prevFrom).lt('created_at', from),
+    supabase.from('leads').select('site_id')
+      .ilike('message', `${QUOTE_TAG}%`).gte('created_at', prevFrom).lt('created_at', from),
   ])
 
   const statusBySession = new Map<string, LeadStatus>()
@@ -88,9 +109,11 @@ export async function GET(req: NextRequest) {
     const { referrer } = unpackVisitor(v.page_url)
     originBySession.set(v.session_id, { country: v.country ?? null, referrer })
   }
-  const prevTotal = (prevRes?.data ?? []).filter((r) => scope.has(r.site_id)).length
+  const prevChatTotal = (prevRes?.data ?? []).filter((r) => scope.has(r.site_id)).length
+  const prevQuoteTotal = (prevQuoteRes?.data ?? []).filter((r) => scope.has(r.site_id)).length
+  const prevTotal = prevChatTotal + prevQuoteTotal
 
-  const leads = rows.map((r) => {
+  const chatLeads = rows.map((r) => {
     const lead = parseLeadCapture(r.message)
     const origin = originBySession.get(r.session_id)
     return {
@@ -106,8 +129,34 @@ export async function GET(req: NextRequest) {
       agent: agentBySession.get(r.session_id) ?? null,
       country: origin?.country ?? null,
       referrer: origin?.referrer ?? null,
+      source: 'chat' as const,
     }
   }).filter((l) => l.email)
+
+  // Custom-quote leads (WordPress form → Gmail → Apps Script → /api/quote-intake).
+  // No chat session, so no agent/country/referrer — but status still works via
+  // the same synthetic-session lead_status mechanism as chat leads.
+  const quoteLeads = quoteRows.map((r) => {
+    const sid = quoteSessionId(r.id)
+    return {
+      session_id: sid,
+      site_id: r.site_id,
+      site_name: siteName[r.site_id] ?? r.site_id,
+      email: r.email ?? '',
+      name: r.name ?? null,
+      phone: r.phone ?? null,
+      captured_at: r.created_at,
+      status: statusBySession.get(sid) ?? ('new' as LeadStatus),
+      agent: null as string | null,
+      country: null as string | null,
+      referrer: null as string | null,
+      source: 'quote' as const,
+      quote_message: stripQuoteTag(r.message),
+    }
+  }).filter((l) => l.email)
+
+  const leads = [...chatLeads, ...quoteLeads]
+    .sort((a, b) => new Date(b.captured_at).getTime() - new Date(a.captured_at).getTime())
 
   // Per-site breakdown.
   const bySiteMap: Record<string, number> = {}

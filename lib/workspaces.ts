@@ -4,16 +4,22 @@
 
 export type Workspace = 'sports' | 'packaging'
 
-// Active packaging-workspace sites. The other site configs (zeecustomboxes,
-// zeepack, burgersleeves, leadgen) still exist in the Supabase sites table —
-// they're just removed from this grouping so they don't show in the packaging
+// Active packaging-workspace sites. The other site configs (zeepack,
+// burgersleeves, leadgen) still exist in the Supabase sites table — they're
+// just removed from this grouping so they don't show in the packaging
 // dashboard. Re-add their ids here to bring them back.
-export const PACKAGING_SITES = ['shopcardboardboxes', 'thetubepackaging', 'kraftboxpack', 'thecandlepackaging', 'theburgerboxes', 'smallfoodboxes']
+//
+// zeecustomboxes and thepapercups are QUOTE-TRACKING ONLY: no widget.js is
+// installed on either site (chat is off there, no footer edits were made) —
+// they're registered purely so their /api/quote-intake leads (see
+// lib/quoteintake.ts) have a home in the Billing tab for month-end payout
+// reconciliation with the buying partner.
+export const PACKAGING_SITES = ['shopcardboardboxes', 'thetubepackaging', 'kraftboxpack', 'thecandlepackaging', 'theburgerboxes', 'smallfoodboxes', 'zeecustomboxes', 'thepapercups']
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
 // Sites whose leads are counted/billed (auto lead detection + the Billing tab).
 // Data-driven: add a site_id here to start tracking it — no other code changes.
-export const LEAD_TRACKED_SITES = ['shopcardboardboxes', 'thetubepackaging', 'kraftboxpack', 'thecandlepackaging', 'theburgerboxes', 'smallfoodboxes']
+export const LEAD_TRACKED_SITES = ['shopcardboardboxes', 'thetubepackaging', 'kraftboxpack', 'thecandlepackaging', 'theburgerboxes', 'smallfoodboxes', 'zeecustomboxes', 'thepapercups']
 
 export function isLeadTracked(siteId: string): boolean {
   return LEAD_TRACKED_SITES.includes(siteId)
