@@ -1292,6 +1292,26 @@ export default function Dashboard() {
   const inScope = (id: string) => visibleSiteIds.has(id)
   const roleSites = sites.filter((s) => inScope(s.site_id))
   const roleLeads = leads.filter((l) => inScope(l.site_id))
+  // The bot's own lead-qualification flow and the quote-intake pipeline can
+  // both produce a row for the SAME real customer (e.g. someone fills the
+  // quote form and also chats with the bot) — each is a legitimate row in
+  // its own right for the Recent Leads list below, but counting both toward
+  // "Total Leads" double-counts one customer. Dedup by site+email (keeping
+  // the first/most-recent, since `leads` arrives newest-first) for the
+  // summary tiles and site breakdown only; the detailed list stays
+  // unfiltered so nothing visibly disappears.
+  const dedupedRoleLeads = (() => {
+    const seen = new Set<string>()
+    const out: typeof roleLeads = []
+    for (const l of roleLeads) {
+      const email = (l.email || '').trim().toLowerCase()
+      const key = email ? `${l.site_id}::${email}` : `id::${l.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(l)
+    }
+    return out
+  })()
   const roleSessions = sessions.filter((s) => inScope(s.site_id))
   // Only count a visitor as "live" if their session is recent. A multi-hour
   // on-site time means a stale/carried-over session (e.g. an old open tab still
@@ -1323,8 +1343,8 @@ export default function Dashboard() {
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
   const yesterdayStr = yesterday.toISOString().split('T')[0]
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-  const todayLeads = roleLeads.filter(l => l.created_at?.startsWith(todayStr)).length
-  const thisWeekLeads = roleLeads.filter(l => new Date(l.created_at) >= startOfWeek).length
+  const todayLeads = dedupedRoleLeads.filter(l => l.created_at?.startsWith(todayStr)).length
+  const thisWeekLeads = dedupedRoleLeads.filter(l => new Date(l.created_at) >= startOfWeek).length
 
   // Recent Leads table: site chip (from "Leads by Site") + date range, combined.
   const dateFilteredLeads = roleLeads.filter((l) => {
@@ -1348,8 +1368,8 @@ export default function Dashboard() {
       const d = new Date(); d.setDate(d.getDate() - (6 - i))
       const key = d.toISOString().split('T')[0]
       return { key, label: d.toLocaleDateString('en', { weekday: 'short' }), count: 0 }
-    }).map(day => ({ ...day, count: roleLeads.filter(l => l.created_at?.startsWith(day.key)).length }))
-  }, [roleLeads])
+    }).map(day => ({ ...day, count: dedupedRoleLeads.filter(l => l.created_at?.startsWith(day.key)).length }))
+  }, [dedupedRoleLeads])
   const chartMax = Math.max(...chartDays.map(d => d.count), 1)
 
   // ── Session filters ────────────────────────────────────────────────────────
@@ -1478,7 +1498,7 @@ export default function Dashboard() {
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 {[
                   { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
-                  { label: 'Total Leads', value: roleLeads.length, icon: '👥', color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
+                  { label: 'Total Leads', value: dedupedRoleLeads.length, icon: '👥', color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
                   { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
                   { label: "Today's Leads", value: todayLeads, icon: '☀️', color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
                   { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20', dateFilter: 'week' as const },
@@ -1528,7 +1548,7 @@ export default function Dashboard() {
                 <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-sm font-semibold text-gray-900">Leads — Last 7 Days</h2>
-                    <span className="text-xs text-gray-500">{roleLeads.length} total</span>
+                    <span className="text-xs text-gray-500">{dedupedRoleLeads.length} total</span>
                   </div>
                   <div className="flex items-end gap-2 h-24">
                     {chartDays.map((day) => {
@@ -1552,7 +1572,7 @@ export default function Dashboard() {
                       )
                     })}
                   </div>
-                  {roleLeads.length === 0 && (
+                  {dedupedRoleLeads.length === 0 && (
                     <p className="text-xs text-gray-500 text-center mt-2">No leads captured yet</p>
                   )}
                 </div>
@@ -1564,8 +1584,8 @@ export default function Dashboard() {
                     {roleSites.length === 0 ? (
                       <p className="text-xs text-gray-500">No sites configured</p>
                     ) : roleSites.map((site) => {
-                      const count = roleLeads.filter(l => l.site_id === site.site_id).length
-                      const pct = roleLeads.length > 0 ? Math.round((count / roleLeads.length) * 100) : 0
+                      const count = dedupedRoleLeads.filter(l => l.site_id === site.site_id).length
+                      const pct = dedupedRoleLeads.length > 0 ? Math.round((count / dedupedRoleLeads.length) * 100) : 0
                       const accent = SITE_ACCENT[site.site_id] ?? accentColor
                       const active = overviewLeadSite === site.site_id
                       return (
@@ -1598,7 +1618,7 @@ export default function Dashboard() {
                   {roleSites.map((site) => {
                     const accent = SITE_ACCENT[site.site_id] ?? site.primary_color
                     const url = SITE_URLS[site.site_id]
-                    const count = roleLeads.filter((l) => l.site_id === site.site_id).length
+                    const count = dedupedRoleLeads.filter((l) => l.site_id === site.site_id).length
                     return (
                       <div key={site.site_id} className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-lg hover:shadow-black/20 group">
                         <div className="h-1" style={{ backgroundColor: accent }} />
