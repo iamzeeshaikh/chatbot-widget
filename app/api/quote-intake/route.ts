@@ -28,28 +28,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'email or phone required' }, { status: 400 })
   }
 
+  const bodyText = typeof message === 'string' ? message.trim() : ''
+  const createdAt = typeof receivedAt === 'string' && !isNaN(new Date(receivedAt).getTime())
+    ? receivedAt : new Date().toISOString()
+
   // Idempotency safety net: the Script already avoids reprocessing a message
   // (it labels each email after a successful POST), but if it ever re-runs on
   // the same message (e.g. a retry), don't double-count it for billing —
-  // skip if an identical quote lead already landed for this site+email today.
+  // skip if an identical quote lead already landed for this site+email within
+  // a day of THIS lead's own timestamp (not wall-clock "now" — a backlog
+  // sweep can post months of history within minutes of real time, so
+  // anchoring to "now" would never catch old duplicates).
   if (cleanEmail) {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const anchor = new Date(createdAt).getTime()
+    const sinceIso = new Date(anchor - 24 * 60 * 60 * 1000).toISOString()
+    const untilIso = new Date(anchor + 24 * 60 * 60 * 1000).toISOString()
     const { data: dupe } = await supabase
       .from('leads')
       .select('id')
       .eq('site_id', siteId)
       .eq('email', cleanEmail)
-      .gte('created_at', since)
+      .gte('created_at', sinceIso)
+      .lt('created_at', untilIso)
       .ilike('message', `${QUOTE_TAG}%`)
       .limit(1)
     if (dupe && dupe.length > 0) {
       return NextResponse.json({ success: true, deduped: true })
     }
   }
-
-  const bodyText = typeof message === 'string' ? message.trim() : ''
-  const createdAt = typeof receivedAt === 'string' && !isNaN(new Date(receivedAt).getTime())
-    ? receivedAt : new Date().toISOString()
 
   const { error } = await supabase.from('leads').insert([{
     site_id: siteId,

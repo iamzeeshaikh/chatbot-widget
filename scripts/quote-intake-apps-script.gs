@@ -54,6 +54,19 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // labeling a new site (e.g. once TPC exists for The Paper Cups).
 var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC'];
 
+// Own domain per site code — used to make sure a lead's "email" is never the
+// site's own notification address (see parseLeadBody_ below).
+var SITE_DOMAINS = {
+  SCB: 'shopcardboardboxes.com',
+  TTP: 'thetubepackaging.com',
+  SFB: 'smallfoodboxes.com',
+  KBP: 'kraftboxpack.com',
+  TBB: 'theburgerboxes.com',
+  ZCB: 'zeecustomboxes.com',
+  TCP: 'thecandlepackaging.com',
+  TPC: 'thepapercups.com',
+};
+
 // Stop working with this much headroom before Apps Script's 6-minute limit.
 var TIME_BUDGET_MS = 4.5 * 60 * 1000;
 // How many threads to list per label per run — kept moderate so just listing
@@ -121,7 +134,7 @@ function processQuoteLeads() {
       var handledAny = false;
       for (var m = 0; m < messages.length; m++) {
         var msg = messages[m];
-        var parsed = parseLeadBody_(msg.getPlainBody());
+        var parsed = parseLeadBody_(msg.getPlainBody(), SITE_DOMAINS[code]);
         if (!parsed.email && !parsed.phone) continue;
         if (postLead_(code, parsed, msg.getDate())) { sent++; handledAny = true; }
         // On failure, leave the thread unlabeled so a later run retries it.
@@ -171,16 +184,34 @@ function alreadyHandled_(thread) {
 // body always rides along as `message` so nothing is ever lost even if a
 // field gets mis-labeled — you can always read the original text on the
 // dashboard (hover the 📧 Quote badge).
-function parseLeadBody_(body) {
+//
+// Some leads get manually forwarded into a label instead of arriving there
+// directly, which prepends Gmail's own "---------- Forwarded message
+// ---------" / From: / Date: / Subject: / To: header block ABOVE the real
+// form content. Those headers carry the SITE's own notification address
+// (e.g. "From: The Burger Boxes <info@theburgerboxes.com>"), which used to
+// get grabbed as "the lead's email" — dropping the real customer's email
+// that was sitting a few lines further down. Skip the header block itself,
+// and never accept the site's own domain as a candidate email — keep
+// scanning until a real (non-self) address turns up.
+function parseLeadBody_(body, ownDomain) {
   var lines = body.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
   var emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   var phoneRe = /^[+()\-.\s\d]{7,20}$/;
+  var headerRe = /^(From|To|Cc|Bcc|Date|Subject|Sent):/i;
+  var fwdMarkerRe = /^-+\s*Forwarded message\s*-+$/i;
 
   var email = '', phone = '', rest = [];
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
+    if (headerRe.test(line) || fwdMarkerRe.test(line)) continue;
+
     var emailMatch = line.match(emailRe);
-    if (emailMatch && !email) { email = emailMatch[0]; continue; }
+    if (emailMatch && !email) {
+      var candidate = emailMatch[0];
+      var isOwn = ownDomain && candidate.toLowerCase().indexOf('@' + ownDomain.toLowerCase()) !== -1;
+      if (!isOwn) { email = candidate; continue; }
+    }
     var digits = line.replace(/\D/g, '');
     if (!phone && phoneRe.test(line) && digits.length >= 7 && digits.length <= 15) { phone = line; continue; }
     rest.push(line);
