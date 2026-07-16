@@ -47,7 +47,7 @@ export function siteIdFromQuoteCode(code: string): string | null {
 // content-specific — NOT a broad "contains a link" check, since real
 // customers legitimately paste reference-image/attachment URLs into these
 // forms and those must never be flagged.
-const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals|\bjackpot\b|no rx\b|prescription without doctor/i
+const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals|\bjackpot\b|no rx\b|prescription without doctor|stop to opt-?out|reply stop|text stop|attendees list|complimentary (bid|quote|audit)|unsubscribe here|no longer wish to receive/i
 
 // The same bot network generates a fake "phone number" as a single literal
 // digit 8 followed by exactly 10 more digits (e.g. "86717731828") — seen
