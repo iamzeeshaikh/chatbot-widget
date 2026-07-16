@@ -2541,7 +2541,10 @@ export default function Dashboard() {
               </div>
 
               {/* By site (for whichever tab is active) — click a site to
-                  filter the table below to just that site. */}
+                  filter the table below to just that site. Each card wears
+                  the site's own accent color (SITE_ACCENT, same as the rest
+                  of the dashboard) with a proportional bar so relative
+                  volume reads at a glance, not just the raw number. */}
               <div className="bg-gray-100 rounded-2xl p-5 border border-gray-200 mb-5">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
@@ -2554,17 +2557,34 @@ export default function Dashboard() {
                 </div>
                 {bySiteActive.length === 0 ? (
                   <p className="text-xs text-gray-500">No {billingLeadType} leads in this period.</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                    {bySiteActive.map(([siteId, info]) => (
-                      <button key={siteId} onClick={() => setBillingSiteFilter(billingSiteFilter === siteId ? null : siteId)}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-left transition-colors ${billingSiteFilter === siteId ? 'bg-indigo-100 ring-1 ring-indigo-300' : 'hover:bg-gray-200'}`}>
-                        <span className={`text-sm truncate ${billingSiteFilter === siteId ? 'text-indigo-900 font-medium' : 'text-gray-800'}`}>{info.name}</span>
-                        <span className={`text-sm font-semibold tabular-nums ${billingSiteFilter === siteId ? 'text-indigo-900' : 'text-gray-900'}`}>{info.count}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                ) : (() => {
+                  const maxCount = Math.max(...bySiteActive.map(([, info]) => info.count))
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {bySiteActive.map(([siteId, info]) => {
+                        const accent = SITE_ACCENT[siteId] ?? '#6366f1'
+                        const selected = billingSiteFilter === siteId
+                        const pct = Math.max(8, Math.round((info.count / maxCount) * 100))
+                        return (
+                          <button key={siteId} onClick={() => setBillingSiteFilter(selected ? null : siteId)}
+                            style={selected ? { backgroundColor: `${accent}14`, borderColor: accent, boxShadow: `0 0 0 1px ${accent}` } : undefined}
+                            className={`group text-left rounded-xl px-3.5 py-3 border transition-all ${selected ? '' : 'bg-white border-gray-200 hover:border-gray-300 hover:-translate-y-0.5 hover:shadow-sm'}`}>
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <span className="flex items-center gap-2 min-w-0">
+                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: accent }} />
+                                <span className={`text-sm truncate ${selected ? 'font-semibold' : 'text-gray-800 group-hover:text-gray-900'}`} style={selected ? { color: accent } : undefined}>{info.name}</span>
+                              </span>
+                              <span className="text-lg font-extrabold tabular-nums flex-shrink-0" style={{ color: selected ? accent : '#111827' }}>{info.count}</span>
+                            </div>
+                            <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
+                              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent, opacity: selected ? 1 : 0.55 }} />
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
 
               {/* Detail table — columns differ by tab: Chat has a real
