@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, siteIdFromQuoteCode, isLikelySpamQuote } from '@/lib/quoteintake'
+import { QUOTE_TAG, siteIdFromQuoteCode, isLikelySpamQuote, normalizeQuoteBody } from '@/lib/quoteintake'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,29 +41,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, spam: true })
   }
 
-  // Idempotency safety net: the Script already avoids reprocessing a message
-  // (it labels each email after a successful POST), but if it ever re-runs on
-  // the same message (e.g. a retry), don't double-count it for billing —
-  // skip if an identical quote lead already landed for this site+email within
-  // a day of THIS lead's own timestamp (not wall-clock "now" — a backlog
-  // sweep can post months of history within minutes of real time, so
-  // anchoring to "now" would never catch old duplicates). Compared
+  // Idempotency safety net: a lead can also be manually forwarded into its
+  // label days or weeks after the original submission (or the Script can
+  // re-run on the same message), landing the exact same content twice under
+  // different-looking metadata. Compare the customer-typed text itself
+  // (stripped of forward headers/footer, case-folded) against every prior
+  // submission from this email on this site — not just a recent time window,
+  // since a genuine second inquiry always has different wording, but a
+  // forward-duplicate never does regardless of the gap. Compared
   // case-insensitively — the same person's email can arrive differently
   // capitalized across a forward vs. the original submission.
   if (cleanEmail) {
-    const anchor = new Date(createdAt).getTime()
-    const sinceIso = new Date(anchor - 24 * 60 * 60 * 1000).toISOString()
-    const untilIso = new Date(anchor + 24 * 60 * 60 * 1000).toISOString()
-    const { data: dupe } = await supabase
+    const normalized = normalizeQuoteBody(`${QUOTE_TAG}${bodyText}`)
+    const { data: candidates } = await supabase
       .from('leads')
-      .select('id')
+      .select('id, message')
       .eq('site_id', siteId)
       .ilike('email', cleanEmail)
-      .gte('created_at', sinceIso)
-      .lt('created_at', untilIso)
       .ilike('message', `${QUOTE_TAG}%`)
-      .limit(1)
-    if (dupe && dupe.length > 0) {
+    const isDupe = (candidates ?? []).some((c) => normalizeQuoteBody(c.message ?? '') === normalized)
+    if (isDupe) {
       return NextResponse.json({ success: true, deduped: true })
     }
   }

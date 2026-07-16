@@ -58,9 +58,42 @@ const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?
 // filler), so the phone shape is often the only signal available.
 const BOT_PHONE_RE = /^8\d{10}$/
 
+// A completed WooCommerce checkout ("New Order: #2013 — You've received the
+// following order...") is a real sale, not a quote request — it lands in the
+// same inbox/label as quote-request notifications but isn't a lead to bill
+// for. The account owner asked for these to never be counted.
+const WOOCOMMERCE_ORDER_RE = /New Order:\s*#|Built with WooCommerce|You[’']ve received the following order/i
+
+// The telecom industry reserves 555-0100 through 555-0199 for fiction/testing
+// — a real customer's phone can never fall in this block, so a submission
+// carrying one (e.g. "416-555-0142") is someone testing the form, not a lead.
+const TEST_PHONE_RE = /^\d{3}555\d{4}$/
+
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
-  if (phone && BOT_PHONE_RE.test(phone.trim())) return true
-  return SPAM_SIGNATURE_RE.test(bodyText)
+  const cleanPhone = phone?.trim()
+  if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
+  return SPAM_SIGNATURE_RE.test(bodyText) || WOOCOMMERCE_ORDER_RE.test(bodyText)
+}
+
+// Strip the QUOTE_TAG, any forwarded-message header block, and the
+// auto-appended "---" footer (Date/Time/Page URL/User Agent/etc.) — what's
+// left is only what the visitor actually typed, used to recognize the same
+// submission arriving twice (e.g. once directly, once as a forward days or
+// weeks later) regardless of how far apart in time they land.
+const HEADER_LINE_RE = /^(From|To|Cc|Bcc|Date|Subject|Sent):/i
+const FWD_MARKER_RE = /^-+\s*Forwarded message\s*-+$/i
+
+export function normalizeQuoteBody(raw: string): string {
+  let body = raw
+  if (body.startsWith(QUOTE_TAG)) body = body.slice(QUOTE_TAG.length)
+  const out: string[] = []
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.trim()
+    if (line === '---') break
+    if (!line || HEADER_LINE_RE.test(line) || FWD_MARKER_RE.test(line)) continue
+    out.push(line.toLowerCase())
+  }
+  return out.join(' ')
 }
 
 export function quoteSessionId(leadId: string): string {
