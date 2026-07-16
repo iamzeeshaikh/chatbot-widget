@@ -2713,8 +2713,18 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Full quote-email text — the table only shows a truncated preview. */}
-      {viewQuote && (
+      {/* Full quote-email text — the table only shows a truncated preview.
+          Prev/Next walk the same filtered list currently on screen (site
+          filter included), so browsing several leads doesn't mean closing
+          and reopening the modal each time. */}
+      {viewQuote && (() => {
+        const navList = (billing?.leads ?? [])
+          .filter((l) => l.source === 'quote')
+          .filter((l) => !billingSiteFilter || l.site_id === billingSiteFilter)
+        const idx = navList.findIndex((l) => l.session_id === viewQuote.session_id)
+        const hasPrev = idx > 0
+        const hasNext = idx !== -1 && idx < navList.length - 1
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewQuote(null)}>
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
@@ -2723,7 +2733,14 @@ export default function Dashboard() {
                 <p className="text-sm font-semibold text-gray-900 truncate">{viewQuote.name || viewQuote.email}</p>
                 <p className="text-xs text-gray-500 truncate">{viewQuote.email} · {viewQuote.site_name} · {formatDateTime(viewQuote.captured_at)}</p>
               </div>
-              <button onClick={() => setViewQuote(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {idx !== -1 && <span className="text-[11px] text-gray-400 tabular-nums mr-1">{idx + 1}/{navList.length}</span>}
+                <button onClick={() => hasPrev && setViewQuote(navList[idx - 1])} disabled={!hasPrev}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors" title="Previous lead">‹</button>
+                <button onClick={() => hasNext && setViewQuote(navList[idx + 1])} disabled={!hasNext}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors" title="Next lead">›</button>
+                <button onClick={() => setViewQuote(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none ml-1.5 px-1" title="Close">✕</button>
+              </div>
             </div>
             <div className="px-5 py-4 overflow-y-auto">
               <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{viewQuote.quote_message || 'No message text.'}</p>
@@ -2733,7 +2750,8 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {tab === 'performance' && (
         <div className="p-6 max-w-6xl mx-auto animate-in">
