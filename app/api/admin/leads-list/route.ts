@@ -12,6 +12,13 @@ export async function GET(req: NextRequest) {
   const scope = await siteScope(member)
   const allowed = Array.from(scope)
 
+  // Quote leads reach back to whenever the account owner first started
+  // labeling emails in Gmail (some from 2024) — long before the chat widget
+  // itself went live. Counting those in the Overview's "Total Leads" makes
+  // it a different, larger number than what the dashboard has actually been
+  // tracking since go-live, so it's floored to when the bot went active.
+  const TRACKING_START = '2026-06-01T00:00:00Z'
+
   // The Overview tab's Total/Today/This-Week tiles and the site breakdown are
   // all computed client-side from this full list — a `.limit(100)` here
   // silently capped "Total Leads" well below the real count once quote-lead
@@ -19,7 +26,7 @@ export async function GET(req: NextRequest) {
   // when the true total was 982). Page through everything in scope instead.
   const leads = await fetchAllPages(
     () => {
-      let q = supabase.from('leads').select('*').order('created_at', { ascending: false })
+      let q = supabase.from('leads').select('*').gte('created_at', TRACKING_START).order('created_at', { ascending: false })
       if (scope) q = q.in('site_id', allowed)
       return q
     },
