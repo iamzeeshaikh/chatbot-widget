@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   // labels the whole notification thread, not each individual message.
   // Silently accept without inserting — the Script already labeled it
   // Processed, so it won't retry.
-  if (isLikelySpamQuote(bodyText)) {
+  if (isLikelySpamQuote(bodyText, cleanPhone)) {
     return NextResponse.json({ success: true, spam: true })
   }
 
@@ -47,7 +47,9 @@ export async function POST(req: NextRequest) {
   // skip if an identical quote lead already landed for this site+email within
   // a day of THIS lead's own timestamp (not wall-clock "now" — a backlog
   // sweep can post months of history within minutes of real time, so
-  // anchoring to "now" would never catch old duplicates).
+  // anchoring to "now" would never catch old duplicates). Compared
+  // case-insensitively — the same person's email can arrive differently
+  // capitalized across a forward vs. the original submission.
   if (cleanEmail) {
     const anchor = new Date(createdAt).getTime()
     const sinceIso = new Date(anchor - 24 * 60 * 60 * 1000).toISOString()
@@ -56,7 +58,7 @@ export async function POST(req: NextRequest) {
       .from('leads')
       .select('id')
       .eq('site_id', siteId)
-      .eq('email', cleanEmail)
+      .ilike('email', cleanEmail)
       .gte('created_at', sinceIso)
       .lt('created_at', untilIso)
       .ilike('message', `${QUOTE_TAG}%`)

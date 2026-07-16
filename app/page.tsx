@@ -578,6 +578,9 @@ export default function Dashboard() {
   // different "what does this mean" — that mixing them in one table read as
   // confusing. Split into two switchable views on the same page.
   const [billingLeadType, setBillingLeadType] = useState<'chat' | 'quote'>('chat')
+  // Click a site in the "By site" breakdown to filter the table below to
+  // just that site — null means "all sites" (the default).
+  const [billingSiteFilter, setBillingSiteFilter] = useState<string | null>(null)
   // Deleting a quote lead (e.g. bot-spam form submissions) is admin-only — see
   // deleteQuoteLead below and the matching server-side check in
   // /api/admin/delete-lead, which requires admin for anything QUOTE_TAG'd
@@ -2456,11 +2459,11 @@ export default function Dashboard() {
               <p className="text-gray-500 text-xs mt-0.5">Auto-captured leads (email provided) for tracked sites — for monthly client billing.</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setBillingMonth(shiftMonth(billingMonth, -1))}
+              <button onClick={() => { setBillingMonth(shiftMonth(billingMonth, -1)); setBillingSiteFilter(null) }}
                 className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month">◀</button>
-              <input type="month" value={billingMonth} max={currentMonth()} onChange={(e) => e.target.value && setBillingMonth(e.target.value)}
+              <input type="month" value={billingMonth} max={currentMonth()} onChange={(e) => { if (e.target.value) { setBillingMonth(e.target.value); setBillingSiteFilter(null) } }}
                 className="bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400 [color-scheme:dark]" />
-              <button onClick={() => { const next = shiftMonth(billingMonth, 1); if (next <= currentMonth()) setBillingMonth(next) }}
+              <button onClick={() => { const next = shiftMonth(billingMonth, 1); if (next <= currentMonth()) { setBillingMonth(next); setBillingSiteFilter(null) } }}
                 disabled={billingMonth >= currentMonth()}
                 className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
               <button onClick={downloadBillingCsv} disabled={!billing || billing.leads.length === 0}
@@ -2490,6 +2493,8 @@ export default function Dashboard() {
               bySiteMap[l.site_id].count++
             }
             const bySiteActive = Object.entries(bySiteMap).sort((a, b) => b[1].count - a[1].count)
+            const chatLeadsShown = billingSiteFilter ? chatLeads.filter((l) => l.site_id === billingSiteFilter) : chatLeads
+            const quoteLeadsShown = billingSiteFilter ? quoteLeads.filter((l) => l.site_id === billingSiteFilter) : quoteLeads
             return (
             <>
               {/* Total + type breakdown */}
@@ -2520,14 +2525,14 @@ export default function Dashboard() {
                 </div>
 
                 {/* Chat / Quote tabs — click either to switch the table below */}
-                <button onClick={() => setBillingLeadType('chat')}
+                <button onClick={() => { setBillingLeadType('chat'); setBillingSiteFilter(null) }}
                   className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'chat' ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
                   <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'chat' ? 'text-blue-700' : 'text-gray-500'}`}>💬 Chat Leads</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{chatLeads.length}</p>
                   <p className="text-[11px] text-gray-500 mt-2">Someone typed their email while chatting on the widget.</p>
                 </button>
 
-                <button onClick={() => setBillingLeadType('quote')}
+                <button onClick={() => { setBillingLeadType('quote'); setBillingSiteFilter(null) }}
                   className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'quote' ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
                   <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'quote' ? 'text-amber-700' : 'text-gray-500'}`}>📧 Quote Leads</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{quoteLeads.length}</p>
@@ -2535,20 +2540,28 @@ export default function Dashboard() {
                 </button>
               </div>
 
-              {/* By site (for whichever tab is active) */}
+              {/* By site (for whichever tab is active) — click a site to
+                  filter the table below to just that site. */}
               <div className="bg-gray-100 rounded-2xl p-5 border border-gray-200 mb-5">
-                <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-3">
-                  By site — {billingLeadType === 'chat' ? '💬 Chat' : '📧 Quote'}
-                </p>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
+                    By site — {billingLeadType === 'chat' ? '💬 Chat' : '📧 Quote'}
+                  </p>
+                  {billingSiteFilter && (
+                    <button onClick={() => setBillingSiteFilter(null)}
+                      className="text-[11px] font-medium text-indigo-700 hover:text-indigo-800 hover:underline">Clear filter ✕</button>
+                  )}
+                </div>
                 {bySiteActive.length === 0 ? (
                   <p className="text-xs text-gray-500">No {billingLeadType} leads in this period.</p>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                     {bySiteActive.map(([siteId, info]) => (
-                      <div key={siteId} className="flex items-center justify-between">
-                        <span className="text-sm text-gray-800 truncate">{info.name}</span>
-                        <span className="text-sm font-semibold text-gray-900 tabular-nums">{info.count}</span>
-                      </div>
+                      <button key={siteId} onClick={() => setBillingSiteFilter(billingSiteFilter === siteId ? null : siteId)}
+                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-left transition-colors ${billingSiteFilter === siteId ? 'bg-indigo-100 ring-1 ring-indigo-300' : 'hover:bg-gray-200'}`}>
+                        <span className={`text-sm truncate ${billingSiteFilter === siteId ? 'text-indigo-900 font-medium' : 'text-gray-800'}`}>{info.name}</span>
+                        <span className={`text-sm font-semibold tabular-nums ${billingSiteFilter === siteId ? 'text-indigo-900' : 'text-gray-900'}`}>{info.count}</span>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -2556,7 +2569,8 @@ export default function Dashboard() {
 
               {/* Detail table — columns differ by tab: Chat has a real
                   conversation (Source/Agent/View chat); Quote has no chat
-                  session, so it shows the raw email text instead. */}
+                  session, so it shows the raw email text instead. Filtered
+                  down to the selected site, if any. */}
               <div className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   {billingLeadType === 'chat' ? (
@@ -2569,17 +2583,17 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {chatLeads.length === 0 ? (
+                        {chatLeadsShown.length === 0 ? (
                           <tr>
                             <td colSpan={9} className="text-center py-10">
                               <div className="flex flex-col items-center">
                                 <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">💬</div>
-                                <p className="text-gray-700 text-sm font-medium">No chat leads this period</p>
+                                <p className="text-gray-700 text-sm font-medium">No chat leads this period{billingSiteFilter ? ' for this site' : ''}</p>
                                 <p className="text-gray-500 text-xs mt-0.5">Recorded when a visitor shares an email while chatting on a tracked site.</p>
                               </div>
                             </td>
                           </tr>
-                        ) : chatLeads.map((l) => (
+                        ) : chatLeadsShown.map((l) => (
                           <tr key={l.session_id} onClick={() => openConversation(l)} title="Open this lead's conversation"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap">
@@ -2623,17 +2637,17 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {quoteLeads.length === 0 ? (
+                        {quoteLeadsShown.length === 0 ? (
                           <tr>
                             <td colSpan={userRole === 'admin' ? 8 : 7} className="text-center py-10">
                               <div className="flex flex-col items-center">
                                 <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📧</div>
-                                <p className="text-gray-700 text-sm font-medium">No quote leads this period</p>
+                                <p className="text-gray-700 text-sm font-medium">No quote leads this period{billingSiteFilter ? ' for this site' : ''}</p>
                                 <p className="text-gray-500 text-xs mt-0.5">Sent by your Gmail Apps Script when a labeled quote-request email arrives.</p>
                               </div>
                             </td>
                           </tr>
-                        ) : quoteLeads.map((l) => (
+                        ) : quoteLeadsShown.map((l) => (
                           <tr key={l.session_id} onClick={() => setViewQuote(l)} title="View the full quote message"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>

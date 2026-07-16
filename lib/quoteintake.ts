@@ -47,9 +47,19 @@ export function siteIdFromQuoteCode(code: string): string | null {
 // content-specific — NOT a broad "contains a link" check, since real
 // customers legitimately paste reference-image/attachment URLs into these
 // forms and those must never be flagged.
-const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals/i
+const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals|\bjackpot\b|no rx\b|prescription without doctor/i
 
-export function isLikelySpamQuote(bodyText: string): boolean {
+// The same bot network generates a fake "phone number" as a single literal
+// digit 8 followed by exactly 10 more digits (e.g. "86717731828") — seen
+// across ~40 spam submissions with zero exceptions, while every real lead's
+// phone is either a normal 10-digit US number or has a country-code prefix
+// (0, +, etc.). Distinct from the content check above since some of these
+// submissions carry no promotional text at all (empty or foreign-language
+// filler), so the phone shape is often the only signal available.
+const BOT_PHONE_RE = /^8\d{10}$/
+
+export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
+  if (phone && BOT_PHONE_RE.test(phone.trim())) return true
   return SPAM_SIGNATURE_RE.test(bodyText)
 }
 
