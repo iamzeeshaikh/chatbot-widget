@@ -41,6 +41,18 @@ export function siteIdFromQuoteCode(code: string): string | null {
   return QUOTE_SITE_CODES[code.trim().toUpperCase()] ?? null
 }
 
+// Bot-spam signatures seen hitting these sites' public WordPress quote-forms
+// directly (crypto/loan/casino/SEO promo content, sometimes with literal
+// BBCode markup that no real customer would type). Deliberately narrow and
+// content-specific — NOT a broad "contains a link" check, since real
+// customers legitimately paste reference-image/attachment URLs into these
+// forms and those must never be flagged.
+const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals/i
+
+export function isLikelySpamQuote(bodyText: string): boolean {
+  return SPAM_SIGNATURE_RE.test(bodyText)
+}
+
 export function quoteSessionId(leadId: string): string {
   return `quote-${leadId}`
 }

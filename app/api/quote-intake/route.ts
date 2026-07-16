@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, siteIdFromQuoteCode } from '@/lib/quoteintake'
+import { QUOTE_TAG, siteIdFromQuoteCode, isLikelySpamQuote } from '@/lib/quoteintake'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +31,15 @@ export async function POST(req: NextRequest) {
   const bodyText = typeof message === 'string' ? message.trim() : ''
   const createdAt = typeof receivedAt === 'string' && !isNaN(new Date(receivedAt).getTime())
     ? receivedAt : new Date().toISOString()
+
+  // Bot spam hits these WordPress quote-forms directly (crypto/loan/casino
+  // promo content) and still carries a real site label since the visitor
+  // labels the whole notification thread, not each individual message.
+  // Silently accept without inserting — the Script already labeled it
+  // Processed, so it won't retry.
+  if (isLikelySpamQuote(bodyText)) {
+    return NextResponse.json({ success: true, spam: true })
+  }
 
   // Idempotency safety net: the Script already avoids reprocessing a message
   // (it labels each email after a successful POST), but if it ever re-runs on
