@@ -573,6 +573,11 @@ export default function Dashboard() {
   const [billingMonth, setBillingMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [billing, setBilling] = useState<BillingData | null>(null)
   const [billingLoading, setBillingLoading] = useState(false)
+  // Billing tab: Chat leads (from the widget) and Quote leads (from labeled
+  // Gmail quote-request emails) are different enough — different columns,
+  // different "what does this mean" — that mixing them in one table read as
+  // confusing. Split into two switchable views on the same page.
+  const [billingLeadType, setBillingLeadType] = useState<'chat' | 'quote'>('chat')
   // Agent performance report (admin-only). Month string "YYYY-MM"; default current.
   const [perfMonth, setPerfMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [perf, setPerf] = useState<PerfData | null>(null)
@@ -2442,13 +2447,29 @@ export default function Dashboard() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 3 }).map((_, i) => <Skel key={i} className="h-20" />)}</div>
               <Skel className="h-64 w-full" />
             </div>
-          ) : (
+          ) : (() => {
+            const allLeads = billing?.leads ?? []
+            const chatLeads = allLeads.filter((l) => l.source !== 'quote')
+            const quoteLeads = allLeads.filter((l) => l.source === 'quote')
+            const activeLeads = billingLeadType === 'chat' ? chatLeads : quoteLeads
+            // By-site breakdown recomputed for whichever type is showing, so the
+            // numbers on screen always add up to what's in the table below —
+            // the server's combined billing.bySite mixed both types together,
+            // which was the confusing part.
+            const bySiteMap: Record<string, { name: string; count: number }> = {}
+            for (const l of activeLeads) {
+              if (!bySiteMap[l.site_id]) bySiteMap[l.site_id] = { name: l.site_name, count: 0 }
+              bySiteMap[l.site_id].count++
+            }
+            const bySiteActive = Object.entries(bySiteMap).sort((a, b) => b[1].count - a[1].count)
+            return (
             <>
-              {/* Totals + per-site breakdown */}
+              {/* Total + type breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
                 <div className="bg-gradient-to-br from-indigo-100 to-indigo-50 rounded-2xl p-5 border border-indigo-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">Total leads this period</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{billing?.total ?? 0}</p>
+                  <p className="text-[11px] text-gray-500 mt-1">{chatLeads.length} chat + {quoteLeads.length} quote</p>
                   {billing && (
                     <p className="text-[11px] text-gray-500 mt-2">
                       Last month: <span className="font-semibold text-gray-700">{billing.prevTotal}</span>
@@ -2469,102 +2490,147 @@ export default function Dashboard() {
                     </div>
                   )}
                 </div>
-                <div className="md:col-span-2 bg-gray-100 rounded-2xl p-5 border border-gray-200">
-                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-3">By site</p>
-                  {(billing?.bySite ?? []).length === 0 ? (
-                    <p className="text-xs text-gray-500">No leads in this period.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {billing!.bySite.map((b) => (
-                        <div key={b.site_id} className="flex items-center justify-between">
-                          <span className="text-sm text-gray-800 truncate">{b.site_name}</span>
-                          <span className="text-sm font-semibold text-gray-900 tabular-nums">{b.count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+
+                {/* Chat / Quote tabs — click either to switch the table below */}
+                <button onClick={() => setBillingLeadType('chat')}
+                  className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'chat' ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'chat' ? 'text-blue-700' : 'text-gray-500'}`}>💬 Chat Leads</p>
+                  <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{chatLeads.length}</p>
+                  <p className="text-[11px] text-gray-500 mt-2">Someone typed their email while chatting on the widget.</p>
+                </button>
+
+                <button onClick={() => setBillingLeadType('quote')}
+                  className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'quote' ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'quote' ? 'text-amber-700' : 'text-gray-500'}`}>📧 Quote Leads</p>
+                  <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{quoteLeads.length}</p>
+                  <p className="text-[11px] text-gray-500 mt-2">From your Gmail-labeled custom-quote-request emails.</p>
+                </button>
               </div>
 
-              {/* Detail table */}
+              {/* By site (for whichever tab is active) */}
+              <div className="bg-gray-100 rounded-2xl p-5 border border-gray-200 mb-5">
+                <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-3">
+                  By site — {billingLeadType === 'chat' ? '💬 Chat' : '📧 Quote'}
+                </p>
+                {bySiteActive.length === 0 ? (
+                  <p className="text-xs text-gray-500">No {billingLeadType} leads in this period.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
+                    {bySiteActive.map(([siteId, info]) => (
+                      <div key={siteId} className="flex items-center justify-between">
+                        <span className="text-sm text-gray-800 truncate">{info.name}</span>
+                        <span className="text-sm font-semibold text-gray-900 tabular-nums">{info.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Detail table — columns differ by tab: Chat has a real
+                  conversation (Source/Agent/View chat); Quote has no chat
+                  session, so it shows the raw email text instead. */}
               <div className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[1050px]">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-100">
-                        {['Type', 'Email', 'Name', 'Phone', 'Site', 'Source', 'Agent', 'Status', 'Date Captured', ''].map((h) => (
-                          <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(billing?.leads ?? []).length === 0 ? (
-                        <tr>
-                          <td colSpan={10} className="text-center py-10">
-                            <div className="flex flex-col items-center">
-                              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">🧾</div>
-                              <p className="text-gray-700 text-sm font-medium">No leads captured this period</p>
-                              <p className="text-gray-500 text-xs mt-0.5">A lead is recorded when a visitor shares an email on a tracked site, or a custom-quote email comes in.</p>
-                            </div>
-                          </td>
+                  {billingLeadType === 'chat' ? (
+                    <table className="w-full text-sm min-w-[1000px]">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-100">
+                          {['Email', 'Name', 'Phone', 'Site', 'Source', 'Agent', 'Status', 'Date Captured', ''].map((h) => (
+                            <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
+                          ))}
                         </tr>
-                      ) : billing!.leads.map((l) => {
-                        const isQuote = l.source === 'quote'
-                        return (
-                        <tr key={l.session_id} onClick={() => { if (!isQuote) openConversation(l) }}
-                          title={isQuote ? (l.quote_message || 'Custom-quote email lead') : "Open this lead's conversation"}
-                          className={`border-b border-gray-100 transition-colors ${isQuote ? '' : 'hover:bg-gray-100 cursor-pointer'}`}>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            {isQuote
-                              ? <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">📧 Quote</span>
-                              : <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">💬 Chat</span>}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => isQuote && e.stopPropagation()}>
-                            {isQuote ? (
-                              <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
-                            ) : (
+                      </thead>
+                      <tbody>
+                        {chatLeads.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="text-center py-10">
+                              <div className="flex flex-col items-center">
+                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">💬</div>
+                                <p className="text-gray-700 text-sm font-medium">No chat leads this period</p>
+                                <p className="text-gray-500 text-xs mt-0.5">Recorded when a visitor shares an email while chatting on a tracked site.</p>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : chatLeads.map((l) => (
+                          <tr key={l.session_id} onClick={() => openConversation(l)} title="Open this lead's conversation"
+                            className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
+                            <td className="px-4 py-3 whitespace-nowrap">
                               <a href={conversationHref(l.session_id, l.site_id)} className="text-blue-700 hover:underline"
                                 onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { e.stopPropagation(); return } e.preventDefault(); e.stopPropagation(); openConversation(l) }}>
                                 {l.email}
                               </a>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
-                          <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
-                          <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
-                          <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap" title={l.referrer ?? 'Direct'}>
-                            {isQuote ? <span className="text-gray-400">Email form</span> : (
-                              <>
-                                {l.country ? <span>{l.country}</span> : <span className="text-gray-400">—</span>}
-                                <span className="text-gray-400"> · </span>{cleanReferrer(l.referrer)}
-                              </>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap" title={l.agent ?? undefined}>
-                            {l.agent ? l.agent.split('@')[0] : <span className="text-gray-400">—</span>}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <select value={l.status} onChange={(e) => setLeadStatus(l, e.target.value as LeadStatus)}
-                              className={`text-[11px] font-semibold px-2 py-1 rounded-full border capitalize cursor-pointer focus:outline-none ${LEAD_STATUS_STYLE[l.status]}`}>
-                              {LEAD_STATUSES.map((s) => <option key={s} value={s} className="bg-white text-gray-800 capitalize">{s}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
-                          <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            {isQuote
-                              ? <span className="text-xs text-gray-400">—</span>
-                              : <a href={conversationHref(l.session_id, l.site_id)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline"
-                                  onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openConversation(l) }}>View chat →</a>}
-                          </td>
+                            </td>
+                            <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
+                            <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
+                            <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
+                            <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap" title={l.referrer ?? 'Direct'}>
+                              {l.country ? <span>{l.country}</span> : <span className="text-gray-400">—</span>}
+                              <span className="text-gray-400"> · </span>{cleanReferrer(l.referrer)}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap" title={l.agent ?? undefined}>
+                              {l.agent ? l.agent.split('@')[0] : <span className="text-gray-400">—</span>}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                              <select value={l.status} onChange={(e) => setLeadStatus(l, e.target.value as LeadStatus)}
+                                className={`text-[11px] font-semibold px-2 py-1 rounded-full border capitalize cursor-pointer focus:outline-none ${LEAD_STATUS_STYLE[l.status]}`}>
+                                {LEAD_STATUSES.map((s) => <option key={s} value={s} className="bg-white text-gray-800 capitalize">{s}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
+                            <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                              <a href={conversationHref(l.session_id, l.site_id)} className="text-xs text-indigo-700 hover:text-indigo-800 hover:underline"
+                                onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openConversation(l) }}>View chat →</a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="w-full text-sm min-w-[1000px]">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-100">
+                          {['Email', 'Name', 'Phone', 'Site', 'Message', 'Status', 'Date Captured'].map((h) => (
+                            <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
+                          ))}
                         </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {quoteLeads.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="text-center py-10">
+                              <div className="flex flex-col items-center">
+                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📧</div>
+                                <p className="text-gray-700 text-sm font-medium">No quote leads this period</p>
+                                <p className="text-gray-500 text-xs mt-0.5">Sent by your Gmail Apps Script when a labeled quote-request email arrives.</p>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : quoteLeads.map((l) => (
+                          <tr key={l.session_id} className="border-b border-gray-100 hover:bg-gray-100 transition-colors">
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
+                            </td>
+                            <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
+                            <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
+                            <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
+                            <td className="px-4 py-3 text-gray-600 max-w-[220px] truncate" title={l.quote_message || undefined}>{l.quote_message || <span className="text-gray-400">—</span>}</td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <select value={l.status} onChange={(e) => setLeadStatus(l, e.target.value as LeadStatus)}
+                                className={`text-[11px] font-semibold px-2 py-1 rounded-full border capitalize cursor-pointer focus:outline-none ${LEAD_STATUS_STYLE[l.status]}`}>
+                                {LEAD_STATUSES.map((s) => <option key={s} value={s} className="bg-white text-gray-800 capitalize">{s}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
             </>
-          )}
+            )
+          })()}
         </div>
       )}
 
