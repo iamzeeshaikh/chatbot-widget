@@ -441,6 +441,14 @@ export default function Dashboard() {
 
   const [sites, setSites] = useState<Site[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
+  // Overview's summary tiles (Total/Today/This Week/by-site/chart) are
+  // computed from the SAME merged chat_logs + quote-leads dataset the
+  // Billing tab uses (via /api/admin/leads-billing), not the raw `leads`
+  // table — that table alone misses chat leads the bot never separately
+  // "qualified" into it, and previously produced a different number than
+  // Billing's own totals. `leads`/roleLeads below stay as the detailed,
+  // browsable Recent Leads list (product/budget/transcript etc.), untouched.
+  const [summaryLeads, setSummaryLeads] = useState<BillingLead[]>([])
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [sessions, setSessions] = useState<Session[]>([])
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
@@ -792,10 +800,17 @@ export default function Dashboard() {
   }, [playDashSound])
 
   useEffect(() => {
+    // Same tracking-start floor as /api/admin/leads-list's TRACKING_START —
+    // quote leads reach back to 2024 (whenever Gmail labeling started), long
+    // before the bot went live, and shouldn't count toward Overview totals.
+    const trackingStart = '2026-06-01T00:00:00Z'
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     Promise.all([
       fetch('/api/admin/sites').then((r) => r.json()).catch(() => ({ sites: [] })),
       fetch('/api/admin/leads-list').then((r) => r.json()).catch(() => ({ leads: [] })),
-    ]).then(([s, l]) => { setSites(s.sites ?? []); setLeads(l.leads ?? []); setOverviewLoading(false) })
+      fetch(`/api/admin/leads-billing?from=${encodeURIComponent(trackingStart)}&to=${encodeURIComponent(tomorrow)}`)
+        .then((r) => r.json()).catch(() => ({ leads: [] })),
+    ]).then(([s, l, b]) => { setSites(s.sites ?? []); setLeads(l.leads ?? []); setSummaryLeads(b.leads ?? []); setOverviewLoading(false) })
   }, [])
 
   // Analytics (visitors + chats over time), scoped server-side to the workspace.
@@ -1292,20 +1307,20 @@ export default function Dashboard() {
   const inScope = (id: string) => visibleSiteIds.has(id)
   const roleSites = sites.filter((s) => inScope(s.site_id))
   const roleLeads = leads.filter((l) => inScope(l.site_id))
-  // The bot's own lead-qualification flow and the quote-intake pipeline can
-  // both produce a row for the SAME real customer (e.g. someone fills the
-  // quote form and also chats with the bot) — each is a legitimate row in
-  // its own right for the Recent Leads list below, but counting both toward
-  // "Total Leads" double-counts one customer. Dedup by site+email (keeping
-  // the first/most-recent, since `leads` arrives newest-first) for the
-  // summary tiles and site breakdown only; the detailed list stays
-  // unfiltered so nothing visibly disappears.
+  // Overview's summary tiles use summaryLeads (chat_logs + quote leads, same
+  // as Billing) instead of the raw `leads` table. The same customer can show
+  // up in both chat and quote in the SAME month (one bill-worthy contact) —
+  // dedup by site+email+captured-month, mirroring Billing's own per-month
+  // "Billable Leads" logic, so a repeat customer in a LATER month (a
+  // separate real contact, separately invoiced) still counts again.
+  const scopedSummaryLeads = summaryLeads.filter((l) => inScope(l.site_id))
   const dedupedRoleLeads = (() => {
     const seen = new Set<string>()
-    const out: typeof roleLeads = []
-    for (const l of roleLeads) {
+    const out: typeof scopedSummaryLeads = []
+    for (const l of scopedSummaryLeads) {
       const email = (l.email || '').trim().toLowerCase()
-      const key = email ? `${l.site_id}::${email}` : `id::${l.id}`
+      const month = (l.captured_at || '').slice(0, 7)
+      const key = email ? `${l.site_id}::${email}::${month}` : `sid::${l.session_id}`
       if (seen.has(key)) continue
       seen.add(key)
       out.push(l)
@@ -1343,8 +1358,8 @@ export default function Dashboard() {
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
   const yesterdayStr = yesterday.toISOString().split('T')[0]
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-  const todayLeads = dedupedRoleLeads.filter(l => l.created_at?.startsWith(todayStr)).length
-  const thisWeekLeads = dedupedRoleLeads.filter(l => new Date(l.created_at) >= startOfWeek).length
+  const todayLeads = dedupedRoleLeads.filter(l => l.captured_at?.startsWith(todayStr)).length
+  const thisWeekLeads = dedupedRoleLeads.filter(l => new Date(l.captured_at) >= startOfWeek).length
 
   // Recent Leads table: site chip (from "Leads by Site") + date range, combined.
   const dateFilteredLeads = roleLeads.filter((l) => {
@@ -1368,7 +1383,7 @@ export default function Dashboard() {
       const d = new Date(); d.setDate(d.getDate() - (6 - i))
       const key = d.toISOString().split('T')[0]
       return { key, label: d.toLocaleDateString('en', { weekday: 'short' }), count: 0 }
-    }).map(day => ({ ...day, count: dedupedRoleLeads.filter(l => l.created_at?.startsWith(day.key)).length }))
+    }).map(day => ({ ...day, count: dedupedRoleLeads.filter(l => l.captured_at?.startsWith(day.key)).length }))
   }, [dedupedRoleLeads])
   const chartMax = Math.max(...chartDays.map(d => d.count), 1)
 
