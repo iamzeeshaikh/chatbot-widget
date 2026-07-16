@@ -66,7 +66,7 @@ function hotPoints(v: { pages: number; visits: number; created_at: string; last_
 const isHotVisitor = (v: { pages: number; visits: number; created_at: string; last_seen: string }) => hotPoints(v) >= 3
 interface AnalyticsPoint { label: string; visitors: number; unique: number; chats: number }
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null; source: 'chat' | 'quote'; quote_message?: string }
-interface BillingData { from: string; to: string; total: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
+interface BillingData { from: string; to: string; total: number; billable: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
 interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number }
 interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; ignoredVisitors: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; daily: PerfDaily[]; unattributedReplies: number }
@@ -2498,7 +2498,7 @@ export default function Dashboard() {
             return (
             <>
               {/* Total + type breakdown */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
                 <div className="bg-gradient-to-br from-indigo-100 to-indigo-50 rounded-2xl p-5 border border-indigo-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">Total leads this period</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{billing?.total ?? 0}</p>
@@ -2522,6 +2522,22 @@ export default function Dashboard() {
                       })}
                     </div>
                   )}
+                </div>
+
+                {/* The number to actually invoice on — if the same customer
+                    (same email, same site) shows up in both Chat and Quote,
+                    that's one customer and gets charged once. The Chat/Quote
+                    tiles below stay as raw per-channel totals on purpose;
+                    this is the only place the overlap is collapsed. */}
+                <div className="bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-2xl p-5 border border-emerald-200">
+                  <p className="text-emerald-800 text-[11px] font-semibold uppercase tracking-wide mb-2">💳 Billable Leads</p>
+                  <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{billing?.billable ?? 0}</p>
+                  <p className="text-[11px] text-emerald-800 mt-1">
+                    {billing && billing.total > billing.billable
+                      ? `${billing.total - billing.billable} overlap${billing.total - billing.billable === 1 ? '' : 's'} removed — same customer, both channels`
+                      : 'No overlap this period'}
+                  </p>
+                  <p className="text-[11px] text-gray-500 mt-2">Unique customers — this is what to charge per lead for.</p>
                 </div>
 
                 {/* Chat / Quote tabs — click either to switch the table below */}

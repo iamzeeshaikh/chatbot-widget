@@ -158,6 +158,15 @@ export async function GET(req: NextRequest) {
   const leads = [...chatLeads, ...quoteLeads]
     .sort((a, b) => new Date(b.captured_at).getTime() - new Date(a.captured_at).getTime())
 
+  // Billable count: the same customer sometimes contacts through both the
+  // chat widget AND a quote-request email (e.g. fills the form, then also
+  // chats minutes later) — that's one customer, and should be charged for
+  // once. This dedupes by site + email (case-insensitive) across BOTH
+  // sources without touching the Chat/Quote counts shown elsewhere, which
+  // stay as raw per-channel totals on purpose.
+  const billableKeys = new Set(leads.filter((l) => l.email).map((l) => `${l.site_id}::${l.email.toLowerCase()}`))
+  const billable = billableKeys.size
+
   // Per-site breakdown.
   const bySiteMap: Record<string, number> = {}
   for (const l of leads) bySiteMap[l.site_id] = (bySiteMap[l.site_id] ?? 0) + 1
@@ -174,5 +183,5 @@ export async function GET(req: NextRequest) {
   const byStatus: Record<string, number> = {}
   for (const l of leads) byStatus[l.status] = (byStatus[l.status] ?? 0) + 1
 
-  return NextResponse.json({ from, to, total: leads.length, prevTotal, byStatus, leads, bySite, trackedInScope })
+  return NextResponse.json({ from, to, total: leads.length, billable, prevTotal, byStatus, leads, bySite, trackedInScope })
 }
