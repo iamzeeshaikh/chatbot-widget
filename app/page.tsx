@@ -578,6 +578,13 @@ export default function Dashboard() {
   // different "what does this mean" — that mixing them in one table read as
   // confusing. Split into two switchable views on the same page.
   const [billingLeadType, setBillingLeadType] = useState<'chat' | 'quote'>('chat')
+  // Deleting a quote lead (e.g. bot-spam form submissions) is admin-only — see
+  // deleteQuoteLead below and the matching server-side check in
+  // /api/admin/delete-lead, which requires admin for anything QUOTE_TAG'd
+  // regardless of site access, unlike regular leads where a standard member
+  // with site access can also delete.
+  const [confirmQuoteDeleteId, setConfirmQuoteDeleteId] = useState<string | null>(null)
+  const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null)
   // Agent performance report (admin-only). Month string "YYYY-MM"; default current.
   const [perfMonth, setPerfMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [perf, setPerf] = useState<PerfData | null>(null)
@@ -1183,6 +1190,23 @@ export default function Dashboard() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: lead.session_id, siteId: lead.site_id, status }),
     }).catch(() => {})
+  }
+
+  // Remove a quote lead (e.g. a bot-spam form submission that slipped
+  // through) straight from the Billing tab — admin-only, gated both here
+  // (button only renders for userRole === 'admin') and on the server.
+  async function deleteQuoteLead(sessionId: string) {
+    const id = sessionId.replace(/^quote-/, '')
+    setDeletingQuoteId(sessionId)
+    await fetch('/api/admin/delete-lead', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+    setBilling((prev) => {
+      if (!prev) return prev
+      const leads = prev.leads.filter((l) => l.session_id !== sessionId)
+      const byStatus: Record<string, number> = {}
+      for (const l of leads) byStatus[l.status] = (byStatus[l.status] ?? 0) + 1
+      return { ...prev, leads, total: leads.length, byStatus }
+    })
+    setConfirmQuoteDeleteId(null); setDeletingQuoteId(null)
   }
 
   // Export the current billing list as CSV for the client invoice.
@@ -2589,15 +2613,15 @@ export default function Dashboard() {
                     <table className="w-full text-sm min-w-[1000px]">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-100">
-                          {['Email', 'Name', 'Phone', 'Site', 'Message', 'Status', 'Date Captured'].map((h) => (
-                            <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
+                          {[...['Email', 'Name', 'Phone', 'Site', 'Message', 'Status', 'Date Captured'], ...(userRole === 'admin' ? [''] : [])].map((h, i) => (
+                            <th key={h || i} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {quoteLeads.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="text-center py-10">
+                            <td colSpan={userRole === 'admin' ? 8 : 7} className="text-center py-10">
                               <div className="flex flex-col items-center">
                                 <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📧</div>
                                 <p className="text-gray-700 text-sm font-medium">No quote leads this period</p>
@@ -2621,6 +2645,22 @@ export default function Dashboard() {
                               </select>
                             </td>
                             <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
+                            {userRole === 'admin' && (
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {confirmQuoteDeleteId === l.session_id ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs text-gray-700">Delete?</span>
+                                    <button onClick={() => deleteQuoteLead(l.session_id)} disabled={deletingQuoteId === l.session_id}
+                                      className="text-xs text-red-600 hover:text-red-700 font-semibold">{deletingQuoteId === l.session_id ? '…' : 'Yes'}</button>
+                                    <span className="text-xs text-gray-500 mx-0.5">·</span>
+                                    <button onClick={() => setConfirmQuoteDeleteId(null)} className="text-xs text-gray-500 hover:text-gray-600">No</button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => setConfirmQuoteDeleteId(l.session_id)}
+                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete this quote lead">🗑</button>
+                                )}
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
