@@ -585,6 +585,10 @@ export default function Dashboard() {
   // with site access can also delete.
   const [confirmQuoteDeleteId, setConfirmQuoteDeleteId] = useState<string | null>(null)
   const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null)
+  // Quote leads have no chat session to open, so clicking a row instead pops
+  // the full original email text in a modal (the table only shows a
+  // truncated preview).
+  const [viewQuote, setViewQuote] = useState<BillingLead | null>(null)
   // Agent performance report (admin-only). Month string "YYYY-MM"; default current.
   const [perfMonth, setPerfMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [perf, setPerf] = useState<PerfData | null>(null)
@@ -2630,15 +2634,16 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ) : quoteLeads.map((l) => (
-                          <tr key={l.session_id} className="border-b border-gray-100 hover:bg-gray-100 transition-colors">
-                            <td className="px-4 py-3 whitespace-nowrap">
+                          <tr key={l.session_id} onClick={() => setViewQuote(l)} title="View the full quote message"
+                            className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
+                            <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
                             </td>
                             <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
                             <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
                             <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
-                            <td className="px-4 py-3 text-gray-600 max-w-[220px] truncate" title={l.quote_message || undefined}>{l.quote_message || <span className="text-gray-400">—</span>}</td>
-                            <td className="px-4 py-3 whitespace-nowrap">
+                            <td className="px-4 py-3 text-gray-600 max-w-[220px] truncate">{l.quote_message || <span className="text-gray-400">—</span>}</td>
+                            <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <select value={l.status} onChange={(e) => setLeadStatus(l, e.target.value as LeadStatus)}
                                 className={`text-[11px] font-semibold px-2 py-1 rounded-full border capitalize cursor-pointer focus:outline-none ${LEAD_STATUS_STYLE[l.status]}`}>
                                 {LEAD_STATUSES.map((s) => <option key={s} value={s} className="bg-white text-gray-800 capitalize">{s}</option>)}
@@ -2646,7 +2651,7 @@ export default function Dashboard() {
                             </td>
                             <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatDateTime(l.captured_at)}</td>
                             {userRole === 'admin' && (
-                              <td className="px-4 py-3 whitespace-nowrap">
+                              <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                                 {confirmQuoteDeleteId === l.session_id ? (
                                   <div className="flex items-center gap-1">
                                     <span className="text-xs text-gray-700">Delete?</span>
@@ -2671,6 +2676,28 @@ export default function Dashboard() {
             </>
             )
           })()}
+        </div>
+      )}
+
+      {/* Full quote-email text — the table only shows a truncated preview. */}
+      {viewQuote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewQuote(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5 inline-block mb-1.5">📧 Quote</p>
+                <p className="text-sm font-semibold text-gray-900 truncate">{viewQuote.name || viewQuote.email}</p>
+                <p className="text-xs text-gray-500 truncate">{viewQuote.email} · {viewQuote.site_name} · {formatDateTime(viewQuote.captured_at)}</p>
+              </div>
+              <button onClick={() => setViewQuote(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+            </div>
+            <div className="px-5 py-4 overflow-y-auto">
+              <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{viewQuote.quote_message || 'No message text.'}</p>
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
+              <a href={`mailto:${viewQuote.email}`} className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors" style={{ backgroundColor: accentColor }}>Reply by email</a>
+            </div>
+          </div>
         </div>
       )}
 
