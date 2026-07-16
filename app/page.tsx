@@ -9,6 +9,7 @@ import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadsta
 import { isClosingMessage } from '@/lib/closing'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
+import { isQuoteLeadMessage, stripQuoteTag } from '@/lib/quoteintake'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -477,6 +478,13 @@ export default function Dashboard() {
   const [overviewLeadSite, setOverviewLeadSite] = useState('')
   const [overviewLeadDate, setOverviewLeadDate] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all')
   const [overviewLeadPage, setOverviewLeadPage] = useState(0)
+  // Recent Leads mixes two very different kinds of row — a real chat
+  // conversation the bot captured, and a quote-request email pulled from
+  // Gmail (no chat session at all) — filterable so it's easy to see just one.
+  const [overviewLeadType, setOverviewLeadType] = useState<'all' | 'chat' | 'quote'>('all')
+  // A Quote-type Recent Lead has no chat session to open — clicking one pops
+  // its full details here instead (mirrors the Billing tab's quote modal).
+  const [viewOverviewLead, setViewOverviewLead] = useState<Lead | null>(null)
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
   const OVERVIEW_LEADS_PER_PAGE = 40
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
@@ -1371,7 +1379,9 @@ export default function Dashboard() {
     if (overviewLeadDate === 'month') return d >= startOfMonth
     return true
   })
-  const overviewFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
+  const siteFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
+  const overviewFilteredLeads = overviewLeadType === 'all' ? siteFilteredLeads
+    : siteFilteredLeads.filter((l) => isQuoteLeadMessage(l.message) === (overviewLeadType === 'quote'))
   const overviewLeadPageCount = Math.max(1, Math.ceil(overviewFilteredLeads.length / OVERVIEW_LEADS_PER_PAGE))
   const overviewLeadPageClamped = Math.min(overviewLeadPage, overviewLeadPageCount - 1)
   const overviewLeadsPageRows = overviewFilteredLeads.slice(
@@ -1677,6 +1687,12 @@ export default function Dashboard() {
                     <option value="week">This week</option>
                     <option value="month">This month</option>
                   </select>
+                  <select value={overviewLeadType} onChange={(e) => { setOverviewLeadType(e.target.value as typeof overviewLeadType); setOverviewLeadPage(0) }}
+                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType !== 'all' ? (overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : 'bg-blue-100 border-blue-300 text-blue-700 font-semibold') : 'bg-white border-gray-300 text-gray-700'}`}>
+                    <option value="all">All types</option>
+                    <option value="chat">💬 Chat only</option>
+                    <option value="quote">📧 Quote only</option>
+                  </select>
                   {overviewLeadSite && (
                     <button onClick={() => { setOverviewLeadSite(''); setOverviewLeadPage(0) }}
                       className="text-[11px] font-medium text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5 hover:bg-blue-200 transition-colors"
@@ -1684,7 +1700,7 @@ export default function Dashboard() {
                       {roleSites.find((s) => s.site_id === overviewLeadSite)?.name ?? overviewLeadSite} ✕
                     </button>
                   )}
-                  {(overviewLeadSite || overviewLeadDate !== 'all') && (
+                  {(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') && (
                     <span className="text-[11px] text-gray-500">{overviewFilteredLeads.length} result{overviewFilteredLeads.length !== 1 ? 's' : ''}</span>
                   )}
                 </div>
@@ -1693,7 +1709,7 @@ export default function Dashboard() {
                     <table className="w-full text-sm min-w-[1100px]">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-100">
-                          {['Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Budget', 'Timeline', 'Site', 'Date', ''].map((h) => (
+                          {['Type', 'Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Budget', 'Timeline', 'Site', 'Date', ''].map((h) => (
                             <th key={h} className="text-left px-3 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -1701,11 +1717,11 @@ export default function Dashboard() {
                       <tbody>
                         {overviewFilteredLeads.length === 0 ? (
                           <tr>
-                            <td colSpan={12} className="text-center py-8">
+                            <td colSpan={13} className="text-center py-8">
                               <div className="flex flex-col items-center">
                                 <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📭</div>
-                                <p className="text-gray-700 text-sm font-medium">{(overviewLeadSite || overviewLeadDate !== 'all') ? 'No leads match this filter' : 'No leads captured yet'}</p>
-                                <p className="text-gray-500 text-xs mt-0.5">{(overviewLeadSite || overviewLeadDate !== 'all') ? 'Try a different date range or site' : 'Leads appear here when the bot qualifies a visitor'}</p>
+                                <p className="text-gray-700 text-sm font-medium">{(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') ? 'No leads match this filter' : 'No leads captured yet'}</p>
+                                <p className="text-gray-500 text-xs mt-0.5">{(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') ? 'Try a different date range, site, or type' : 'Leads appear here when the bot qualifies a visitor'}</p>
                               </div>
                             </td>
                           </tr>
@@ -1724,9 +1740,15 @@ export default function Dashboard() {
                           const isEditing = editingLeadId === lead.id
                           const isConfirmingDelete = confirmLeadDeleteId === lead.id
                           const accent = SITE_ACCENT[lead.site_id] ?? '#6b7280'
+                          const isQuote = isQuoteLeadMessage(lead.message)
 
                           if (isEditing) return (
                             <tr key={lead.id} className="border-b border-gray-200 bg-gray-100">
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                {isQuote
+                                  ? <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">📧 Quote</span>
+                                  : <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">💬 Chat</span>}
+                              </td>
                               <td className="px-3 py-2">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
                               <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
                               <td className="px-3 py-2"><input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-blue-700 w-full min-w-[140px] focus:outline-none focus:border-blue-500" placeholder="Email" /></td>
@@ -1739,8 +1761,14 @@ export default function Dashboard() {
                           )
 
                           return (
-                            <tr key={lead.id} onClick={() => openLeadConversation(lead)} title="Open this lead's conversation"
+                            <tr key={lead.id} onClick={() => isQuote ? setViewOverviewLead(lead) : openLeadConversation(lead)}
+                              title={isQuote ? 'View the full quote message' : "Open this lead's conversation"}
                               className="group border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
+                              <td className="px-3 py-3 whitespace-nowrap">
+                                {isQuote
+                                  ? <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">📧 Quote</span>
+                                  : <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">💬 Chat</span>}
+                              </td>
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
                               <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">{lead.name || '-'}</td>
                               <td className="px-3 py-3 text-blue-600 whitespace-nowrap">{lead.email || '-'}</td>
@@ -2761,6 +2789,34 @@ export default function Dashboard() {
             </>
             )
           })()}
+        </div>
+      )}
+
+      {/* Recent Leads (Overview tab): a Quote-type row has no chat session,
+          so clicking it shows its full details here instead. */}
+      {viewOverviewLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewOverviewLead(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5 inline-block mb-1.5">📧 Quote</p>
+                <p className="text-sm font-semibold text-gray-900 truncate">{viewOverviewLead.name || viewOverviewLead.email}</p>
+                <p className="text-xs text-gray-500 truncate">
+                  {viewOverviewLead.email} · {(roleSites.find((s) => s.site_id === viewOverviewLead.site_id)?.name) ?? viewOverviewLead.site_id}
+                  {viewOverviewLead.created_at ? ` · ${formatDateTime(viewOverviewLead.created_at)}` : ''}
+                </p>
+              </div>
+              <button onClick={() => setViewOverviewLead(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+            </div>
+            <div className="px-5 py-4 overflow-y-auto">
+              <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{stripQuoteTag(viewOverviewLead.message) || 'No message text.'}</p>
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
+              {viewOverviewLead.email && (
+                <a href={`mailto:${viewOverviewLead.email}`} className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors" style={{ backgroundColor: accentColor }}>Reply by email</a>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
