@@ -2832,8 +2832,10 @@ export default function Dashboard() {
                 const site = sites.find((s) => s.site_id === cs.site_id)
                 const accent = SITE_ACCENT[cs.site_id] ?? '#6b7280'
                 return (
-                  <button key={cs.session_id + i}
-                    onClick={() => {
+                  <a key={cs.session_id + i} href={conversationHref(cs.session_id, cs.site_id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey) return // let the browser open a new tab/window
+                      e.preventDefault()
                       openConversationBySession({ sessionId: cs.session_id, siteId: cs.site_id, siteName: site?.name })
                       setTab('conversations')
                       setViewDayChats(null)
@@ -2842,7 +2844,7 @@ export default function Dashboard() {
                     style={{ borderLeft: `3px solid ${accent}` }}>
                     <span className="text-sm text-gray-800 truncate">{site?.name ?? cs.site_id}</span>
                     <span className="text-xs text-indigo-700 flex-shrink-0">View chat →</span>
-                  </button>
+                  </a>
                 )
               })}
             </div>
