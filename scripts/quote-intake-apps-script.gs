@@ -156,7 +156,7 @@ function processQuoteLeads() {
       var handledAny = false;
       for (var m = 0; m < messages.length; m++) {
         var msg = messages[m];
-        var parsed = parseLeadBody_(msg.getPlainBody(), SITE_DOMAINS[code]);
+        var parsed = parseLeadBody_(msg.getPlainBody());
         if (!parsed.email && !parsed.phone) continue;
         if (postLead_(code, parsed, msg.getDate())) { sent++; handledAny = true; }
         // On failure, leave the thread unlabeled so a later run retries it.
@@ -210,13 +210,23 @@ function alreadyHandled_(thread) {
 // Some leads get manually forwarded into a label instead of arriving there
 // directly, which prepends Gmail's own "---------- Forwarded message
 // ---------" / From: / Date: / Subject: / To: header block ABOVE the real
-// form content. Those headers carry the SITE's own notification address
-// (e.g. "From: The Burger Boxes <info@theburgerboxes.com>"), which used to
-// get grabbed as "the lead's email" — dropping the real customer's email
-// that was sitting a few lines further down. Skip the header block itself,
-// and never accept the site's own domain as a candidate email — keep
-// scanning until a real (non-self) address turns up.
-function parseLeadBody_(body, ownDomain) {
+// form content. Those headers carry a notification address — USUALLY the
+// site's own domain, but not always: The Paper Cups' form notifications
+// actually send from an @zeecustomboxes.com address (same underlying
+// WordPress setup), so checking only the CURRENT site's own domain missed
+// it and grabbed zeecustomboxes.com's address as if it were the customer's.
+// Check against EVERY one of our own site domains, not just the current
+// one, since a forward's header can reference any of them. Skip the header
+// block itself, and keep scanning until a real (non-self) address turns up.
+function isOwnDomain_(email) {
+  var lower = email.toLowerCase();
+  for (var code in SITE_DOMAINS) {
+    if (lower.indexOf('@' + SITE_DOMAINS[code].toLowerCase()) !== -1) return true;
+  }
+  return false;
+}
+
+function parseLeadBody_(body) {
   var lines = body.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
   var emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   var phoneRe = /^[+()\-.\s\d]{7,20}$/;
@@ -231,8 +241,7 @@ function parseLeadBody_(body, ownDomain) {
     var emailMatch = line.match(emailRe);
     if (emailMatch && !email) {
       var candidate = emailMatch[0];
-      var isOwn = ownDomain && candidate.toLowerCase().indexOf('@' + ownDomain.toLowerCase()) !== -1;
-      if (!isOwn) { email = candidate; continue; }
+      if (!isOwnDomain_(candidate)) { email = candidate; continue; }
     }
     var digits = line.replace(/\D/g, '');
     if (!phone && phoneRe.test(line) && digits.length >= 7 && digits.length <= 15) { phone = line; continue; }
