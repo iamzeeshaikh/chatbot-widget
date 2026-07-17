@@ -19,10 +19,14 @@ export async function GET(req: NextRequest) {
 
   const fromParam = req.nextUrl.searchParams.get('from')
   const toParam = req.nextUrl.searchParams.get('to')
-  // Default window: the current calendar month.
-  const now = new Date()
-  const from = fromParam || new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-  const to = toParam || new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
+  // Default window: the current calendar month in Pakistan time (the client
+  // always passes explicit from/to, so this only matters as a defensive
+  // fallback — but it must agree with PKT, not the server's own UTC clock).
+  const nowPkt = new Date(Date.now() + 5 * 60 * 60 * 1000)
+  const y = nowPkt.getUTCFullYear(), m = nowPkt.getUTCMonth()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const from = fromParam || new Date(`${y}-${pad(m + 1)}-01T00:00:00+05:00`).toISOString()
+  const to = toParam || new Date(`${m === 11 ? y + 1 : y}-${pad(m === 11 ? 1 : m + 2)}-01T00:00:00+05:00`).toISOString()
 
   const [rowsRes, quoteRowsRes, sitesRes] = await Promise.all([
     supabase

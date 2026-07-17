@@ -826,6 +826,12 @@ export default function Dashboard() {
   }, [playDashSound])
 
   useEffect(() => {
+    // Refetches every time the Overview tab is (re)opened, not just once on
+    // first mount — this data used to only ever load once for the whole
+    // session, so a tab left open since morning would silently keep showing
+    // that morning's counts (found via a real report: "Today's Leads" was
+    // stuck one lead behind after a new one arrived later in the day).
+    if (tab !== 'overview' || !authReady) return
     // Same tracking-start floor as /api/admin/leads-list's TRACKING_START —
     // quote leads reach back to 2024 (whenever Gmail labeling started), long
     // before the bot went live, and shouldn't count toward Overview totals.
@@ -837,7 +843,7 @@ export default function Dashboard() {
       fetch(`/api/admin/leads-billing?from=${encodeURIComponent(trackingStart)}&to=${encodeURIComponent(tomorrow)}`)
         .then((r) => r.json()).catch(() => ({ leads: [] })),
     ]).then(([s, l, b]) => { setSites(s.sites ?? []); setLeads(l.leads ?? []); setSummaryLeads(b.leads ?? []); setOverviewLoading(false) })
-  }, [])
+  }, [tab, authReady])
 
   // Analytics (visitors + chats over time), scoped server-side to the workspace.
   // Cached per range: switching Hourly/Daily/Weekly/Monthly shows the cached
@@ -863,8 +869,14 @@ export default function Dashboard() {
     if (tab !== 'billing' || !authReady) return
     const [y, m] = billingMonth.split('-').map(Number)
     if (!y || !m) return
-    const from = new Date(y, m - 1, 1).toISOString()
-    const to = new Date(y, m, 1).toISOString()
+    // Explicit Pakistan-time month boundary (+05:00), not the browser's local
+    // timezone — a lead captured just after midnight PKT on the 1st must land
+    // in THIS month, matching how every date on screen is displayed.
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const from = new Date(`${y}-${pad(m)}-01T00:00:00+05:00`).toISOString()
+    const nextY = m === 12 ? y + 1 : y
+    const nextM = m === 12 ? 1 : m + 1
+    const to = new Date(`${nextY}-${pad(nextM)}-01T00:00:00+05:00`).toISOString()
     setBillingLoading(true)
     fetch(`/api/admin/leads-billing?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
       .then((r) => (r.ok ? r.json() : null)).catch(() => null)
@@ -877,8 +889,12 @@ export default function Dashboard() {
     if (tab !== 'performance' || !authReady) return
     const [y, m] = perfMonth.split('-').map(Number)
     if (!y || !m) return
-    const from = new Date(y, m - 1, 1).toISOString()
-    const to = new Date(y, m, 1).toISOString()
+    // Explicit Pakistan-time month boundary — see the matching Billing fetch.
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const from = new Date(`${y}-${pad(m)}-01T00:00:00+05:00`).toISOString()
+    const nextY = m === 12 ? y + 1 : y
+    const nextM = m === 12 ? 1 : m + 1
+    const to = new Date(`${nextY}-${pad(nextM)}-01T00:00:00+05:00`).toISOString()
     setPerfLoading(true)
     fetch(`/api/admin/performance?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
       .then((r) => (r.ok ? r.json() : null)).catch(() => null)
