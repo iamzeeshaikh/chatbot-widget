@@ -6,26 +6,25 @@
  *
  * LABEL-ONLY: this only ever touches emails that already carry one of YOUR
  * OWN site labels (SCB, TTP, SFB, KBP, TBB, ZCB, TCP, TPC — see SITE_CODES
- * below). It finds the exact label first by walking your actual Gmail label
- * list (a plain `label:SCB` text search doesn't reliably match NESTED labels
- * like "Extra Outsource Projects/SCB"), then searches using that label's own
- * exact name, excluding anything already marked Processed/Unmatched — so
- * each run only touches genuinely new mail, never re-scanning the same old
- * threads. It never guesses from sender/subject text, so it can never pick
- * up spam — if you haven't labeled it, it's invisible here. Delete spam as
- * you already do; label the real ones and they'll be picked up on a later
- * run, no matter how deeply nested.
+ * below), found by walking your actual Gmail label list (a plain `label:SCB`
+ * TEXT SEARCH doesn't reliably match NESTED labels like "Extra Outsource
+ * Projects/SCB" — a `GmailApp.search()` query still doesn't either, even
+ * quoted with the label's full path, which is why this walks label OBJECTS
+ * instead and calls .getThreads() on each one directly). It never guesses
+ * from sender/subject text, so it can never pick up spam — if you haven't
+ * labeled it, it's invisible here. Delete spam as you already do; label the
+ * real ones and they'll be picked up on a later run, no matter how deeply
+ * nested.
  *
  * QUOTA: a personal Gmail account gets a modest daily allowance of Gmail API
- * calls from Apps Script. Re-scanning old already-handled threads on every
- * run (the original version of this script) burns through that allowance
- * fast and starts failing with "Service invoked too many times for one day:
- * gmail" for the rest of the day — excluding already-handled threads at the
- * search level (above) is what keeps steady-state runs cheap. If you ever
- * see that error again, either widen the trigger interval (Triggers → edit
- * → every 1-2 hours instead of every 30 min) or wait for the quota to reset
- * (~24h from when it started failing) — nothing is lost either way, since
- * whatever a run can't get to just waits for the next one.
+ * calls from Apps Script. Running this MUCH more often than the recommended
+ * 30-minute trigger (e.g. "every minute") re-scans the same threads far more
+ * often than needed and can burn through that allowance in a few hours,
+ * failing with "Service invoked too many times for one day: gmail" for the
+ * rest of the day. If you ever see that error, widen the trigger interval
+ * (Triggers → edit → every 30 min, not more often) and wait for the quota to
+ * reset (~24h from when it started failing) — nothing is lost either way,
+ * since whatever a run can't get to just waits for the next one.
  *
  * TIME BUDGET: Apps Script kills any run after 6 minutes, and a mailbox with
  * years of backlog under these labels can't be swept in one go. This script
@@ -135,16 +134,13 @@ function processQuoteLeads() {
   for (var code in siteLabels) {
     if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
 
-    // Ask Gmail itself for only threads that (a) carry this site's label and
-    // (b) do NOT already carry Processed/Unmatched — instead of re-listing
-    // every thread under the label and checking each one by hand every run.
-    // That old approach re-scanned the same already-done threads again and
-    // again (thread.getLabels() is a Gmail API call per thread), which is
-    // what burned through the free daily Gmail quota. Quoting the label's
-    // own getName() (its exact full path, not the short SITE_CODES entry)
-    // is what makes this match correctly even for nested labels.
-    var query = 'label:"' + siteLabels[code].getName() + '" -label:"' + PROCESSED_LABEL + '" -label:"' + SKIPPED_LABEL + '"';
-    var threads = GmailApp.search(query, 0, MAX_THREADS_PER_LABEL);
+    // Walk the label object's own threads directly — a `GmailApp.search()`
+    // text query with a quoted nested label path (tried as an optimization
+    // to cut quota use) turned out to silently match nothing for these
+    // nested labels, which is why leads stopped arriving even though the
+    // script kept reporting "sent=0 skipped=0" with no errors. This object
+    // method is the one already proven to find nested labels correctly.
+    var threads = siteLabels[code].getThreads(0, MAX_THREADS_PER_LABEL);
 
     for (var t = 0; t < threads.length; t++) {
       if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
@@ -153,6 +149,8 @@ function processQuoteLeads() {
       var id = thread.getId();
       if (seen[id]) continue; // a thread carrying two site labels — already handled
       seen[id] = true;
+
+      if (alreadyHandled_(thread)) continue;
 
       var messages = thread.getMessages();
       var handledAny = false;
@@ -191,6 +189,15 @@ function findSiteLabels_() {
     if (SITE_CODES.indexOf(leaf) !== -1 && !found[leaf]) found[leaf] = all[i];
   }
   return found;
+}
+
+function alreadyHandled_(thread) {
+  var labels = thread.getLabels();
+  for (var i = 0; i < labels.length; i++) {
+    var n = labels[i].getName();
+    if (n === PROCESSED_LABEL || n === SKIPPED_LABEL) return true;
+  }
+  return false;
 }
 
 // Lead-form emails list field VALUES one per line with no labels (e.g.
