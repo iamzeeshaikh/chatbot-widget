@@ -6,19 +6,30 @@
  *
  * LABEL-ONLY: this only ever touches emails that already carry one of YOUR
  * OWN site labels (SCB, TTP, SFB, KBP, TBB, ZCB, TCP, TPC — see SITE_CODES
- * below), found by walking your actual Gmail label list (a plain `label:SCB`
- * TEXT SEARCH doesn't reliably match NESTED labels like "Extra Outsource
- * Projects/SCB" — a `GmailApp.search()` query still doesn't either, even
- * quoted with the label's full path, which is why this walks label OBJECTS
- * instead and calls .getThreads() on each one directly). It never guesses
- * from sender/subject text, so it can never pick up spam — if you haven't
- * labeled it, it's invisible here. Delete spam as you already do; label the
- * real ones and they'll be picked up on a later run, no matter how deeply
- * nested.
+ * below). It never guesses from sender/subject text, so it can never pick up
+ * spam — if you haven't labeled it, it's invisible here. Delete spam as you
+ * already do; label the real ones and they'll be picked up on a later run,
+ * no matter how deeply nested.
+ *
+ * HOW IT FINDS MAIL: the automatic run (processQuoteLeads, on your 30-min
+ * trigger) searches your WHOLE mailbox for mail from the last RECENT_DAYS
+ * days that isn't already marked Processed/Unmatched, then checks each
+ * candidate's own labels to see if it's one of yours. This is deliberately
+ * NOT a `label:"Site/Path"` text search — Gmail's search operator doesn't
+ * reliably match nested labels like "Extra Outsource Projects/SCB" even
+ * quoted with the full path (an earlier version relied on that and silently
+ * found nothing for weeks). And it's deliberately not "list every thread
+ * under this label" either — a site label with a big historical backlog has
+ * more threads than any run can safely re-scan, and Gmail doesn't return
+ * them newest-first, so a fixed per-label cap silently missed brand new
+ * leads once a label passed it. Genuine new mail is always recent, so the
+ * date window doesn't lose anything day-to-day. If you ever go back and
+ * label something OLDER than RECENT_DAYS, run processQuoteLeadsBackfill by
+ * hand once to sweep it in (see that function).
  *
  * QUOTA: a personal Gmail account gets a modest daily allowance of Gmail API
  * calls from Apps Script. Running this MUCH more often than the recommended
- * 30-minute trigger (e.g. "every minute") re-scans the same threads far more
+ * 30-minute trigger (e.g. "every minute") re-scans the same mail far more
  * often than needed and can burn through that allowance in a few hours,
  * failing with "Service invoked too many times for one day: gmail" for the
  * rest of the day. If you ever see that error, widen the trigger interval
@@ -26,13 +37,11 @@
  * reset (~24h from when it started failing) — nothing is lost either way,
  * since whatever a run can't get to just waits for the next one.
  *
- * TIME BUDGET: Apps Script kills any run after 6 minutes, and a mailbox with
- * years of backlog under these labels can't be swept in one go. This script
- * checks the clock as it works and stops itself cleanly at ~4.5 minutes,
- * logging how far it got. Nothing is lost — whatever it finished is marked
+ * TIME BUDGET: Apps Script kills any run after 6 minutes. This script checks
+ * the clock as it works and stops itself cleanly at ~4.5 minutes, logging
+ * how far it got. Nothing is lost — whatever it finished is marked
  * Processed, and your recurring trigger (every 30 min) picks up the rest
- * next time. After the first few runs burn down the backlog, each run
- * finishes in seconds.
+ * next time.
  *
  * SETUP (5 minutes, one time):
  *   1. Go to https://script.google.com → New project.
@@ -42,11 +51,15 @@
  *      — Google will ask you to authorize; allow it (Advanced → Go to
  *      [project] (unsafe) → Allow — normal for a script you wrote yourself).
  *      Execution log should say "OK: webhook reachable".
- *   5. Run `processQuoteLeads` — may need a few manual runs back-to-back at
- *      first if you have a big backlog (each one chips away ~4.5 minutes'
- *      worth); after that the trigger keeps it caught up automatically.
+ *   5. If you have OLD mail already labeled (older than RECENT_DAYS), run
+ *      `processQuoteLeadsBackfill` first — may need a few manual runs
+ *      back-to-back (each one chips away ~4.5 minutes' worth). Otherwise
+ *      just run `processQuoteLeads` once.
  *   6. Clock icon (Triggers) on the left → Add Trigger → function
- *      processQuoteLeads, Time-driven, Minutes timer, every N minutes → Save.
+ *      processQuoteLeads, Time-driven, Minutes timer, every 30 minutes →
+ *      Save. That trigger is what keeps it caught up automatically from
+ *      here on — processQuoteLeadsBackfill is manual-only, never on a
+ *      trigger.
  *
  * Every email it successfully sends gets the Gmail label "ZeeOps/Processed"
  * (auto-created) so it's never sent twice. One that's labeled with a site
@@ -82,9 +95,20 @@ var SITE_DOMAINS = {
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
 var TIME_BUDGET_MS = 4.5 * 60 * 1000;
-// How many threads to list per label per run — kept moderate so just listing
-// them (before any processing) can't itself eat the time budget.
+// How many threads to list per label — used only by the listSiteLabels
+// diagnostic below now (see processQuoteLeads for why the real run doesn't
+// rely on this cap anymore).
 var MAX_THREADS_PER_LABEL = 150;
+// processQuoteLeads only looks at mail from the last N days — a site label
+// with a big historical backlog (ZCB, TCP) has MORE threads than any single
+// run could safely re-scan, and Gmail's per-label thread order isn't
+// reliably newest-first, so a fixed "first 150" cap silently missed brand
+// new leads once a label passed that count (found via a real report: 3
+// same-day ZCB leads never arrived, all already correctly labeled). Genuine
+// new mail is always recent, so this window doesn't lose anything — the
+// bigger the number, the more quota a run spends re-checking old mail.
+var RECENT_DAYS = 30;
+var MAX_CANDIDATE_THREADS = 500;
 
 // ── Entry points ─────────────────────────────────────────────────────────
 
@@ -122,35 +146,32 @@ function listSiteLabels() {
   }
 }
 
-function processQuoteLeads() {
+// MANUAL USE ONLY — not on the trigger. processQuoteLeads only looks at
+// mail from the last RECENT_DAYS days, so if you ever go back and label a
+// genuinely OLD email (older than that), it won't be picked up
+// automatically. Run this by hand afterward to sweep everything under every
+// site label regardless of age, same as the very first backlog clear-out.
+// Safe to run repeatedly (already-handled threads are skipped instantly).
+function processQuoteLeadsBackfill() {
   var start = Date.now();
   var processedLabel = getOrCreateLabel_(PROCESSED_LABEL);
   var skippedLabel = getOrCreateLabel_(SKIPPED_LABEL);
-  var siteLabels = findSiteLabels_(); // { CODE: GmailLabel }
+  var siteLabels = findSiteLabels_();
 
   var sent = 0, skipped = 0, seen = {}, stoppedEarly = false;
+  var BACKFILL_MAX_THREADS_PER_LABEL = 3000;
 
   outer:
   for (var code in siteLabels) {
     if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
-
-    // Walk the label object's own threads directly — a `GmailApp.search()`
-    // text query with a quoted nested label path (tried as an optimization
-    // to cut quota use) turned out to silently match nothing for these
-    // nested labels, which is why leads stopped arriving even though the
-    // script kept reporting "sent=0 skipped=0" with no errors. This object
-    // method is the one already proven to find nested labels correctly.
-    var threads = siteLabels[code].getThreads(0, MAX_THREADS_PER_LABEL);
-
+    var threads = siteLabels[code].getThreads(0, BACKFILL_MAX_THREADS_PER_LABEL);
     for (var t = 0; t < threads.length; t++) {
       if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
-
       var thread = threads[t];
       var id = thread.getId();
-      if (seen[id]) continue; // a thread carrying two site labels — already handled
+      if (seen[id]) continue;
       seen[id] = true;
-
-      if (alreadyHandled_(thread)) continue;
+      if (isHandled_(thread)) continue;
 
       var messages = thread.getMessages();
       var handledAny = false;
@@ -159,13 +180,50 @@ function processQuoteLeads() {
         var parsed = parseLeadBody_(msg.getPlainBody());
         if (!parsed.email && !parsed.phone) continue;
         if (postLead_(code, parsed, msg.getDate())) { sent++; handledAny = true; }
-        // On failure, leave the thread unlabeled so a later run retries it.
       }
       if (handledAny) thread.addLabel(processedLabel);
       else { thread.addLabel(skippedLabel); skipped++; }
     }
   }
-  Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped +
+  Logger.log('processQuoteLeadsBackfill: sent=' + sent + ' skipped=' + skipped +
+    (stoppedEarly ? ' — stopped early (time budget); run again to continue.' : ' — done, nothing left to process.'));
+}
+
+function processQuoteLeads() {
+  var start = Date.now();
+  var processedLabel = getOrCreateLabel_(PROCESSED_LABEL);
+  var skippedLabel = getOrCreateLabel_(SKIPPED_LABEL);
+
+  var sent = 0, skipped = 0, notOurs = 0, stoppedEarly = false;
+
+  // ONE search across the whole mailbox for recent, not-yet-handled mail —
+  // not scoped to any particular site label, so there's no nested-label
+  // text-matching to get wrong (that's what broke v5's search). Excluding
+  // Processed/Unmatched here is safe and cheap: those two are OUR OWN flat
+  // "ZeeOps/…" labels, not the user's arbitrarily-nested site folders.
+  var query = 'newer_than:' + RECENT_DAYS + 'd -label:"' + PROCESSED_LABEL + '" -label:"' + SKIPPED_LABEL + '"';
+  var threads = GmailApp.search(query, 0, MAX_CANDIDATE_THREADS);
+
+  for (var t = 0; t < threads.length; t++) {
+    if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break; }
+
+    var thread = threads[t];
+    var code = matchSiteCode_(thread); // null if it doesn't carry one of our site labels
+    if (!code) { notOurs++; continue; }
+
+    var messages = thread.getMessages();
+    var handledAny = false;
+    for (var m = 0; m < messages.length; m++) {
+      var msg = messages[m];
+      var parsed = parseLeadBody_(msg.getPlainBody());
+      if (!parsed.email && !parsed.phone) continue;
+      if (postLead_(code, parsed, msg.getDate())) { sent++; handledAny = true; }
+      // On failure, leave the thread unlabeled so a later run retries it.
+    }
+    if (handledAny) thread.addLabel(processedLabel);
+    else { thread.addLabel(skippedLabel); skipped++; }
+  }
+  Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped + ' (scanned ' + threads.length + ' recent threads, ' + notOurs + ' not site-labeled)' +
     (stoppedEarly ? ' — stopped early (time budget); rest will be picked up on the next run.' : ' — done, nothing left to process.'));
 }
 
@@ -173,6 +231,15 @@ function processQuoteLeads() {
 
 function getOrCreateLabel_(name) {
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
+}
+
+function isHandled_(thread) {
+  var labels = thread.getLabels();
+  for (var i = 0; i < labels.length; i++) {
+    var n = labels[i].getName();
+    if (n === PROCESSED_LABEL || n === SKIPPED_LABEL) return true;
+  }
+  return false;
 }
 
 // Every Gmail label (any nesting depth) whose LEAF name matches a site code.
@@ -191,13 +258,19 @@ function findSiteLabels_() {
   return found;
 }
 
-function alreadyHandled_(thread) {
+// Does this thread carry one of our site labels (any nesting depth, matched
+// by LEAF name)? Returns the site code, or null. Checking the thread's own
+// labels directly (not a text search) is what correctly handles nested
+// labels — same reasoning as findSiteLabels_ above.
+function matchSiteCode_(thread) {
   var labels = thread.getLabels();
   for (var i = 0; i < labels.length; i++) {
-    var n = labels[i].getName();
-    if (n === PROCESSED_LABEL || n === SKIPPED_LABEL) return true;
+    var name = labels[i].getName();
+    var parts = name.split('/');
+    var leaf = parts[parts.length - 1].trim().toUpperCase();
+    if (SITE_CODES.indexOf(leaf) !== -1) return leaf;
   }
-  return false;
+  return null;
 }
 
 // Lead-form emails list field VALUES one per line with no labels (e.g.
