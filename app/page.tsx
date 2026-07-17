@@ -69,7 +69,7 @@ interface AnalyticsPoint { label: string; visitors: number; unique: number; chat
 interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null; source: 'chat' | 'quote'; quote_message?: string }
 interface BillingData { from: string; to: string; total: number; billable: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
-interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number }
+interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number; chatSessions: { session_id: string; site_id: string }[] }
 interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; ignoredVisitors: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; daily: PerfDaily[]; unattributedReplies: number }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
 interface VisitorDetail {
@@ -485,6 +485,9 @@ export default function Dashboard() {
   // A Quote-type Recent Lead has no chat session to open — clicking one pops
   // its full details here instead (mirrors the Billing tab's quote modal).
   const [viewOverviewLead, setViewOverviewLead] = useState<Lead | null>(null)
+  // Performance tab's Daily performance table: click a day's Chats count to
+  // see exactly those sessions, instead of just a number.
+  const [viewDayChats, setViewDayChats] = useState<PerfDaily | null>(null)
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
   const OVERVIEW_LEADS_PER_PAGE = 40
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
@@ -2809,6 +2812,44 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Daily performance table: click a day's Chats count to see exactly
+          those sessions instead of just a number. Each row jumps straight
+          into that conversation on the Conversations tab. */}
+      {viewDayChats && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewDayChats(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900">
+                  {new Date(`${viewDayChats.date}T00:00:00Z`).toLocaleDateString('en', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })}
+                </p>
+                <p className="text-xs text-gray-500">{viewDayChats.chatSessions.length} chat{viewDayChats.chatSessions.length !== 1 ? 's' : ''}</p>
+              </div>
+              <button onClick={() => setViewDayChats(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+            </div>
+            <div className="overflow-y-auto">
+              {viewDayChats.chatSessions.map((cs, i) => {
+                const site = sites.find((s) => s.site_id === cs.site_id)
+                const accent = SITE_ACCENT[cs.site_id] ?? '#6b7280'
+                return (
+                  <button key={cs.session_id + i}
+                    onClick={() => {
+                      openConversationBySession({ sessionId: cs.session_id, siteId: cs.site_id, siteName: site?.name })
+                      setTab('conversations')
+                      setViewDayChats(null)
+                    }}
+                    className="w-full text-left px-5 py-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-100 transition-colors flex items-center justify-between gap-2"
+                    style={{ borderLeft: `3px solid ${accent}` }}>
+                    <span className="text-sm text-gray-800 truncate">{site?.name ?? cs.site_id}</span>
+                    <span className="text-xs text-indigo-700 flex-shrink-0">View chat →</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Full quote-email text — the table only shows a truncated preview.
           Prev/Next walk the same filtered list currently on screen (site
           filter included), so browsing several leads doesn't mean closing
@@ -3024,7 +3065,11 @@ export default function Dashboard() {
                             <tr key={d.date} className={`border-b border-gray-100 ${isToday ? 'bg-blue-50/60' : ''}`}>
                               <td className="px-4 py-2.5 text-gray-800 whitespace-nowrap">{label}{isToday && <span className="ml-1.5 text-[9px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px">today</span>}</td>
                               <td className="px-4 py-2.5 text-right text-gray-800 tabular-nums">{d.visitors}</td>
-                              <td className="px-4 py-2.5 text-right text-gray-800 tabular-nums">{d.chats}</td>
+                              <td className="px-4 py-2.5 text-right tabular-nums">
+                                {d.chats > 0
+                                  ? <button onClick={() => setViewDayChats(d)} className="text-blue-700 hover:underline hover:text-blue-800 font-medium" title="View these chats">{d.chats}</button>
+                                  : <span className="text-gray-800">0</span>}
+                              </td>
                               <td className="px-4 py-2.5 text-right tabular-nums">
                                 {d.picked > 0
                                   ? <span className="inline-block px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">{d.picked}</span>

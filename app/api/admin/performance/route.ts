@@ -75,10 +75,12 @@ export async function GET(req: NextRequest) {
       50000),
     // Every widget session of the period (for the ignored-visitors count),
     // with user_agent so bot bursts can be excluded like everywhere else.
-    fetchAllPages<{ session_id: string; user_agent: string | null; created_at: string }>(
+    // site_id rides along so the Daily performance table can link each day's
+    // chat count to the actual sessions.
+    fetchAllPages<{ session_id: string; site_id: string; user_agent: string | null; created_at: string }>(
       () => supabase
         .from('active_visitors')
-        .select('session_id, user_agent, created_at')
+        .select('session_id, site_id, user_agent, created_at')
         .in('site_id', allowed)
         .gte('created_at', from)
         .lt('created_at', to)
@@ -254,7 +256,7 @@ export async function GET(req: NextRequest) {
   // Daily breakdown (PKT days): visitors that came, how many an agent engaged
   // (any agent message in the session — reply or proactive), how many chatted.
   const PKT_DAY_MS = 5 * 60 * 60 * 1000
-  const daily = new Map<string, { visitors: number; chats: number; picked: number }>()
+  const daily = new Map<string, { visitors: number; chats: number; picked: number; chatSessions: { session_id: string; site_id: string }[] }>()
   for (const { v, ms } of vStamped) {
     if (vBursts.has(burstKey(v.user_agent, ms))) continue
     if (seenVisitorSessions.has(v.session_id)) continue
@@ -264,9 +266,9 @@ export async function GET(req: NextRequest) {
     if (!conversations.has(v.session_id)) ignoredVisitors++
     const day = new Date(ms + PKT_DAY_MS).toISOString().slice(0, 10)
     let d = daily.get(day)
-    if (!d) { d = { visitors: 0, chats: 0, picked: 0 }; daily.set(day, d) }
+    if (!d) { d = { visitors: 0, chats: 0, picked: 0, chatSessions: [] }; daily.set(day, d) }
     d.visitors++
-    if (chattedSessions.has(v.session_id)) d.chats++
+    if (chattedSessions.has(v.session_id)) { d.chats++; d.chatSessions.push({ session_id: v.session_id, site_id: v.site_id }) }
     if (answeredSessions.has(v.session_id)) d.picked++
   }
   const dailyRows = Array.from(daily.entries())
