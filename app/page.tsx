@@ -1366,24 +1366,35 @@ export default function Dashboard() {
   const botEffectivelyActive = !botGlobalOff && !!selectedSession && selectedSession.mode === 'bot' && !scheduledBotOff
 
   // ── Stats derived ──────────────────────────────────────────────────────────
-  const todayStr = new Date().toISOString().split('T')[0]
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const startOfWeek = new Date(today)
-  startOfWeek.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1))
-  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
-  const yesterdayStr = yesterday.toISOString().split('T')[0]
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-  const todayLeads = overviewSummaryLeads.filter(l => l.captured_at?.startsWith(todayStr)).length
-  const thisWeekLeads = overviewSummaryLeads.filter(l => new Date(l.captured_at) >= startOfWeek).length
+  // Every timestamp in this app is DISPLAYED in Pakistan time (formatDateTime),
+  // but a plain `new Date().toISOString().split('T')[0]` for "today" is a UTC
+  // calendar date — PKT is 5h ahead, so anything captured before ~5am PKT is
+  // still "yesterday" in UTC. That mismatch made a lead showing "Jul 17, 12:21
+  // AM" on screen silently drop out of "Today's Leads" (found via a real
+  // report: 6 leads visibly dated Jul 17, only 2 counted as "today"). Bucket
+  // by PKT day everywhere here, matching the Performance tab's own PKT_DAY_MS
+  // approach, so "today" means the same thing as what's on screen.
+  const PKT_OFFSET_MS = 5 * 60 * 60 * 1000
+  const pktDateStr = (iso: string | null | undefined) => iso ? new Date(new Date(iso).getTime() + PKT_OFFSET_MS).toISOString().slice(0, 10) : ''
+  const nowPkt = new Date(Date.now() + PKT_OFFSET_MS)
+  const todayStr = nowPkt.toISOString().slice(0, 10)
+  const yesterdayPktDate = new Date(nowPkt); yesterdayPktDate.setUTCDate(yesterdayPktDate.getUTCDate() - 1)
+  const yesterdayStr = yesterdayPktDate.toISOString().slice(0, 10)
+  const dowPkt = nowPkt.getUTCDay()
+  const startOfWeekPktDate = new Date(nowPkt); startOfWeekPktDate.setUTCDate(startOfWeekPktDate.getUTCDate() - (dowPkt === 0 ? 6 : dowPkt - 1))
+  const startOfWeekStr = startOfWeekPktDate.toISOString().slice(0, 10)
+  const startOfMonthStr = `${nowPkt.getUTCFullYear()}-${String(nowPkt.getUTCMonth() + 1).padStart(2, '0')}-01`
+  const todayLeads = overviewSummaryLeads.filter(l => pktDateStr(l.captured_at) === todayStr).length
+  const thisWeekLeads = overviewSummaryLeads.filter(l => pktDateStr(l.captured_at) >= startOfWeekStr).length
 
   // Recent Leads table: site chip (from "Leads by Site") + date range, combined.
   const dateFilteredLeads = roleLeads.filter((l) => {
     if (!l.created_at) return overviewLeadDate === 'all'
-    const d = new Date(l.created_at)
-    if (overviewLeadDate === 'today') return l.created_at.startsWith(todayStr)
-    if (overviewLeadDate === 'yesterday') return l.created_at.startsWith(yesterdayStr)
-    if (overviewLeadDate === 'week') return d >= startOfWeek
-    if (overviewLeadDate === 'month') return d >= startOfMonth
+    const day = pktDateStr(l.created_at)
+    if (overviewLeadDate === 'today') return day === todayStr
+    if (overviewLeadDate === 'yesterday') return day === yesterdayStr
+    if (overviewLeadDate === 'week') return day >= startOfWeekStr
+    if (overviewLeadDate === 'month') return day >= startOfMonthStr
     return true
   })
   const siteFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
@@ -1394,13 +1405,14 @@ export default function Dashboard() {
   const overviewLeadsPageRows = overviewFilteredLeads.slice(
     overviewLeadPageClamped * OVERVIEW_LEADS_PER_PAGE, (overviewLeadPageClamped + 1) * OVERVIEW_LEADS_PER_PAGE)
 
-  // ── Bar chart: leads per day last 7 days ──────────────────────────────────
+  // ── Bar chart: leads per day last 7 days (PKT days, matching todayStr above) ──
   const chartDays = useMemo(() => {
+    const base = new Date(Date.now() + PKT_OFFSET_MS)
     return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(); d.setDate(d.getDate() - (6 - i))
-      const key = d.toISOString().split('T')[0]
-      return { key, label: d.toLocaleDateString('en', { weekday: 'short' }), count: 0 }
-    }).map(day => ({ ...day, count: overviewSummaryLeads.filter(l => l.captured_at?.startsWith(day.key)).length }))
+      const d = new Date(base); d.setUTCDate(d.getUTCDate() - (6 - i))
+      const key = d.toISOString().slice(0, 10)
+      return { key, label: d.toLocaleDateString('en', { weekday: 'short', timeZone: 'UTC' }), count: 0 }
+    }).map(day => ({ ...day, count: overviewSummaryLeads.filter(l => pktDateStr(l.captured_at) === day.key).length }))
   }, [overviewSummaryLeads])
   const chartMax = Math.max(...chartDays.map(d => d.count), 1)
 
