@@ -86,6 +86,21 @@ interface VisitorDetail {
   }
 }
 
+// Matches lib/leadtracking.ts's LEAD_CAPTURE_ROLE/parseLeadCapture — kept as a
+// tiny local copy (not imported) since that module pulls in the server-only
+// Supabase client, which must never end up in the client bundle.
+const LEAD_CAPTURE_ROLE = 'lead_capture'
+function parseLeadCapture(message: string | null): { email: string; name: string | null; phone: string | null } | null {
+  if (!message) return null
+  try {
+    const o = JSON.parse(message)
+    if (o && typeof o.email === 'string') {
+      return { email: o.email, name: typeof o.name === 'string' && o.name ? o.name : null, phone: typeof o.phone === 'string' && o.phone ? o.phone : null }
+    }
+  } catch { /* not a lead row */ }
+  return null
+}
+
 function cleanLeadMessage(msg: string | null): string {
   if (!msg) return '-'
   if (/^(Product|Quantity|Budget|Timeline):/i.test(msg)) {
@@ -1991,16 +2006,36 @@ export default function Dashboard() {
                     const isAdmin = msg.role === 'admin'
                     const showDate = (msg as typeof msg & { showDate?: boolean; dateLabel?: string }).showDate
                     const dateLabel = (msg as typeof msg & { dateLabel?: string }).dateLabel
+                    const dateDivider = showDate && (
+                      <div className="flex items-center gap-3 my-4">
+                        <div className="flex-1 h-px bg-gray-200" />
+                        <span className="text-[11px] text-gray-500 font-medium px-2">{dateLabel}</span>
+                        <div className="flex-1 h-px bg-gray-200" />
+                      </div>
+                    )
+                    // The widget's contact-info form doesn't post as a normal
+                    // chat message (it's a structured submission, not typed
+                    // text) — without this marker an agent reading the
+                    // transcript has no way to know the visitor ever handed
+                    // over their email at all.
+                    if (msg.role === LEAD_CAPTURE_ROLE) {
+                      const lead = parseLeadCapture(msg.message)
+                      if (!lead) return null
+                      return (
+                        <div key={msg.id}>
+                          {dateDivider}
+                          <div className="flex justify-center my-2">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1.5 text-center">
+                              📋 Shared contact info{lead.name ? ` — ${lead.name}` : ''}{lead.email ? ` · ${lead.email}` : ''}{lead.phone ? ` · ${lead.phone}` : ''}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    }
                     const file = parseAttachment(msg.message)
                     return (
                       <div key={msg.id}>
-                        {showDate && (
-                          <div className="flex items-center gap-3 my-4">
-                            <div className="flex-1 h-px bg-gray-200" />
-                            <span className="text-[11px] text-gray-500 font-medium px-2">{dateLabel}</span>
-                            <div className="flex-1 h-px bg-gray-200" />
-                          </div>
-                        )}
+                        {dateDivider}
                         <div className={`flex flex-col mb-2 ${isUser ? 'items-end' : 'items-start'}`}>
                           <div className="flex items-center gap-1.5 mb-1 px-1">
                             {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-600' : 'text-blue-600'}`}>{isAdmin ? '👤 Agent' : botGlobalOff ? '💬 Auto-reply' : '🤖 Bot'}</span>}

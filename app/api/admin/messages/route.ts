@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSession } from '@/lib/auth'
 import { asUtcIso } from '@/lib/visitor'
-import { CONTROL_ROLES_IN } from '@/lib/controlroles'
+import { VISIBLE_CONTROL_ROLES_IN } from '@/lib/controlroles'
 import { readTyping, VISITOR_TYPING_KEY } from '@/lib/typing'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       .from('chat_logs')
       .select('*')
       .eq('session_id', sessionId)
-      .not('role', 'in', `(${CONTROL_ROLES_IN})`) // hide ALL control rows from the message view
+      .not('role', 'in', `(${VISIBLE_CONTROL_ROLES_IN})`) // hide control rows except lead_capture, which renders as a marker
       .order('created_at', { ascending: true }),
     readTyping(sessionId, VISITOR_TYPING_KEY),
   ])

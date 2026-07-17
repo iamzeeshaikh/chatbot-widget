@@ -40,3 +40,11 @@ export function isControlRole(role: string | null | undefined): boolean {
 
 // Comma-joined for Supabase `.not('role', 'in', `(${CONTROL_ROLES_IN})`)` filters.
 export const CONTROL_ROLES_IN = CONTROL_ROLES.join(',')
+
+// Same, but lets lead_capture through — used only by the conversation
+// transcript view, which renders a lead_capture row as a "customer shared
+// their contact info" marker instead of hiding it. A widget lead-capture
+// form submission never appears as a normal 'user' chat message (it isn't
+// typed text), so without this an agent reading the transcript has no way
+// to know the visitor ever handed over their email — see lib/leadtracking.ts.
+export const VISIBLE_CONTROL_ROLES_IN = CONTROL_ROLES.filter((r) => r !== LEAD_CAPTURE_ROLE).join(',')
