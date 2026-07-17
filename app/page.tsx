@@ -2021,13 +2021,18 @@ export default function Dashboard() {
                     if (msg.role === LEAD_CAPTURE_ROLE) {
                       const lead = parseLeadCapture(msg.message)
                       if (!lead) return null
+                      const lines = [lead.name, lead.email, lead.phone].filter(Boolean).join('\n')
                       return (
                         <div key={msg.id}>
                           {dateDivider}
-                          <div className="flex justify-center my-2">
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1.5 text-center">
-                              📋 Shared contact info{lead.name ? ` — ${lead.name}` : ''}{lead.email ? ` · ${lead.email}` : ''}{lead.phone ? ` · ${lead.phone}` : ''}
-                            </span>
+                          <div className="flex flex-col mb-2 items-end">
+                            <div className="flex items-center gap-1.5 mb-1 px-1">
+                              <span className="text-[11px] text-gray-500">Visitor</span>
+                              <span className="text-[10px] text-gray-500">{formatTime(msg.created_at)}</span>
+                            </div>
+                            <div className="max-w-sm lg:max-w-md xl:max-w-lg px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm bg-gray-200 text-gray-900 rounded-tr-sm border border-gray-300">
+                              {lines}
+                            </div>
                           </div>
                         </div>
                       )
