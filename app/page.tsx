@@ -1390,8 +1390,18 @@ export default function Dashboard() {
   // report: 6 leads visibly dated Jul 17, only 2 counted as "today"). Bucket
   // by PKT day everywhere here, matching the Performance tab's own PKT_DAY_MS
   // approach, so "today" means the same thing as what's on screen.
+  //
+  // asUtcIso is essential here, not optional: several of these timestamps
+  // come straight from a Postgres "timestamp without time zone" column (no
+  // trailing Z), which `new Date(...)` parses as the BROWSER's OWN local
+  // time, not UTC. On a browser already set to PKT that silently double-
+  // applies the +5h shift below, landing one day early for anything after
+  // ~7pm PKT — a second, compounding bug found the same way as the first.
   const PKT_OFFSET_MS = 5 * 60 * 60 * 1000
-  const pktDateStr = (iso: string | null | undefined) => iso ? new Date(new Date(iso).getTime() + PKT_OFFSET_MS).toISOString().slice(0, 10) : ''
+  const pktDateStr = (iso: string | null | undefined) => {
+    const utc = asUtcIso(iso)
+    return utc ? new Date(new Date(utc).getTime() + PKT_OFFSET_MS).toISOString().slice(0, 10) : ''
+  }
   const nowPkt = new Date(Date.now() + PKT_OFFSET_MS)
   const todayStr = nowPkt.toISOString().slice(0, 10)
   const yesterdayPktDate = new Date(nowPkt); yesterdayPktDate.setUTCDate(yesterdayPktDate.getUTCDate() - 1)
