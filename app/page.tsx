@@ -591,6 +591,12 @@ export default function Dashboard() {
   const [contactForm, setContactForm] = useState<VisitorContact>({ name: '', email: '', phone: '', notes: '' })
   const [savingContact, setSavingContact] = useState(false)
   const [contactSaved, setContactSaved] = useState(false)
+  // Admin-only: manually count this conversation as a lead when the customer
+  // clearly became one (e.g. "I emailed you") without ever typing an email
+  // into the widget, so the bot's automatic capture never fired.
+  const [markingLead, setMarkingLead] = useState(false)
+  const [leadMarked, setLeadMarked] = useState(false)
+  const [markLeadError, setMarkLeadError] = useState('')
   // Tags for the open conversation (locally editable; persisted on each change).
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
@@ -1112,6 +1118,26 @@ export default function Dashboard() {
       setContactSaved(true)
       setVisitorDetail((d) => (d ? { ...d, contact: { ...contactForm } } : d))
       setTimeout(() => setContactSaved(false), 2500)
+    }
+  }
+
+  // Uses whatever's currently in the Contact form (name/email/phone) —
+  // requires an email since that's what the whole Billing pipeline keys on.
+  async function markAsLead() {
+    if (!selectedSession || markingLead) return
+    if (!contactForm.email.trim()) { setMarkLeadError('Enter the customer\'s email above first.'); return }
+    setMarkingLead(true); setMarkLeadError(''); setLeadMarked(false)
+    const res = await fetch('/api/admin/mark-lead', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: selectedSession.session_id, name: contactForm.name, email: contactForm.email, phone: contactForm.phone }),
+    })
+    setMarkingLead(false)
+    if (res.ok) {
+      setLeadMarked(true)
+      setTimeout(() => setLeadMarked(false), 2500)
+    } else {
+      const data = await res.json().catch(() => null)
+      setMarkLeadError(data?.error || 'Failed to mark as lead.')
     }
   }
 
@@ -2302,6 +2328,19 @@ export default function Dashboard() {
                         </button>
                         {contactSaved && <span className="text-[11px] text-green-600">✓ Saved</span>}
                       </div>
+                      {userRole === 'admin' && (
+                        <div className="pt-2 mt-2 border-t border-gray-200">
+                          <div className="flex items-center gap-2">
+                            <button onClick={markAsLead} disabled={markingLead}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-800 bg-amber-100 border border-amber-300 hover:bg-amber-200 disabled:opacity-50 transition-colors">
+                              📌 {markingLead ? 'Marking…' : 'Mark as lead'}
+                            </button>
+                            {leadMarked && <span className="text-[11px] text-green-600">✓ Counted as a lead</span>}
+                          </div>
+                          <p className="text-[10px] text-gray-500 mt-1">For when the customer clearly became a lead (e.g. "I emailed you") without ever typing their email into the chat. Uses the email above.</p>
+                          {markLeadError && <p className="text-[10px] text-red-600 mt-1">{markLeadError}</p>}
+                        </div>
+                      )}
                     </div>
                   </section>
 
