@@ -124,7 +124,9 @@ export async function GET(req: NextRequest) {
       session_id: r.session_id,
       site_id: r.site_id,
       site_name: siteName[r.site_id] ?? r.site_id,
-      email: lead?.email ?? '',
+      // null (not '') for a manual mark, so the UI can tell "no contact info
+      // on purpose" apart from an empty string and label the row accordingly.
+      email: lead?.email ?? null,
       name: lead?.name ?? null,
       phone: lead?.phone ?? null,
       // The capture timestamp; fall back to the row time for very old rows.
@@ -134,8 +136,13 @@ export async function GET(req: NextRequest) {
       country: origin?.country ?? null,
       referrer: origin?.referrer ?? null,
       source: 'chat' as const,
+      // Admin manually marked this conversation as a lead — no email/name/
+      // phone was ever captured, so it's not a parsing failure, it's meant
+      // to have no contact info. Kept in the list (unlike a row that failed
+      // to parse at all) so it still counts everywhere leads are totalled.
+      manual: lead?.manual ?? false,
     }
-  }).filter((l) => l.email)
+  }).filter((l) => l.email || l.manual)
 
   // Custom-quote leads (WordPress form → Gmail → Apps Script → /api/quote-intake).
   // No chat session, so no agent/country/referrer — but status still works via
@@ -167,8 +174,11 @@ export async function GET(req: NextRequest) {
   // chats minutes later) — that's one customer, and should be charged for
   // once. This dedupes by site + email (case-insensitive) across BOTH
   // sources without touching the Chat/Quote counts shown elsewhere, which
-  // stay as raw per-channel totals on purpose.
-  const billableKeys = new Set(leads.filter((l) => l.email).map((l) => `${l.site_id}::${l.email.toLowerCase()}`))
+  // stay as raw per-channel totals on purpose. A manually-marked lead has no
+  // email to dedupe by — falls back to its own session id, so it always
+  // counts as its own billable lead rather than collapsing every manual
+  // mark on a site into one (an empty string would otherwise be a shared key).
+  const billableKeys = new Set(leads.map((l) => l.email ? `${l.site_id}::${l.email.toLowerCase()}` : `manual::${l.session_id}`))
   const billable = billableKeys.size
 
   // Per-site breakdown.

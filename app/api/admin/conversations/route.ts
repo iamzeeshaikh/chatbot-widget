@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
 
   // Latest tags per session (logs are ascending, so the last TAGS_ROLE wins).
   const tagsBySession: Record<string, string[]> = {}
-  // Genuine lead per session — set ONLY from a real email capture, never by site.
+  // Genuine lead per session — set ONLY from a real lead_capture row (automatic
+  // email capture, or an admin's manual mark), never inferred from the site.
   const leadBySession: Record<string, { name: string | null; email: string | null }> = {}
   // email → session_id, built from real signals (visitor-typed email, contact
   // row, lead_capture) so leads-table rows can be matched by email, not by site.
@@ -57,9 +58,11 @@ export async function GET(req: NextRequest) {
     if (log.role === TAGS_ROLE) { tagsBySession[log.session_id] = parseTags(log.message); continue }
     if (log.role === LEAD_CAPTURE_ROLE) {
       const cap = parseLeadCapture(log.message)
-      if (cap?.email) {
+      if (cap) {
+        // A manual mark has no email — still a lead (drives the "lead" filter),
+        // it just can't be matched against the leads table below.
         leadBySession[log.session_id] = { name: cap.name, email: cap.email }
-        emailToSession[`${log.site_id}|${cap.email.toLowerCase()}`] = log.session_id
+        if (cap.email) emailToSession[`${log.site_id}|${cap.email.toLowerCase()}`] = log.session_id
       }
       continue
     }

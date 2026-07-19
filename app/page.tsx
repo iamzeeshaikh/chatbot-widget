@@ -66,7 +66,9 @@ function hotPoints(v: { pages: number; visits: number; created_at: string; last_
 }
 const isHotVisitor = (v: { pages: number; visits: number; created_at: string; last_seen: string }) => hotPoints(v) >= 3
 interface AnalyticsPoint { label: string; visitors: number; unique: number; chats: number }
-interface BillingLead { session_id: string; site_id: string; site_name: string; email: string; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null; source: 'chat' | 'quote'; quote_message?: string }
+// `email` is null only for an admin's manual mark (see markLeadManually) —
+// every automatic capture and every quote lead has one.
+interface BillingLead { session_id: string; site_id: string; site_name: string; email: string | null; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null; source: 'chat' | 'quote'; manual?: boolean; quote_message?: string }
 interface BillingData { from: string; to: string; total: number; billable: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
 interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number; chatSessions: { session_id: string; site_id: string }[] }
@@ -90,12 +92,17 @@ interface VisitorDetail {
 // tiny local copy (not imported) since that module pulls in the server-only
 // Supabase client, which must never end up in the client bundle.
 const LEAD_CAPTURE_ROLE = 'lead_capture'
-function parseLeadCapture(message: string | null): { email: string; name: string | null; phone: string | null } | null {
+function parseLeadCapture(message: string | null): { email: string | null; name: string | null; phone: string | null; manual: boolean } | null {
   if (!message) return null
   try {
     const o = JSON.parse(message)
-    if (o && typeof o.email === 'string') {
-      return { email: o.email, name: typeof o.name === 'string' && o.name ? o.name : null, phone: typeof o.phone === 'string' && o.phone ? o.phone : null }
+    if (o && (typeof o.email === 'string' || o.manual === true)) {
+      return {
+        email: typeof o.email === 'string' && o.email ? o.email : null,
+        name: typeof o.name === 'string' && o.name ? o.name : null,
+        phone: typeof o.phone === 'string' && o.phone ? o.phone : null,
+        manual: o.manual === true,
+      }
     }
   } catch { /* not a lead row */ }
   return null
@@ -595,7 +602,10 @@ export default function Dashboard() {
   // clearly became one (e.g. "I emailed you") without ever typing an email
   // into the widget, so the bot's automatic capture never fired.
   const [markingLead, setMarkingLead] = useState(false)
-  const [leadMarked, setLeadMarked] = useState(false)
+  // null = idle; 'new' = just counted; 'already' = this conversation was
+  // already a lead, so the click changed nothing (worth saying, otherwise a
+  // plain ✓ looks like it counted a second time).
+  const [leadMarked, setLeadMarked] = useState<'new' | 'already' | null>(null)
   const [markLeadError, setMarkLeadError] = useState('')
   // Tags for the open conversation (locally editable; persisted on each change).
   const [tags, setTags] = useState<string[]>([])
@@ -1121,20 +1131,29 @@ export default function Dashboard() {
     }
   }
 
-  // Uses whatever's currently in the Contact form (name/email/phone) —
-  // requires an email since that's what the whole Billing pipeline keys on.
+  // Counts this conversation as a lead with no contact info attached — the
+  // point is the count, not data entry, so it deliberately doesn't read the
+  // Contact form above (that's saved separately via "Save contact").
+  // Idempotent server-side: a second click reports alreadyMarked rather than
+  // double-counting.
   async function markAsLead() {
     if (!selectedSession || markingLead) return
-    if (!contactForm.email.trim()) { setMarkLeadError('Enter the customer\'s email above first.'); return }
-    setMarkingLead(true); setMarkLeadError(''); setLeadMarked(false)
+    setMarkingLead(true); setMarkLeadError(''); setLeadMarked(null)
     const res = await fetch('/api/admin/mark-lead', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: selectedSession.session_id, name: contactForm.name, email: contactForm.email, phone: contactForm.phone }),
+      body: JSON.stringify({ sessionId: selectedSession.session_id }),
     })
     setMarkingLead(false)
     if (res.ok) {
-      setLeadMarked(true)
-      setTimeout(() => setLeadMarked(false), 2500)
+      const data = await res.json().catch(() => null)
+      setLeadMarked(data?.alreadyMarked ? 'already' : 'new')
+      setTimeout(() => setLeadMarked(null), 3000)
+      // Reflect it immediately in the list so the "lead" filter/chip agrees
+      // without waiting for a refetch.
+      setTags((prev) => prev.some((t) => t.toLowerCase() === 'lead') ? prev : [...prev, 'lead'])
+      setSessions((prev) => prev.map((s) => s.session_id === selectedSession.session_id
+        ? { ...s, lead: s.lead ?? { name: null, email: null }, tags: (s.tags ?? []).some((t) => t.toLowerCase() === 'lead') ? s.tags : [...(s.tags ?? []), 'lead'] }
+        : s))
     } else {
       const data = await res.json().catch(() => null)
       setMarkLeadError(data?.error || 'Failed to mark as lead.')
@@ -1253,7 +1272,7 @@ export default function Dashboard() {
   }
 
   function openConversation(lead: BillingLead) {
-    openConversationBySession({ sessionId: lead.session_id, siteId: lead.site_id, siteName: lead.site_name, preview: lead.email, lastAt: lead.captured_at })
+    openConversationBySession({ sessionId: lead.session_id, siteId: lead.site_id, siteName: lead.site_name, preview: lead.email ?? 'Marked as lead', lastAt: lead.captured_at })
   }
 
   // Recent-Leads row → open the matched conversation (server resolves session_id
@@ -1305,7 +1324,7 @@ export default function Dashboard() {
     const esc = (v: string | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const header = ['Type', 'Email', 'Name', 'Phone', 'Site', 'Status', 'Agent', 'Country', 'Origin', 'Date Captured']
     const rows = billing.leads.map((l) => [
-      esc(l.source === 'quote' ? 'Custom Quote' : 'Chat'), esc(l.email), esc(l.name), esc(l.phone), esc(l.site_name),
+      esc(l.source === 'quote' ? 'Custom Quote' : 'Chat'), esc(l.email ?? (l.manual ? 'Marked as lead (no contact info)' : '')), esc(l.name), esc(l.phone), esc(l.site_name),
       esc(l.status), esc(l.agent), esc(l.country), esc(cleanReferrer(l.referrer)),
       esc(new Date(l.captured_at).toISOString()),
     ].join(','))
@@ -2085,6 +2104,22 @@ export default function Dashboard() {
                     if (msg.role === LEAD_CAPTURE_ROLE) {
                       const lead = parseLeadCapture(msg.message)
                       if (!lead) return null
+                      // A manual mark has no contact info at all, so there's no
+                      // visitor bubble to draw — show it as a centered note
+                      // instead, making clear it was the admin's call and not
+                      // something the visitor actually submitted.
+                      if (lead.manual) {
+                        return (
+                          <div key={msg.id}>
+                            {dateDivider}
+                            <div className="flex justify-center mb-2">
+                              <span className="text-[10px] text-amber-800 bg-amber-100 border border-amber-300 rounded-full px-2.5 py-1">
+                                📌 Marked as a lead by an admin · {formatTime(msg.created_at)}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      }
                       const lines = [lead.name, lead.email, lead.phone].filter(Boolean).join('\n')
                       return (
                         <div key={msg.id}>
@@ -2335,9 +2370,10 @@ export default function Dashboard() {
                               className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-800 bg-amber-100 border border-amber-300 hover:bg-amber-200 disabled:opacity-50 transition-colors">
                               📌 {markingLead ? 'Marking…' : 'Mark as lead'}
                             </button>
-                            {leadMarked && <span className="text-[11px] text-green-600">✓ Counted as a lead</span>}
+                            {leadMarked === 'new' && <span className="text-[11px] text-green-600">✓ Counted as a lead</span>}
+                            {leadMarked === 'already' && <span className="text-[11px] text-gray-500">Already counted — no change</span>}
                           </div>
-                          <p className="text-[10px] text-gray-500 mt-1">For when the customer clearly became a lead (e.g. "I emailed you") without ever typing their email into the chat. Uses the email above.</p>
+                          <p className="text-[10px] text-gray-500 mt-1">For when the customer clearly became a lead (e.g. &quot;I emailed you&quot;) without ever typing their email into the chat. Counts toward Billing with no contact info attached.</p>
                           {markLeadError && <p className="text-[10px] text-red-600 mt-1">{markLeadError}</p>}
                         </div>
                       )}
@@ -2807,7 +2843,7 @@ export default function Dashboard() {
                             <td className="px-4 py-3 whitespace-nowrap">
                               <a href={conversationHref(l.session_id, l.site_id)} className="text-blue-700 hover:underline"
                                 onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { e.stopPropagation(); return } e.preventDefault(); e.stopPropagation(); openConversation(l) }}>
-                                {l.email}
+                                {l.email ?? <span className="text-gray-500 italic">Marked as lead</span>}
                               </a>
                             </td>
                             <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
