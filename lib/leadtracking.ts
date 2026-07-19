@@ -155,11 +155,20 @@ export async function maybeCaptureLead(opts: {
 
     const existing = existingRows?.[0]
     if (existing) {
-      // Already a lead — only fill in a missing name/phone, never re-count.
+      // Already a lead — only fill in what's missing, never re-count. A manual
+      // mark (markLeadManually) starts with no contact info at all, so a later
+      // real capture on the same session upgrades it in place: it keeps its
+      // original timestamp, so it stays in the billing period it was counted
+      // in, but gains the email/name/phone we now have. The `manual` flag is
+      // deliberately dropped here — `email` is always set by this point, so the
+      // row is no longer a contact-less admin count and shouldn't be labelled
+      // as one. Keeping prev.email (or dropping the flag while email stayed
+      // null) would leave a row that parseLeadCapture can't read at all, which
+      // silently deletes the lead from every total.
       const prev = parseLeadCapture(existing.message)
-      if (prev && ((!prev.name && name) || (!prev.phone && phone))) {
+      if (prev && ((!prev.email && email) || (!prev.name && name) || (!prev.phone && phone))) {
         const merged: CapturedLead = {
-          email: prev.email,
+          email: prev.email || email,
           name: prev.name || name,
           phone: prev.phone || phone,
           at: prev.at,
