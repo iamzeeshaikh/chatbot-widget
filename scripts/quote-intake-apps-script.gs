@@ -78,7 +78,31 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // by LEAF name (the part after the last "/"), so it doesn't matter which
 // parent folder each one lives under. Add a line here the day you start
 // labeling a new site (e.g. once TPC exists for The Paper Cups).
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC'];
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB'];
+
+// ── Checkout (cart order) emails ────────────────────────────────────────────
+// WooCommerce "New order #6449" notifications live under ONE flat label rather
+// than a per-site one, so the site has to come from somewhere else. These mails
+// carry the store name in the subject — "[Shop Cardboard Boxes]: New order
+// #6449" — which WooCommerce fills in from the store's own settings, so it is
+// the store identifying itself rather than us guessing from sender text.
+//
+// Only consulted for threads under CHECKOUT_LABEL that carry no site-code
+// label; a site-code label always wins. Unrecognised store names go to
+// ZeeOps/Unmatched instead of being attributed to the wrong site.
+var CHECKOUT_LABEL = 'checkout';
+
+var STORE_NAME_CODES = {
+  'shop cardboard boxes': 'SCB',
+  'the tube packaging': 'TTP',
+  'small food boxes': 'SFB',
+  'kraft box pack': 'KBP',
+  'the burger boxes': 'TBB',
+  'zee custom boxes': 'ZCB',
+  'the candle packaging': 'TCP',
+  'the paper cups': 'TPC',
+  'peptides boxes': 'PB',
+};
 
 // Own domain per site code — used to make sure a lead's "email" is never the
 // site's own notification address (see parseLeadBody_ below).
@@ -91,6 +115,7 @@ var SITE_DOMAINS = {
   ZCB: 'zeecustomboxes.com',
   TCP: 'thecandlepackaging.com',
   TPC: 'thepapercups.com',
+  PB: 'peptidesboxes.com',
 };
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
@@ -107,8 +132,27 @@ var MAX_THREADS_PER_LABEL = 150;
 // same-day ZCB leads never arrived, all already correctly labeled). Genuine
 // new mail is always recent, so this window doesn't lose anything — the
 // bigger the number, the more quota a run spends re-checking old mail.
-var RECENT_DAYS = 30;
-var MAX_CANDIDATE_THREADS = 500;
+//
+// SIZED FOR THE GMAIL QUOTA, not for "as much as possible". Checking a
+// thread's labels costs one Gmail call, so a run costs roughly one call per
+// candidate thread. At 30 days / 500 threads with the recommended 30-minute
+// trigger that is ~500 × 48 = ~24,000 calls a day — over a personal account's
+// daily allowance, which is exactly how this hit "Service invoked too many
+// times for one day: gmail" on 2026-07-28. Seven days at this mailbox's
+// volume is ~120 threads per run (~6,000/day), with plenty of headroom.
+// Raising either number multiplies daily quota use — don't, unless the
+// trigger interval is widened by the same factor.
+//
+// The trade-off is deliberate: labelling an email OLDER than RECENT_DAYS no
+// longer gets picked up automatically. Run processQuoteLeadsBackfill by hand
+// after doing that. (The checkout sweep below has no date window at all, so
+// order mail is unaffected either way.)
+var RECENT_DAYS = 7;
+var MAX_CANDIDATE_THREADS = 250;
+// How many threads the dedicated checkout sweep walks per run (see
+// sweepCheckoutLabel_ for why checkout can't rely on the search above).
+// Same quota maths: every thread here costs a call on every run.
+var CHECKOUT_SWEEP_MAX = 150;
 
 // ── Entry points ─────────────────────────────────────────────────────────
 
@@ -161,9 +205,16 @@ function processQuoteLeadsBackfill() {
   var sent = 0, skipped = 0, seen = {}, stoppedEarly = false;
   var BACKFILL_MAX_THREADS_PER_LABEL = 3000;
 
+  // `checkout` isn't a site-code label, so the loop below never reaches it.
+  // Sweep it here with no date window — that's what pulls in an existing
+  // backlog of order mail.
+  var co = sweepCheckoutLabel_(start, processedLabel, skippedLabel, BACKFILL_MAX_THREADS_PER_LABEL);
+  sent += co.sent; skipped += co.skipped;
+  if (co.stoppedEarly) stoppedEarly = true;
+
   outer:
   for (var code in siteLabels) {
-    if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
+    if (stoppedEarly || Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
     var threads = siteLabels[code].getThreads(0, BACKFILL_MAX_THREADS_PER_LABEL);
     for (var t = 0; t < threads.length; t++) {
       if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
@@ -196,6 +247,16 @@ function processQuoteLeads() {
 
   var sent = 0, skipped = 0, notOurs = 0, stoppedEarly = false;
 
+  // Checkout FIRST, before the general search spends the time budget — order
+  // mail must never be starved by a mailbox full of unrelated threads.
+  var co = sweepCheckoutLabel_(start, processedLabel, skippedLabel, CHECKOUT_SWEEP_MAX);
+  sent += co.sent; skipped += co.skipped;
+  if (co.stoppedEarly) {
+    Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped +
+      ' (checkout sweep only) — stopped early (time budget); rest will be picked up on the next run.');
+    return;
+  }
+
   // ONE search across the whole mailbox for recent, not-yet-handled mail —
   // not scoped to any particular site label, so there's no nested-label
   // text-matching to get wrong (that's what broke v5's search). Excluding
@@ -208,8 +269,18 @@ function processQuoteLeads() {
     if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break; }
 
     var thread = threads[t];
+    // The search ran before the checkout sweep labeled anything, so its results
+    // can already be handled by the time we get here.
+    if (isHandled_(thread)) continue;
     var code = matchSiteCode_(thread); // null if it doesn't carry one of our site labels
-    if (!code) { notOurs++; continue; }
+    if (!code) {
+      // A checkout thread whose store name isn't in STORE_NAME_CODES would
+      // otherwise be re-scanned forever. Park it in Unmatched so it shows up as
+      // something to fix (add the store name) rather than silently vanishing.
+      if (hasCheckoutLabel_(thread)) { thread.addLabel(skippedLabel); skipped++; }
+      else notOurs++;
+      continue;
+    }
 
     var messages = thread.getMessages();
     var handledAny = false;
@@ -225,6 +296,42 @@ function processQuoteLeads() {
   }
   Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped + ' (scanned ' + threads.length + ' recent threads, ' + notOurs + ' not site-labeled)' +
     (stoppedEarly ? ' — stopped early (time budget); rest will be picked up on the next run.' : ' — done, nothing left to process.'));
+}
+
+// Re-try everything sitting in ZeeOps/Unmatched. That label means "carried one
+// of your site labels but the parser found no email or phone", which is a
+// permanent verdict — the thread is never looked at again. So whenever the
+// parser gets BETTER, the mail it previously gave up on has to be released by
+// hand; that's what this does. (It found five real leads the first time, all
+// forwarded customer emails whose address lived only in the From: header.)
+//
+// Manual-only, never on a trigger. Threads it still can't read go straight back
+// to Unmatched, so running it twice costs nothing and changes nothing.
+function retryUnmatched() {
+  var start = Date.now();
+  var processedLabel = getOrCreateLabel_(PROCESSED_LABEL);
+  var skippedLabel = getOrCreateLabel_(SKIPPED_LABEL);
+  var threads = skippedLabel.getThreads(0, 200);
+  var sent = 0, stillStuck = 0, stoppedEarly = false;
+
+  for (var t = 0; t < threads.length; t++) {
+    if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break; }
+    var thread = threads[t];
+    var code = matchSiteCode_(thread);
+    if (!code) { stillStuck++; continue; } // no site label at all — leave it alone
+
+    var messages = thread.getMessages();
+    var handledAny = false;
+    for (var m = 0; m < messages.length; m++) {
+      var parsed = parseLeadBody_(messages[m].getPlainBody());
+      if (!parsed.email && !parsed.phone) continue;
+      if (postLead_(code, parsed, messages[m].getDate())) { sent++; handledAny = true; }
+    }
+    if (handledAny) { thread.removeLabel(skippedLabel); thread.addLabel(processedLabel); }
+    else stillStuck++;
+  }
+  Logger.log('retryUnmatched: sent=' + sent + ' stillUnreadable=' + stillStuck + ' (of ' + threads.length + ' unmatched threads)' +
+    (stoppedEarly ? ' — stopped early (time budget); run again to continue.' : ' — done.'));
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -246,6 +353,51 @@ function isHandled_(thread) {
 // Uses label OBJECTS (GmailApp.getUserLabels() + label.getThreads()), not a
 // text search string — Gmail's `label:` search operator does not reliably
 // match nested labels by leaf name.
+// Walk the flat `checkout` label directly instead of hoping the searches above
+// reach it. BOTH entry points need this:
+//   • processQuoteLeads searches the newest MAX_CANDIDATE_THREADS threads of the
+//     last RECENT_DAYS days. A busy mailbox fills that cap with unrelated mail
+//     (a real run scanned 500 and found 495 irrelevant), pushing older checkout
+//     orders out of view — permanently, because unrelated threads are never
+//     labeled and so never leave the candidate set.
+//   • processQuoteLeadsBackfill only walks SITE_CODES labels, and `checkout`
+//     isn't one of them, so it never saw these threads at all.
+// Walking the label itself is bounded, can't be crowded out, and has no date
+// window — which is exactly what a mailbox with a backlog of order mail needs.
+function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max) {
+  var out = { sent: 0, skipped: 0, stoppedEarly: false };
+  var label = findCheckoutLabel_();
+  if (!label) return out; // no checkout label in this mailbox — nothing to do
+  var threads = label.getThreads(0, max);
+  for (var t = 0; t < threads.length; t++) {
+    if (Date.now() - start > TIME_BUDGET_MS) { out.stoppedEarly = true; return out; }
+    var thread = threads[t];
+    if (isHandled_(thread)) continue;
+    // A site-code label on the thread still wins over the subject's store name.
+    var code = matchSiteCode_(thread);
+    if (!code) { thread.addLabel(skippedLabel); out.skipped++; continue; }
+    var messages = thread.getMessages();
+    var handledAny = false;
+    for (var m = 0; m < messages.length; m++) {
+      var parsed = parseLeadBody_(messages[m].getPlainBody());
+      if (!parsed.email && !parsed.phone) continue;
+      if (postLead_(code, parsed, messages[m].getDate())) { out.sent++; handledAny = true; }
+    }
+    if (handledAny) thread.addLabel(processedLabel);
+    else { thread.addLabel(skippedLabel); out.skipped++; }
+  }
+  return out;
+}
+
+function findCheckoutLabel_() {
+  var all = GmailApp.getUserLabels();
+  for (var i = 0; i < all.length; i++) {
+    var parts = all[i].getName().split('/');
+    if (parts[parts.length - 1].trim().toLowerCase() === CHECKOUT_LABEL) return all[i];
+  }
+  return null;
+}
+
 function findSiteLabels_() {
   var all = GmailApp.getUserLabels();
   var found = {};
@@ -264,13 +416,37 @@ function findSiteLabels_() {
 // labels — same reasoning as findSiteLabels_ above.
 function matchSiteCode_(thread) {
   var labels = thread.getLabels();
+  var hasCheckout = false;
   for (var i = 0; i < labels.length; i++) {
     var name = labels[i].getName();
     var parts = name.split('/');
-    var leaf = parts[parts.length - 1].trim().toUpperCase();
-    if (SITE_CODES.indexOf(leaf) !== -1) return leaf;
+    var leaf = parts[parts.length - 1].trim();
+    if (SITE_CODES.indexOf(leaf.toUpperCase()) !== -1) return leaf.toUpperCase();
+    if (leaf.toLowerCase() === CHECKOUT_LABEL) hasCheckout = true;
   }
+  // No site label, but it is a checkout thread — read the store name out of the
+  // subject instead (see STORE_NAME_CODES).
+  if (hasCheckout) return codeFromSubject_(thread.getFirstMessageSubject());
   return null;
+}
+
+function hasCheckoutLabel_(thread) {
+  var labels = thread.getLabels();
+  for (var i = 0; i < labels.length; i++) {
+    var parts = labels[i].getName().split('/');
+    if (parts[parts.length - 1].trim().toLowerCase() === CHECKOUT_LABEL) return true;
+  }
+  return false;
+}
+
+// "[Shop Cardboard Boxes]: New order #6449" → "SCB". Returns null when the
+// subject has no bracketed store name, or the name isn't one we know — the
+// caller then sends the thread to ZeeOps/Unmatched rather than guessing.
+function codeFromSubject_(subject) {
+  var m = String(subject || '').match(/\[([^\]]+)\]/);
+  if (!m) return null;
+  var store = m[1].trim().toLowerCase();
+  return STORE_NAME_CODES[store] || null;
 }
 
 // Lead-form emails list field VALUES one per line with no labels (e.g.
@@ -299,31 +475,112 @@ function isOwnDomain_(email) {
   return false;
 }
 
+// Anything that must never be mistaken for a customer's address: our site
+// domains, this Gmail account itself, plus any extra addresses you forward
+// from. The account's own address matters because YOU are the one forwarding
+// these threads — without this the From-header fallback below would happily
+// record your own address as the lead's.
+var OWN_EMAILS = []; // add any other address you forward from, e.g. 'you@work.com'
+
+function isOwnAddress_(email) {
+  var lower = email.toLowerCase();
+  if (isOwnDomain_(lower)) return true;
+  for (var i = 0; i < OWN_EMAILS.length; i++) {
+    if (lower === String(OWN_EMAILS[i]).toLowerCase()) return true;
+  }
+  try {
+    var me = Session.getActiveUser().getEmail(); // no Gmail quota cost
+    if (me && lower === me.toLowerCase()) return true;
+  } catch (e) {}
+  return false;
+}
+
+// Some forms LABEL their fields instead of listing bare values — Peptides
+// Boxes sends "Full name: Joey Pannell / Business email: … / Phone: 12562210417".
+// The bare-value logic below can't read those: "Phone: 12562210417" fails the
+// digits-only test (it has letters), so the number was silently dropped, and
+// the first junk line ("New enquiry from peptidesboxes.com") became the name.
+// Labels win when present; anything unlabeled still falls through to the
+// original positional handling, so the older forms behave exactly as before.
+var FIELD_LABELS = {
+  name: ['full name', 'name', 'your name', 'customer name', 'contact name'],
+  email: ['business email', 'email', 'email address', 'e-mail', 'your email'],
+  phone: ['phone', 'phone number', 'contact number', 'mobile', 'mobile number', 'telephone'],
+  product: ['enquiry from page', 'inquiry from page', 'product', 'product name', 'interested in'],
+};
+
+function fieldForLabel_(label) {
+  var k = label.toLowerCase().trim();
+  for (var field in FIELD_LABELS) {
+    if (FIELD_LABELS[field].indexOf(k) !== -1) return field;
+  }
+  return null;
+}
+
 function parseLeadBody_(body) {
   var lines = body.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
   var emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   var phoneRe = /^[+()\-.\s\d]{7,20}$/;
   var headerRe = /^(From|To|Cc|Bcc|Date|Subject|Sent):/i;
   var fwdMarkerRe = /^-+\s*Forwarded message\s*-+$/i;
+  var labelRe = /^([A-Za-z][A-Za-z \-]{0,30}?)\s*:\s*(.*)$/;
 
-  var email = '', phone = '', rest = [];
+  var email = '', phone = '', name = '', product = '', rest = [];
+  // Fallback identity taken from a forward's "From:" header. Plenty of real
+  // leads are not form submissions at all — a customer simply emails the site
+  // and the thread gets forwarded here. In those the customer's address exists
+  // ONLY in that header, which the loop skips, so the parser found nothing and
+  // the thread was parked in ZeeOps/Unmatched. (Five real leads sat there:
+  // "Box and foam insert interest", "Shipping boxes", "Plain Corrugated
+  // Catering Boxes Inquiry", etc.) Used only when the body yields no address.
+  var fromEmail = '', fromName = '';
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
-    if (headerRe.test(line) || fwdMarkerRe.test(line)) continue;
+    if (headerRe.test(line) || fwdMarkerRe.test(line)) {
+      if (/^From:/i.test(line) && !fromEmail) {
+        var fm = line.match(emailRe);
+        if (fm && !isOwnAddress_(fm[0])) {
+          fromEmail = fm[0];
+          // "From: Diane Carter <diane@example.com>" → "Diane Carter"
+          var nm = line.replace(/^From:\s*/i, '').replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
+          if (nm && nm.indexOf('@') === -1) fromName = nm;
+        }
+      }
+      continue;
+    }
+
+    var lm = line.match(labelRe);
+    if (lm) {
+      var field = fieldForLabel_(lm[1]);
+      var value = lm[2].trim();
+      if (field && value) {
+        if (field === 'email' && !email) {
+          var labeled = value.match(emailRe);
+          if (labeled && !isOwnAddress_(labeled[0])) { email = labeled[0]; continue; }
+        } else if (field === 'phone' && !phone) {
+          var labeledDigits = value.replace(/\D/g, '');
+          if (labeledDigits.length >= 7 && labeledDigits.length <= 15) { phone = value; continue; }
+        } else if (field === 'name' && !name) {
+          name = value; continue;
+        } else if (field === 'product' && !product) {
+          product = value; continue;
+        }
+      }
+    }
 
     var emailMatch = line.match(emailRe);
     if (emailMatch && !email) {
       var candidate = emailMatch[0];
-      if (!isOwnDomain_(candidate)) { email = candidate; continue; }
+      if (!isOwnAddress_(candidate)) { email = candidate; continue; }
     }
     var digits = line.replace(/\D/g, '');
     if (!phone && phoneRe.test(line) && digits.length >= 7 && digits.length <= 15) { phone = line; continue; }
     rest.push(line);
   }
   return {
-    name: rest[0] || '',
-    product: rest[1] || '',
-    email: email,
+    name: name || fromName || rest[0] || '',
+    product: product || rest[1] || '',
+    email: email || fromEmail,
     phone: phone,
     message: lines.join('\n').slice(0, 2000), // full original text, capped
   };

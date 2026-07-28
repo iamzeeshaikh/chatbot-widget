@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, siteIdFromQuoteCode, isLikelySpamQuote, normalizeQuoteBody } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody } from '@/lib/quoteintake'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,14 +51,36 @@ export async function POST(req: NextRequest) {
   // forward-duplicate never does regardless of the gap. Compared
   // case-insensitively — the same person's email can arrive differently
   // capitalized across a forward vs. the original submission.
+  // A cart checkout is still a lead worth recording, it just isn't one the
+  // buying partner sourced — so it gets its own tag and, through that, stays
+  // out of the Billing tab while still counting everywhere else.
+  const tag = isCheckoutOrder(bodyText) ? CHECKOUT_TAG : QUOTE_TAG
+
+  // Checkout orders dedupe on the order number, not the body text — see
+  // checkoutOrderNumber for why the text comparison can't catch a forwarded
+  // copy of the same order.
+  const orderNo = tag === CHECKOUT_TAG ? checkoutOrderNumber(bodyText) : null
+  if (orderNo) {
+    const { data: sameOrder } = await supabase
+      .from('leads')
+      .select('id')
+      .eq('site_id', siteId)
+      .ilike('message', `${CHECKOUT_TAG}%`)
+      .ilike('message', `%#${orderNo}%`)
+      .limit(1)
+    if (sameOrder && sameOrder.length > 0) {
+      return NextResponse.json({ success: true, deduped: true })
+    }
+  }
+
   if (cleanEmail) {
-    const normalized = normalizeQuoteBody(`${QUOTE_TAG}${bodyText}`)
+    const normalized = normalizeQuoteBody(`${tag}${bodyText}`)
     const { data: candidates } = await supabase
       .from('leads')
       .select('id, message')
       .eq('site_id', siteId)
       .ilike('email', cleanEmail)
-      .ilike('message', `${QUOTE_TAG}%`)
+      .ilike('message', `${tag}%`)
     const isDupe = (candidates ?? []).some((c) => normalizeQuoteBody(c.message ?? '') === normalized)
     if (isDupe) {
       return NextResponse.json({ success: true, deduped: true })
@@ -70,7 +92,7 @@ export async function POST(req: NextRequest) {
     name: typeof name === 'string' ? name.trim() || null : null,
     email: cleanEmail || null,
     phone: cleanPhone || null,
-    message: `${QUOTE_TAG}${bodyText}`,
+    message: `${tag}${bodyText}`,
     product: typeof product === 'string' ? product.trim() || null : null,
     created_at: createdAt,
   }])

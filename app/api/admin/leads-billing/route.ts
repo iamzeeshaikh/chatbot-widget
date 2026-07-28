@@ -5,7 +5,7 @@ import { LEAD_CAPTURE_ROLE, parseLeadCapture, LEAD_TRACKED_SITES } from '@/lib/l
 import { LEAD_STATUS_ROLE, parseLeadStatus, type LeadStatus } from '@/lib/leadstatus'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
 import { unpackVisitor } from '@/lib/visitor'
-import { QUOTE_TAG, stripQuoteTag, quoteSessionId } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, stripQuoteTag, quoteSessionId } from '@/lib/quoteintake'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const from = fromParam || new Date(`${y}-${pad(m + 1)}-01T00:00:00+05:00`).toISOString()
   const to = toParam || new Date(`${m === 11 ? y + 1 : y}-${pad(m === 11 ? 1 : m + 2)}-01T00:00:00+05:00`).toISOString()
 
-  const [rowsRes, quoteRowsRes, sitesRes] = await Promise.all([
+  const [rowsRes, quoteRowsRes, checkoutRowsRes, sitesRes] = await Promise.all([
     supabase
       .from('chat_logs')
       .select('session_id, site_id, message, created_at')
@@ -47,6 +47,17 @@ export async function GET(req: NextRequest) {
       .gte('created_at', from)
       .lt('created_at', to)
       .order('created_at', { ascending: false }),
+    // Checkout leads (WooCommerce cart orders, same Gmail → Apps Script path).
+    // They belong in the period TOTAL and in the per-site breakdown, but must
+    // never reach the Billable figure — a completed sale isn't a lead the
+    // agency generated, so charging per-lead for it would be wrong.
+    supabase
+      .from('leads')
+      .select('id, site_id, name, email, phone, message, created_at')
+      .ilike('message', `${CHECKOUT_TAG}%`)
+      .gte('created_at', from)
+      .lt('created_at', to)
+      .order('created_at', { ascending: false }),
     supabase.from('sites').select('site_id, name'),
   ])
 
@@ -56,6 +67,7 @@ export async function GET(req: NextRequest) {
   // Only sites the member can access (workspace + assigned-site isolation).
   const rows = (rowsRes.data ?? []).filter((r) => scope.has(r.site_id))
   const quoteRows = (quoteRowsRes.data ?? []).filter((r) => scope.has(r.site_id))
+  const checkoutRows = (checkoutRowsRes.data ?? []).filter((r) => scope.has(r.site_id))
 
   // Enrichment for the period's lead sessions (queried by session id, NOT the
   // date window — a status can be set long after the lead was captured):
@@ -67,11 +79,11 @@ export async function GET(req: NextRequest) {
   // (via the same /api/admin/lead-status endpoint chat leads use) is picked up
   // below — author/origin lookups simply find nothing for them, which is
   // correct: a quote lead has no chat session or agent reply attached.
-  const quoteSessionIds = quoteRows.map((r) => quoteSessionId(r.id))
-  const sessionIds = (rows.length || quoteRows.length)
+  const quoteSessionIds = [...quoteRows, ...checkoutRows].map((r) => quoteSessionId(r.id))
+  const sessionIds = (rows.length || quoteSessionIds.length)
     ? Array.from(new Set([...rows.map((r) => r.session_id), ...quoteSessionIds])) : ['-']
   const prevFrom = new Date(new Date(from).getTime() - (new Date(to).getTime() - new Date(from).getTime())).toISOString()
-  const [statusRes, authorRes, visRes, prevRes, prevQuoteRes] = await Promise.all([
+  const [statusRes, authorRes, visRes, prevRes, prevQuoteRes, prevCheckoutRes] = await Promise.all([
     supabase.from('chat_logs').select('session_id, message, created_at')
       .eq('role', LEAD_STATUS_ROLE).in('session_id', sessionIds)
       .order('created_at', { ascending: true }),
@@ -84,6 +96,10 @@ export async function GET(req: NextRequest) {
       .eq('role', LEAD_CAPTURE_ROLE).gte('created_at', prevFrom).lt('created_at', from),
     supabase.from('leads').select('site_id')
       .ilike('message', `${QUOTE_TAG}%`).gte('created_at', prevFrom).lt('created_at', from),
+    // Kept as its own query rather than an .or() — the tags contain spaces and
+    // brackets, which PostgREST's or() filter syntax would need escaping for.
+    supabase.from('leads').select('site_id')
+      .ilike('message', `${CHECKOUT_TAG}%`).gte('created_at', prevFrom).lt('created_at', from),
   ])
 
   const statusBySession = new Map<string, LeadStatus>()
@@ -115,7 +131,9 @@ export async function GET(req: NextRequest) {
   }
   const prevChatTotal = (prevRes?.data ?? []).filter((r) => scope.has(r.site_id)).length
   const prevQuoteTotal = (prevQuoteRes?.data ?? []).filter((r) => scope.has(r.site_id)).length
-  const prevTotal = prevChatTotal + prevQuoteTotal
+  const prevCheckoutTotal = (prevCheckoutRes?.data ?? []).filter((r) => scope.has(r.site_id)).length
+  // Same mix as `total` below, so the month-over-month comparison is like-for-like.
+  const prevTotal = prevChatTotal + prevQuoteTotal + prevCheckoutTotal
 
   const chatLeads = rows.map((r) => {
     const lead = parseLeadCapture(r.message)
@@ -166,7 +184,29 @@ export async function GET(req: NextRequest) {
     }
   }).filter((l) => l.email)
 
-  const leads = [...chatLeads, ...quoteLeads]
+  // Checkout leads (WooCommerce orders). Shaped exactly like a quote lead so
+  // the table/CSV/status machinery treats them identically — only `source`
+  // differs, and that's what keeps them out of the billable count below.
+  const checkoutLeads = checkoutRows.map((r) => {
+    const sid = quoteSessionId(r.id)
+    return {
+      session_id: sid,
+      site_id: r.site_id,
+      site_name: siteName[r.site_id] ?? r.site_id,
+      email: r.email ?? '',
+      name: r.name ?? null,
+      phone: r.phone ?? null,
+      captured_at: r.created_at,
+      status: statusBySession.get(sid) ?? ('new' as LeadStatus),
+      agent: null as string | null,
+      country: null as string | null,
+      referrer: null as string | null,
+      source: 'checkout' as const,
+      quote_message: stripQuoteTag(r.message),
+    }
+  }).filter((l) => l.email)
+
+  const leads = [...chatLeads, ...quoteLeads, ...checkoutLeads]
     .sort((a, b) => new Date(b.captured_at).getTime() - new Date(a.captured_at).getTime())
 
   // Billable count: the same customer sometimes contacts through both the
@@ -178,8 +218,14 @@ export async function GET(req: NextRequest) {
   // email to dedupe by — falls back to its own session id, so it always
   // counts as its own billable lead rather than collapsing every manual
   // mark on a site into one (an empty string would otherwise be a shared key).
-  const billableKeys = new Set(leads.map((l) => l.email ? `${l.site_id}::${l.email.toLowerCase()}` : `manual::${l.session_id}`))
+  // Checkout leads are excluded outright: they're completed cart orders, not
+  // leads the agency generated, so they count in the period total but are never
+  // charged for. `billableBase` is the population billable is deduped FROM, so
+  // the UI can report the overlap removed without checkout skewing it.
+  const billableSource = leads.filter((l) => l.source !== 'checkout')
+  const billableKeys = new Set(billableSource.map((l) => l.email ? `${l.site_id}::${l.email.toLowerCase()}` : `manual::${l.session_id}`))
   const billable = billableKeys.size
+  const billableBase = billableSource.length
 
   // Per-site breakdown.
   const bySiteMap: Record<string, number> = {}
@@ -197,5 +243,5 @@ export async function GET(req: NextRequest) {
   const byStatus: Record<string, number> = {}
   for (const l of leads) byStatus[l.status] = (byStatus[l.status] ?? 0) + 1
 
-  return NextResponse.json({ from, to, total: leads.length, billable, prevTotal, byStatus, leads, bySite, trackedInScope })
+  return NextResponse.json({ from, to, total: leads.length, billable, billableBase, prevTotal, byStatus, leads, bySite, trackedInScope })
 }

@@ -106,6 +106,9 @@ html.dark .hover\:text-indigo-800:hover { color: #c7d2fe !important; }
 html.dark .text-indigo-900, html.dark .text-indigo-950 { color: #c7d2fe !important; }
 html.dark .border-indigo-200, html.dark .border-indigo-300 { border-color: rgba(99, 102, 241, 0.4) !important; }
 html.dark .bg-purple-100 { background-color: rgba(168, 85, 247, 0.16) !important; }
+/* Selected-tab cards use the -50 shade; without this the Checkout card was
+   the only one that stayed light in dark mode. Mirrors .bg-blue-50 above. */
+html.dark .bg-purple-50 { background-color: rgba(168, 85, 247, 0.12) !important; }
 html.dark .text-purple-700 { color: #c084fc !important; }
 html.dark .border-purple-200, html.dark .border-purple-300 { border-color: rgba(168, 85, 247, 0.4) !important; }
 html.dark .bg-yellow-100 { background-color: rgba(234, 179, 8, 0.14) !important; }

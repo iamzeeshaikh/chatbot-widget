@@ -14,13 +14,34 @@
 
 export const QUOTE_TAG = '[Custom Quote] '
 
+// A completed WooCommerce checkout arriving in the same labeled inbox. It is a
+// real lead worth having on record and in the Overview counts, but it is NOT a
+// lead the buying partner sourced, so it must never reach the Billing tab —
+// which it can't, because Billing only ever queries for QUOTE_TAG.
+export const CHECKOUT_TAG = '[Checkout] '
+
 export function isQuoteLeadMessage(message: string | null | undefined): boolean {
   return !!message && message.startsWith(QUOTE_TAG)
 }
 
+export function isCheckoutLeadMessage(message: string | null | undefined): boolean {
+  return !!message && message.startsWith(CHECKOUT_TAG)
+}
+
+// Where a lead came from, for the badge in the leads table and the type filter.
+export type LeadSource = 'quote' | 'checkout' | 'chat'
+
+export function leadSource(message: string | null | undefined): LeadSource {
+  if (isQuoteLeadMessage(message)) return 'quote'
+  if (isCheckoutLeadMessage(message)) return 'checkout'
+  return 'chat'
+}
+
 export function stripQuoteTag(message: string | null | undefined): string {
   if (!message) return ''
-  return isQuoteLeadMessage(message) ? message.slice(QUOTE_TAG.length) : message
+  if (isQuoteLeadMessage(message)) return message.slice(QUOTE_TAG.length)
+  if (isCheckoutLeadMessage(message)) return message.slice(CHECKOUT_TAG.length)
+  return message
 }
 
 // Short code (matches the labels/mental-model the user already uses, e.g.
@@ -35,6 +56,7 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   KBP: 'kraftboxpack',
   TCP: 'thecandlepackaging',
   TBB: 'theburgerboxes',
+  PB: 'peptidesboxes',
 }
 
 export function siteIdFromQuoteCode(code: string): string | null {
@@ -58,21 +80,46 @@ const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?
 // filler), so the phone shape is often the only signal available.
 const BOT_PHONE_RE = /^8\d{10}$/
 
-// A completed WooCommerce checkout ("New Order: #2013 — You've received the
-// following order...") is a real sale, not a quote request — it lands in the
-// same inbox/label as quote-request notifications but isn't a lead to bill
-// for. The account owner asked for these to never be counted.
-const WOOCOMMERCE_ORDER_RE = /New Order:\s*#|Built with WooCommerce|You[’']ve received the following order/i
+// A completed WooCommerce checkout ("New order #6449 — You've received the
+// following order...") is a real sale placed through the cart, not a quote
+// request. It still gets recorded as a lead and shows a Checkout badge, but it
+// carries CHECKOUT_TAG instead of QUOTE_TAG so it stays out of Billing.
+//
+// The colon after "order" is optional: the subject line these arrive under is
+// "[Shop Cardboard Boxes]: New order #6449", while the body header uses
+// "New Order: #6449".
+const WOOCOMMERCE_ORDER_RE = /New order:?\s*#|Built with WooCommerce|You[’']ve received the following order/i
+
+export function isCheckoutOrder(bodyText: string): boolean {
+  return WOOCOMMERCE_ORDER_RE.test(bodyText)
+}
+
+// WooCommerce's order number, which is the only stable identity a checkout mail
+// has. The generic body-text dedupe can't recognise the same order twice: when
+// the SAME notification is also forwarded into the mailbox, the forward carries
+// the store name in a "From:" header while the direct copy has it as the first
+// body line, so the two normalise to different text and both get inserted.
+// (Seen for real: orders #6453–#6457 each landed twice, doubling the count.)
+// Matching on the order number instead makes a re-send — forwarded, re-labeled,
+// or re-processed — collapse onto the original every time.
+const ORDER_NUMBER_RE = /New Order:?\s*#(\d+)/i
+
+export function checkoutOrderNumber(bodyText: string): string | null {
+  const m = bodyText.match(ORDER_NUMBER_RE)
+  return m ? m[1] : null
+}
 
 // The telecom industry reserves 555-0100 through 555-0199 for fiction/testing
 // — a real customer's phone can never fall in this block, so a submission
 // carrying one (e.g. "416-555-0142") is someone testing the form, not a lead.
 const TEST_PHONE_RE = /^\d{3}555\d{4}$/
 
+// WooCommerce orders are deliberately NOT treated as spam any more — they are
+// ingested as checkout leads instead (see isCheckoutOrder above).
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
   if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
-  return SPAM_SIGNATURE_RE.test(bodyText) || WOOCOMMERCE_ORDER_RE.test(bodyText)
+  return SPAM_SIGNATURE_RE.test(bodyText)
 }
 
 // Strip the QUOTE_TAG, any forwarded-message header block, and the
@@ -84,8 +131,7 @@ const HEADER_LINE_RE = /^(From|To|Cc|Bcc|Date|Subject|Sent):/i
 const FWD_MARKER_RE = /^-+\s*Forwarded message\s*-+$/i
 
 export function normalizeQuoteBody(raw: string): string {
-  let body = raw
-  if (body.startsWith(QUOTE_TAG)) body = body.slice(QUOTE_TAG.length)
+  const body = stripQuoteTag(raw)
   const out: string[] = []
   for (const rawLine of body.split('\n')) {
     const line = rawLine.trim()

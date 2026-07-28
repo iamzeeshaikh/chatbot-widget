@@ -9,7 +9,7 @@ import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadsta
 import { isClosingMessage } from '@/lib/closing'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
-import { isQuoteLeadMessage, stripQuoteTag } from '@/lib/quoteintake'
+import { isQuoteLeadMessage, stripQuoteTag, leadSource, type LeadSource } from '@/lib/quoteintake'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -18,10 +18,37 @@ const SITE_URLS: Record<string, string> = {
   floridabasketball: 'floridabasketballjerseys.com',
   baseballjerseys: 'thebaseballjerseys.com',
   zeecustomboxes: 'zeecustomboxes.com.au',
-  zeepack: 'zeepack.com.au',
   burgersleeves: 'burgersleeves.com.au',
   leadgen: 'leadgen.zeeops.dev',
   shopcardboardboxes: 'shopcardboardboxes.com',
+  thetubepackaging: 'thetubepackaging.com',
+  kraftboxpack: 'kraftboxpack.com',
+  thecandlepackaging: 'thecandlepackaging.com',
+  theburgerboxes: 'theburgerboxes.com',
+  smallfoodboxes: 'smallfoodboxes.com',
+  thepapercups: 'thepapercups.com',
+  thewaxpapers: 'thewaxpapers.co',
+  thecustomstickers: 'thecustomstickers.co',
+  zeepack: 'zeepack.co',
+  thecerealboxes: 'thecerealboxes.com',
+  hotdogtrays: 'hotdogtrays.com',
+  theburgersleeves: 'theburgersleeves.com',
+  thecandlesleeves: 'thecandlesleeves.com',
+  cardboardcups: 'cardboardcups.com',
+  thecoffeesleeves: 'thecoffeesleeves.com',
+  shopbubblemailers: 'shopbubblemailers.com',
+  insertshub: 'insertshub.com',
+  thediecutstickers: 'thediecutstickers.com',
+  customperfumeboxes: 'customperfumeboxes.com',
+  shopdisplayboxes: 'shopdisplayboxes.com',
+  peptidesboxes: 'peptidesboxes.com',
+}
+
+// Each site's favicon via Google's favicon service (falls back to a coloured
+// letter tile in <SiteIcon> when the domain is unknown or the icon fails).
+function siteFaviconUrl(siteId: string): string {
+  const d = SITE_URLS[siteId]
+  return d ? `https://www.google.com/s2/favicons?domain=${d}&sz=64` : ''
 }
 
 const SITE_ACCENT: Record<string, string> = {
@@ -31,7 +58,6 @@ const SITE_ACCENT: Record<string, string> = {
   floridabasketball: '#8b5cf6',
   baseballjerseys: '#10b981',
   zeecustomboxes: '#2563eb',
-  zeepack: '#0891b2',
   burgersleeves: '#d97706',
   leadgen: '#6366f1',
   shopcardboardboxes: '#b45309',
@@ -41,6 +67,21 @@ const SITE_ACCENT: Record<string, string> = {
   theburgerboxes: '#c0392b',
   smallfoodboxes: '#2e7d32',
   thepapercups: '#6d4c2f',
+  thewaxpapers: '#ca8a04',
+  thecustomstickers: '#ec4899',
+  zeepack: '#16a34a',
+  thecerealboxes: '#ea580c',
+  hotdogtrays: '#b91c1c',
+  theburgersleeves: '#d97706',
+  thecandlesleeves: '#9333ea',
+  cardboardcups: '#a16207',
+  thecoffeesleeves: '#6f4e37',
+  shopbubblemailers: '#0ea5e9',
+  insertshub: '#475569',
+  thediecutstickers: '#7c3aed',
+  customperfumeboxes: '#be185d',
+  shopdisplayboxes: '#0f766e',
+  peptidesboxes: '#0284c7',
 }
 
 const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="40" width="76" height="52" rx="5" fill="#2563eb"/><polygon points="12,40 50,22 88,40" fill="#1d4ed8"/><rect x="38" y="40" width="24" height="52" fill="#93c5fd" opacity="0.35"/></svg>')}`
@@ -48,8 +89,8 @@ const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="htt
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null }
-interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[] }
-interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string }
+interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
+interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
 // Visitors-history row (Zendesk-style history): a Visitor plus whether the
 // session ever chatted, whether the chat is still waiting on an agent reply
@@ -65,13 +106,13 @@ function hotPoints(v: { pages: number; visits: number; created_at: string; last_
     + (v.visits >= 4 ? 2 : v.visits >= 2 ? 1 : 0)
 }
 const isHotVisitor = (v: { pages: number; visits: number; created_at: string; last_seen: string }) => hotPoints(v) >= 3
-interface AnalyticsPoint { label: string; visitors: number; unique: number; chats: number }
+interface AnalyticsPoint { label: string; visitors: number; unique: number; chats: number; picked?: number; notPicked?: number }
 // `email` is null only for an admin's manual mark (see markLeadManually) —
 // every automatic capture and every quote lead has one.
-interface BillingLead { session_id: string; site_id: string; site_name: string; email: string | null; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null; source: 'chat' | 'quote'; manual?: boolean; quote_message?: string }
-interface BillingData { from: string; to: string; total: number; billable: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
+interface BillingLead { session_id: string; site_id: string; site_name: string; email: string | null; name: string | null; phone: string | null; captured_at: string; status: LeadStatus; agent: string | null; country: string | null; referrer: string | null; source: 'chat' | 'quote' | 'checkout'; manual?: boolean; quote_message?: string }
+interface BillingData { from: string; to: string; total: number; billable: number; billableBase: number; prevTotal: number; byStatus: Record<string, number>; leads: BillingLead[]; bySite: { site_id: string; site_name: string; count: number }[] }
 interface PerfAgent { id: string; email: string; builtin: boolean; former: boolean; handled: number; replies: number; avgResponseMs: number | null; slowReplies: number; measuredReplies: number; leads: number; dropped: number; proactive: number; lastReplyAt: string | null }
-interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number; chatSessions: { session_id: string; site_id: string }[] }
+interface PerfDaily { date: string; visitors: number; chats: number; picked: number; notPicked: number; chatSessions: { session_id: string; site_id: string }[]; byAgent?: { email: string; picked: number }[] }
 interface PerfData { from: string; to: string; summary: { totalConversations: number; answeredConversations: number; totalLeads: number; totalMissed: number; totalUnanswered: number; ignoredVisitors: number; totalReplies: number; attributedReplies: number; avgResponseMs: number | null }; agents: PerfAgent[]; daily: PerfDaily[]; unattributedReplies: number }
 interface VisitorContact { name: string; email: string; phone: string; notes: string }
 interface VisitorDetail {
@@ -199,6 +240,51 @@ function cleanReferrer(r: string | null): string {
   try { return new URL(r).hostname.replace(/^www\./, '') || 'Direct' } catch { return 'Direct' }
 }
 
+// Short, human name for an agent from their email (ahmed@zeeops.dev → "ahmed").
+// Used on the compact assignment badges where the full email won't fit.
+function agentShort(email: string | null | undefined): string {
+  if (!email) return ''
+  const name = email.split('@')[0] || email
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+// A site's favicon, falling back to a coloured letter tile (its accent colour +
+// first letter) when the domain is unknown or the icon fails to load.
+function SiteIcon({ siteId, name, size = 32, accent }: { siteId: string; name: string; size?: number; accent: string }) {
+  const [failed, setFailed] = useState(false)
+  const url = siteFaviconUrl(siteId)
+  if (url && !failed) {
+    return (
+      <img src={url} alt="" width={size} height={size} onError={() => setFailed(true)}
+        className="rounded-lg object-contain bg-white border border-gray-200 shrink-0" style={{ width: size, height: size, padding: Math.max(2, size * 0.12) }} />
+    )
+  }
+  return (
+    <div className="rounded-lg flex items-center justify-center text-white font-bold shrink-0"
+      style={{ width: size, height: size, backgroundColor: accent, fontSize: size * 0.4 }}>
+      {name[0]?.toUpperCase()}
+    </div>
+  )
+}
+
+// Compact "who's handling this chat" badge, shown on visitor/chat cards so every
+// agent can see a chat is already picked up before they start replying to it.
+function AssignBadge({ email, me }: { email: string | null | undefined; me: string }) {
+  if (!email) {
+    return (
+      <span className="text-[9px] font-medium text-gray-500 bg-gray-100 border border-gray-200 rounded-full px-1.5 py-px whitespace-nowrap">⚪ Unassigned</span>
+    )
+  }
+  const mine = email === me
+  return (
+    <span
+      title={mine ? `Assigned to you (${email})` : `Assigned to ${email}`}
+      className={`text-[9px] font-semibold rounded-full px-1.5 py-px whitespace-nowrap border ${mine ? 'text-green-700 bg-green-100 border-green-200' : 'text-amber-700 bg-amber-100 border-amber-200'}`}>
+      {mine ? '🟢 You' : `🙋 ${agentShort(email)}`}
+    </span>
+  )
+}
+
 // What the visitor is currently viewing: page title if known, else a tidy path.
 function viewingLabel(v: { page_title: string | null; page_url: string | null }): string {
   if (v.page_title && v.page_title.trim()) return v.page_title.trim()
@@ -253,18 +339,37 @@ function OverviewSkeleton() {
   )
 }
 
+// Where a lead came from. Checkout leads are cart orders pulled out of Gmail:
+// they count everywhere a lead counts EXCEPT the Billing tab, which only ever
+// queries QUOTE_TAG rows (see lib/quoteintake.ts).
+const LEAD_SOURCE_BADGE: Record<LeadSource, { label: string; cls: string }> = {
+  quote: { label: '📧 Quote', cls: 'text-amber-700 bg-amber-100 border-amber-200' },
+  checkout: { label: '🛒 Checkout', cls: 'text-purple-700 bg-purple-100 border-purple-200' },
+  chat: { label: '💬 Chat', cls: 'text-blue-700 bg-blue-100 border-blue-200' },
+}
+
+function LeadSourceBadge({ message, className = '' }: { message: string | null | undefined; className?: string }) {
+  const { label, cls } = LEAD_SOURCE_BADGE[leadSource(message)]
+  return <span className={`text-[11px] font-semibold border rounded-full px-2 py-0.5 whitespace-nowrap ${cls} ${className}`}>{label}</span>
+}
+
 // Lightweight dependency-free SVG line chart: Visitors vs Chats over time.
 const UNIQUE_COLOR = '#8b5cf6'
+// Shared by the legend, the lines and the hover tooltip so a series always
+// reads as the same colour wherever it appears.
+const PICKED_COLOR = '#22c55e'
+const NOTPICKED_COLOR = '#f87171'
+const CHATS_COLOR = '#f59e0b'
 
 function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoint[]; accent: string; totalUnique: number }) {
   const W = 760, H = 220, padL = 30, padR = 14, padT = 14, padB = 26
   const n = points.length
-  const maxV = Math.max(1, ...points.map((p) => Math.max(p.visitors, p.chats)))
+  const maxV = Math.max(1, ...points.map((p) => Math.max(p.visitors, p.chats, p.picked ?? 0, p.notPicked ?? 0)))
   const x = (i: number) => padL + (n <= 1 ? 0 : (i * (W - padL - padR)) / (n - 1))
   const y = (val: number) => padT + (H - padT - padB) * (1 - val / maxV)
 
   // Catmull-Rom → cubic bezier for a gently smoothed line (k tunes the curve).
-  const smooth = (key: 'visitors' | 'chats' | 'unique'): string => {
+  const smooth = (key: 'visitors' | 'chats' | 'unique' | 'picked' | 'notPicked'): string => {
     const pts = points.map((p, i) => ({ x: x(i), y: y(p[key] ?? 0) }))
     if (pts.length === 0) return ''
     if (pts.length < 3) return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
@@ -291,6 +396,8 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
 
   const totalVisitors = points.reduce((s, p) => s + p.visitors, 0)
   const totalChats = points.reduce((s, p) => s + p.chats, 0)
+  const totalPicked = points.reduce((s, p) => s + (p.picked ?? 0), 0)
+  const totalNotPicked = points.reduce((s, p) => s + (p.notPicked ?? 0), 0)
   const labelEvery = Math.max(1, Math.ceil(n / 6))
   const gridVals = [0, 0.5, 1].map((f) => Math.round(maxV * f))
   const gid = accent.replace('#', '')
@@ -312,7 +419,13 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
         <span className="flex items-center gap-1.5" title="Distinct people (persistent browser id; a returning person counts once) — the dashed line">
           <span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: UNIQUE_COLOR }} /><span className="text-gray-700">Unique visitors</span><span className="text-gray-500">({totalUnique})</span>
         </span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full bg-amber-400" /><span className="text-gray-700">Chats</span><span className="text-gray-500">({totalChats})</span></span>
+        <span className="flex items-center gap-1.5" title="Visits where an agent replied">
+          <span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: PICKED_COLOR }} /><span className="text-gray-700">Picked</span><span className="text-gray-500">({totalPicked})</span>
+        </span>
+        <span className="flex items-center gap-1.5" title="Visits that never got an agent reply">
+          <span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: NOTPICKED_COLOR }} /><span className="text-gray-700">Not picked</span><span className="text-gray-500">({totalNotPicked})</span>
+        </span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: CHATS_COLOR }} /><span className="text-gray-700">Chats</span><span className="text-gray-500">({totalChats})</span></span>
       </div>
       {totalVisitors === 0 && totalChats === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -336,7 +449,12 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
               <line key={i} x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="#111827" strokeOpacity={0.06} strokeWidth={1} strokeDasharray="3 4" />
             ))}
             <path d={areaFor('visitors')} fill={`url(#grad-v-${gid})`} stroke="none" />
-            <path d={smooth('chats')} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            {/* Picked / not picked sit under the headline series: they split the
+                same visitor total, so they stay thinner and read as a breakdown
+                rather than competing with the Visits line. */}
+            <path d={smooth('notPicked')} fill="none" stroke={NOTPICKED_COLOR} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={smooth('picked')} fill="none" stroke={PICKED_COLOR} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={smooth('chats')} fill="none" stroke={CHATS_COLOR} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             <path d={smooth('unique')} fill="none" stroke={UNIQUE_COLOR} strokeWidth={1.75} strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" />
             <path d={smooth('visitors')} fill="none" stroke={accent} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
           </svg>
@@ -363,7 +481,9 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
                   <p className="text-[10px] text-gray-500 mb-0.5 whitespace-nowrap">{points[hover].label}</p>
                   <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visits</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].visitors}</span></p>
                   <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: UNIQUE_COLOR }} /><span className="text-gray-700">Unique</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].unique ?? 0}</span></p>
-                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="text-gray-700">Chats</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].chats}</span></p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: PICKED_COLOR }} /><span className="text-gray-700">Picked</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].picked ?? 0}</span></p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: NOTPICKED_COLOR }} /><span className="text-gray-700">Not picked</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].notPicked ?? 0}</span></p>
+                  <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: CHATS_COLOR }} /><span className="text-gray-700">Chats</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].chats}</span></p>
                 </div>
               </div>
             </>
@@ -387,7 +507,7 @@ const WAITING_REPEAT_MS = 3 * 1000
 const WAITING_FRESH_MS = 30 * 60 * 1000
 // Live-visitor poll: also the worst-case delay between a visitor landing on a
 // site and the arrival chime, so it's kept tight.
-const VISITOR_POLL_MS = 3 * 1000
+const VISITOR_POLL_MS = 5 * 1000
 
 export default function Dashboard() {
   const [tab, setTab] = useState<'overview' | 'conversations' | 'visitors' | 'billing' | 'performance'>('overview')
@@ -503,19 +623,24 @@ export default function Dashboard() {
   // Recent Leads mixes two very different kinds of row — a real chat
   // conversation the bot captured, and a quote-request email pulled from
   // Gmail (no chat session at all) — filterable so it's easy to see just one.
-  const [overviewLeadType, setOverviewLeadType] = useState<'all' | 'chat' | 'quote'>('all')
+  const [overviewLeadType, setOverviewLeadType] = useState<'all' | LeadSource>('all')
   // A Quote-type Recent Lead has no chat session to open — clicking one pops
   // its full details here instead (mirrors the Billing tab's quote modal).
   const [viewOverviewLead, setViewOverviewLead] = useState<Lead | null>(null)
   // Performance tab's Daily performance table: click a day's Chats count to
   // see exactly those sessions, instead of just a number.
   const [viewDayChats, setViewDayChats] = useState<PerfDaily | null>(null)
+  // …and click a day's Picked-up count to see which agent took how many.
+  const [viewDayAgents, setViewDayAgents] = useState<PerfDaily | null>(null)
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
   const OVERVIEW_LEADS_PER_PAGE = 40
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
   const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
   const [visitorHistoryLoaded, setVisitorHistoryLoaded] = useState(false)
   const [blockedIps, setBlockedIps] = useState<string[]>([])
+  // Team presence — who's on shift right now (Zendesk-style online list).
+  const [teamAgents, setTeamAgents] = useState<{ email: string; online: boolean; lastSeen: string | null }[]>([])
+  const [showTeam, setShowTeam] = useState(false)
   const [histSiteFilter, setHistSiteFilter] = useState('')
   const [histChatOnly, setHistChatOnly] = useState(false)
   const [histStatusFilter, setHistStatusFilter] = useState<'all' | 'live' | 'left'>('all')
@@ -562,10 +687,12 @@ export default function Dashboard() {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [messagesLoading, setMessagesLoading] = useState(false)
   const [visitorTyping, setVisitorTyping] = useState(false)
   const lastAgentTypingPing = useRef(0)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
+  const [claimingSession, setClaimingSession] = useState(false)
   const [togglingMode, setTogglingMode] = useState(false)
   const replyFileRef = useRef<HTMLInputElement>(null)
   const [uploadingFile, setUploadingFile] = useState(false)
@@ -596,6 +723,8 @@ export default function Dashboard() {
   const [visitorDetail, setVisitorDetail] = useState<VisitorDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [contactForm, setContactForm] = useState<VisitorContact>({ name: '', email: '', phone: '', notes: '' })
+  // Session we've already auto-filled contact fields for, so the poll doesn't
+  // keep re-filling a field the agent deliberately cleared.
   const [savingContact, setSavingContact] = useState(false)
   const [contactSaved, setContactSaved] = useState(false)
   // Admin-only: manually count this conversation as a lead when the customer
@@ -627,7 +756,7 @@ export default function Dashboard() {
   // Gmail quote-request emails) are different enough — different columns,
   // different "what does this mean" — that mixing them in one table read as
   // confusing. Split into two switchable views on the same page.
-  const [billingLeadType, setBillingLeadType] = useState<'chat' | 'quote'>('chat')
+  const [billingLeadType, setBillingLeadType] = useState<'chat' | 'quote' | 'checkout'>('chat')
   // Click a site in the "By site" breakdown to filter the table below to
   // just that site — null means "all sites" (the default).
   const [billingSiteFilter, setBillingSiteFilter] = useState<string | null>(null)
@@ -780,26 +909,29 @@ export default function Dashboard() {
       if (ctx.state === 'suspended' && ctx.resume) ctx.resume()
 
       const master = ctx.createGain()
-      master.gain.value = 1.0
+      master.gain.value = 0.9
       const shaper = ctx.createWaveShaper()
       const curve = new Float32Array(1024)
       for (let c = 0; c < 1024; c++) {
         const x = (c / 1023) * 2 - 1
-        curve[c] = Math.tanh(x * 1.8)
+        curve[c] = Math.tanh(x * 1.1) // gentler saturation = warm, not harsh
       }
       shaper.curve = curve
       master.connect(shaper); shaper.connect(ctx.destination)
 
-      ;[[784, 0], [1047, 0.13], [1319, 0.26]].forEach(([freq, delay]) => {
+      // Warm, pleasant three-note rising bell (C6→E6→G6) — sine body + a soft
+      // triangle overtone, no bright sawtooth. Still cuts through a room, but easy
+      // on the ear and repeatable.
+      ;[[1047, 0], [1319, 0.14], [1568, 0.28]].forEach(([freq, delay]) => {
         const t = ctx.currentTime + delay
-        ;([['sine', freq, 1.0], ['triangle', freq * 2, 0.6], ['sawtooth', freq, 0.35]] as [OscillatorType, number, number][]).forEach(([type, f, peak]) => {
+        ;([['sine', freq, 0.95], ['triangle', freq * 2, 0.18]] as [OscillatorType, number, number][]).forEach(([type, f, peak]) => {
           const osc = ctx.createOscillator(); const gain = ctx.createGain()
           osc.connect(gain); gain.connect(master)
           osc.type = type; osc.frequency.value = f
           gain.gain.setValueAtTime(0, t)
-          gain.gain.linearRampToValueAtTime(peak, t + 0.012)
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
-          osc.start(t); osc.stop(t + 0.55)
+          gain.gain.linearRampToValueAtTime(peak, t + 0.02)
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6)
+          osc.start(t); osc.stop(t + 0.65)
         })
       })
     } catch { /* ignore */ }
@@ -950,6 +1082,18 @@ export default function Dashboard() {
     dashSoundReady.current = true
 
     setSessions(incoming)
+    // Keep the OPEN conversation's assignment + mode in sync with the poll, so
+    // when another agent claims/releases the chat you're viewing, your header
+    // and the reply-box lock update within one poll (without this, selectedSession
+    // kept its stale open-time assignment and never locked).
+    setSelectedSession((cur) => {
+      if (!cur) return cur
+      const fresh = incoming.find((s) => s.session_id === cur.session_id)
+      if (!fresh) return cur
+      const nextAssigned = fresh.assignedTo ?? null
+      if (cur.assignedTo === nextAssigned && cur.mode === fresh.mode) return cur
+      return { ...cur, assignedTo: nextAssigned, mode: fresh.mode }
+    })
     setSessionsLoaded(true)
     if (typeof data.bot_enabled === 'boolean') setBotGlobalOff(!data.bot_enabled)
   }, [playDashSound])
@@ -959,9 +1103,25 @@ export default function Dashboard() {
   useEffect(() => {
     if (!authReady) return
     fetchSessions()
-    const iv = setInterval(fetchSessions, 6000)
+    const iv = setInterval(fetchSessions, 13000)
     return () => clearInterval(iv)
   }, [authReady, fetchSessions])
+
+  // Load the IP blocklist once for admins, so the "Ban / Unban" state is correct
+  // on the conversation panel too (not just the Visitors tab).
+  useEffect(() => {
+    if (!authReady || userRole !== 'admin') return
+    fetch('/api/admin/block').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.ips) setBlockedIps(d.ips) }).catch(() => {})
+  }, [authReady, userRole])
+
+  // Team presence: refresh who's online every 20s while signed in.
+  useEffect(() => {
+    if (!authReady) return
+    const load = () => fetch('/api/admin/presence').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.agents) setTeamAgents(d.agents) }).catch(() => {})
+    load()
+    const iv = setInterval(load, 20000)
+    return () => clearInterval(iv)
+  }, [authReady])
 
   const fetchVisitors = useCallback(async () => {
     const data = await fetch('/api/visitor/active').then((r) => r.json()).catch(() => ({ visitors: [] }))
@@ -1005,16 +1165,34 @@ export default function Dashboard() {
 
   const fetchMessages = useCallback(async (sessionId: string) => {
     const data = await fetch(`/api/admin/messages?sessionId=${sessionId}`).then((r) => r.json()).catch(() => ({ messages: [] }))
-    setMessages(data.messages ?? [])
+    const next: ChatMsg[] = data.messages ?? []
+    // Skip the state update (and the transcript re-render + scroll work it
+    // triggers) when the 3s poll returns the same messages — the common idle
+    // case. Keeps an open chat from re-rendering every 3 seconds for nothing.
+    setMessages((prev) => {
+      if (prev.length === next.length && (prev.length === 0 ||
+        (prev[prev.length - 1].id === next[next.length - 1].id &&
+         prev[prev.length - 1].message === next[next.length - 1].message))) return prev
+      return next
+    })
     setVisitorTyping(data.visitorTyping === true)
   }, [])
 
+  // Keyed on the session ID, NOT the whole selectedSession object: assignment
+  // updates replace that object (new identity) every poll, and we must not
+  // reload/flash the transcript for those — only for a genuine chat switch.
+  const selectedSessionId = selectedSession?.session_id
   useEffect(() => {
-    if (!selectedSession) return
-    fetchMessages(selectedSession.session_id)
-    const iv = setInterval(() => fetchMessages(selectedSession.session_id), 3000)
+    if (!selectedSessionId) return
+    // Clear immediately so switching chats shows the NEW one loading, not the
+    // previous chat's transcript lingering (which read as "my click did nothing"
+    // and made agents click repeatedly).
+    setMessages([])
+    setMessagesLoading(true)
+    fetchMessages(selectedSessionId).finally(() => setMessagesLoading(false))
+    const iv = setInterval(() => fetchMessages(selectedSessionId), 3000)
     return () => clearInterval(iv)
-  }, [selectedSession, fetchMessages])
+  }, [selectedSessionId, fetchMessages])
 
   // Record whether the agent is at (or near) the bottom of the message panel,
   // so we know whether it's safe to auto-scroll on the next update.
@@ -1064,16 +1242,24 @@ export default function Dashboard() {
     if (withSpinner) setDetailLoading(false)
   }, [])
 
+  // Keyed on session ID (not the object) so an assignment update — which
+  // replaces selectedSession every poll — doesn't reset the contact/tag fields
+  // the agent is editing or re-flash the detail spinner. Only a real switch
+  // re-seeds and reloads.
   useEffect(() => {
-    if (!selectedSession) { setVisitorDetail(null); return }
+    if (!selectedSessionId) { setVisitorDetail(null); return }
     setContactSaved(false)
-    setTags(selectedSession.tags ?? []); setTagInput('')
+    setTags(selectedSession?.tags ?? []); setTagInput('')
     // Translation is per-conversation and off by default.
     setTranslateOn(false); setTranslateOut(false); setMsgAnalysis({})
-    fetchVisitorDetail(selectedSession.session_id, true)
-    const iv = setInterval(() => fetchVisitorDetail(selectedSession.session_id, false), 15000)
+    fetchVisitorDetail(selectedSessionId, true)
+    const iv = setInterval(() => fetchVisitorDetail(selectedSessionId, false), 20000)
     return () => clearInterval(iv)
-  }, [selectedSession, fetchVisitorDetail])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSessionId, fetchVisitorDetail])
+
+  // (Contact auto-fill from chat is done server-side in /api/admin/visitor, so
+  // the saved-contact seed already arrives pre-filled — no client race here.)
 
   // Detect language + fetch English translation for any visitor text messages we
   // haven't analysed yet (batched, cached by id). Runs on message updates so new
@@ -1198,14 +1384,77 @@ export default function Dashboard() {
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
       if (t?.translation) outgoing = t.translation
     }
-    await fetch('/api/admin/reply', {
+    const resp = await fetch('/api/admin/reply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: selectedSession.session_id, siteId: selectedSession.site_id, message: outgoing }),
     })
+    const res = await resp.json().catch(() => null)
+    // Locked by another agent (race): don't send. Reflect the real owner so the
+    // box locks, and tell the agent to take over.
+    if (resp.status === 409) {
+      if (res?.assignedTo) applyAssignment(selectedSession.session_id, res.assignedTo)
+      setUploadError(`🔒 ${agentShort(res?.assignedTo)} took this chat — take over to reply.`)
+      setSending(false)
+      return
+    }
+    // Replying auto-claims an unassigned chat (server returns the assignee).
+    if (res?.assignedTo) applyAssignment(selectedSession.session_id, res.assignedTo)
     setReplyText('')
     await fetchMessages(selectedSession.session_id)
     setSending(false)
   }
+
+  // Reflect a new assignee across both the list and the open conversation, so
+  // every card and the header update instantly without waiting for the poll.
+  const applyAssignment = useCallback((sessionId: string, email: string | null) => {
+    setSessions((prev) => prev.map((s) => s.session_id === sessionId ? { ...s, assignedTo: email } : s))
+    setSelectedSession((s) => s && s.session_id === sessionId ? { ...s, assignedTo: email } : s)
+  }, [])
+
+  // "Assign to me" / "Release" from the conversation header.
+  async function claimSession(claim: boolean) {
+    if (!selectedSession || claimingSession) return
+    setClaimingSession(true)
+    const optimistic = claim ? userEmail : null
+    applyAssignment(selectedSession.session_id, optimistic)
+    const res = await fetch('/api/admin/assign', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: selectedSession.session_id, siteId: selectedSession.site_id, action: claim ? 'claim' : 'release' }),
+    }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    // Reconcile with the server's authoritative answer (e.g. a release that was
+    // refused because someone else holds the chat).
+    if (res) applyAssignment(selectedSession.session_id, res.assignedTo ?? null)
+    setClaimingSession(false)
+  }
+
+  // Close a chat tab: release (unassign) that specific session so it leaves this
+  // agent's tab bar and returns to the unassigned pool. If it's the open chat,
+  // deselect it too. Works on any session, not just the selected one.
+  async function closeChatTab(sessionId: string, siteId: string) {
+    applyAssignment(sessionId, null) // optimistic
+    if (selectedSession?.session_id === sessionId) setSelectedSession(null)
+    const res = await fetch('/api/admin/assign', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, siteId, action: 'release' }),
+    }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (res) applyAssignment(sessionId, res.assignedTo ?? null)
+  }
+
+  // Auto-pick-up: opening a chat that nobody holds assigns it to you, so the
+  // moment you start reading it every other agent sees it's being handled.
+  // Claim (lock) an unassigned chat the moment this agent ENGAGES with it (starts
+  // typing / sends). Merely opening a chat does NOT claim it, so other agents can
+  // still view it. Never steals an already-assigned chat — the server's
+  // onlyIfFree guard keeps ownership put, and we reconcile to what it reports.
+  const claimIfFree = useCallback(async (session: Session) => {
+    if (session.assignedTo) return // already owned (by anyone) — leave it
+    applyAssignment(session.session_id, userEmail) // optimistic "You" (also guards repeat keystrokes)
+    const res = await fetch('/api/admin/assign', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: session.session_id, siteId: session.site_id, action: 'claim', onlyIfFree: true }),
+    }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (res) applyAssignment(session.session_id, res.assignedTo ?? null)
+  }, [applyAssignment, userEmail])
 
   // Agent sends a file to the visitor. Uploads via the same endpoint as the
   // widget (authenticated here), which saves it as an 'admin' message and flips
@@ -1220,8 +1469,13 @@ export default function Dashboard() {
     fd.append('siteId', selectedSession.site_id)
     fd.append('sessionId', selectedSession.session_id)
     const res = await fetch('/api/upload', { method: 'POST', body: fd })
-      .then((r) => r.json().then((d) => ({ ok: r.ok, d }))).catch(() => ({ ok: false, d: null }))
+      .then((r) => r.json().then((d) => ({ ok: r.ok, status: r.status, d }))).catch(() => ({ ok: false, status: 0, d: null }))
     setUploadingFile(false)
+    if (res.status === 409) { // locked by another agent
+      if (res.d?.assignedTo) applyAssignment(selectedSession.session_id, res.d.assignedTo)
+      setUploadError(`🔒 ${agentShort(res.d?.assignedTo)} is handling this chat — take over to send.`)
+      return
+    }
     if (!res.ok) { setUploadError(res.d?.error || 'Upload failed'); return }
     setSelectedSession((s) => s ? { ...s, mode: 'human' } : s)
     setSessions((prev) => prev.map((s) => s.session_id === selectedSession.session_id ? { ...s, mode: 'human' } : s))
@@ -1229,13 +1483,16 @@ export default function Dashboard() {
   }
 
   async function openVisitorSession(visitor: Visitor) {
-    const session: Session = {
+    // Prefer the already-loaded session (carries real mode/assignedTo/lead) so
+    // the header reflects the true assignment instead of a blank synthetic one.
+    const existing = sessions.find((s) => s.session_id === visitor.session_id)
+    const session: Session = existing ?? {
       session_id: visitor.session_id, site_id: visitor.site_id,
       site_name: visitor.site_name, preview: visitor.page_url ?? '',
       last_at: visitor.last_seen, message_count: 0, mode: 'bot', lead: null,
     }
     setSelectedSession(session)
-    setSessions((prev) => prev.some((s) => s.session_id === visitor.session_id) ? prev : [session, ...prev])
+    if (!existing) setSessions((prev) => [session, ...prev])
   }
 
   // Open a specific conversation by sessionId: prefer the already-loaded session
@@ -1324,7 +1581,7 @@ export default function Dashboard() {
     const esc = (v: string | null) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const header = ['Type', 'Email', 'Name', 'Phone', 'Site', 'Status', 'Agent', 'Country', 'Origin', 'Date Captured']
     const rows = billing.leads.map((l) => [
-      esc(l.source === 'quote' ? 'Custom Quote' : 'Chat'), esc(l.email ?? (l.manual ? 'Marked as lead (no contact info)' : '')), esc(l.name), esc(l.phone), esc(l.site_name),
+      esc(l.source === 'quote' ? 'Custom Quote' : l.source === 'checkout' ? 'Checkout' : 'Chat'), esc(l.email ?? (l.manual ? 'Marked as lead (no contact info)' : '')), esc(l.name), esc(l.phone), esc(l.site_name),
       esc(l.status), esc(l.agent), esc(l.country), esc(cleanReferrer(l.referrer)),
       esc(new Date(l.captured_at).toISOString()),
     ].join(','))
@@ -1404,6 +1661,11 @@ export default function Dashboard() {
   // "Billable Leads" card, not here.
   const overviewSummaryLeads = summaryLeads.filter((l) => inScope(l.site_id))
   const roleSessions = sessions.filter((s) => inScope(s.site_id))
+  // Assignee email per session, from the polled conversations. Lets the live-
+  // visitor cards (whose data comes from a separate presence feed) show who has
+  // picked up a chat, keyed by the shared session_id.
+  const assignmentBySession: Record<string, string> = {}
+  for (const s of sessions) if (s.assignedTo) assignmentBySession[s.session_id] = s.assignedTo
   // Only count a visitor as "live" if their session is recent. A multi-hour
   // on-site time means a stale/carried-over session (e.g. an old open tab still
   // pinging) — never show those as live, mirroring the server cap.
@@ -1412,6 +1674,16 @@ export default function Dashboard() {
     const created = asUtcIso(v.created_at)
     if (created && Date.now() - new Date(created).getTime() > LIVE_MAX_ON_SITE_MS) return false
     return true
+  }).sort((a, b) => {
+    // STABLE order by first-seen (created_at), tie-broken by session_id. A
+    // visitor's created_at never changes, so cards keep a fixed position instead
+    // of jumping every poll (the server orders by last_seen, which shuffles as
+    // visitors ping). This is what makes a card clickable without it moving out
+    // from under the cursor mid-click.
+    const ca = asUtcIso(a.created_at) ?? a.created_at ?? ''
+    const cb = asUtcIso(b.created_at) ?? b.created_at ?? ''
+    if (ca !== cb) return ca < cb ? -1 : 1
+    return a.session_id < b.session_id ? -1 : 1
   })
   // Show the Billing tab only when the member can access a lead-tracked site.
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
@@ -1425,6 +1697,10 @@ export default function Dashboard() {
   // which happens on every poll, so it flips within seconds of a window boundary.)
   const scheduledBotOff = !!selectedSession && isBotOffBySchedule(selectedSession.site_id)
   const botEffectivelyActive = !botGlobalOff && !!selectedSession && selectedSession.mode === 'bot' && !scheduledBotOff
+  // Hard lock: this chat belongs to ANOTHER agent — this agent may view it but
+  // not message (reply + file are blocked) until they "Take over" or the owner
+  // releases it. Enforced on the server too (reply/upload return 409).
+  const lockedByOther = !!selectedSession?.assignedTo && selectedSession.assignedTo !== userEmail
 
   // ── Stats derived ──────────────────────────────────────────────────────────
   // Every timestamp in this app is DISPLAYED in Pakistan time (formatDateTime),
@@ -1470,7 +1746,7 @@ export default function Dashboard() {
   })
   const siteFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
   const overviewFilteredLeads = overviewLeadType === 'all' ? siteFilteredLeads
-    : siteFilteredLeads.filter((l) => isQuoteLeadMessage(l.message) === (overviewLeadType === 'quote'))
+    : siteFilteredLeads.filter((l) => leadSource(l.message) === overviewLeadType)
   const overviewLeadPageCount = Math.max(1, Math.ceil(overviewFilteredLeads.length / OVERVIEW_LEADS_PER_PAGE))
   const overviewLeadPageClamped = Math.min(overviewLeadPage, overviewLeadPageCount - 1)
   const overviewLeadsPageRows = overviewFilteredLeads.slice(
@@ -1590,6 +1866,35 @@ export default function Dashboard() {
             className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200' : 'bg-gray-100 text-gray-500 border-gray-200 hover:text-gray-600'}`}>
             {soundOn ? '🔔' : '🔕'}
           </button>
+          {/* Team presence — who's online right now (any member can see it). */}
+          <div className="relative">
+            <button onClick={() => setShowTeam((v) => !v)}
+              title="See which teammates are online right now"
+              className="px-2.5 py-1.5 text-xs rounded-lg border bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200 transition-colors flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${teamAgents.some((a) => a.online) ? 'bg-green-500' : 'bg-gray-300'}`} />
+              Team <span className="font-semibold">{teamAgents.filter((a) => a.online).length}</span>
+            </button>
+            {showTeam && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowTeam(false)} />
+                <div className="absolute right-0 mt-1.5 w-60 max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1.5">
+                  <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-100 flex items-center justify-between">
+                    <span>Team</span>
+                    <span className="text-green-600">{teamAgents.filter((a) => a.online).length} online</span>
+                  </div>
+                  {teamAgents.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-gray-500">No teammates found.</p>
+                  ) : teamAgents.map((a) => (
+                    <div key={a.email} className="px-3 py-1.5 flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${a.online ? 'bg-green-500' : 'bg-gray-300'}`} title={a.online ? 'Online' : 'Offline'} />
+                      <span className={`text-xs truncate flex-1 ${a.online ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>{agentShort(a.email)}</span>
+                      <span className="text-[10px] text-gray-400 shrink-0">{a.online ? 'online' : a.lastSeen ? timeAgo(a.lastSeen) : '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           {userRole === 'admin' && (
             <a href="/members" className="px-3 py-1.5 text-xs text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors flex items-center gap-1.5">
               👥 Members
@@ -1739,9 +2044,7 @@ export default function Dashboard() {
                         <div className="h-1" style={{ backgroundColor: accent }} />
                         <div className="p-4">
                           <div className="flex items-center gap-2.5 mb-3">
-                            <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm" style={{ backgroundColor: accent }}>
-                              {site.bot_name?.[0]?.toUpperCase() ?? 'B'}
-                            </div>
+                            <SiteIcon siteId={site.site_id} name={site.name} size={36} accent={accent} />
                             <div className="min-w-0">
                               <p className="font-semibold text-gray-900 text-sm truncate">{site.name}</p>
                               <p className="text-gray-500 text-[11px] truncate">{site.bot_name}</p>
@@ -1778,10 +2081,11 @@ export default function Dashboard() {
                     <option value="month">This month</option>
                   </select>
                   <select value={overviewLeadType} onChange={(e) => { setOverviewLeadType(e.target.value as typeof overviewLeadType); setOverviewLeadPage(0) }}
-                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType !== 'all' ? (overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : 'bg-blue-100 border-blue-300 text-blue-700 font-semibold') : 'bg-white border-gray-300 text-gray-700'}`}>
+                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All types</option>
                     <option value="chat">💬 Chat only</option>
                     <option value="quote">📧 Quote only</option>
+                    <option value="checkout">🛒 Checkout only</option>
                   </select>
                   {overviewLeadSite && (
                     <button onClick={() => { setOverviewLeadSite(''); setOverviewLeadPage(0) }}
@@ -1830,14 +2134,15 @@ export default function Dashboard() {
                           const isEditing = editingLeadId === lead.id
                           const isConfirmingDelete = confirmLeadDeleteId === lead.id
                           const accent = SITE_ACCENT[lead.site_id] ?? '#6b7280'
-                          const isQuote = isQuoteLeadMessage(lead.message)
+                          // Quote and checkout leads both arrive by email and have
+                          // no conversation behind them, so their row opens the
+                          // message instead of a chat transcript.
+                          const isEmailLead = leadSource(lead.message) !== 'chat'
 
                           if (isEditing) return (
                             <tr key={lead.id} className="border-b border-gray-200 bg-gray-100">
                               <td className="px-3 py-2 whitespace-nowrap">
-                                {isQuote
-                                  ? <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">📧 Quote</span>
-                                  : <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">💬 Chat</span>}
+                                <LeadSourceBadge message={lead.message} />
                               </td>
                               <td className="px-3 py-2">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
                               <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
@@ -1851,13 +2156,11 @@ export default function Dashboard() {
                           )
 
                           return (
-                            <tr key={lead.id} onClick={() => isQuote ? setViewOverviewLead(lead) : openLeadConversation(lead)}
-                              title={isQuote ? 'View the full quote message' : "Open this lead's conversation"}
+                            <tr key={lead.id} onClick={() => isEmailLead ? setViewOverviewLead(lead) : openLeadConversation(lead)}
+                              title={isEmailLead ? 'View the full message' : "Open this lead's conversation"}
                               className="group border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                               <td className="px-3 py-3 whitespace-nowrap">
-                                {isQuote
-                                  ? <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">📧 Quote</span>
-                                  : <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">💬 Chat</span>}
+                                <LeadSourceBadge message={lead.message} />
                               </td>
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
                               <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">{lead.name || '-'}</td>
@@ -1917,7 +2220,8 @@ export default function Dashboard() {
 
       {/* ── CONVERSATIONS TAB ── */}
       {tab === 'conversations' && (
-        <div className="flex animate-in" style={{ height: `calc(100dvh - ${headerH}px)` }}>
+        <div className="flex flex-col animate-in" style={{ height: `calc(100dvh - ${headerH}px)` }}>
+         <div className="flex flex-1 min-h-0">
 
           {/* ── Left sidebar: live visitors + waiting chats ──
               Top: live visitors, so an agent can grab someone the moment they're
@@ -1925,11 +2229,51 @@ export default function Dashboard() {
               is the customer's, oldest wait first (the same chats the alert
               chime rings for). Past visitors/chats live in the Visitors tab. */}
           {(() => {
-            // Waiting = customer's message is last AND it isn't just a closing
-            // pleasantry after an agent already handled them ("Thank you!").
-            const waitingChats = roleSessions
-              .filter((s) => s.last_role === 'user' && !(s.mode === 'human' && isClosingMessage(s.preview)))
-              .sort((a, b) => new Date(a.last_at).getTime() - new Date(b.last_at).getTime())
+            // Split live visitors by whether an agent has picked their chat up,
+            // so "Assigned" ones sit above the still-free "Unassigned" pool.
+            const assignedVisitors = roleVisitors.filter((v) => assignmentBySession[v.session_id])
+            const unassignedVisitors = roleVisitors.filter((v) => !assignmentBySession[v.session_id])
+            const renderVisitorCard = (v: Visitor) => {
+              const accent = SITE_ACCENT[v.site_id] ?? '#16a34a'
+              return (
+                <button key={v.session_id} onClick={() => openVisitorSession(v)}
+                  className="w-full text-left px-3 py-2 border-b border-gray-100 hover:bg-green-50 transition-colors flex items-start gap-2.5"
+                  style={{ borderLeft: `3px solid ${accent}` }}>
+                  <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-semibold text-gray-900 truncate">{v.site_name}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {v.visits > 1 && (
+                          <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
+                        )}
+                        {/* The live list only ever contains visitors active within the
+                            last 60s (server-filtered), so these are genuinely live. */}
+                        <span className="text-[10px] text-green-600 font-medium flex items-center gap-1 shrink-0" title={`Last activity ${timeAgo(v.last_seen)}`}>
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />active now
+                        </span>
+                      </div>
+                    </div>
+                    {/* Currently viewing */}
+                    <div className="text-[11px] text-gray-700 truncate mt-0.5" title={v.page_url ?? undefined}>
+                      <span className="text-gray-500">Viewing:</span> {viewingLabel(v)}
+                    </div>
+                    {/* Location · referrer */}
+                    <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                      {v.country && <span className="text-[11px] text-gray-500 truncate">{v.country}</span>}
+                      {v.country && <span className="text-[10px] text-gray-500 shrink-0">·</span>}
+                      <span className="text-[10px] text-gray-500 truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      <span className="text-[10px] text-green-600">on site {timeOnSite(v.created_at)}</span>
+                      {assignmentBySession[v.session_id] && (
+                        <AssignBadge email={assignmentBySession[v.session_id]} me={userEmail} />
+                      )}
+                    </div>
+                  </div>
+                </button>
+              )
+            }
             // On phones the sidebar IS the page until a chat is opened; the
             // chat then takes over with a ← back button. md+ shows both.
             return (
@@ -1940,82 +2284,38 @@ export default function Dashboard() {
                 {roleVisitors.length > 0 ? `${roleVisitors.length} Live ${roleVisitors.length === 1 ? 'Visitor' : 'Visitors'}` : 'No live visitors'}
               </p>
             </div>
-            <div className={`${waitingChats.length > 0 ? 'flex-1' : 'flex-1'} min-h-0 overflow-y-auto`} style={waitingChats.length > 0 ? { flexBasis: '45%' } : undefined}>
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {roleVisitors.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8 animate-in">
                   <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👀</div>
                   <p className="text-sm text-gray-700 font-medium">Nobody on your sites right now</p>
                   <p className="text-xs text-gray-500 mt-0.5">Live visitors appear here the moment they land. Past visitors &amp; chats are in the Visitors tab.</p>
                 </div>
-              ) : roleVisitors.map((v) => {
-                const accent = SITE_ACCENT[v.site_id] ?? '#16a34a'
-                return (
-                  <button key={v.session_id} onClick={() => openVisitorSession(v)}
-                    className="w-full text-left px-3 py-2 border-b border-gray-100 hover:bg-green-50 transition-colors flex items-start gap-2.5"
-                    style={{ borderLeft: `3px solid ${accent}` }}>
-                    <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-gray-900 truncate">{v.site_name}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {v.visits > 1 && (
-                            <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
-                          )}
-                          {/* The live list only ever contains visitors active within the
-                              last 60s (server-filtered), so these are genuinely live. */}
-                          <span className="text-[10px] text-green-600 font-medium flex items-center gap-1 shrink-0" title={`Last activity ${timeAgo(v.last_seen)}`}>
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />active now
-                          </span>
-                        </div>
+              ) : (
+                <>
+                  {/* Assigned — chats an agent has already picked up. Only shown
+                      once at least one is claimed, so it stays out of the way. */}
+                  {assignedVisitors.length > 0 && (
+                    <>
+                      <div className="px-3 py-1.5 bg-green-50 border-b border-green-100 flex items-center gap-1.5 sticky top-0 z-[1]">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-green-700">✓ Currently served</span>
+                        <span className="text-[10px] text-green-600">({assignedVisitors.length})</span>
                       </div>
-                      {/* Currently viewing */}
-                      <div className="text-[11px] text-gray-700 truncate mt-0.5" title={v.page_url ?? undefined}>
-                        <span className="text-gray-500">Viewing:</span> {viewingLabel(v)}
-                      </div>
-                      {/* Location · referrer */}
-                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                        {v.country && <span className="text-[11px] text-gray-500 truncate">{v.country}</span>}
-                        {v.country && <span className="text-[10px] text-gray-500 shrink-0">·</span>}
-                        <span className="text-[10px] text-gray-500 truncate" title={v.referrer ?? 'Direct'}>via {cleanReferrer(v.referrer)}</span>
-                      </div>
-                      <div className="text-[10px] text-green-600 mt-0.5">on site {timeOnSite(v.created_at)}</div>
+                      {assignedVisitors.map(renderVisitorCard)}
+                    </>
+                  )}
+                  {/* Unassigned — still up for grabs. Always labelled so agents
+                      can always see which chats nobody has picked up yet. */}
+                  {unassignedVisitors.length > 0 && (
+                    <div className="px-3 py-1.5 bg-gray-100 border-b border-gray-200 flex items-center gap-1.5 sticky top-0 z-[1]">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">👁 Active visitors</span>
+                      <span className="text-[10px] text-gray-400">({unassignedVisitors.length})</span>
                     </div>
-                  </button>
-                )
-              })}
+                  )}
+                  {unassignedVisitors.map(renderVisitorCard)}
+                </>
+              )}
             </div>
-
-            {/* Waiting-for-reply queue */}
-            {waitingChats.length > 0 && (
-              <>
-                <div className="px-3 py-2 flex items-center gap-2 bg-orange-50 flex-shrink-0 border-y border-orange-200">
-                  <span className="text-[11px]">⚠️</span>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700">{waitingChats.length} Waiting for reply</p>
-                </div>
-                <div className="flex-1 min-h-0 overflow-y-auto">
-                  {waitingChats.map((s) => {
-                    const accent = SITE_ACCENT[s.site_id] ?? '#6b7280'
-                    const waitMs = Date.now() - new Date(s.last_at).getTime()
-                    const overSla = waitMs > 2 * 60 * 1000
-                    const isActive = selectedSession?.session_id === s.session_id
-                    return (
-                      <button key={s.session_id} onClick={() => setSelectedSession(s)}
-                        className={`w-full text-left px-3 py-2 border-b border-gray-100 transition-colors ${isActive ? 'bg-gray-100' : 'hover:bg-orange-50'}`}
-                        style={{ borderLeft: `3px solid ${accent}` }}>
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-xs font-semibold text-gray-900 truncate">{s.site_name}</span>
-                          <span className={`text-[10px] font-semibold shrink-0 ${overSla ? 'text-red-600' : 'text-orange-600'}`}
-                            title={`Customer's last message: ${formatDateTime(s.last_at)}`}>
-                            ⏱ {timeAgo(s.last_at)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-600 truncate mt-0.5">{s.preview || '(no messages)'}</p>
-                      </button>
-                    )
-                  })}
-                </div>
-              </>
-            )}
           </div>
             )
           })()}
@@ -2039,16 +2339,47 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                     <button onClick={() => setSelectedSession(null)}
                       className="md:hidden shrink-0 p-1.5 -ml-1 rounded-lg text-gray-600 hover:bg-gray-100 text-lg leading-none" title="Back to list">←</button>
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-900 text-xs font-bold shrink-0"
-                      style={{ backgroundColor: SITE_ACCENT[selectedSession.site_id] ?? accentColor }}>
-                      {selectedSession.site_name[0]?.toUpperCase()}
-                    </div>
+                    <SiteIcon siteId={selectedSession.site_id} name={selectedSession.site_name} size={32} accent={SITE_ACCENT[selectedSession.site_id] ?? accentColor} />
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-900 text-sm">{selectedSession.site_name}</p>
                       <p className="text-[10px] text-gray-500 font-mono truncate">{selectedSession.session_id}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    {/* Assignment control — pick up / release / take over a chat
+                        so agents don't answer the same visitor at once. */}
+                    {(() => {
+                      const assignee = selectedSession.assignedTo
+                      if (!assignee) {
+                        return (
+                          <button onClick={() => claimSession(true)} disabled={claimingSession}
+                            title="Pick up this chat so other agents know you're handling it"
+                            className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50 whitespace-nowrap">
+                            🙋 Assign to me
+                          </button>
+                        )
+                      }
+                      if (assignee === userEmail) {
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-green-200 bg-green-100 text-green-700 whitespace-nowrap">✓ You have this</span>
+                            <button onClick={() => claimSession(false)} disabled={claimingSession}
+                              title="Release this chat back to the unassigned pool"
+                              className="text-[11px] text-gray-500 hover:text-gray-800 underline disabled:opacity-50">Release</button>
+                          </div>
+                        )
+                      }
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <span title={`${assignee} is handling this chat`}
+                            className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-amber-200 bg-amber-100 text-amber-700 whitespace-nowrap">🙋 {agentShort(assignee)} has this</span>
+                          <button onClick={() => claimSession(true)} disabled={claimingSession}
+                            title={`Take this chat over from ${assignee}`}
+                            className="text-[11px] text-gray-500 hover:text-gray-800 underline disabled:opacity-50">Take over</button>
+                        </div>
+                      )
+                    })()}
+                    <span className="w-px h-5 bg-gray-200" />
                     <button onClick={() => setTranslateOn((v) => !v)}
                       title="Show English translations of non-English visitor messages"
                       className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors flex items-center gap-1.5 ${
@@ -2082,7 +2413,11 @@ export default function Dashboard() {
                   className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 bg-gray-50 space-y-1">
                   {messageDates.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-center">
-                      <p className="text-gray-500 text-sm">No messages yet</p>
+                      {messagesLoading ? (
+                        <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <p className="text-gray-500 text-sm">No messages yet</p>
+                      )}
                     </div>
                   ) : messageDates.map((msg) => {
                     const isUser = msg.role === 'user'
@@ -2142,7 +2477,7 @@ export default function Dashboard() {
                         {dateDivider}
                         <div className={`flex flex-col mb-2 ${isUser ? 'items-end' : 'items-start'}`}>
                           <div className="flex items-center gap-1.5 mb-1 px-1">
-                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-600' : 'text-blue-600'}`}>{isAdmin ? '👤 Agent' : botGlobalOff ? '💬 Auto-reply' : '🤖 Bot'}</span>}
+                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-600' : 'text-blue-600'}`} title={isAdmin && msg.author ? msg.author : undefined}>{isAdmin ? `👤 ${msg.author ? agentShort(msg.author) : 'Agent'}` : botGlobalOff ? '💬 Auto-reply' : '🤖 Bot'}</span>}
                             {isUser && <span className="text-[11px] text-gray-500">Visitor</span>}
                             <span className="text-[10px] text-gray-500">{formatTime(msg.created_at)}</span>
                           </div>
@@ -2222,6 +2557,15 @@ export default function Dashboard() {
 
                 {/* Reply input */}
                 <div className="px-4 py-3 border-t border-gray-200 bg-white flex-shrink-0">
+                  {/* Hard lock — this chat belongs to another agent. Messaging is
+                      blocked (below) until you take over; you can still read it. */}
+                  {lockedByOther && (
+                    <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5">🔒 <b>{agentShort(selectedSession.assignedTo)}</b> is handling this chat — you can view but not message.</span>
+                      <button onClick={() => claimSession(true)} disabled={claimingSession}
+                        className="shrink-0 font-semibold text-amber-900 underline hover:text-amber-700 disabled:opacity-50">Take over</button>
+                    </div>
+                  )}
                   {botEffectivelyActive ? (
                     <p className="text-[11px] text-blue-700 mb-2 flex items-center gap-1.5">
                       <span>🤖</span> Bot is active — toggle to Human to reply, or send a file to take over
@@ -2231,6 +2575,34 @@ export default function Dashboard() {
                       <span>🌙</span> Bot is off (scheduled) — human only. The bot won&apos;t reply right now; type to respond.
                     </p>
                   ) : null}
+                  {/* Quick replies: one-tap canned openers/answers the agent can
+                      drop into the box and Send. Shown while the box is empty (so
+                      they don't get in the way once the agent starts typing). The
+                      first is product-aware from the page the visitor is on. */}
+                  {!lockedByOther && !botEffectivelyActive && !replyText.trim() && (() => {
+                    const v = visitors.find((x) => x.session_id === selectedSession.session_id)
+                    const product = (v?.page_title || '').split(/ [|\-–—] |·/)[0].trim()
+                    const hasProduct = !!product && product.length >= 3 && product.length <= 70
+                    const quicks: { label: string; text: string }[] = [
+                      hasProduct
+                        ? { label: '👋', text: `Hi! Are you looking for ${product}?` }
+                        : { label: '👋', text: 'Hi! How can I help you today?' },
+                      { label: '💰', text: 'Would you like a quick quote? Please share your size and quantity.' },
+                      { label: '🎨', text: 'We offer custom printing and design support. Would you like the details?' },
+                      { label: '🚚', text: 'We offer free shipping and design support on all orders.' },
+                      { label: '❓', text: 'Happy to help with sizes, quantities, or pricing — what do you need?' },
+                    ]
+                    return (
+                      <div className="flex flex-col gap-1 mb-2 max-h-40 overflow-y-auto">
+                        {quicks.map((q, i) => (
+                          <button key={i} onClick={() => setReplyText(q.text)} title="Click to insert, then Send"
+                            className="text-[11px] text-left px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors leading-snug">
+                            {q.text}
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })()}
                   {uploadError && (
                     <p className="text-[11px] text-red-600 mb-2">{uploadError}</p>
                   )}
@@ -2247,9 +2619,9 @@ export default function Dashboard() {
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadReplyFile(f); e.target.value = '' }} />
                     <button
                       onClick={() => replyFileRef.current?.click()}
-                      disabled={uploadingFile}
-                      title="Attach a file"
-                      className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 self-center"
+                      disabled={uploadingFile || lockedByOther}
+                      title={lockedByOther ? 'Locked — take over to send' : 'Attach a file'}
+                      className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-center"
                     >
                       {uploadingFile ? '…' : '📎'}
                     </button>
@@ -2257,6 +2629,9 @@ export default function Dashboard() {
                       value={replyText}
                       onChange={(e) => {
                         setReplyText(e.target.value)
+                        // Engaging (typing) claims + LOCKS an unassigned chat to
+                        // this agent, so nobody else can message it.
+                        if (selectedSession && e.target.value.trim() && !selectedSession.assignedTo) claimIfFree(selectedSession)
                         // Throttled "agent is typing" ping → shows dots in the widget.
                         const now = Date.now()
                         if (selectedSession && e.target.value.trim() && now - lastAgentTypingPing.current > 3000) {
@@ -2268,14 +2643,14 @@ export default function Dashboard() {
                         }
                       }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-                      placeholder={botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
-                      disabled={botEffectivelyActive || sending}
+                      placeholder={lockedByOther ? `🔒 ${agentShort(selectedSession.assignedTo)} is handling this — take over to reply` : botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
+                      disabled={botEffectivelyActive || sending || lockedByOther}
                       rows={2}
                       className="flex-1 bg-white border-2 border-orange-500 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:border-orange-600 focus:ring-2 focus:ring-orange-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     />
                     <button
                       onClick={sendReply}
-                      disabled={!replyText.trim() || sending || botEffectivelyActive}
+                      disabled={!replyText.trim() || sending || botEffectivelyActive || lockedByOther}
                       className="px-5 py-2.5 bg-orange-600 text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-orange-700 active:bg-orange-800 transition-colors disabled:bg-orange-300 disabled:cursor-not-allowed self-center"
                     >
                       Send
@@ -2292,7 +2667,11 @@ export default function Dashboard() {
               <div className="px-4 py-3 border-b border-gray-200 bg-white sticky top-0 backdrop-blur z-10 flex items-center gap-2">
                 <span className="text-base">{deviceIcon(visitorDetail?.technical.device_type ?? null)}</span>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 leading-tight">Visitor details</p>
+                  {/* Once an agent saves a contact name, show it here instead of
+                      the generic "Visitor details" so this reads as the customer. */}
+                  <p className="text-sm font-semibold text-gray-900 leading-tight truncate">
+                    {visitorDetail?.contact?.name?.trim() || 'Visitor details'}
+                  </p>
                   <p className="text-[10px] text-gray-500 font-mono truncate">{selectedSession.session_id}</p>
                 </div>
               </div>
@@ -2439,10 +2818,74 @@ export default function Dashboard() {
                       ))}
                     </dl>
                   </section>
+
+                  {/* Ban a spam/bot visitor by IP (admin only). Blocks them across
+                      ALL sites — they can't load the widget or send messages. */}
+                  {userRole === 'admin' && visitorDetail?.technical.ip && (
+                    <section>
+                      {blockedIps.includes(visitorDetail.technical.ip) ? (
+                        <button onClick={() => toggleIpBlock(visitorDetail!.technical.ip!, false)}
+                          className="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-gray-300 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+                          ✓ Blocked — tap to unban
+                        </button>
+                      ) : (
+                        <button onClick={() => { const ip = visitorDetail!.technical.ip!; if (confirm(`Ban this visitor (IP ${ip})?\n\nThey won't be able to load the widget or chat on any of your sites. Use for spam / bots.`)) toggleIpBlock(ip, true) }}
+                          className="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 transition-colors">
+                          🚫 Ban visitor (spam / bot)
+                        </button>
+                      )}
+                      <p className="text-[10px] text-gray-500 mt-1.5 leading-relaxed">Blocks this IP across all sites — takes effect within a minute. Admins only.</p>
+                    </section>
+                  )}
                 </div>
               )}
             </aside>
           )}
+         </div>
+
+          {/* ── My open chats tab bar (Zendesk-style) ──
+              One tab per chat THIS agent is CURRENTLY handling: assigned to them
+              AND either the visitor is live right now OR they exchanged a message
+              in the last 15 min. This keeps last-night's finished chats out of the
+              bar. Click to switch — reuses the single chat panel above, so only
+              the open chat polls messages (no extra DB load). A red dot marks a
+              chat whose last message is the customer's and isn't the one open. */}
+          {(() => {
+            const RECENT = 15 * 60 * 1000
+            const liveIds = new Set(roleVisitors.map((v) => v.session_id))
+            // The chat you're viewing always stays in the bar while it's open,
+            // even if the visitor briefly goes idle, so it can't vanish mid-reply.
+            const myChats = roleSessions
+              .filter((s) => s.assignedTo === userEmail && (
+                liveIds.has(s.session_id) ||
+                s.session_id === selectedSession?.session_id ||
+                Date.now() - new Date(s.last_at).getTime() <= RECENT))
+              .sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime())
+            if (myChats.length === 0) return null
+            return (
+              <div className="flex items-stretch gap-1 px-2 py-1.5 border-t border-gray-200 bg-gray-100 overflow-x-auto flex-shrink-0">
+                <span className="flex items-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 px-2 shrink-0">💬 My chats ({myChats.length})</span>
+                {myChats.map((s) => {
+                  const active = selectedSession?.session_id === s.session_id
+                  const waiting = s.last_role === 'user' && !active
+                  const accent = SITE_ACCENT[s.site_id] ?? '#6b7280'
+                  return (
+                    <div key={s.session_id} onClick={() => setSelectedSession(s)}
+                      title={`${s.site_name} · ${s.session_id}`}
+                      className={`group/tab flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-t-lg text-xs whitespace-nowrap border-t-2 transition-colors shrink-0 cursor-pointer ${active ? 'bg-white text-gray-900 font-semibold shadow-sm' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                      style={{ borderTopColor: active ? accent : 'transparent' }}>
+                      {waiting && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />}
+                      <SiteIcon siteId={s.site_id} name={s.site_name} size={16} accent={accent} />
+                      <span className="max-w-[110px] truncate">{s.site_name}</span>
+                      <button onClick={(e) => { e.stopPropagation(); closeChatTab(s.session_id, s.site_id) }}
+                        title="Close chat (release it)"
+                        className="w-4 h-4 inline-flex items-center justify-center rounded text-gray-400 hover:text-gray-800 hover:bg-gray-300 leading-none shrink-0">×</button>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
         </div>
       )}
 
@@ -2688,9 +3131,10 @@ export default function Dashboard() {
             </div>
           ) : (() => {
             const allLeads = billing?.leads ?? []
-            const chatLeads = allLeads.filter((l) => l.source !== 'quote')
+            const chatLeads = allLeads.filter((l) => l.source === 'chat')
             const quoteLeads = allLeads.filter((l) => l.source === 'quote')
-            const activeLeads = billingLeadType === 'chat' ? chatLeads : quoteLeads
+            const checkoutLeads = allLeads.filter((l) => l.source === 'checkout')
+            const activeLeads = billingLeadType === 'chat' ? chatLeads : billingLeadType === 'quote' ? quoteLeads : checkoutLeads
             // By-site breakdown recomputed for whichever type is showing, so the
             // numbers on screen always add up to what's in the table below —
             // the server's combined billing.bySite mixed both types together,
@@ -2702,15 +3146,18 @@ export default function Dashboard() {
             }
             const bySiteActive = Object.entries(bySiteMap).sort((a, b) => b[1].count - a[1].count)
             const chatLeadsShown = billingSiteFilter ? chatLeads.filter((l) => l.site_id === billingSiteFilter) : chatLeads
-            const quoteLeadsShown = billingSiteFilter ? quoteLeads.filter((l) => l.site_id === billingSiteFilter) : quoteLeads
+            // The non-chat table branch renders whichever email-sourced type is
+            // active — quote and checkout leads have the identical shape.
+            const emailLeadsSrc = billingLeadType === 'checkout' ? checkoutLeads : quoteLeads
+            const emailLeadsShown = billingSiteFilter ? emailLeadsSrc.filter((l) => l.site_id === billingSiteFilter) : emailLeadsSrc
             return (
             <>
               {/* Total + type breakdown */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-5">
                 <div className="bg-gradient-to-br from-indigo-100 to-indigo-50 rounded-2xl p-5 border border-indigo-200">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">Total leads this period</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{billing?.total ?? 0}</p>
-                  <p className="text-[11px] text-gray-500 mt-1">{chatLeads.length} chat + {quoteLeads.length} quote</p>
+                  <p className="text-[11px] text-gray-500 mt-1">{chatLeads.length} chat + {quoteLeads.length} quote{checkoutLeads.length > 0 ? ` + ${checkoutLeads.length} checkout` : ''}</p>
                   {billing && (
                     <p className="text-[11px] text-gray-500 mt-2">
                       Last month: <span className="font-semibold text-gray-700">{billing.prevTotal}</span>
@@ -2739,19 +3186,29 @@ export default function Dashboard() {
                     this is the only place the overlap is collapsed. */}
                 <div className="bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-2xl p-5 border border-emerald-200">
                   <p className="text-emerald-800 text-[11px] font-semibold uppercase tracking-wide mb-2">💳 Billable Leads</p>
-                  <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{billing?.billable ?? 0}</p>
+                  {/* Fixed light-green card — use emerald text (NOT gray, which the
+                      dark theme remaps to near-white and would vanish here). */}
+                  <p className="text-[2.5rem] leading-none font-extrabold text-emerald-900 tabular-nums">{billing?.billable ?? 0}</p>
                   <p className="text-[11px] text-emerald-800 mt-1">
-                    {billing && billing.total > billing.billable
-                      ? `${billing.total - billing.billable} overlap${billing.total - billing.billable === 1 ? '' : 's'} removed — same customer, both channels`
+                    {billing && (billing.billableBase ?? billing.total) > billing.billable
+                      ? `${(billing.billableBase ?? billing.total) - billing.billable} overlap${(billing.billableBase ?? billing.total) - billing.billable === 1 ? '' : 's'} removed — same customer, both channels`
                       : 'No overlap this period'}
                   </p>
-                  <p className="text-[11px] text-gray-500 mt-2">Unique customers — this is what to charge per lead for.</p>
+                  <p className="text-[11px] text-emerald-700 mt-2">
+                    Unique customers — this is what to charge per lead for.
+                    {checkoutLeads.length > 0 ? ` Checkout orders (${checkoutLeads.length}) are counted in the total but never billed.` : ''}
+                  </p>
                 </div>
 
                 {/* Chat / Quote tabs — click either to switch the table below */}
                 <button onClick={() => { setBillingLeadType('chat'); setBillingSiteFilter(null) }}
                   className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'chat' ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
                   <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'chat' ? 'text-blue-700' : 'text-gray-500'}`}>💬 Chat Leads</p>
+                  {/* Plain gray text on purpose: these three tab cards get a dark
+                      background in dark mode (see .bg-blue-50/.bg-amber-50/.bg-purple-50
+                      in globals.css), so the theme's gray→near-white remap is what
+                      keeps them readable. Only the Billable card, whose gradient
+                      stays light in both themes, needs a hardcoded dark accent. */}
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{chatLeads.length}</p>
                   <p className="text-[11px] text-gray-500 mt-2">Someone typed their email while chatting on the widget.</p>
                 </button>
@@ -2761,6 +3218,16 @@ export default function Dashboard() {
                   <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'quote' ? 'text-amber-700' : 'text-gray-500'}`}>📧 Quote Leads</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{quoteLeads.length}</p>
                   <p className="text-[11px] text-gray-500 mt-2">From your Gmail-labeled custom-quote-request emails.</p>
+                </button>
+
+                {/* Cart orders. Deliberately NOT part of Billable above — these
+                    are completed sales, counted so the period total is honest
+                    but never charged for as generated leads. */}
+                <button onClick={() => { setBillingLeadType('checkout'); setBillingSiteFilter(null) }}
+                  className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'checkout' ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'checkout' ? 'text-purple-700' : 'text-gray-500'}`}>🛒 Checkout Leads</p>
+                  <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{checkoutLeads.length}</p>
+                  <p className="text-[11px] text-gray-500 mt-2">WooCommerce cart orders — counted in the total, not billed.</p>
                 </button>
               </div>
 
@@ -2772,7 +3239,7 @@ export default function Dashboard() {
               <div className="bg-gray-100 rounded-2xl p-5 border border-gray-200 mb-5">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
-                    By site — {billingLeadType === 'chat' ? '💬 Chat' : '📧 Quote'}
+                    By site — {billingLeadType === 'chat' ? '💬 Chat' : billingLeadType === 'quote' ? '📧 Quote' : '🛒 Checkout'}
                   </p>
                   {billingSiteFilter && (
                     <button onClick={() => setBillingSiteFilter(null)}
@@ -2881,17 +3348,17 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {quoteLeadsShown.length === 0 ? (
+                        {emailLeadsShown.length === 0 ? (
                           <tr>
                             <td colSpan={userRole === 'admin' ? 8 : 7} className="text-center py-10">
                               <div className="flex flex-col items-center">
-                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📧</div>
-                                <p className="text-gray-700 text-sm font-medium">No quote leads this period{billingSiteFilter ? ' for this site' : ''}</p>
-                                <p className="text-gray-500 text-xs mt-0.5">Sent by your Gmail Apps Script when a labeled quote-request email arrives.</p>
+                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">{billingLeadType === 'checkout' ? '🛒' : '📧'}</div>
+                                <p className="text-gray-700 text-sm font-medium">No {billingLeadType} leads this period{billingSiteFilter ? ' for this site' : ''}</p>
+                                <p className="text-gray-500 text-xs mt-0.5">{billingLeadType === 'checkout' ? 'Sent by your Gmail Apps Script when a WooCommerce order email carries the checkout label.' : 'Sent by your Gmail Apps Script when a labeled quote-request email arrives.'}</p>
                               </div>
                             </td>
                           </tr>
-                        ) : quoteLeadsShown.map((l) => (
+                        ) : emailLeadsShown.map((l) => (
                           <tr key={l.session_id} onClick={() => setViewQuote(l)} title="View the full quote message"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
@@ -2944,7 +3411,7 @@ export default function Dashboard() {
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5 inline-block mb-1.5">📧 Quote</p>
+                <LeadSourceBadge message={viewOverviewLead.message} className="inline-block mb-1.5" />
                 <p className="text-sm font-semibold text-gray-900 truncate">{viewOverviewLead.name || viewOverviewLead.email}</p>
                 <p className="text-xs text-gray-500 truncate">
                   {viewOverviewLead.email} · {(roleSites.find((s) => s.site_id === viewOverviewLead.site_id)?.name) ?? viewOverviewLead.site_id}
@@ -3005,13 +3472,38 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Per-agent breakdown for a single day: who picked up how many chats. */}
+      {viewDayAgents && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewDayAgents(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-sm max-h-[80vh] flex flex-col">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900">
+                  {new Date(`${viewDayAgents.date}T00:00:00Z`).toLocaleDateString('en', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })}
+                </p>
+                <p className="text-xs text-gray-500">Chats picked up per agent · {viewDayAgents.picked} total</p>
+              </div>
+              <button onClick={() => setViewDayAgents(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+            </div>
+            <div className="overflow-y-auto">
+              {(viewDayAgents.byAgent ?? []).map((a, i) => (
+                <div key={a.email + i} className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100 last:border-b-0">
+                  <span className="text-sm text-gray-800 truncate">{agentShort(a.email)}<span className="text-gray-400 text-xs ml-1.5 hidden sm:inline">{a.email}</span></span>
+                  <span className="text-sm font-semibold text-green-700 tabular-nums flex-shrink-0 bg-green-100 rounded-full px-2.5 py-0.5">{a.picked}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Full quote-email text — the table only shows a truncated preview.
           Prev/Next walk the same filtered list currently on screen (site
           filter included), so browsing several leads doesn't mean closing
           and reopening the modal each time. */}
       {viewQuote && (() => {
         const navList = (billing?.leads ?? [])
-          .filter((l) => l.source === 'quote')
+          .filter((l) => l.source === viewQuote.source)
           .filter((l) => !billingSiteFilter || l.site_id === billingSiteFilter)
         const idx = navList.findIndex((l) => l.session_id === viewQuote.session_id)
         const hasPrev = idx > 0
@@ -3021,7 +3513,7 @@ export default function Dashboard() {
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5 inline-block mb-1.5">📧 Quote</p>
+                <p className={`text-[11px] font-semibold rounded-full px-2 py-0.5 inline-block mb-1.5 border ${viewQuote.source === 'checkout' ? 'text-purple-700 bg-purple-100 border-purple-200' : 'text-amber-700 bg-amber-100 border-amber-200'}`}>{viewQuote.source === 'checkout' ? '🛒 Checkout' : '📧 Quote'}</p>
                 <p className="text-sm font-semibold text-gray-900 truncate">{viewQuote.name || viewQuote.email}</p>
                 <p className="text-xs text-gray-500 truncate">{viewQuote.email} · {viewQuote.site_name} · {formatDateTime(viewQuote.captured_at)}</p>
               </div>
@@ -3227,7 +3719,9 @@ export default function Dashboard() {
                               </td>
                               <td className="px-4 py-2.5 text-right tabular-nums">
                                 {d.picked > 0
-                                  ? <span className="inline-block px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">{d.picked}</span>
+                                  ? (d.byAgent && d.byAgent.length > 0
+                                      ? <button onClick={() => setViewDayAgents(d)} title="See which agent picked up how many" className="inline-block px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold hover:bg-green-200">{d.picked} ›</button>
+                                      : <span className="inline-block px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">{d.picked}</span>)
                                   : <span className="text-gray-500">0</span>}
                               </td>
                               <td className="px-4 py-2.5 text-right tabular-nums">
