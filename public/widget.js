@@ -173,6 +173,45 @@
   var landingSoundPlayed = false;
   var interactionUnlockBound = false;
 
+  // ─── Cross-page quiet rules ─────────────────────────────────────────────────
+  // Everything below is stored in localStorage, NOT in page variables, because a
+  // shopper browsing a store loads a new page every few seconds. Page-scoped
+  // flags meant the greeting chime, the landing ding and the auto-open all fired
+  // again on EVERY page — which reads to the visitor as a chat box that keeps
+  // popping up and dinging no matter how often they close it. (A real visitor
+  // left over exactly this: "if i close the popup it just keeps ringing anyway.")
+  //
+  //  • closing the chat = an explicit "leave me alone": silences ALL announcement
+  //    sounds and stops auto-open for DISMISS_QUIET_MS. Re-opening it by hand
+  //    clears the flag.
+  //  • the landing ding and the auto-open happen at most ONCE per session, not
+  //    once per page load.
+  // Replies from an agent/bot inside an open chat still ding — that's the one
+  // sound the visitor is actually waiting for.
+  var DISMISS_KEY = 'zee-dismissed-' + siteId;  // ms timestamp of the last close
+  var AUTOOPEN_KEY = 'zee-autoopen-' + siteId;  // sessionId that already auto-opened
+  var DING_KEY = 'zee-ding-' + siteId;          // sessionId that already heard the ding
+  var MUTE_KEY = 'zee-muted-' + siteId;         // visitor turned sound off (persistent)
+  var DISMISS_QUIET_MS = 24 * 60 * 60 * 1000;   // stay quiet for 24h after a close
+
+  // Visitor-controlled mute (speaker button in the chat header). Persisted per
+  // site and never expires — if someone says "no sound", we don't ask again.
+  function isMuted() { return lsGet(MUTE_KEY) === '1'; }
+  function setMuted(on) { if (on) lsSet(MUTE_KEY, '1'); else lsDel(MUTE_KEY); }
+
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+  function wasDismissed() {
+    var t = parseInt(lsGet(DISMISS_KEY), 10) || 0;
+    return t > 0 && (Date.now() - t) < DISMISS_QUIET_MS;
+  }
+  function markDismissed() { lsSet(DISMISS_KEY, String(Date.now())); }
+  function clearDismissed() { lsDel(DISMISS_KEY); }
+
+  // The landing ding is per SESSION, so navigating the site stays silent.
+  function landingDingDone() { return landingSoundPlayed || lsGet(DING_KEY) === sessionId; }
+  function markLandingDing() { landingSoundPlayed = true; lsSet(DING_KEY, sessionId); }
+
   // ─── CSS ──────────────────────────────────────────────────────────────────
   function injectCSS(primaryColor) {
     var existing = document.getElementById('zee-chat-widget-css');
@@ -190,8 +229,11 @@
 #zee-chat-avatar { width: 36px; height: 36px; border-radius: 50%; background: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; line-height: 1; }\
 #zee-chat-title { color: white; font-weight: 600; font-size: 15px; }\
 #zee-chat-subtitle { color: rgba(255,255,255,0.8); font-size: 11px; }\
-#zee-chat-close { background: none; border: none; cursor: pointer; color: white; padding: 4px; border-radius: 6px; display: flex; align-items: center; justify-content: center; opacity: 0.8; transition: opacity 0.2s; }\
-#zee-chat-close:hover { opacity: 1; }\
+#zee-chat-header-actions { display: flex; align-items: center; gap: 2px; }\
+#zee-chat-close, #zee-chat-mute { background: none; border: none; cursor: pointer; color: white; padding: 4px; border-radius: 6px; display: flex; align-items: center; justify-content: center; opacity: 0.8; transition: opacity 0.2s; }\
+#zee-chat-close:hover, #zee-chat-mute:hover { opacity: 1; }\
+#zee-chat-mute svg { width: 19px; height: 19px; fill: white; }\
+#zee-chat-mute.muted { opacity: 0.55; }\
 #zee-chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #f9fafb; }\
 #zee-chat-messages::-webkit-scrollbar { width: 4px; }\
 #zee-chat-messages::-webkit-scrollbar-track { background: transparent; }\
@@ -230,12 +272,41 @@
 .zee-lead-input:focus { border-color: ' + primaryColor + '; }\
 #zee-lead-submit { width: 100%; background: ' + primaryColor + '; color: white; border: none; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }\
 #zee-lead-submit:hover { opacity: 0.88; }\
+.zee-ol { margin: 6px 0 6px 18px; padding: 0; }\
+/* These three used to be style="" attributes on the markup. A site whose CSP\
+   carries style hashes blocks inline style ATTRIBUTES too, which left the file\
+   picker and the lead form visible and the avatar letter unbranded. Setting\
+   them from the stylesheet keeps the JS toggles working — element.style.display\
+   set from script is CSSOM and stays allowed. */\
+#zee-chat-file { display: none; }\
+#zee-lead-form { display: none; }\
+#zee-chat-avatar { color: ' + primaryColor + '; }\
 @media (max-width: 767px) { #zee-chat-widget { bottom: 0; right: 0; width: 100%; height: 100%; border-radius: 0; } #zee-chat-widget-btn { bottom: 16px; right: 16px; } }';
 
     var style = document.createElement('style');
     style.id = 'zee-chat-widget-css';
     style.textContent = css;
     document.head.appendChild(style);
+
+    // A site with a strict style-src (hashes or a nonce, no 'unsafe-inline')
+    // silently refuses this stylesheet: the <style> stays in the DOM but its
+    // .sheet is null, so the widget renders completely unstyled and the visitor
+    // sees nothing usable. A hash can't help — the CSS carries the site's brand
+    // colour, so it differs per site and changes whenever that colour does.
+    //
+    // Constructed stylesheets are governed by CSSOM, not style-src, so this
+    // fallback restores the CSS without asking the site to weaken its policy.
+    if (!style.sheet && typeof CSSStyleSheet === 'function') {
+      try {
+        var sheet = new CSSStyleSheet();
+        sheet.replaceSync(css);
+        document.adoptedStyleSheets = document.adoptedStyleSheets.concat(sheet);
+        style.remove();
+      } catch (e) {
+        // Pre-2023 browser without constructed stylesheets. Nothing further to
+        // try — leave the blocked <style> in place rather than break the page.
+      }
+    }
   }
 
   // ─── DOM ──────────────────────────────────────────────────────────────────
@@ -256,13 +327,16 @@
     widget.innerHTML = '\
 <div id="zee-chat-header">\
   <div id="zee-chat-header-left">\
-    <div id="zee-chat-avatar" style="color:' + escapeHtml(config.primary_color) + '">' + escapeHtml((config.bot_name || 'A')[0].toUpperCase()) + '</div>\
+    <div id="zee-chat-avatar">' + escapeHtml((config.bot_name || 'A')[0].toUpperCase()) + '</div>\
     <div><div id="zee-chat-title">' + escapeHtml(config.bot_name) + '</div><div id="zee-chat-subtitle">Online · Ready to help</div></div>\
   </div>\
-  <button id="zee-chat-close" aria-label="Close chat"><svg viewBox="0 0 24 24" width="20" height="20" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>\
+  <div id="zee-chat-header-actions">\
+    <button id="zee-chat-mute" aria-label="Turn sound off" title="Turn sound off"></button>\
+    <button id="zee-chat-close" aria-label="Close chat"><svg viewBox="0 0 24 24" width="20" height="20" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>\
+  </div>\
 </div>\
 <div id="zee-chat-messages"></div>\
-<div id="zee-lead-form" style="display:none">\
+<div id="zee-lead-form">\
   <p>Leave your details and we\'ll follow up with you!</p>\
   <input class="zee-lead-input" id="zee-lead-name" placeholder="Your Name *" type="text" />\
   <input class="zee-lead-input" id="zee-lead-email" placeholder="Email Address *" type="email" />\
@@ -270,7 +344,7 @@
   <button id="zee-lead-submit">Submit & Continue Chat</button>\
 </div>\
 <div id="zee-chat-input-area">\
-  <input id="zee-chat-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,application/pdf" style="display:none" />\
+  <input id="zee-chat-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,application/pdf" />\
   <button id="zee-chat-attach" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 01-8 0V5a2.5 2.5 0 015 0v10.5a1 1 0 01-2 0V6H10v9.5a2.5 2.5 0 005 0V5a4 4 0 00-8 0v12.5a5.5 5.5 0 0011 0V6h-1.5z"/></svg></button>\
   <textarea id="zee-chat-input" placeholder="Type your message..." rows="1"></textarea>\
   <button id="zee-chat-send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>\
@@ -282,9 +356,11 @@
     btn.addEventListener('click', function () {
       widget.classList.toggle('open');
       if (widget.classList.contains('open')) {
+        clearDismissed(); // opening it by hand undoes an earlier "leave me alone"
         sendBotGreeting();
         startPolling();
       } else {
+        markDismissed();
         stopPolling();
       }
       btn.innerHTML = widget.classList.contains('open')
@@ -292,9 +368,34 @@
         : '<svg viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
     });
 
+    // ─── Sound on/off ────────────────────────────────────────────────────────
+    // A visitor who dislikes the chime shouldn't have to close the chat (or the
+    // whole site) to stop it. The speaker button silences every widget sound and
+    // the choice sticks across pages and future visits.
+    var SVG_SOUND_ON = '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+    var SVG_SOUND_OFF = '<svg viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>';
+    var muteBtn = document.getElementById('zee-chat-mute');
+    function renderMuteBtn() {
+      var off = isMuted();
+      muteBtn.innerHTML = off ? SVG_SOUND_OFF : SVG_SOUND_ON;
+      muteBtn.setAttribute('aria-label', off ? 'Turn sound on' : 'Turn sound off');
+      muteBtn.setAttribute('title', off ? 'Sound off — click to turn on' : 'Turn sound off');
+      muteBtn.setAttribute('aria-pressed', off ? 'true' : 'false');
+      if (off) muteBtn.classList.add('muted'); else muteBtn.classList.remove('muted');
+    }
+    renderMuteBtn();
+    muteBtn.addEventListener('click', function () {
+      var turningOn = isMuted(); // currently muted → this click un-mutes
+      setMuted(!turningOn);
+      renderMuteBtn();
+      // Unmuting plays a soft confirmation so they can hear what they turned on.
+      if (turningOn) playChime(0.45);
+    });
+
     document.getElementById('zee-chat-close').addEventListener('click', function () {
       console.log('widget closed by user click');
       widget.classList.remove('open');
+      markDismissed(); // no more auto-opens or announcement sounds for 24h
       stopPolling();
       btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
     });
@@ -338,10 +439,15 @@
 
     document.getElementById('zee-lead-submit').addEventListener('click', handleLeadSubmit);
 
-    // Auto-open after 5 seconds if visitor hasn't opened manually
+    // Auto-open after 5 seconds — but only ONCE per session, and never after the
+    // visitor has closed it. Without these two guards every page load re-opened
+    // the panel, so closing it appeared to do nothing at all.
     setTimeout(function () {
       console.log('widget auto-open timer fired, already open=' + widget.classList.contains('open'));
+      if (wasDismissed()) { console.log('auto-open skipped: visitor closed the chat'); return; }
+      if (lsGet(AUTOOPEN_KEY) === sessionId) { console.log('auto-open skipped: already auto-opened this session'); return; }
       if (!widget.classList.contains('open')) {
+        lsSet(AUTOOPEN_KEY, sessionId);
         console.log('widget auto-opening');
         widget.classList.add('open');
         console.log('widget open class set: ' + widget.classList.contains('open'));
@@ -379,7 +485,7 @@
 
     function flushList() {
       if (listBuf.length) {
-        out.push('<ol style="margin:6px 0 6px 18px;padding:0">' + listBuf.join('') + '</ol>');
+        out.push('<ol class="zee-ol">' + listBuf.join('') + '</ol>');
         listBuf = [];
       }
     }
@@ -572,6 +678,8 @@
             // any pending safety-net prompt.
             clearSafetyNetTimer();
             playNotificationSound();
+            // On another tab? Flash the title so the reply isn't missed.
+            if (typeof document !== 'undefined' && document.hidden) flashTitle(newMsgs.length);
             maybeShowLeadForm();
             // The reply arrived — drop the typing dots so they don't sit above it.
             if (agentTypingShown) { hideTyping(); agentTypingShown = false; }
@@ -610,28 +718,40 @@
   // layers a sine + a brighter triangle an octave up, driven through a soft
   // limiter so it's clearly audible without harsh clipping.
   function playChime(volume) {
+    if (isMuted()) return; // single gate — covers landing, greeting and replies
     var ctx = getAudioCtx();
     if (!ctx) return;
-    try {
-      if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
+    // Resume FIRST, then schedule. A suspended context has a frozen currentTime,
+    // so scheduling before the resume completes silently drops the sound (the
+    // note's start time ends up in the past). Waiting for resume fixes the
+    // "no bell on the agent's reply" case.
+    if (ctx.state === 'suspended' && ctx.resume) {
+      try { ctx.resume().then(function () { playChimeNow(ctx, volume); }).catch(function () {}); } catch (e) {}
+      return;
+    }
+    playChimeNow(ctx, volume);
+  }
 
+  function playChimeNow(ctx, volume) {
+    try {
       var master = ctx.createGain();
-      master.gain.value = 1.0;
+      master.gain.value = 0.9;
       var shaper = ctx.createWaveShaper();
       var curve = new Float32Array(1024);
       for (var c = 0; c < 1024; c++) {
         var x = (c / 1023) * 2 - 1;
-        curve[c] = Math.tanh(x * 1.6); // gentle saturation = loud but not crackly
+        curve[c] = Math.tanh(x * 1.1); // gentle saturation = warm, not harsh
       }
       shaper.curve = curve;
       master.connect(shaper);
       shaper.connect(ctx.destination);
 
-      // Rising two-note chime: G5 (784Hz) then C6 (1047Hz), 130ms apart.
-      [[784, 0], [1047, 0.13]].forEach(function (pair) {
+      // Warm, pleasant rising bell: C6 (1047Hz) then E6 (1319Hz), sine body with
+      // a soft triangle overtone — audible but easy on the ear.
+      [[1047, 0], [1319, 0.14]].forEach(function (pair) {
         var freq = pair[0], delay = pair[1];
         var t = ctx.currentTime + delay;
-        [['sine', freq, 1.0], ['triangle', freq * 2, 0.5]].forEach(function (layer) {
+        [['sine', freq, 0.95], ['triangle', freq * 2, 0.18]].forEach(function (layer) {
           var osc = ctx.createOscillator();
           var gain = ctx.createGain();
           osc.connect(gain);
@@ -640,10 +760,10 @@
           osc.frequency.value = layer[1];
           var peak = layer[2] * volume;
           gain.gain.setValueAtTime(0, t);
-          gain.gain.linearRampToValueAtTime(peak, t + 0.015); // fast attack
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+          gain.gain.linearRampToValueAtTime(peak, t + 0.02); // smooth attack
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
           osc.start(t);
-          osc.stop(t + 0.6);
+          osc.stop(t + 0.65);
         });
       });
     } catch (e) {}
@@ -655,18 +775,47 @@
     playChime(1.0);
   }
 
+  // ─── Backgrounded-tab notice ──────────────────────────────────────────────
+  // If the reply lands while the visitor is looking at another tab, sound alone
+  // is easy to miss (and may be throttled). Flash the browser tab title so they
+  // see a message is waiting; restore it the moment they come back.
+  var originalTitle = null;
+  var titleFlashTimer = null;
+  var unreadAgentMsgs = 0;
+  function flashTitle(count) {
+    if (typeof document === 'undefined') return;
+    if (originalTitle === null) originalTitle = document.title;
+    unreadAgentMsgs += (count || 1);
+    if (titleFlashTimer) return; // already flashing
+    var on = true;
+    titleFlashTimer = setInterval(function () {
+      document.title = on ? ('💬 New message' + (unreadAgentMsgs > 1 ? ' (' + unreadAgentMsgs + ')' : '')) : (originalTitle || '');
+      on = !on;
+    }, 1000);
+  }
+  function clearTitleFlash() {
+    if (titleFlashTimer) { clearInterval(titleFlashTimer); titleFlashTimer = null; }
+    if (originalTitle !== null) { document.title = originalTitle; }
+    unreadAgentMsgs = 0;
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') clearTitleFlash();
+    });
+  }
+
   // "Chat is available" ding on landing — softer/pleasant, and only once. If
   // audio is still blocked (no interaction yet) it does nothing; the interaction
   // unlock below will fire it on the visitor's first click/scroll/move instead.
   function playLandingSound() {
-    if (landingSoundPlayed) return;
+    if (landingDingDone() || wasDismissed()) return;
     var ctx = getAudioCtx();
-    if (!ctx) { landingSoundPlayed = true; return; }
+    if (!ctx) { markLandingDing(); return; }
     var resume = (ctx.state === 'suspended' && ctx.resume) ? ctx.resume() : null;
     var go = function () {
-      if (landingSoundPlayed) return;
+      if (landingDingDone() || wasDismissed()) return;
       if (ctx.state !== 'running') return; // still blocked — wait for interaction
-      landingSoundPlayed = true;
+      markLandingDing();
       playChime(0.55);
     };
     if (resume && typeof resume.then === 'function') { resume.then(go).catch(function () {}); }
@@ -690,14 +839,35 @@
   }
 
   // ─── Greeting ─────────────────────────────────────────────────────────────
+  // Derive the product the visitor is browsing from the page <title>, so the
+  // opener can be "Are you looking for X?" instead of a generic hello. Takes the
+  // part before the first separator (site name usually follows a | or -) and
+  // rejects anything too short/long to be a product name.
+  function pageProduct() {
+    try {
+      var t = (document.title || '').trim();
+      if (!t) return '';
+      // The site name usually follows a separator — keep the part before it.
+      t = t.split(/\s[|\-–—:»]\s|·|\|/)[0].trim();
+      // Drop a leading sales verb so "Buy Custom Boxes" → "Custom Boxes".
+      t = t.replace(/^(buy|shop|order|get|browse)\s+/i, '').trim();
+      if (t.length >= 3 && t.length <= 60) return t;
+    } catch (e) {}
+    return '';
+  }
+
   function sendBotGreeting() {
     console.log('sendBotGreeting called, greetingSent=' + greetingSent);
     if (greetingSent) return;
-    // With the bot globally disabled (config.bot_enabled === false from
-    // site-config), don't greet as a bot persona — a human team is replying.
-    var greeting = config.bot_enabled === false
-      ? 'Hi! How can we help you today?'
-      : 'Hi! I\'m ' + config.bot_name + '. How can I help you today?';
+    // Product-aware opener when we can tell what they're viewing — shown to the
+    // customer the moment the chat opens. Falls back to a plain hello (no bot
+    // persona; a human team replies here).
+    var product = pageProduct();
+    var greeting = product
+      ? 'Hi! Are you looking for ' + product + '?'
+      : (config.bot_enabled === false
+        ? 'Hi! How can we help you today?'
+        : 'Hi! I\'m ' + config.bot_name + '. How can I help you today?');
     messages.push({ role: 'user', content: '(session started)' });
     appendMessage('bot', greeting);
     console.log('greeting appended to DOM');
@@ -707,10 +877,11 @@
     botMessageCount++;
     greetingSent = true;
     console.log('greeting sent');
-    // The greeting chime doubles as the "chat is available" cue, so don't also
-    // fire the separate landing ding afterward.
-    landingSoundPlayed = true;
-    playNotificationSound();
+    // No sound here. The greeting is a canned line that appears the instant the
+    // panel opens — the visitor is already looking straight at it, so a chime
+    // adds nothing and, on an auto-open, fires without them asking for anything.
+    // The once-per-session landing ding is the only "we're here" cue.
+    markLandingDing();
   }
 
   // ─── Send ──────────────────────────────────────────────────────────────────
@@ -931,9 +1102,27 @@
     }).catch(function () {});
   }
 
+  // ─── Preview mode ───────────────────────────────────────────────────────────
+  // The geo-block hides the widget from South Asian visitors, which means the
+  // site owners — who are in that region — cannot see their own widget to check
+  // it works. Loading any page with ?zeechat=preview once sticks a flag in
+  // localStorage that asks the server to skip the geo-check for this browser,
+  // so they can click through the whole site normally. ?zeechat=off clears it.
+  // Deliberately not a secret: it only reveals a chat bubble.
+  var PREVIEW_KEY = 'zee-preview';
+  function previewMode() {
+    try {
+      var q = String(window.location.search || '');
+      if (q.indexOf('zeechat=preview') !== -1) lsSet(PREVIEW_KEY, '1');
+      else if (q.indexOf('zeechat=off') !== -1) localStorage.removeItem(PREVIEW_KEY);
+      return lsGet(PREVIEW_KEY) === '1';
+    } catch (e) { return false; }
+  }
+
   // ─── Init ──────────────────────────────────────────────────────────────────
   function init() {
-    fetch(baseUrl + '/api/site-config?siteId=' + encodeURIComponent(siteId))
+    fetch(baseUrl + '/api/site-config?siteId=' + encodeURIComponent(siteId)
+      + (previewMode() ? '&preview=1' : ''))
       .then(function (r) { return r.json(); })
       .then(function (data) {
         // Geo-gate: on packaging sites the server flags visitors from blocked

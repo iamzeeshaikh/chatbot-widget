@@ -9,17 +9,27 @@ export type Workspace = 'sports' | 'packaging'
 // just removed from this grouping so they don't show in the packaging
 // dashboard. Re-add their ids here to bring them back.
 //
-// zeecustomboxes and thepapercups are QUOTE-TRACKING ONLY: no widget.js is
-// installed on either site (chat is off there, no footer edits were made) —
-// they're registered purely so their /api/quote-intake leads (see
-// lib/quoteintake.ts) have a home in the Billing tab for month-end payout
-// reconciliation with the buying partner.
-export const PACKAGING_SITES = ['shopcardboardboxes', 'thetubepackaging', 'kraftboxpack', 'thecandlepackaging', 'theburgerboxes', 'smallfoodboxes', 'zeecustomboxes', 'thepapercups']
+// zeecustomboxes is QUOTE-TRACKING ONLY: no widget.js is installed there (chat
+// is off, no footer edits were made) — it's registered purely so its
+// /api/quote-intake leads (see lib/quoteintake.ts) have a home in the Billing
+// tab for month-end payout reconciliation with the buying partner.
+export const PACKAGING_SITES = [
+  'shopcardboardboxes', 'thetubepackaging', 'kraftboxpack', 'thecandlepackaging', 'theburgerboxes', 'smallfoodboxes', 'zeecustomboxes', 'thepapercups',
+  // 2026-07 roster. thepapercups (above) also gets the widget now, so it is no
+  // longer quote-tracking-only. Note `theburgersleeves` (theburgersleeves.com)
+  // is a NEW site — distinct from the retired `burgersleeves` (burgersleeves.com.au),
+  // whose old chat history stays parked under its own id and out of this list.
+  'thewaxpapers', 'thecustomstickers', 'zeepack', 'thecerealboxes', 'hotdogtrays',
+  'theburgersleeves', 'thecandlesleeves', 'cardboardcups', 'thecoffeesleeves',
+  'shopbubblemailers', 'insertshub', 'thediecutstickers', 'customperfumeboxes',
+  'shopdisplayboxes', 'peptidesboxes',
+]
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
 // Sites whose leads are counted/billed (auto lead detection + the Billing tab).
 // Data-driven: add a site_id here to start tracking it — no other code changes.
-export const LEAD_TRACKED_SITES = ['shopcardboardboxes', 'thetubepackaging', 'kraftboxpack', 'thecandlepackaging', 'theburgerboxes', 'smallfoodboxes', 'zeecustomboxes', 'thepapercups']
+// Every packaging site is currently billed, so this mirrors PACKAGING_SITES.
+export const LEAD_TRACKED_SITES = [...PACKAGING_SITES]
 
 export function isLeadTracked(siteId: string): boolean {
   return LEAD_TRACKED_SITES.includes(siteId)
