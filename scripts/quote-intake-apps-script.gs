@@ -47,6 +47,11 @@
  *   1. Go to https://script.google.com → New project.
  *   2. Select all the placeholder code, delete it, paste this whole file in.
  *   3. Save (Cmd/Ctrl+S).
+ *   3b. ⚙ Project Settings → Script Properties → Add script property →
+ *      name `ZEEOPS_WEBHOOK_SECRET`, value = the QUOTE_INTAKE_SECRET set on
+ *      the server. Required — the secret is deliberately NOT in this file
+ *      (it's a public repo). Everything below fails with a clear error
+ *      until this property exists.
  *   4. Run `testConnection` once (▶ Run, pick it from the function dropdown)
  *      — Google will ask you to authorize; allow it (Advanced → Go to
  *      [project] (unsafe) → Allow — normal for a script you wrote yourself).
@@ -69,7 +74,24 @@
 
 // ── Config ───────────────────────────────────────────────────────────────
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
-var WEBHOOK_SECRET = 'HX-2yZkO4BsWqO4fsv1SKyyr59WGgMTsjZ67jYbwvWA'; // matches QUOTE_INTAKE_SECRET on the server
+
+// The shared secret is read from this project's Script Properties, NOT written
+// here. This file lives in a PUBLIC GitHub repo, and an earlier version had the
+// secret as a plain string in it — which meant anyone reading the repo could
+// POST fake leads to the webhook. Never paste the value into this file; keep it
+// in Script Properties, where it stays out of git for good.
+//
+// ONE-TIME SETUP: Apps Script → ⚙ Project Settings → Script Properties →
+//   Add script property → name: ZEEOPS_WEBHOOK_SECRET, value: <the secret>
+// A wrong or missing value shows up immediately as a 401 from testConnection.
+function webhookSecret_() {
+  var v = PropertiesService.getScriptProperties().getProperty('ZEEOPS_WEBHOOK_SECRET');
+  if (!v) {
+    throw new Error('Script property ZEEOPS_WEBHOOK_SECRET is not set — ' +
+      'Project Settings → Script Properties → add ZEEOPS_WEBHOOK_SECRET.');
+  }
+  return v;
+}
 var PROCESSED_LABEL = 'ZeeOps/Processed';
 var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no email/phone found in the body
 
@@ -160,13 +182,13 @@ function testConnection() {
   var res = UrlFetchApp.fetch(WEBHOOK_URL, {
     method: 'post',
     contentType: 'application/json',
-    headers: { 'x-quote-secret': WEBHOOK_SECRET },
+    headers: { 'x-quote-secret': webhookSecret_() },
     payload: JSON.stringify({ siteCode: 'SCB', email: '' }), // intentionally invalid — just checking auth wiring
     muteHttpExceptions: true,
   });
   var code = res.getResponseCode();
   if (code === 400) Logger.log('OK: webhook reachable, auth accepted.');
-  else if (code === 401) Logger.log('FAILED: webhook rejected the secret (401). Check WEBHOOK_SECRET matches the server.');
+  else if (code === 401) Logger.log('FAILED: webhook rejected the secret (401). Check the ZEEOPS_WEBHOOK_SECRET script property matches the server.');
   else Logger.log('Unexpected response ' + code + ': ' + res.getContentText());
 }
 
@@ -591,7 +613,7 @@ function postLead_(siteCode, parsed, receivedDate) {
     var res = UrlFetchApp.fetch(WEBHOOK_URL, {
       method: 'post',
       contentType: 'application/json',
-      headers: { 'x-quote-secret': WEBHOOK_SECRET },
+      headers: { 'x-quote-secret': webhookSecret_() },
       payload: JSON.stringify({
         siteCode: siteCode,
         name: parsed.name,
