@@ -101,9 +101,18 @@ export async function GET(req: NextRequest) {
   // Bot bursts — dozens of sessions with the exact same user-agent in one hour
   // (e.g. the 557-row flood on Jul 4 2026) — are excluded so the line shows
   // real humans (see lib/botfilter.ts).
+  // Sessions an agent ENGAGED — any 'admin' message, proactive greeting OR a
+  // reply. This mirrors the Performance tab's "picked up": of the visitors that
+  // came, how many the team served vs ignored (picked + notPicked === visitors).
+  const agentSessions = new Set<string>()
+  for (const l of logRows) if (String(l.role || '').toLowerCase() === 'admin') agentSessions.add(l.session_id)
+
   const visStamped = visRows.map((v) => ({ v, userAgent: v.user_agent, tsMs: toPktMs(v.created_at) }))
   const bursts = findBurstKeys(visStamped)
   const visitorCounts = new Array(buckets.length).fill(0)
+  const pickedCounts = new Array(buckets.length).fill(0)
+  const notPickedCounts = new Array(buckets.length).fill(0)
+  const countedSessions = new Set<string>() // one visitor row per session, but guard anyway
   // Unique people per bucket: keyed by the widget's persistent visitor id
   // (falling back to IP, then session, for rows recorded before vid existed).
   const uniqueSets: Set<string>[] = buckets.map(() => new Set())
@@ -113,6 +122,11 @@ export async function GET(req: NextRequest) {
     const idx = bucketIndex(buckets, s.tsMs)
     if (idx < 0) continue
     visitorCounts[idx]++
+    if (!countedSessions.has(s.v.session_id)) {
+      countedSessions.add(s.v.session_id)
+      if (agentSessions.has(s.v.session_id)) pickedCounts[idx]++
+      else notPickedCounts[idx]++
+    }
     const { vid, ip } = unpackVisitor(s.v.page_url)
     const key = vid || ip || s.v.session_id
     uniqueSets[idx].add(key)
@@ -138,6 +152,6 @@ export async function GET(req: NextRequest) {
     if (idx >= 0) chatCounts[idx]++
   }
 
-  const points = buckets.map((b, i) => ({ label: b.label, visitors: visitorCounts[i], unique: uniqueSets[i].size, chats: chatCounts[i] }))
+  const points = buckets.map((b, i) => ({ label: b.label, visitors: visitorCounts[i], unique: uniqueSets[i].size, chats: chatCounts[i], picked: pickedCounts[i], notPicked: notPickedCounts[i] }))
   return NextResponse.json({ range, points, totalUnique: windowUnique.size })
 }

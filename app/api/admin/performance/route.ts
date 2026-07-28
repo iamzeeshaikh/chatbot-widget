@@ -117,6 +117,9 @@ export async function GET(req: NextRequest) {
     if (!a) { a = { handled: new Set(), replies: 0, respSum: 0, respCount: 0, respExcluded: 0, slow: 0, leads: 0, hanging: 0, lastReplyMs: 0, proactive: 0 }; agg.set(id, a) }
     return a
   }
+  // Per-agent, per-PKT-day pickups: agentId → (day → set of sessions they first
+  // replied to that day). Powers the "who picked up how many chats each day" view.
+  const pickedAgentDay = new Map<string, Map<string, Set<string>>>()
 
   // Workspace-level tallies.
   let totalReplies = 0, attributedReplies = 0, totalLeads = 0
@@ -187,10 +190,22 @@ export async function GET(req: NextRequest) {
         const author = authorByKey.get(`${sid}|${ev.created_at}`)
         if (author) {
           attributedReplies++
-          const a = ensure(author.id); a.replies++; a.handled.add(sid)
+          const a = ensure(author.id); a.replies++
+          const firstForAgent = !a.handled.has(sid)
+          a.handled.add(sid)
           if (ts > a.lastReplyMs) a.lastReplyMs = ts
           lastAdminAuthor = author.id
           if (!firstAdminAuthor) firstAdminAuthor = author.id
+          // Credit the pickup to the PKT day of this agent's FIRST reply in the
+          // session, so each chat counts once, on the day they took it.
+          if (firstForAgent) {
+            const day = new Date(ts + 5 * 3600 * 1000).toISOString().slice(0, 10)
+            let byDay = pickedAgentDay.get(author.id)
+            if (!byDay) { byDay = new Map(); pickedAgentDay.set(author.id, byDay) }
+            let set = byDay.get(day)
+            if (!set) { set = new Set(); byDay.set(day, set) }
+            set.add(sid)
+          }
         }
 
         if (pendingUserTs !== null) {
@@ -271,8 +286,20 @@ export async function GET(req: NextRequest) {
     if (chattedSessions.has(v.session_id)) { d.chats++; d.chatSessions.push({ session_id: v.session_id, site_id: v.site_id }) }
     if (answeredSessions.has(v.session_id)) d.picked++
   }
+  // Per-day agent pickup breakdown: date → [{ email, picked }] (busiest first).
+  const emailForId = (id: string) => roster.get(id)?.email ?? idToEmail.get(id) ?? 'former member'
+  const pickByDay = new Map<string, { email: string; picked: number }[]>()
+  for (const [agentId, byDay] of pickedAgentDay) {
+    for (const [day, set] of byDay) {
+      let arr = pickByDay.get(day)
+      if (!arr) { arr = []; pickByDay.set(day, arr) }
+      arr.push({ email: emailForId(agentId), picked: set.size })
+    }
+  }
+  for (const arr of pickByDay.values()) arr.sort((a, b) => b.picked - a.picked)
+
   const dailyRows = Array.from(daily.entries())
-    .map(([date, d]) => ({ date, ...d, notPicked: d.visitors - d.picked }))
+    .map(([date, d]) => ({ date, ...d, notPicked: d.visitors - d.picked, byAgent: pickByDay.get(date) ?? [] }))
     .sort((a, b) => b.date.localeCompare(a.date))
 
   // ── Diagnostic: dump every pair feeding the workspace average ───────────────

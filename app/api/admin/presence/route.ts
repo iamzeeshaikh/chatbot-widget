@@ -1,7 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { getMember } from '@/lib/auth'
+import { getMember, HARDCODED_ACCOUNTS } from '@/lib/auth'
 import { AGENT_DUTY_SITE } from '@/lib/visitor'
+
+export const dynamic = 'force-dynamic'
+
+// Who's online right now: every agent in the workspace, flagged online if their
+// duty heartbeat (POST below, once a minute) landed within ONLINE_MS. Available
+// to any member so the whole team can see who's on shift (Zendesk-style).
+const ONLINE_MS = 2.5 * 60 * 1000
+export async function GET(req: NextRequest) {
+  const member = await getMember(req)
+  if (!member) return NextResponse.json({ agents: [], onlineCount: 0 }, { status: 401 })
+
+  const [{ data: memberRows }, { data: beats }] = await Promise.all([
+    supabase.from('members').select('email').eq('workspace', member.workspace),
+    supabase.from('active_visitors').select('page_url, last_seen')
+      .eq('site_id', AGENT_DUTY_SITE)
+      .gte('last_seen', new Date(Date.now() - 15 * 60 * 1000).toISOString()),
+  ])
+
+  const roster = new Set<string>()
+  for (const a of HARDCODED_ACCOUNTS.filter((x) => x.workspace === member.workspace)) roster.add(a.email)
+  for (const m of memberRows ?? []) roster.add(m.email)
+
+  const lastByEmail: Record<string, number> = {}
+  for (const b of beats ?? []) {
+    let email = '', ws = ''
+    try { const o = JSON.parse(b.page_url ?? '{}'); email = o.email; ws = o.ws } catch { /* skip */ }
+    if (!email || ws !== member.workspace) continue
+    const ms = new Date(b.last_seen.endsWith('Z') ? b.last_seen : b.last_seen + 'Z').getTime()
+    if (!lastByEmail[email] || ms > lastByEmail[email]) lastByEmail[email] = ms
+  }
+
+  const now = Date.now()
+  const agents = Array.from(roster).map((email) => {
+    const ms = lastByEmail[email] || 0
+    return { email, online: ms > 0 && now - ms < ONLINE_MS, lastSeen: ms ? new Date(ms).toISOString() : null }
+  }).sort((a, b) => (a.online === b.online ? a.email.localeCompare(b.email) : a.online ? -1 : 1))
+
+  return NextResponse.json({ agents, onlineCount: agents.filter((a) => a.online).length })
+}
 
 // Agent duty-hours heartbeat — no DDL: one active_visitors row per agent per
 // PKT day under the reserved AGENT_DUTY_SITE id (every visitor query filters

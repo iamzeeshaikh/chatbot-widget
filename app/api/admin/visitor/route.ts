@@ -6,6 +6,37 @@ import { isControlRole } from '@/lib/controlroles'
 
 export const dynamic = 'force-dynamic'
 
+// Auto-detect a visitor's name / email / phone from what they typed in chat, to
+// PRE-FILL the agent's contact fields (they can still edit + must Save). Only
+// fills fields the saved contact left empty — a saved value always wins. The
+// NAME is only taken from a message that also carries the email or phone (the
+// "Andrew / email / number" contact dump), so casual lines never get grabbed.
+const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i
+function fillContactFromMessages(contact: VisitorContact, userMessages: { message: string }[]): VisitorContact {
+  let { name, email, phone } = contact
+  for (const m of userMessages) {
+    const text = m.message || ''
+    if (!email) { const e = text.match(EMAIL_RE); if (e) email = e[0] }
+    if (!phone) {
+      const p = text.match(/(\+?\d[\d\s().-]{6,}\d)/)
+      if (p) { const d = p[1].replace(/\D/g, ''); if (d.length >= 7 && d.length <= 15) phone = p[1].trim() }
+    }
+  }
+  if (!name) {
+    for (const m of userMessages) {
+      const text = m.message || ''
+      if (!(EMAIL_RE.test(text) || /\d{7,}/.test(text.replace(/\D/g, '')))) continue
+      for (const raw of text.split(/\n|,/)) {
+        const line = raw.trim()
+        if (!line || EMAIL_RE.test(line) || /\d{4,}/.test(line)) continue
+        if (/^[A-Za-z][A-Za-z.'’-]*(?:\s+[A-Za-z.'’-]+){0,2}$/.test(line) && line.length >= 2 && line.length <= 40) { name = line; break }
+      }
+      if (name) break
+    }
+  }
+  return { ...contact, name, email, phone }
+}
+
 // Resolve the site a session belongs to (from its chat logs, falling back to the
 // visitor row for sessions that pinged but never chatted). Returns null when it
 // can't be determined — callers treat that as forbidden.
@@ -62,6 +93,8 @@ export async function GET(req: NextRequest) {
   const userMessages = logs.filter(
     (l) => l.role === 'user' && l.message !== '(session started)',
   )
+  // Pre-fill any empty contact fields from what the visitor typed in chat.
+  contact = fillContactFromMessages(contact, userMessages)
   const messageLogs = logs.filter((l) => !isControlRole(l.role))
 
   // Time on site: first activity (visitor row creation or first log) → last seen.
