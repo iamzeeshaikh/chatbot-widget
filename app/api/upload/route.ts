@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { getMode, setMode } from '@/lib/mode'
 import { recordReplyAuthor } from '@/lib/replyauthor'
+import { getAssignment, setAssignment } from '@/lib/assignment'
 import {
   ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, isAllowedMime,
   uniqueAttachmentPath, buildAttachmentMessage, AttachmentInfo,
@@ -42,6 +43,15 @@ export async function POST(req: NextRequest) {
     }
     if (isAgent && !canAccessSite(member, siteId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403, headers: corsHeaders })
+    }
+    // HARD LOCK (agents only): a chat assigned to another agent is exclusive —
+    // block sending files too, not just text. Checked before the upload so we
+    // don't store an orphan file. Visitors are never affected.
+    if (isAgent && member) {
+      const owner = await getAssignment(sessionId)
+      if (owner && owner !== member.email) {
+        return NextResponse.json({ error: 'locked', assignedTo: owner }, { status: 409, headers: corsHeaders })
+      }
     }
 
     const mime = file.type || 'application/octet-stream'
@@ -96,6 +106,10 @@ export async function POST(req: NextRequest) {
       await recordReplyAuthor(sessionId, siteId, member, at)
       if ((await getMode(sessionId)) !== 'human') {
         await setMode(sessionId, siteId, 'human')
+      }
+      // Sending a file also claims (locks) an unassigned chat, like a text reply.
+      if (!(await getAssignment(sessionId))) {
+        await setAssignment(sessionId, siteId, member.email)
       }
     }
 

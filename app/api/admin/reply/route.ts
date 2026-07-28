@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { getMode, setMode } from '@/lib/mode'
 import { recordReplyAuthor } from '@/lib/replyauthor'
+import { getAssignment, setAssignment } from '@/lib/assignment'
 
 export async function POST(req: NextRequest) {
   const member = await getMember(req)
@@ -14,6 +15,15 @@ export async function POST(req: NextRequest) {
   }
   if (!canAccessSite(member, siteId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // HARD LOCK: a chat assigned to another agent is exclusive — only its owner
+  // may reply. Others must "Take over" (which reassigns it) first. This is the
+  // authoritative guard so the lock can't be bypassed by a stale/hacked client.
+  // An unassigned chat is claimed below by whoever replies first.
+  const currentOwner = await getAssignment(sessionId)
+  if (currentOwner && currentOwner !== member.email) {
+    return NextResponse.json({ error: 'locked', assignedTo: currentOwner }, { status: 409 })
   }
 
   // Save admin reply to chat_logs — delivery detection uses timestamp comparison,
@@ -40,5 +50,12 @@ export async function POST(req: NextRequest) {
     await setMode(sessionId, siteId, 'human')
   }
 
-  return NextResponse.json({ success: true })
+  // Auto-claim: replying to a chat nobody had picked up assigns (locks) it to
+  // this agent. (If it was already ours, currentOwner === member.email.)
+  if (!currentOwner) {
+    await setAssignment(sessionId, siteId, member.email)
+    return NextResponse.json({ success: true, assignedTo: member.email })
+  }
+
+  return NextResponse.json({ success: true, assignedTo: currentOwner })
 }

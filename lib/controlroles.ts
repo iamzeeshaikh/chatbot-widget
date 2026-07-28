@@ -14,6 +14,7 @@ import { CONTACT_ROLE, TAGS_ROLE } from './visitor'
 import { LEAD_CAPTURE_ROLE } from './leadtracking'
 import { REPLY_AUTHOR_ROLE } from './replyauthor'
 import { LEAD_STATUS_ROLE } from './leadstatus'
+import { ASSIGNMENT_ROLE } from './assignment'
 
 // NOTE: kept as literals (not imported from lib/blocklist.ts / lib/push.ts) so
 // this module stays importable without pulling in server-only dependencies.
@@ -27,6 +28,7 @@ export const CONTROL_ROLES = [
   LEAD_CAPTURE_ROLE,
   REPLY_AUTHOR_ROLE,
   LEAD_STATUS_ROLE,
+  ASSIGNMENT_ROLE,
   BLOCKED_VISITOR_ROLE,
   PUSH_SUB_ROLE,
 ] as const
