@@ -192,10 +192,13 @@ var FIRST_RUN_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 
 var RECENT_DAYS = 7;
 // Sized for a CATCH-UP run (after rewindWatermark), not for the steady state —
-// a normal 30-minute run now returns a handful of threads, so this cap only
-// ever comes into play when re-covering days at once, and being cut short
-// there is exactly the case that loses leads.
-var MAX_CANDIDATE_THREADS = 600;
+// a normal 30-minute run returns a handful of threads, so this ceiling only
+// comes into play when re-covering days at once, and being cut short there is
+// exactly the case that loses leads. Reached by PAGING: GmailApp.search
+// rejects a `max` above 500 outright ("Argument max cannot exceed 500"), so
+// anything larger has to be fetched a page at a time.
+var MAX_CANDIDATE_THREADS = 1500;
+var SEARCH_PAGE_SIZE = 500; // Gmail's hard per-call limit
 // How many threads the dedicated checkout sweep walks per run (see
 // sweepCheckoutLabel_ for why checkout can't rely on the search above).
 // Same quota maths: every thread here costs a call on every run.
@@ -331,9 +334,16 @@ function processQuoteLeads() {
   // and puts every single run back near the cap; seconds make the window
   // exactly as wide as it needs to be.
   var query = 'after:' + Math.floor(cutoff / 1000);
-  var threads = GmailApp.search(query, 0, MAX_CANDIDATE_THREADS);
+  var threads = [];
+  for (var off = 0; off < MAX_CANDIDATE_THREADS; off += SEARCH_PAGE_SIZE) {
+    var want = Math.min(SEARCH_PAGE_SIZE, MAX_CANDIDATE_THREADS - off);
+    var batch = GmailApp.search(query, off, want);
+    threads = threads.concat(batch);
+    if (batch.length < want) break;               // last page
+    if (Date.now() - start > TIME_BUDGET_MS) break;
+  }
   if (threads.length >= MAX_CANDIDATE_THREADS) {
-    Logger.log('WARNING: hit the ' + MAX_CANDIDATE_THREADS + '-thread cap — raise MAX_CANDIDATE_THREADS or shorten the trigger interval.');
+    Logger.log('WARNING: hit the ' + MAX_CANDIDATE_THREADS + '-thread ceiling — the oldest threads in this window went unread. Run again to continue.');
   }
 
   for (var t = 0; t < threads.length; t++) {
