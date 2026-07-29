@@ -71,6 +71,22 @@ export function siteIdFromQuoteCode(code: string): string | null {
 // forms and those must never be flagged.
 const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals|\bjackpot\b|no rx\b|prescription without doctor|stop to opt-?out|reply stop|text stop|attendees list|complimentary (bid|quote|audit)|unsubscribe here|no longer wish to receive|live within 24 hours|drive (more )?traffic|directly in front of people|boost your (rankings|traffic|sales)|increase your (traffic|leads|sales)|grow your business online|first page of google|rank higher on google/i
 
+// A rival packaging supplier pitching ITS services through the quote form —
+// the sender wants to sell, not buy, so it is not a lead however polite it is.
+// (Real example: "Senior Sales Executive at Premium Product Boxes … we
+// specialize in premium packaging solutions … Here's what you'll get when
+// working with us: Free Professional Design".)
+//
+// Every phrase here is one only a SELLER writes. Deliberately excluded:
+// "we specialize in", "free design", "competitive wholesale pricing" and
+// "hope this message finds you" — buyers write all of those constantly. The
+// genuine leads in this table include a New York State agency's formal
+// quotation request and a Fortune-100 vendor's branded-packaging enquiry, both
+// of which open exactly like a pitch; catching one of those would cost far
+// more than letting a pitch through. Checked against all 998 stored quote
+// leads: this matches that one seller and nothing else.
+const SELLER_PITCH_RE = /here'?s what you'?ll get|when working with us|why choose us\b|we can help you (enhance|elevate|boost|grow|improve) your (brand|business|sales|packaging)|allow me to introduce|i am reaching out to (offer|introduce)|(sales|business development) (executive|manager|representative) at\b|we would be (delighted|happy|glad) to (be|become) your (supplier|partner|vendor)|partner with us\b/i
+
 // The same bot network generates a fake "phone number" as a single literal
 // digit 8 followed by exactly 10 more digits (e.g. "86717731828") — seen
 // across ~40 spam submissions with zero exceptions, while every real lead's
@@ -119,7 +135,7 @@ const TEST_PHONE_RE = /^\d{3}555\d{4}$/
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
   if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
-  return SPAM_SIGNATURE_RE.test(bodyText)
+  return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText)
 }
 
 // Strip the QUOTE_TAG, any forwarded-message header block, and the
