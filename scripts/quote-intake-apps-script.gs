@@ -265,7 +265,12 @@ function processQuoteLeadsBackfill() {
       var id = thread.getId();
       if (seen[id]) continue;
       seen[id] = true;
-      if (isHandled_(thread)) continue;
+      // Deliberately NOT skipping already-labelled threads. This is the
+      // catch-all sweep — its whole job is to re-read everything under a site
+      // label, including the threads the main run marked Processed after
+      // handling only the messages that existed at the time. Anything already
+      // ingested comes straight back as `deduped` from the server, so a
+      // re-read costs a request and nothing else.
 
       var messages = thread.getMessages();
       var handledAny = false;
@@ -310,8 +315,18 @@ function processQuoteLeads() {
   // the first one was handled. The message-date watermark below is what stops
   // the same message being sent twice.
   var cutoff = readWatermark_();
-  var query = 'newer_than:' + RECENT_DAYS + 'd';
+  // Scope the search to the watermark, not to a fixed RECENT_DAYS window. With
+  // a 30-minute trigger that is a handful of threads instead of everything from
+  // the last week, which both slashes the Gmail quota cost AND takes the
+  // pressure off MAX_CANDIDATE_THREADS — a run that hits that cap is a run that
+  // silently didn't look at the oldest threads in its window. Gmail's `after:`
+  // is day-granular, so reach two days further back than needed.
+  var since = new Date(cutoff - 2 * 24 * 60 * 60 * 1000);
+  var query = 'after:' + Utilities.formatDate(since, Session.getScriptTimeZone(), 'yyyy/MM/dd');
   var threads = GmailApp.search(query, 0, MAX_CANDIDATE_THREADS);
+  if (threads.length >= MAX_CANDIDATE_THREADS) {
+    Logger.log('WARNING: hit the ' + MAX_CANDIDATE_THREADS + '-thread cap — raise MAX_CANDIDATE_THREADS or shorten the trigger interval.');
+  }
 
   for (var t = 0; t < threads.length; t++) {
     if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break; }
@@ -345,11 +360,75 @@ function processQuoteLeads() {
     else { thread.addLabel(skippedLabel); skipped++; }
   }
 
+  // Safety net for the one failure the label model can't see: a genuine form
+  // notification that carries NO site label at all — nobody filed it, or Gmail
+  // threaded it somewhere unexpected. Found live: a zeecustomboxes enquiry
+  // (Levi Lyons, 28 Jul) that never reached the dashboard.
+  //
+  // This does NOT relax the label-only rule into guessing from sender or
+  // subject text. It keys off the form's own machine-generated footer — the
+  // "Page URL: https://<site>/..." line the site itself writes — and only
+  // accepts a host that is already one of ours in SITE_DOMAINS. Spam can't
+  // manufacture that without genuinely being a submission on that site, and
+  // the server's own spam rules still apply on top.
+  var fb = sweepUnlabeledForms_(start, cutoff, processedLabel);
+  sent += fb.sent;
+  if (fb.stoppedEarly) stoppedEarly = true;
+  if (fb.sent > 0) Logger.log('no-label fallback: ingested ' + fb.sent + ' form submission(s) whose thread carried no site label — worth labelling them.');
+
   // Only advance the watermark on a complete pass. A run cut short by the time
   // budget must leave it where it was, so the next run re-covers the remainder.
   if (!stoppedEarly) saveWatermark_(start);
   Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped + ' (scanned ' + threads.length + ' recent threads, ' + notOurs + ' not site-labeled)' +
     (stoppedEarly ? ' — stopped early (time budget); rest will be picked up on the next run.' : ' — done, nothing left to process.'));
+}
+
+// Pull the watermark back so the next processQuoteLeads run re-covers the last
+// REWIND_DAYS days. Needed whenever the script gains a new way of finding mail
+// — the watermark has already moved past the messages the OLD code couldn't
+// see, so without this they stay invisible forever. Costs no Gmail quota at
+// all (it only writes a property); everything already ingested comes straight
+// back as `deduped` from the server.
+var REWIND_DAYS = 7;
+
+function rewindWatermark() {
+  var target = Date.now() - REWIND_DAYS * 24 * 60 * 60 * 1000;
+  saveWatermark_(target + WATERMARK_OVERLAP_MS); // readWatermark_ subtracts the overlap again
+  Logger.log('Watermark rewound to ' + new Date(target) +
+    '. Run processQuoteLeads once now — it will re-read everything since then.');
+}
+
+// Why did THIS email never become a lead? Put anything that identifies it in
+// DIAGNOSE_QUERY (an address, a subject, "from:someone") and run this. It sends
+// nothing and changes nothing — it just prints, for every matching thread: the
+// labels Gmail actually has on it, whether those resolve to one of our site
+// codes, and for each message whether it is newer than the watermark and what
+// the parser can read out of it. Between those four facts, exactly one will be
+// the reason.
+var DIAGNOSE_QUERY = 'lyonslevi298@gmail.com';
+
+function diagnoseThread() {
+  var threads = GmailApp.search(DIAGNOSE_QUERY, 0, 5);
+  if (!threads.length) { Logger.log('No thread matched: ' + DIAGNOSE_QUERY); return; }
+  var cutoff = readWatermark_();
+  Logger.log('watermark cutoff = ' + new Date(cutoff) + '  (messages at or before this are treated as already covered)');
+  for (var i = 0; i < threads.length; i++) {
+    var th = threads[i];
+    var names = th.getLabels().map(function (l) { return l.getName(); });
+    var code = matchSiteCode_(th);
+    Logger.log('--- thread ' + (i + 1) + ': ' + th.getFirstMessageSubject());
+    Logger.log('    labels    : ' + (names.join('  |  ') || '(none)'));
+    Logger.log('    site code : ' + (code || 'NONE — this is why it is skipped'));
+    var msgs = th.getMessages();
+    for (var j = 0; j < msgs.length; j++) {
+      var m = msgs[j];
+      var p = parseLeadBody_(m.getPlainBody());
+      Logger.log('    msg ' + (j + 1) + '  ' + m.getDate() +
+        '  | newer than watermark: ' + (m.getDate().getTime() > cutoff) +
+        '  | email: ' + (p.email || 'NONE') +
+        '  | phone: ' + (p.phone || 'NONE'));
+    }
+  }
 }
 
 // Re-try everything sitting in ZeeOps/Unmatched. That label means "carried one
@@ -452,6 +531,48 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max) {
     if (considered === 0) continue;
     if (handledAny) thread.addLabel(processedLabel);
     else { thread.addLabel(skippedLabel); out.skipped++; }
+  }
+  return out;
+}
+
+// "Page URL: https://zeecustomboxes.com/product/..." -> "ZCB". Returns null for
+// any host that isn't one of ours, so this can only ever resolve to a site we
+// already own.
+function codeFromBodyUrl_(body) {
+  var m = String(body || '').match(/Page URL:\s*<?\s*(https?:\/\/[^\s>]+)/i);
+  if (!m) return null;
+  var host = m[1].replace(/^https?:\/\//i, '').split('/')[0].toLowerCase().replace(/^www\./, '');
+  for (var code in SITE_DOMAINS) {
+    if (SITE_DOMAINS[code].toLowerCase() === host) return code;
+  }
+  return null;
+}
+
+// One targeted search for form notifications ("Page URL:" only appears in that
+// footer), so this costs a single query plus a look at the few threads it
+// returns — not a body read of every unlabelled thread in the mailbox.
+function sweepUnlabeledForms_(start, cutoff, processedLabel) {
+  var out = { sent: 0, stoppedEarly: false };
+  var since = new Date(cutoff - 2 * 24 * 60 * 60 * 1000);
+  var q = 'after:' + Utilities.formatDate(since, Session.getScriptTimeZone(), 'yyyy/MM/dd') + ' "Page URL:"';
+  var threads = GmailApp.search(q, 0, 100);
+  for (var t = 0; t < threads.length; t++) {
+    if (Date.now() - start > TIME_BUDGET_MS) { out.stoppedEarly = true; return out; }
+    var thread = threads[t];
+    if (matchSiteCode_(thread)) continue; // labelled — the main loop already had it
+    var messages = thread.getMessages();
+    var handledAny = false;
+    for (var m = 0; m < messages.length; m++) {
+      var msg = messages[m];
+      if (msg.getDate().getTime() <= cutoff) continue;
+      var body = msg.getPlainBody();
+      var code = codeFromBodyUrl_(body);
+      if (!code) continue;
+      var parsed = parseLeadBody_(body);
+      if (!parsed.email && !parsed.phone) continue;
+      if (postLead_(code, parsed, msg.getDate())) { out.sent++; handledAny = true; }
+    }
+    if (handledAny) thread.addLabel(processedLabel);
   }
   return out;
 }
