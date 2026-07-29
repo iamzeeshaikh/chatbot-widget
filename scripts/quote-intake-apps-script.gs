@@ -66,6 +66,12 @@
  *      here on — processQuoteLeadsBackfill is manual-only, never on a
  *      trigger.
  *
+ * WHAT STOPS DOUBLE-SENDING: a message-date watermark stored in this script's
+ * properties (ZEEOPS_LAST_RUN_MS), NOT the Gmail labels. Labels are
+ * thread-level, and a form-notification thread keeps receiving new
+ * submissions — treating "thread handled" as "done" silently hid every later
+ * message in it. The labels below are now only a human-readable trail.
+ *
  * Every email it successfully sends gets the Gmail label "ZeeOps/Processed"
  * (auto-created) so it's never sent twice. One that's labeled with a site
  * code but has no readable email/phone gets "ZeeOps/Unmatched" instead, so
@@ -169,6 +175,21 @@ var MAX_THREADS_PER_LABEL = 150;
 // longer gets picked up automatically. Run processQuoteLeadsBackfill by hand
 // after doing that. (The checkout sweep below has no date window at all, so
 // order mail is unaffected either way.)
+// Gmail labels are THREAD-level, so "this thread is done" is the wrong unit of
+// work — a form-notification thread keeps receiving new submissions, and any
+// message arriving after the thread was labelled Processed became invisible to
+// the search below. (Found live: Levi Lyons' 28 Jul enquiry landed in the ZCB
+// thread that already carried Processed and was never ingested — the thread
+// showed "19 deleted messages", i.e. every earlier submission had been in it
+// too.) The unit of work is therefore a MESSAGE DATE, kept here: everything
+// newer than this watermark gets processed, whatever its thread is labelled.
+// The overlap re-covers the seam so a message arriving mid-run is never lost;
+// re-sending a message is harmless because the server dedupes.
+var LAST_RUN_KEY = 'ZEEOPS_LAST_RUN_MS';
+var WATERMARK_OVERLAP_MS = 15 * 60 * 1000;
+// First run only (no watermark stored yet) — how far back to reach.
+var FIRST_RUN_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
+
 var RECENT_DAYS = 7;
 var MAX_CANDIDATE_THREADS = 250;
 // How many threads the dedicated checkout sweep walks per run (see
@@ -279,43 +300,54 @@ function processQuoteLeads() {
     return;
   }
 
-  // ONE search across the whole mailbox for recent, not-yet-handled mail —
-  // not scoped to any particular site label, so there's no nested-label
-  // text-matching to get wrong (that's what broke v5's search). Excluding
-  // Processed/Unmatched here is safe and cheap: those two are OUR OWN flat
-  // "ZeeOps/…" labels, not the user's arbitrarily-nested site folders.
-  var query = 'newer_than:' + RECENT_DAYS + 'd -label:"' + PROCESSED_LABEL + '" -label:"' + SKIPPED_LABEL + '"';
+  // ONE search across the whole mailbox for recent mail — not scoped to any
+  // particular site label, so there's no nested-label text-matching to get
+  // wrong (that's what broke v5's search).
+  //
+  // Deliberately NOT excluding Processed/Unmatched any more. Those labels sit
+  // on the THREAD, and a form-notification thread goes on receiving new
+  // submissions forever, so excluding it hid every message that arrived after
+  // the first one was handled. The message-date watermark below is what stops
+  // the same message being sent twice.
+  var cutoff = readWatermark_();
+  var query = 'newer_than:' + RECENT_DAYS + 'd';
   var threads = GmailApp.search(query, 0, MAX_CANDIDATE_THREADS);
 
   for (var t = 0; t < threads.length; t++) {
     if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break; }
 
     var thread = threads[t];
-    // The search ran before the checkout sweep labeled anything, so its results
-    // can already be handled by the time we get here.
-    if (isHandled_(thread)) continue;
     var code = matchSiteCode_(thread); // null if it doesn't carry one of our site labels
     if (!code) {
       // A checkout thread whose store name isn't in STORE_NAME_CODES would
       // otherwise be re-scanned forever. Park it in Unmatched so it shows up as
       // something to fix (add the store name) rather than silently vanishing.
-      if (hasCheckoutLabel_(thread)) { thread.addLabel(skippedLabel); skipped++; }
+      if (hasCheckoutLabel_(thread) && !isHandled_(thread)) { thread.addLabel(skippedLabel); skipped++; }
       else notOurs++;
       continue;
     }
 
     var messages = thread.getMessages();
-    var handledAny = false;
+    var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
       var msg = messages[m];
+      if (msg.getDate().getTime() <= cutoff) continue; // already covered by an earlier run
+      considered++;
       var parsed = parseLeadBody_(msg.getPlainBody());
       if (!parsed.email && !parsed.phone) continue;
       if (postLead_(code, parsed, msg.getDate())) { sent++; handledAny = true; }
-      // On failure, leave the thread unlabeled so a later run retries it.
+      // On failure, leave the watermark alone so a later run retries it.
     }
+    // Nothing new in this thread — leave its labels exactly as they are, or an
+    // old fully-handled thread would get re-flagged Unmatched on every run.
+    if (considered === 0) continue;
     if (handledAny) thread.addLabel(processedLabel);
     else { thread.addLabel(skippedLabel); skipped++; }
   }
+
+  // Only advance the watermark on a complete pass. A run cut short by the time
+  // budget must leave it where it was, so the next run re-covers the remainder.
+  if (!stoppedEarly) saveWatermark_(start);
   Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped + ' (scanned ' + threads.length + ' recent threads, ' + notOurs + ' not site-labeled)' +
     (stoppedEarly ? ' — stopped early (time budget); rest will be picked up on the next run.' : ' — done, nothing left to process.'));
 }
@@ -358,6 +390,16 @@ function retryUnmatched() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
+function readWatermark_() {
+  var v = parseInt(PropertiesService.getScriptProperties().getProperty(LAST_RUN_KEY), 10);
+  if (!v) return Date.now() - FIRST_RUN_LOOKBACK_MS;
+  return v - WATERMARK_OVERLAP_MS;
+}
+
+function saveWatermark_(ms) {
+  PropertiesService.getScriptProperties().setProperty(LAST_RUN_KEY, String(ms));
+}
+
 function getOrCreateLabel_(name) {
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
 }
@@ -390,21 +432,24 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max) {
   var out = { sent: 0, skipped: 0, stoppedEarly: false };
   var label = findCheckoutLabel_();
   if (!label) return out; // no checkout label in this mailbox — nothing to do
+  var cutoff = readWatermark_(); // same message-date rule as the main run
   var threads = label.getThreads(0, max);
   for (var t = 0; t < threads.length; t++) {
     if (Date.now() - start > TIME_BUDGET_MS) { out.stoppedEarly = true; return out; }
     var thread = threads[t];
-    if (isHandled_(thread)) continue;
     // A site-code label on the thread still wins over the subject's store name.
     var code = matchSiteCode_(thread);
-    if (!code) { thread.addLabel(skippedLabel); out.skipped++; continue; }
     var messages = thread.getMessages();
-    var handledAny = false;
+    var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
+      if (messages[m].getDate().getTime() <= cutoff) continue;
+      considered++;
+      if (!code) continue;
       var parsed = parseLeadBody_(messages[m].getPlainBody());
       if (!parsed.email && !parsed.phone) continue;
       if (postLead_(code, parsed, messages[m].getDate())) { out.sent++; handledAny = true; }
     }
+    if (considered === 0) continue;
     if (handledAny) thread.addLabel(processedLabel);
     else { thread.addLabel(skippedLabel); out.skipped++; }
   }
