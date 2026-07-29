@@ -191,7 +191,11 @@ var WATERMARK_OVERLAP_MS = 15 * 60 * 1000;
 var FIRST_RUN_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 
 var RECENT_DAYS = 7;
-var MAX_CANDIDATE_THREADS = 250;
+// Sized for a CATCH-UP run (after rewindWatermark), not for the steady state —
+// a normal 30-minute run now returns a handful of threads, so this cap only
+// ever comes into play when re-covering days at once, and being cut short
+// there is exactly the case that loses leads.
+var MAX_CANDIDATE_THREADS = 600;
 // How many threads the dedicated checkout sweep walks per run (see
 // sweepCheckoutLabel_ for why checkout can't rely on the search above).
 // Same quota maths: every thread here costs a call on every run.
@@ -294,6 +298,7 @@ function processQuoteLeads() {
   var skippedLabel = getOrCreateLabel_(SKIPPED_LABEL);
 
   var sent = 0, skipped = 0, notOurs = 0, stoppedEarly = false;
+  var noLabel = 0, siteLabeled = 0; // for the summary line
 
   // Checkout FIRST, before the general search spends the time budget — order
   // mail must never be starved by a mailbox full of unrelated threads.
@@ -315,14 +320,17 @@ function processQuoteLeads() {
   // the first one was handled. The message-date watermark below is what stops
   // the same message being sent twice.
   var cutoff = readWatermark_();
-  // Scope the search to the watermark, not to a fixed RECENT_DAYS window. With
-  // a 30-minute trigger that is a handful of threads instead of everything from
-  // the last week, which both slashes the Gmail quota cost AND takes the
-  // pressure off MAX_CANDIDATE_THREADS — a run that hits that cap is a run that
-  // silently didn't look at the oldest threads in its window. Gmail's `after:`
-  // is day-granular, so reach two days further back than needed.
-  var since = new Date(cutoff - 2 * 24 * 60 * 60 * 1000);
-  var query = 'after:' + Utilities.formatDate(since, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+  // Scope the search to the watermark, not to a fixed RECENT_DAYS window — on a
+  // 30-minute trigger that is a handful of threads instead of a week's worth,
+  // which both slashes the Gmail quota AND keeps the run clear of
+  // MAX_CANDIDATE_THREADS. Hitting that cap means the run silently never looked
+  // at the oldest threads in its window, so it is warned about below.
+  //
+  // `after:` takes a Unix timestamp as well as a yyyy/MM/dd date. The date form
+  // is only day-granular, which rounds a 30-minute window up to two-plus days
+  // and puts every single run back near the cap; seconds make the window
+  // exactly as wide as it needs to be.
+  var query = 'after:' + Math.floor(cutoff / 1000);
   var threads = GmailApp.search(query, 0, MAX_CANDIDATE_THREADS);
   if (threads.length >= MAX_CANDIDATE_THREADS) {
     Logger.log('WARNING: hit the ' + MAX_CANDIDATE_THREADS + '-thread cap — raise MAX_CANDIDATE_THREADS or shorten the trigger interval.');
@@ -334,6 +342,30 @@ function processQuoteLeads() {
     var thread = threads[t];
     var code = matchSiteCode_(thread); // null if it doesn't carry one of our site labels
     if (!code) {
+      // Last line of defence: a genuine form notification nobody labelled.
+      // Decided from the form's own machine-generated footer ("Page URL:
+      // https://<site>/…", written by the site itself), never from sender or
+      // subject text — so the label-only guarantee against spam still holds,
+      // and only hosts already in SITE_DOMAINS can match.
+      //
+      // Read here rather than via a separate `"Page URL:"` search: Gmail's
+      // quoted-phrase search containing a colon is unreliable, and this is
+      // exactly the path that must not fail quietly. It costs a body read per
+      // unlabelled thread WITH NEW MESSAGES, which the watermark keeps to a
+      // handful on a normal run.
+      var fbAny = false;
+      var umsgs = thread.getMessages();
+      for (var um = 0; um < umsgs.length; um++) {
+        if (umsgs[um].getDate().getTime() <= cutoff) continue;
+        var ubody = umsgs[um].getPlainBody();
+        var ucode = codeFromBodyUrl_(ubody);
+        if (!ucode) continue;
+        var uparsed = parseLeadBody_(ubody);
+        if (!uparsed.email && !uparsed.phone) continue;
+        if (postLead_(ucode, uparsed, umsgs[um].getDate())) { sent++; noLabel++; fbAny = true; }
+      }
+      if (fbAny) { thread.addLabel(processedLabel); continue; }
+
       // A checkout thread whose store name isn't in STORE_NAME_CODES would
       // otherwise be re-scanned forever. Park it in Unmatched so it shows up as
       // something to fix (add the store name) rather than silently vanishing.
@@ -341,6 +373,7 @@ function processQuoteLeads() {
       else notOurs++;
       continue;
     }
+    siteLabeled++;
 
     var messages = thread.getMessages();
     var handledAny = false, considered = 0;
@@ -371,15 +404,13 @@ function processQuoteLeads() {
   // accepts a host that is already one of ours in SITE_DOMAINS. Spam can't
   // manufacture that without genuinely being a submission on that site, and
   // the server's own spam rules still apply on top.
-  var fb = sweepUnlabeledForms_(start, cutoff, processedLabel);
-  sent += fb.sent;
-  if (fb.stoppedEarly) stoppedEarly = true;
-  if (fb.sent > 0) Logger.log('no-label fallback: ingested ' + fb.sent + ' form submission(s) whose thread carried no site label — worth labelling them.');
+  if (noLabel > 0) Logger.log('no-label fallback: ingested ' + noLabel + ' form submission(s) whose thread carried NO site label — worth labelling those threads.');
 
   // Only advance the watermark on a complete pass. A run cut short by the time
   // budget must leave it where it was, so the next run re-covers the remainder.
   if (!stoppedEarly) saveWatermark_(start);
-  Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped + ' (scanned ' + threads.length + ' recent threads, ' + notOurs + ' not site-labeled)' +
+  Logger.log('processQuoteLeads: sent=' + sent + ' (' + noLabel + ' via no-label fallback) skipped=' + skipped +
+    ' (scanned ' + threads.length + ' threads since the watermark, ' + siteLabeled + ' site-labeled, ' + notOurs + ' not ours)' +
     (stoppedEarly ? ' — stopped early (time budget); rest will be picked up on the next run.' : ' — done, nothing left to process.'));
 }
 
@@ -546,35 +577,6 @@ function codeFromBodyUrl_(body) {
     if (SITE_DOMAINS[code].toLowerCase() === host) return code;
   }
   return null;
-}
-
-// One targeted search for form notifications ("Page URL:" only appears in that
-// footer), so this costs a single query plus a look at the few threads it
-// returns — not a body read of every unlabelled thread in the mailbox.
-function sweepUnlabeledForms_(start, cutoff, processedLabel) {
-  var out = { sent: 0, stoppedEarly: false };
-  var since = new Date(cutoff - 2 * 24 * 60 * 60 * 1000);
-  var q = 'after:' + Utilities.formatDate(since, Session.getScriptTimeZone(), 'yyyy/MM/dd') + ' "Page URL:"';
-  var threads = GmailApp.search(q, 0, 100);
-  for (var t = 0; t < threads.length; t++) {
-    if (Date.now() - start > TIME_BUDGET_MS) { out.stoppedEarly = true; return out; }
-    var thread = threads[t];
-    if (matchSiteCode_(thread)) continue; // labelled — the main loop already had it
-    var messages = thread.getMessages();
-    var handledAny = false;
-    for (var m = 0; m < messages.length; m++) {
-      var msg = messages[m];
-      if (msg.getDate().getTime() <= cutoff) continue;
-      var body = msg.getPlainBody();
-      var code = codeFromBodyUrl_(body);
-      if (!code) continue;
-      var parsed = parseLeadBody_(body);
-      if (!parsed.email && !parsed.phone) continue;
-      if (postLead_(code, parsed, msg.getDate())) { out.sent++; handledAny = true; }
-    }
-    if (handledAny) thread.addLabel(processedLabel);
-  }
-  return out;
 }
 
 function findCheckoutLabel_() {
