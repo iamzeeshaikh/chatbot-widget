@@ -329,11 +329,14 @@ function processQuoteLeads() {
   // MAX_CANDIDATE_THREADS. Hitting that cap means the run silently never looked
   // at the oldest threads in its window, so it is warned about below.
   //
-  // `after:` takes a Unix timestamp as well as a yyyy/MM/dd date. The date form
-  // is only day-granular, which rounds a 30-minute window up to two-plus days
-  // and puts every single run back near the cap; seconds make the window
-  // exactly as wide as it needs to be.
-  var query = 'after:' + Math.floor(cutoff / 1000);
+  // yyyy/MM/dd, NOT a Unix timestamp. Gmail's own search box accepts an epoch
+  // in `after:`, but GmailApp.search does not — swapping to one took a run that
+  // had been scanning 250 threads down to 3, silently. Day granularity means
+  // the window is always a little wider than needed; that is harmless now the
+  // search pages up to MAX_CANDIDATE_THREADS, and the watermark still decides
+  // message by message what actually gets sent.
+  var since = new Date(cutoff - 24 * 60 * 60 * 1000);
+  var query = 'after:' + Utilities.formatDate(since, Session.getScriptTimeZone(), 'yyyy/MM/dd');
   var threads = [];
   for (var off = 0; off < MAX_CANDIDATE_THREADS; off += SEARCH_PAGE_SIZE) {
     var want = Math.min(SEARCH_PAGE_SIZE, MAX_CANDIDATE_THREADS - off);
