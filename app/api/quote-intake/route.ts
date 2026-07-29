@@ -87,6 +87,42 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Same person, same site, same day = ONE enquiry, however many times the form
+  // was submitted. Customers routinely send the identical form two or three
+  // times within minutes, attaching a different artwork file each go (and
+  // sometimes fixing a typo in between). The body comparison above can't catch
+  // those: the upload URL sits ABOVE the `---` footer, so it lands inside the
+  // compared text and is different every time. A genuine second enquiry from
+  // the same customer on the same day to the same site is vanishingly rare
+  // next to that — 39 such rows across 1,020 leads were all repeat submissions.
+  //
+  // The fullest version wins: the first submission is often the one WITHOUT
+  // the artwork attached, so a longer follow-up replaces the stored text
+  // rather than being thrown away. The lead keeps its id, status and original
+  // timestamp.
+  if (cleanEmail && tag === QUOTE_TAG) {
+    const dayStart = `${createdAt.slice(0, 10)}T00:00:00Z`
+    const dayEnd = new Date(new Date(dayStart).getTime() + 86400000).toISOString()
+    const { data: sameDay } = await supabase
+      .from('leads')
+      .select('id, message')
+      .eq('site_id', siteId)
+      .ilike('email', cleanEmail)
+      .ilike('message', `${QUOTE_TAG}%`)
+      .gte('created_at', dayStart)
+      .lt('created_at', dayEnd)
+      .order('created_at', { ascending: true })
+      .limit(1)
+    const existing = sameDay?.[0]
+    if (existing) {
+      const incoming = `${tag}${bodyText}`
+      if (incoming.length > (existing.message?.length ?? 0)) {
+        await supabase.from('leads').update({ message: incoming }).eq('id', existing.id)
+      }
+      return NextResponse.json({ success: true, deduped: true })
+    }
+  }
+
   const { error } = await supabase.from('leads').insert([{
     site_id: siteId,
     name: typeof name === 'string' ? name.trim() || null : null,
