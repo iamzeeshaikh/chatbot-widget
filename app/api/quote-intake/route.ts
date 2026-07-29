@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody } from '@/lib/quoteintake'
 
 export const dynamic = 'force-dynamic'
 
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
       .eq('site_id', siteId)
       .ilike('email', cleanEmail)
       .ilike('message', `${tag}%`)
-    const isDupe = (candidates ?? []).some((c) => normalizeQuoteBody(c.message ?? '') === normalized)
+    const isDupe = (candidates ?? []).some((c) => isSameQuoteBody(normalizeQuoteBody(c.message ?? ''), normalized))
     if (isDupe) {
       return NextResponse.json({ success: true, deduped: true })
     }

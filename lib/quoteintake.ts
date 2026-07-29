@@ -142,6 +142,26 @@ export function normalizeQuoteBody(raw: string): string {
   return out.join(' ')
 }
 
+// Two normalized bodies are the same submission when one is a prefix of the
+// other. An exact === comparison misses the commonest real case: the Apps
+// Script caps `message` at 2000 characters, and a forwarded copy spends part of
+// that budget on its From/Date/Subject/To block, so the forward's actual
+// content gets truncated EARLIER than the original's. Stripping the headers
+// afterwards leaves two strings that agree perfectly and then simply stop at
+// different points (seen live: 1999 vs 1822 characters, identical throughout).
+//
+// The length floor keeps this from collapsing genuinely different short
+// enquiries — "hi, need a quote" is a plausible prefix of half the inbox.
+const MIN_PREFIX_MATCH = 120
+
+export function isSameQuoteBody(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a]
+  if (shorter.length < MIN_PREFIX_MATCH) return false
+  return longer.startsWith(shorter)
+}
+
 export function quoteSessionId(leadId: string): string {
   return `quote-${leadId}`
 }
