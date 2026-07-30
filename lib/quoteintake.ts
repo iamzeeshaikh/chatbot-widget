@@ -57,6 +57,25 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   TCP: 'thecandlepackaging',
   TBB: 'theburgerboxes',
   PB: 'peptidesboxes',
+  // 2026-07 roster. Only TCS is confirmed against a real Gmail label
+  // ("Extra Outsource Projects/tcs"); the rest are internal identifiers so the
+  // Apps Script's page-URL fallback has a code to resolve their domains to.
+  // A code only ever gets matched against a Gmail label if it is ALSO listed in
+  // SITE_CODES in the script — inventing one here cannot mis-file anything.
+  TCS: 'thecoffeesleeves',
+  TWP: 'thewaxpapers',
+  TCST: 'thecustomstickers',
+  ZP: 'zeepack',
+  TCRB: 'thecerealboxes',
+  HDT: 'hotdogtrays',
+  TBSL: 'theburgersleeves',
+  TCSL: 'thecandlesleeves',
+  CBC: 'cardboardcups',
+  SBM: 'shopbubblemailers',
+  IH: 'insertshub',
+  TDCS: 'thediecutstickers',
+  CPB: 'customperfumeboxes',
+  SDB: 'shopdisplayboxes',
 }
 
 export function siteIdFromQuoteCode(code: string): string | null {

@@ -106,7 +106,14 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // by LEAF name (the part after the last "/"), so it doesn't matter which
 // parent folder each one lives under. Add a line here the day you start
 // labeling a new site (e.g. once TPC exists for The Paper Cups).
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB'];
+// Only codes that are ACTUALLY used as Gmail label leaf names belong here — a
+// code listed here claims every thread carrying that label. TCS is confirmed
+// from a real thread ("Extra Outsource Projects/tcs"). The rest of the 2026-07
+// roster is in SITE_DOMAINS below but deliberately NOT here: their label names
+// haven't been seen yet, and guessing one that means something else in this
+// mailbox would file leads under the wrong site. Run listSiteLabels to see
+// which labels exist and add them as they're confirmed.
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS'];
 
 // ── Checkout (cart order) emails ────────────────────────────────────────────
 // WooCommerce "New order #6449" notifications live under ONE flat label rather
@@ -130,6 +137,20 @@ var STORE_NAME_CODES = {
   'the candle packaging': 'TCP',
   'the paper cups': 'TPC',
   'peptides boxes': 'PB',
+  'the coffee sleeves': 'TCS',
+  'the wax papers': 'TWP',
+  'the custom stickers': 'TCST',
+  'zeepack': 'ZP',
+  'the cereal boxes': 'TCRB',
+  'hotdog trays': 'HDT',
+  'the burger sleeves': 'TBSL',
+  'the candle sleeves': 'TCSL',
+  'cardboard cups': 'CBC',
+  'shop bubble mailers': 'SBM',
+  'inserts hub': 'IH',
+  'the die cut stickers': 'TDCS',
+  'custom perfume boxes': 'CPB',
+  'shop display boxes': 'SDB',
 };
 
 // Own domain per site code — used to make sure a lead's "email" is never the
@@ -144,6 +165,25 @@ var SITE_DOMAINS = {
   TCP: 'thecandlepackaging.com',
   TPC: 'thepapercups.com',
   PB: 'peptidesboxes.com',
+  // Full 2026-07 roster. Two jobs here, both independent of Gmail labels:
+  // codeFromBodyUrl_ resolves a form's "Page URL:" host to one of these, and
+  // isOwnAddress_ uses them to make sure a site's own noreply@ address is never
+  // recorded as the customer's (this mail is literally from
+  // noreply@thecoffeesleeves.com).
+  TCS: 'thecoffeesleeves.com',
+  TWP: 'thewaxpapers.co',
+  TCST: 'thecustomstickers.co',
+  ZP: 'zeepack.co',
+  TCRB: 'thecerealboxes.com',
+  HDT: 'hotdogtrays.com',
+  TBSL: 'theburgersleeves.com',
+  TCSL: 'thecandlesleeves.com',
+  CBC: 'cardboardcups.com',
+  SBM: 'shopbubblemailers.com',
+  IH: 'insertshub.com',
+  TDCS: 'thediecutstickers.com',
+  CPB: 'customperfumeboxes.com',
+  SDB: 'shopdisplayboxes.com',
 };
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
@@ -225,6 +265,25 @@ function testConnection() {
 // way as the real run), WITHOUT sending anything.
 function listSiteLabels() {
   var start = Date.now();
+
+  // First, the cheap and most useful half: every short label leaf this mailbox
+  // has that is NOT a recognised site code. 14 of the 23 packaging sites have
+  // no code yet, so any thread filed under one of their labels is silently
+  // ignored — this is how you find their real names instead of guessing them.
+  // One getUserLabels() call, no thread listing, so it costs almost nothing.
+  var everyLabel = GmailApp.getUserLabels();
+  var unknown = [];
+  for (var u = 0; u < everyLabel.length; u++) {
+    var full = everyLabel[u].getName();
+    if (full.indexOf('ZeeOps/') === 0) continue;            // our own bookkeeping
+    var leafName = full.split('/').pop().trim();
+    if (SITE_CODES.indexOf(leafName.toUpperCase()) !== -1) continue;
+    if (leafName.toLowerCase() === CHECKOUT_LABEL) continue;
+    if (leafName.length <= 5) unknown.push(full);           // short = looks like a code
+  }
+  Logger.log('Short labels NOT recognised as site codes (add the real ones to SITE_CODES): ' +
+    (unknown.join('   |   ') || 'none'));
+
   var found = findSiteLabels_();
   var codes = Object.keys(found);
   if (codes.length === 0) {
