@@ -478,6 +478,13 @@ function processQuoteLeads() {
   // the server's own spam rules still apply on top.
   if (noLabel > 0) Logger.log('no-label fallback: ingested ' + noLabel + ' form submission(s) whose thread carried NO site label — worth labelling those threads.');
 
+  var unknownNames = Object.keys(UNKNOWN_SITE_LABELS);
+  if (unknownNames.length > 0) {
+    Logger.log('ACTION NEEDED — threads carrying a short label that is NOT a known site code, so nothing was ingested from them: ' +
+      unknownNames.map(function (n) { return n + ' (' + UNKNOWN_SITE_LABELS[n] + ' threads)'; }).join('   |   ') +
+      '. If any of those is a site, add its code to SITE_CODES and to QUOTE_SITE_CODES on the server.');
+  }
+
   // Only advance the watermark on a complete pass. A run cut short by the time
   // budget must leave it where it was, so the next run re-covers the remainder.
   if (!stoppedEarly) saveWatermark_(start);
@@ -676,16 +683,27 @@ function findSiteLabels_() {
 // by LEAF name)? Returns the site code, or null. Checking the thread's own
 // labels directly (not a text search) is what correctly handles nested
 // labels — same reasoning as findSiteLabels_ above.
+// Labels seen during a run that LOOK like a site code but aren't one. A new
+// site gets a new Gmail label the day its first lead lands, and until that
+// code is added here the lead is dropped in silence — exactly how The Coffee
+// Sleeves' "tcs" was missed. Collected here (the labels are already fetched,
+// so it costs nothing) and reported at the end of the run, so a new label
+// announces itself the first time it appears instead of weeks later.
+var UNKNOWN_SITE_LABELS = {};
+
 function matchSiteCode_(thread) {
   var labels = thread.getLabels();
   var hasCheckout = false;
+  var shortUnknown = null;
   for (var i = 0; i < labels.length; i++) {
     var name = labels[i].getName();
     var parts = name.split('/');
     var leaf = parts[parts.length - 1].trim();
     if (SITE_CODES.indexOf(leaf.toUpperCase()) !== -1) return leaf.toUpperCase();
     if (leaf.toLowerCase() === CHECKOUT_LABEL) hasCheckout = true;
+    else if (leaf.length <= 5 && name.indexOf('ZeeOps/') !== 0) shortUnknown = name;
   }
+  if (shortUnknown) UNKNOWN_SITE_LABELS[shortUnknown] = (UNKNOWN_SITE_LABELS[shortUnknown] || 0) + 1;
   // No site label, but it is a checkout thread — read the store name out of the
   // subject instead (see STORE_NAME_CODES).
   if (hasCheckout) return codeFromSubject_(thread.getFirstMessageSubject());
