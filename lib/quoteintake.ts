@@ -87,6 +87,20 @@ const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?
 // leads: this matches that one seller and nothing else.
 const SELLER_PITCH_RE = /here'?s what you'?ll get|when working with us|why choose us\b|we can help you (enhance|elevate|boost|grow|improve) your (brand|business|sales|packaging)|allow me to introduce|i am reaching out to (offer|introduce)|(sales|business development) (executive|manager|representative) at\b|we would be (delighted|happy|glad) to (be|become) your (supplier|partner|vendor)|partner with us\b/i
 
+// SEO / digital-marketing outreach sent through the quote form. Distinct from
+// the bot spam above, which is crude and keyword-stuffed — this arrives as a
+// short, plausible-looking form submission with a real name and phone number.
+// (Real example: "Within 24 hours, we can have your brand appearing when people
+// search for your top keywords. Want to see what kind of reach we can get you?")
+//
+// Matches only the language of someone SELLING marketing. "SEO agency",
+// "advertising agency" and "marketing services" are deliberately absent: a
+// genuine lead in this table is from Shane Coleman, who works at an advertising
+// agency and wanted pricing on 6x9 presentation folders — naming your own
+// industry is not a pitch. Checked against all 1,113 stored leads: this matches
+// that one sender and nothing else.
+const MARKETING_PITCH_RE = /when people search for|top keywords|what kind of reach|we can (get|bring|send) you|we can have your brand|free (seo )?(audit|analysis|consultation)|we noticed your (website|site)|increase your (online )?(visibility|presence)|organic traffic|domain authority|generate (more )?(leads|traffic) for your|page one of google|get you ranked|rank(ing)? on (the )?first page/i
+
 // The same bot network generates a fake "phone number" as a single literal
 // digit 8 followed by exactly 10 more digits (e.g. "86717731828") — seen
 // across ~40 spam submissions with zero exceptions, while every real lead's
@@ -135,7 +149,7 @@ const TEST_PHONE_RE = /^\d{3}555\d{4}$/
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
   if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
-  return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText)
+  return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText) || MARKETING_PITCH_RE.test(bodyText)
 }
 
 // Strip the QUOTE_TAG, any forwarded-message header block, and the
