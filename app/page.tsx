@@ -509,6 +509,34 @@ const WAITING_FRESH_MS = 30 * 60 * 1000
 // site and the arrival chime, so it's kept tight.
 const VISITOR_POLL_MS = 5 * 1000
 
+// Agents leave this dashboard open all day, and on a background tab it went on
+// polling six endpoints regardless — a single forgotten tab is ~24,000 requests
+// per 8-hour shift. That volume is what exhausted the database's disk-IO budget
+// on 2026-07-24 and took the whole system down, so a poll nobody is looking at
+// is not a harmless one.
+//
+// Skipped, not stopped: the interval keeps ticking so nothing has to be torn
+// down and rebuilt, and `visibleTick` re-runs each polling effect the moment the
+// tab comes back, which re-fires its initial fetch — so the agent sees fresh
+// data immediately rather than waiting out the interval.
+//
+// Deliberately NOT gated: the 60-second attendance heartbeat (an agent working
+// in another tab is still on duty and must not read as offline) and the
+// waiting-chat alarm, which touches no network at all.
+const whenVisible = (fn: () => void) => () => {
+  if (typeof document === 'undefined' || !document.hidden) fn()
+}
+
+function useVisibleTick(): number {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const onChange = () => { if (!document.hidden) setTick((n) => n + 1) }
+    document.addEventListener('visibilitychange', onChange)
+    return () => document.removeEventListener('visibilitychange', onChange)
+  }, [])
+  return tick
+}
+
 export default function Dashboard() {
   const [tab, setTab] = useState<'overview' | 'conversations' | 'visitors' | 'billing' | 'performance'>('overview')
 
@@ -947,6 +975,7 @@ export default function Dashboard() {
   // mute toggle.
   const sessionsRef = useRef<Session[]>([])
   const visitorsRef = useRef<Visitor[]>([])
+  const visibleTick = useVisibleTick()
   const userSitesRef = useRef<string[]>([])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
   useEffect(() => { visitorsRef.current = visitors }, [visitors])
@@ -1103,9 +1132,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (!authReady) return
     fetchSessions()
-    const iv = setInterval(fetchSessions, 13000)
+    const iv = setInterval(whenVisible(fetchSessions), 13000)
     return () => clearInterval(iv)
-  }, [authReady, fetchSessions])
+  }, [authReady, fetchSessions, visibleTick])
 
   // Load the IP blocklist once for admins, so the "Ban / Unban" state is correct
   // on the conversation panel too (not just the Visitors tab).
@@ -1119,9 +1148,9 @@ export default function Dashboard() {
     if (!authReady) return
     const load = () => fetch('/api/admin/presence').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.agents) setTeamAgents(d.agents) }).catch(() => {})
     load()
-    const iv = setInterval(load, 20000)
+    const iv = setInterval(whenVisible(load), 20000)
     return () => clearInterval(iv)
-  }, [authReady])
+  }, [authReady, visibleTick])
 
   const fetchVisitors = useCallback(async () => {
     const data = await fetch('/api/visitor/active').then((r) => r.json()).catch(() => ({ visitors: [] }))
@@ -1144,9 +1173,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (!authReady) return
     fetchVisitors()
-    const iv = setInterval(fetchVisitors, VISITOR_POLL_MS)
+    const iv = setInterval(whenVisible(fetchVisitors), VISITOR_POLL_MS)
     return () => clearInterval(iv)
-  }, [authReady, fetchVisitors])
+  }, [authReady, fetchVisitors, visibleTick])
 
   // Visitor history: fetched when the Visitors tab opens, refreshed every 30s
   // while it stays open (history is not latency-critical like the live list).
@@ -1159,9 +1188,9 @@ export default function Dashboard() {
       setVisitorHistoryLoaded(true)
     }
     load()
-    const iv = setInterval(load, 30000)
+    const iv = setInterval(whenVisible(load), 30000)
     return () => clearInterval(iv)
-  }, [tab, authReady])
+  }, [tab, authReady, visibleTick])
 
   const fetchMessages = useCallback(async (sessionId: string) => {
     const data = await fetch(`/api/admin/messages?sessionId=${sessionId}`).then((r) => r.json()).catch(() => ({ messages: [] }))
@@ -1190,9 +1219,22 @@ export default function Dashboard() {
     setMessages([])
     setMessagesLoading(true)
     fetchMessages(selectedSessionId).finally(() => setMessagesLoading(false))
-    const iv = setInterval(() => fetchMessages(selectedSessionId), 3000)
+    const iv = setInterval(whenVisible(() => fetchMessages(selectedSessionId)), 3000)
     return () => clearInterval(iv)
   }, [selectedSessionId, fetchMessages])
+
+  // Catch the open conversation up when the tab comes back. Deliberately a
+  // separate effect: the two effects above cannot simply take `visibleTick` as a
+  // dependency, because their bodies clear the transcript (setMessages([])) and
+  // reset per-conversation UI — the translation toggle, the tag input. Re-running
+  // them on every focus would blank the chat and undo the agent's own state,
+  // which is precisely the flash their comments warn about.
+  useEffect(() => {
+    if (!visibleTick || !selectedSessionId) return
+    fetchMessages(selectedSessionId)
+    fetchVisitorDetail(selectedSessionId, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleTick])
 
   // Record whether the agent is at (or near) the bottom of the message panel,
   // so we know whether it's safe to auto-scroll on the next update.
@@ -1253,7 +1295,7 @@ export default function Dashboard() {
     // Translation is per-conversation and off by default.
     setTranslateOn(false); setTranslateOut(false); setMsgAnalysis({})
     fetchVisitorDetail(selectedSessionId, true)
-    const iv = setInterval(() => fetchVisitorDetail(selectedSessionId, false), 20000)
+    const iv = setInterval(whenVisible(() => fetchVisitorDetail(selectedSessionId, false)), 20000)
     return () => clearInterval(iv)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSessionId, fetchVisitorDetail])
