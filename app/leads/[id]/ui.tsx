@@ -137,14 +137,17 @@ export function InlineField({ label, value, placeholder, href, overridden, onSav
           className="mt-0.5 w-full bg-gray-100 border border-blue-500 rounded-md px-1.5 py-0.5 text-sm text-gray-900 focus:outline-none"
         />
       ) : (
-        <div className="flex items-start gap-1">
-          {/* break-all rather than truncate: a long address wraps to a second
-              line instead of ending in an ellipsis. */}
+        <div className="flex items-start gap-1 min-w-0">
+          {/* Wraps at SENSIBLE boundaries, never mid-word: soft break
+              opportunities are inserted before the @ and before each domain
+              dot, so "marlenebrewer@protonmail.com" breaks after the local part
+              rather than as "…prot / onmail.com". The full value is on hover
+              either way. */}
           {value ? (
             href ? (
               <a href={href} title={value}
-                className="text-sm text-blue-700 hover:underline break-all leading-snug min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
-                {value}
+                className="text-sm text-blue-700 hover:underline leading-snug min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+                {withBreakPoints(value)}
               </a>
             ) : (
               <span className="text-sm text-gray-900 break-words leading-snug min-w-0" title={value}>{value}</span>
@@ -169,6 +172,21 @@ export function InlineField({ label, value, placeholder, href, overridden, onSav
       )}
     </div>
   )
+}
+
+// Insert zero-width break opportunities at the points a human would break an
+// address or a URL — before the "@" and before each dot in the domain. <wbr>
+// only takes effect when the line actually needs to wrap, so short values are
+// untouched, and unlike break-all it can never split a word arbitrarily.
+function withBreakPoints(value: string): React.ReactNode {
+  const parts = value.split(/(?=[@.])/)
+  if (parts.length === 1) return value
+  return parts.map((part, i) => (
+    <span key={i}>
+      {i > 0 && <wbr />}
+      {part}
+    </span>
+  ))
 }
 
 // ── Properties list ──────────────────────────────────────────────────────────

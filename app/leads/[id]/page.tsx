@@ -20,7 +20,7 @@ import { useParams } from 'next/navigation'
 import {
   ArrowLeft, MessagesSquare, StickyNote, ListTodo, Mail, Phone, Target,
   Paperclip, Link2, Activity, FileText, Lock, Search, TriangleAlert,
-  Repeat, Building2, Globe, Tag, User, Inbox, ChevronRight,
+  Repeat, Building2, Globe, Tag, Inbox, ChevronRight,
 } from 'lucide-react'
 import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
 import {
@@ -312,10 +312,15 @@ export default function LeadRecordPage() {
         </div>
       </header>
 
-      <main className="max-w-[1500px] mx-auto px-3 sm:px-5 py-3 grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_300px] gap-3 items-start animate-in">
+      <main className="max-w-[1500px] mx-auto px-3 sm:px-5 py-3 grid grid-cols-1 lg:grid-cols-[290px_minmax(0,1fr)_265px] xl:grid-cols-[320px_minmax(0,1fr)_300px] 2xl:grid-cols-[340px_minmax(0,1fr)_320px] gap-3 items-start animate-in">
 
-        {/* ══ LEFT — identity ══ */}
-        <div className="space-y-3 min-w-0">
+        {/* ══ LEFT — identity ══
+            Pinned on desktop alongside the right column, so only the activity
+            timeline scrolls. The timeline is several times taller than either
+            side on a real lead; without this both gutters go dead as soon as
+            you scroll. Falls back to its own scrollbar if a lead ever has
+            enough tags/values to outgrow the viewport. */}
+        <div className="space-y-3 min-w-0 lg:sticky lg:top-[60px] lg:max-h-[calc(100vh-72px)] lg:overflow-y-auto">
           <Card>
             <div className="divide-y divide-gray-100">
               <InlineField label="Name" value={record.contact.name} placeholder="Add a name"
@@ -346,25 +351,22 @@ export default function LeadRecordPage() {
 
           {/* Properties list — quiet labels, strong values, grouped. */}
           <Card title="Details" icon={FileText} bodyClass="py-1">
+            {/* Stage deliberately does NOT appear here — the header pill is the
+                authoritative place for it, and the Deal card carries who changed
+                it and when. Repeating it in three places was noise. */}
             <PropGroup label="Ownership">
               <Prop label="Owner">
-                <span className="inline-flex items-center gap-1.5">
-                  <User size={11} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
-                  <select value={record.owner ?? ''} onChange={(e) => saveOwner(e.target.value)}
-                    aria-label="Lead owner"
-                    className="bg-transparent border border-transparent hover:border-gray-300 focus:border-gray-400 rounded px-1 -ml-1 py-0 text-xs font-medium text-gray-900 max-w-full focus:outline-none cursor-pointer transition-colors">
-                    <option value="">Unassigned</option>
-                    {record.assignableMembers.map((m) => (
-                      <option key={m} value={m} className="bg-white text-gray-800">{m.split('@')[0]}</option>
-                    ))}
-                  </select>
-                </span>
-              </Prop>
-              <Prop label="Stage">
-                <span className="inline-flex items-center gap-1.5 flex-wrap">
-                  <StagePill stage={record.stage} small />
-                  {record.stageBy && <span className="text-[10px] text-gray-500">by {record.stageBy.split('@')[0]}</span>}
-                </span>
+                {/* No negative margin and real right padding: the native chevron
+                    was being clipped by the card edge. w-full keeps it inside
+                    the value column at every breakpoint. */}
+                <select value={record.owner ?? ''} onChange={(e) => saveOwner(e.target.value)}
+                  aria-label="Lead owner"
+                  className="w-full bg-transparent border border-transparent hover:border-gray-300 focus:border-gray-400 rounded pl-1 pr-1 py-0.5 text-xs font-medium text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer transition-colors">
+                  <option value="">Unassigned</option>
+                  {record.assignableMembers.map((m) => (
+                    <option key={m} value={m} className="bg-white text-gray-800">{m.split('@')[0]}</option>
+                  ))}
+                </select>
               </Prop>
             </PropGroup>
 
@@ -377,10 +379,18 @@ export default function LeadRecordPage() {
               </Prop>
               {(record.country || record.referrer) && (
                 <Prop label="Origin" title={[record.country, record.referrer].filter(Boolean).join(' · ')}>
-                  <span className="inline-flex items-start gap-1">
-                    <Globe size={11} strokeWidth={2} className="text-gray-400 shrink-0 mt-0.5" aria-hidden />
-                    <span>{[record.country, hostOf(record.referrer)].filter(Boolean).join(' · ')}</span>
-                  </span>
+                  {/* Plain inline flow, not inline-flex: a flex row defaults to
+                      nowrap, which is what clipped "search.nortonsafese…". The
+                      host truncates with the full URL on hover if it still can't
+                      fit. */}
+                  <Globe size={11} strokeWidth={2} className="text-gray-400 shrink-0 inline align-[-1px] mr-1" aria-hidden />
+                  <span className="inline">{record.country}</span>
+                  {record.country && record.referrer && <span className="text-gray-400" aria-hidden> · </span>}
+                  {record.referrer && (
+                    <span className="inline-block max-w-full align-bottom truncate" title={record.referrer}>
+                      {hostOf(record.referrer)}
+                    </span>
+                  )}
                 </Prop>
               )}
               {record.tags.length > 0 && (
@@ -445,8 +455,11 @@ export default function LeadRecordPage() {
                     </option>
                   ))}
                 </select>
+                {/* Who changed it and when lives here, since the Details list
+                    no longer repeats the stage. */}
                 <span className="text-[11px] text-gray-500">
                   {record.stageAt ? `changed ${timeAgo(record.stageAt)}` : 'never changed'}
+                  {record.stageBy && ` by ${record.stageBy.split('@')[0]}`}
                 </span>
               </div>
 
@@ -490,8 +503,11 @@ export default function LeadRecordPage() {
           </Card>
         </div>
 
-        {/* ══ RIGHT — context ══ */}
-        <div className="space-y-3 min-w-0">
+        {/* ══ RIGHT — context ══
+            Sticky on desktop: the activity timeline is far taller than this
+            column on any real lead, so pinning it keeps the right-hand side
+            useful instead of leaving a tall empty gutter while you scroll. */}
+        <div className="space-y-3 min-w-0 lg:sticky lg:top-[60px] lg:max-h-[calc(100vh-72px)] lg:overflow-y-auto">
           <Card title="Attachments" icon={Paperclip}
             action={<span className="text-[10px] text-gray-500 tabular-nums">{record.attachments.length}</span>}>
             {record.attachments.length === 0 ? (
@@ -595,13 +611,11 @@ function hostOf(url: string | null): string | null {
 // ── Stage ────────────────────────────────────────────────────────────────────
 // The most important element on the page, so it carries real colour: the pill
 // is tinted with the stage's own palette and rimmed with its accent.
-function StagePill({ stage, small = false }: { stage: CrmStage; small?: boolean }) {
+function StagePill({ stage }: { stage: CrmStage }) {
   return (
     <span
       style={{ boxShadow: `inset 2px 0 0 ${CRM_STAGE_DOT[stage]}` }}
-      className={`inline-flex items-center font-bold rounded-full border shrink-0 ${CRM_STAGE_STYLE[stage]} ${
-        small ? 'text-[10px] px-2 py-px' : 'text-[11px] px-2.5 py-0.5'
-      }`}>
+      className={`inline-flex items-center text-[11px] font-bold px-2.5 py-0.5 rounded-full border shrink-0 ${CRM_STAGE_STYLE[stage]}`}>
       {CRM_STAGE_LABEL[stage]}
     </span>
   )
@@ -720,7 +734,7 @@ function LoadingSkeleton() {
           </div>
         </div>
       </header>
-      <main className="max-w-[1500px] mx-auto px-3 sm:px-5 py-3 grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_300px] gap-3 items-start">
+      <main className="max-w-[1500px] mx-auto px-3 sm:px-5 py-3 grid grid-cols-1 lg:grid-cols-[290px_minmax(0,1fr)_265px] xl:grid-cols-[320px_minmax(0,1fr)_300px] 2xl:grid-cols-[340px_minmax(0,1fr)_320px] gap-3 items-start">
         {[0, 1, 2].map((col) => (
           <div key={col} className="space-y-3 w-full">
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-3 space-y-2.5">

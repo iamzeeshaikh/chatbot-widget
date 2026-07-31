@@ -160,13 +160,11 @@ export default function Tasks({
         </p>
       )}
 
-      {/* Compact empty state: one line, the action beside it — not a hero block. */}
+      {/* One compact line. The + Task button lives in the card header and only
+          there — having it here as well meant two identical buttons a few
+          pixels apart. */}
       {openTasks.length === 0 && !composing ? (
-        <div className="flex items-center gap-2 px-3 py-2">
-          <ListTodo size={14} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
-          <p className="text-xs text-gray-500">No open tasks</p>
-          <div className="ml-auto">{addButton}</div>
-        </div>
+        <p className="px-3 py-2 text-xs text-gray-500">No open tasks</p>
       ) : openTasks.length > 0 ? (
         <ul className="divide-y divide-gray-100">
           {openTasks.map((t) => (
