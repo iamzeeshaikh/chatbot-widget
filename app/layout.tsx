@@ -24,6 +24,9 @@ export const metadata: Metadata = {
   icons: {
     apple: "/apple-touch-icon.png",
   },
+  // Stops Chrome offering to translate the dashboard at all — see the
+  // translate="no" note on <html> below for why that matters here.
+  other: { google: "notranslate" },
 };
 
 export default function RootLayout({
@@ -32,9 +35,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // translate="no" is load-bearing, not cosmetic. Google Translate (and other
+    // DOM-rewriting extensions) replace text nodes in place; React then tries to
+    // update a node whose parent it no longer owns and dies with
+    // "Cannot read properties of null (reading 'removeChild')". On a dashboard
+    // that re-renders long lists on every poll that happens constantly, and it
+    // strands client-side navigation — the URL changes but the page never swaps
+    // until a hard refresh. Machine-translating agent names, statuses and site
+    // ids would be wrong anyway.
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      translate="no"
+      className={`notranslate ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         {children}
