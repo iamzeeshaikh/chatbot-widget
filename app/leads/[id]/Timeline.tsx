@@ -1,0 +1,209 @@
+'use client'
+
+// The activity timeline — the heart of the record page.
+//
+// Every entry is MERGED from data that already exists elsewhere (chat messages,
+// lead capture, assignment, stage/status rows, attachments) plus the notes this
+// page writes. Nothing is duplicated into a new store; the API builds the list
+// and this renders it, newest first, grouped by Pakistan-time day.
+
+import { useMemo, useState } from 'react'
+import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
+import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
+import { isImageMime } from '@/lib/attachment'
+import type { TimelineEvent } from '@/lib/leadrecord'
+import { EmptyState } from './ui'
+
+type FilterKey = 'all' | 'notes' | 'messages' | 'stage' | 'system'
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'notes', label: 'Notes' },
+  { key: 'messages', label: 'Messages' },
+  { key: 'stage', label: 'Stage changes' },
+  { key: 'system', label: 'System' },
+]
+
+const ICON: Record<TimelineEvent['kind'], string> = {
+  created: '✨',
+  message: '💬',
+  note: '📝',
+  stage: '🎯',
+  assign: '🙋',
+  attachment: '📎',
+  field: '✎',
+  value: '💰',
+}
+
+function dotColor(e: TimelineEvent): string {
+  if (e.kind === 'stage' && e.stage) return CRM_STAGE_DOT[e.stage]
+  switch (e.kind) {
+    case 'note': return '#6366f1'
+    case 'created': return '#22c55e'
+    case 'attachment': return '#0ea5e9'
+    case 'value': return '#10b981'
+    case 'assign': return '#f59e0b'
+    default: return '#94a3b8'
+  }
+}
+
+export default function Timeline({ events, currency, onEditNote, onDeleteNote, canManageNote }: {
+  events: TimelineEvent[]
+  currency: CrmCurrency
+  onEditNote: (noteId: string, body: string) => Promise<void>
+  onDeleteNote: (noteId: string) => Promise<void>
+  canManageNote: (e: TimelineEvent) => boolean
+}) {
+  const [filter, setFilter] = useState<FilterKey>('all')
+  const [editingNote, setEditingNote] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const counts = useMemo(() => {
+    const c: Record<FilterKey, number> = { all: events.length, notes: 0, messages: 0, stage: 0, system: 0 }
+    for (const e of events) c[e.group as FilterKey]++
+    return c
+  }, [events])
+
+  const shown = useMemo(
+    () => (filter === 'all' ? events : events.filter((e) => e.group === filter)),
+    [events, filter],
+  )
+
+  // Day separators, computed in Pakistan time so the divider flips at Karachi
+  // midnight rather than the agent's own.
+  const withDays = useMemo(() => {
+    const out: { event: TimelineEvent; dayLabel: string | null }[] = []
+    let lastLabel = ''
+    for (const e of shown) {
+      const label = dateDividerLabel(e.at)
+      out.push({ event: e, dayLabel: label === lastLabel ? null : label })
+      lastLabel = label
+    }
+    return out
+  }, [shown])
+
+  return (
+    <div>
+      <div className="flex items-center gap-1 flex-wrap px-4 py-3 border-b border-gray-100" role="tablist" aria-label="Filter activity">
+        {FILTERS.map((f) => {
+          const active = filter === f.key
+          return (
+            <button key={f.key} role="tab" aria-selected={active} onClick={() => setFilter(f.key)}
+              className={`text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                active ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'
+              }`}>
+              {f.label}
+              <span className={`ml-1 tabular-nums ${active ? 'text-blue-700' : 'text-gray-400'}`}>{counts[f.key]}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {shown.length === 0 ? (
+        <EmptyState icon="🗒" title={filter === 'all' ? 'No activity yet' : `No ${FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} yet`}
+          hint={filter === 'notes' ? 'Notes you add are internal — the visitor never sees them.' : 'Activity appears here as the lead progresses.'} />
+      ) : (
+        <ol className="px-4 py-3 space-y-0">
+          {withDays.map(({ event: e, dayLabel }) => (
+            <li key={e.id}>
+              {dayLabel && (
+                <div className="flex items-center gap-3 py-3 first:pt-0">
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">{dayLabel}</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+              )}
+              <div className="flex gap-3">
+                {/* rail */}
+                <div className="flex flex-col items-center shrink-0 pt-1">
+                  <span className="w-6 h-6 rounded-full border border-gray-200 bg-white flex items-center justify-center text-[11px] shadow-sm"
+                    style={{ boxShadow: `inset 0 0 0 2px ${dotColor(e)}22` }} aria-hidden>{ICON[e.kind]}</span>
+                  <span className="flex-1 w-px bg-gray-200 my-1 min-h-[10px]" />
+                </div>
+
+                <div className="flex-1 min-w-0 pb-4">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-gray-900">{e.actor}</span>
+                    <span className="text-xs text-gray-600">{e.title}</span>
+                    {e.kind === 'stage' && e.stage && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full border ${CRM_STAGE_STYLE[e.stage]}`}>
+                        {CRM_STAGE_LABEL[e.stage]}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-gray-400 ml-auto whitespace-nowrap" title={formatTime(e.at)}>
+                      {formatTime(e.at)} · {timeAgo(e.at)}
+                    </span>
+                  </div>
+
+                  {e.kind === 'note' && e.body && editingNote === e.noteId ? (
+                    <div className="mt-1.5">
+                      <textarea value={draft} onChange={(ev) => setDraft(ev.target.value)} rows={3}
+                        className="w-full bg-gray-100 border border-blue-400 rounded-lg px-2.5 py-2 text-xs text-gray-900 focus:outline-none resize-y" />
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <button disabled={busy || !draft.trim()}
+                          onClick={async () => {
+                            if (!e.noteId) return
+                            setBusy(true)
+                            try { await onEditNote(e.noteId, draft.trim()); setEditingNote(null) } finally { setBusy(false) }
+                          }}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                          {busy ? 'Saving…' : 'Save'}
+                        </button>
+                        <button onClick={() => setEditingNote(null)}
+                          className="text-[11px] text-gray-500 hover:text-gray-800">Cancel</button>
+                      </div>
+                    </div>
+                  ) : e.kind === 'note' && e.body ? (
+                    <div className="mt-1.5 group/note relative rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2">
+                      <p className="text-xs text-gray-800 whitespace-pre-wrap break-words">{e.body}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        {e.editedAt && <span className="text-[10px] text-gray-500">edited {timeAgo(e.editedAt)}</span>}
+                        {canManageNote(e) && (
+                          <span className="ml-auto flex items-center gap-2 opacity-0 group-hover/note:opacity-100 focus-within:opacity-100 transition-opacity">
+                            <button onClick={() => { setEditingNote(e.noteId ?? null); setDraft(e.body ?? '') }}
+                              className="text-[10px] text-gray-500 hover:text-blue-700">Edit</button>
+                            <button onClick={() => { if (e.noteId) onDeleteNote(e.noteId) }}
+                              className="text-[10px] text-gray-500 hover:text-red-600">Delete</button>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : e.kind === 'attachment' && e.attachment ? (
+                    <a href={e.attachment.url} target="_blank" rel="noopener noreferrer"
+                      className="mt-1.5 inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-100 px-2.5 py-1.5 hover:border-gray-300 transition-colors max-w-full">
+                      {isImageMime(e.attachment.mime)
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        ? <img src={e.attachment.url} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                        : <span className="text-base shrink-0" aria-hidden>📄</span>}
+                      <span className="text-xs text-blue-700 truncate">{e.attachment.name}</span>
+                    </a>
+                  ) : e.kind === 'value' && e.body ? (
+                    <p className="mt-1 text-xs text-gray-600">{describeValue(e.body, currency)}</p>
+                  ) : e.body ? (
+                    <p className={`mt-1 text-xs text-gray-700 whitespace-pre-wrap break-words ${e.kind === 'message' ? 'line-clamp-6' : ''}`}>
+                      {e.kind === 'stage' ? `from ${CRM_STAGE_LABEL[e.body as keyof typeof CRM_STAGE_LABEL] ?? e.body}` : e.body}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+function describeValue(body: string, fallbackCurrency: CrmCurrency): string {
+  try {
+    const o = JSON.parse(body)
+    const cur = (o.currency ?? fallbackCurrency) as CrmCurrency
+    const parts: string[] = []
+    if (o.estimated !== null && o.estimated !== undefined) parts.push(`estimated ${formatMoney(o.estimated, cur)}`)
+    if (o.won !== null && o.won !== undefined) parts.push(`won ${formatMoney(o.won, cur)}`)
+    return parts.length ? parts.join(' · ') : 'cleared'
+  } catch {
+    return body
+  }
+}

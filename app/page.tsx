@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
@@ -538,6 +539,7 @@ function useVisibleTick(): number {
 }
 
 export default function Dashboard() {
+  const router = useRouter() // client-side nav to the CRM record page
   const [tab, setTab] = useState<'overview' | 'conversations' | 'visitors' | 'billing' | 'performance'>('overview')
 
   const [userRole, setUserRole] = useState<'admin' | 'standard'>('standard')
@@ -1560,6 +1562,15 @@ export default function Dashboard() {
   const conversationHref = (sessionId: string, siteId: string) =>
     `/?tab=conversations&session=${encodeURIComponent(sessionId)}&site=${encodeURIComponent(siteId)}`
 
+  // ── CRM record page (app/leads/[id]) ───────────────────────────────────────
+  // Relative on purpose: the dashboard may later be served from a second
+  // domain alias, and every link has to keep working under that origin.
+  const leadRecordHref = (recordId: string) => `/leads/${encodeURIComponent(recordId)}`
+  // A record is keyed by the conversation id where there is one; leads that
+  // arrived by email use the same synthetic `quote-<leadId>` id the Billing
+  // tab already gives them.
+  const leadRecordId = (lead: Lead) => lead.session_id || `quote-${lead.id}`
+
   // Block / unblock a visitor IP (admin only); optimistic UI update.
   async function toggleIpBlock(ip: string, block: boolean) {
     setBlockedIps((prev) => block ? Array.from(new Set([...prev, ip])).sort() : prev.filter((x) => x !== ip))
@@ -2198,17 +2209,27 @@ export default function Dashboard() {
                           )
 
                           return (
-                            <tr key={lead.id} onClick={() => isEmailLead ? setViewOverviewLead(lead) : openLeadConversation(lead)}
-                              title={isEmailLead ? 'View the full message' : "Open this lead's conversation"}
+                            <tr key={lead.id} onClick={() => router.push(leadRecordHref(leadRecordId(lead)))}
+                              title="Open this lead's record"
                               className="group border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                               <td className="px-3 py-3 whitespace-nowrap">
                                 <LeadSourceBadge message={lead.message} />
                               </td>
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
-                              <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">{lead.name || '-'}</td>
+                              {/* A real href so the record can be middle-clicked
+                                  into a new tab; the row click handles the
+                                  normal case. */}
+                              <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">
+                                <a href={leadRecordHref(leadRecordId(lead))} onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault() }}
+                                  className="hover:underline">{lead.name || '-'}</a>
+                              </td>
                               <td className="px-3 py-3 text-blue-600 whitespace-nowrap">{lead.email || '-'}</td>
                               <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{lead.phone || '-'}</td>
-                              <td className="px-3 py-3 text-gray-500 max-w-[150px] truncate" title={cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined}>{cleanLeadMessage(lead.message)}</td>
+                              {/* Email leads keep their full-message popup here —
+                                  the record page shows it too, but this is the
+                                  one-click peek the table has always had. */}
+                              <td onClick={(e) => { if (isEmailLead) { e.stopPropagation(); setViewOverviewLead(lead) } }}
+                                className="px-3 py-3 text-gray-500 max-w-[150px] truncate" title={isEmailLead ? 'View the full message' : (cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined)}>{cleanLeadMessage(lead.message)}</td>
                               <td className="px-3 py-3 text-gray-700 max-w-[120px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
                               <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{quantity}</td>
                               <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{budget}</td>
@@ -2227,6 +2248,12 @@ export default function Dashboard() {
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {/* The row now opens the CRM record, so the
+                                        old "row opens the chat" behaviour lives
+                                        on as its own button. */}
+                                    {!isEmailLead && (
+                                      <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation">💬</button>
+                                    )}
                                     <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit">✏️</button>
                                     <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete">🗑</button>
                                   </div>
@@ -2386,6 +2413,14 @@ export default function Dashboard() {
                       <p className="font-semibold text-gray-900 text-sm">{selectedSession.site_name}</p>
                       <p className="text-[10px] text-gray-500 font-mono truncate">{selectedSession.session_id}</p>
                     </div>
+                    {/* Additive: opening the CRM record is a separate link —
+                        clicking the conversation itself behaves exactly as before. */}
+                    <a href={leadRecordHref(selectedSession.session_id)}
+                      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); router.push(leadRecordHref(selectedSession.session_id)) }}
+                      title="Open the full lead record — stage, notes, deal value, activity"
+                      className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors whitespace-nowrap">
+                      📇 Open record
+                    </a>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     {/* Assignment control — pick up / release / take over a chat
@@ -3347,11 +3382,11 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ) : chatLeadsShown.map((l) => (
-                          <tr key={l.session_id} onClick={() => openConversation(l)} title="Open this lead's conversation"
+                          <tr key={l.session_id} onClick={() => router.push(leadRecordHref(l.session_id))} title="Open this lead's record"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <a href={conversationHref(l.session_id, l.site_id)} className="text-blue-700 hover:underline"
-                                onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { e.stopPropagation(); return } e.preventDefault(); e.stopPropagation(); openConversation(l) }}>
+                              <a href={leadRecordHref(l.session_id)} className="text-blue-700 hover:underline"
+                                onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault() }}>
                                 {l.email ?? <span className="text-gray-500 italic">Marked as lead</span>}
                               </a>
                             </td>
@@ -3401,7 +3436,7 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ) : emailLeadsShown.map((l) => (
-                          <tr key={l.session_id} onClick={() => setViewQuote(l)} title="View the full quote message"
+                          <tr key={l.session_id} onClick={() => router.push(leadRecordHref(l.session_id))} title="Open this lead's record"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
@@ -3409,7 +3444,10 @@ export default function Dashboard() {
                             <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
                             <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
                             <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
-                            <td className="px-4 py-3 text-gray-600 max-w-[220px] truncate">{l.quote_message || <span className="text-gray-400">—</span>}</td>
+                            {/* The row opens the record now; the full-message
+                                popup stays one click away, right here. */}
+                            <td onClick={(e) => { e.stopPropagation(); setViewQuote(l) }} title="View the full quote message"
+                              className="px-4 py-3 text-gray-600 max-w-[220px] truncate hover:text-gray-900">{l.quote_message || <span className="text-gray-400">—</span>}</td>
                             <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <select value={l.status} onChange={(e) => setLeadStatus(l, e.target.value as LeadStatus)}
                                 className={`text-[11px] font-semibold px-2 py-1 rounded-full border capitalize cursor-pointer focus:outline-none ${LEAD_STATUS_STYLE[l.status]}`}>

@@ -8,6 +8,14 @@
 // dashboard it was missed in some of them, so its raw JSON ({"id":...,"email":...})
 // leaked into the conversation view and the session-list preview, looking like the
 // bot was replying to the agent. Keep every control role here so that can't recur.
+//
+// IMPORTANT — this list is NOT the only filter. The conversations list gets its
+// per-session preview from the Postgres function session_message_summaries(),
+// which carries its own hardcoded DENYLIST of roles inside the database. A role
+// added here but unknown to that function still leaks (verified: an unknown role
+// comes back as a session's preview/last_role). app/api/admin/conversations
+// therefore re-checks every summary against isControlRole() in Node and repairs
+// it — so registering a role HERE is genuinely enough. Do not remove that guard.
 
 import { MODE_ROLE } from './mode'
 import { CONTACT_ROLE, TAGS_ROLE } from './visitor'
@@ -15,6 +23,7 @@ import { LEAD_CAPTURE_ROLE } from './leadtracking'
 import { REPLY_AUTHOR_ROLE } from './replyauthor'
 import { LEAD_STATUS_ROLE } from './leadstatus'
 import { ASSIGNMENT_ROLE } from './assignment'
+import { CRM_ROLES } from './crm'
 
 // NOTE: kept as literals (not imported from lib/blocklist.ts / lib/push.ts) so
 // this module stays importable without pulling in server-only dependencies.
@@ -31,6 +40,8 @@ export const CONTROL_ROLES = [
   ASSIGNMENT_ROLE,
   BLOCKED_VISITOR_ROLE,
   PUSH_SUB_ROLE,
+  // CRM record page (app/leads/[id]): stage, notes, field overrides, deal value.
+  ...CRM_ROLES,
 ] as const
 
 const CONTROL_ROLE_SET: ReadonlySet<string> = new Set(CONTROL_ROLES)

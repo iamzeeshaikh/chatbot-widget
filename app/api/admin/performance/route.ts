@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope, HARDCODED_ACCOUNTS } from '@/lib/auth'
 import { MODE_ROLE } from '@/lib/mode'
-import { CONTACT_ROLE, TAGS_ROLE, asUtcIso } from '@/lib/visitor'
+import { asUtcIso } from '@/lib/visitor'
+import { isControlRole } from '@/lib/controlroles'
 import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
 import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, RESPONSE_OUTLIER_CAP_MS, parseReplyAuthor, type ReplyAuthor } from '@/lib/replyauthor'
 import { isBotOffBySchedule } from '@/lib/botschedule'
@@ -157,7 +158,11 @@ export async function GET(req: NextRequest) {
 
     for (const ev of evs) {
       if (ev.role === MODE_ROLE) { mode = ev.message === 'human' ? 'human' : 'bot'; continue }
-      if (ev.role === CONTACT_ROLE || ev.role === TAGS_ROLE || ev.role === LEAD_CAPTURE_ROLE || ev.role === REPLY_AUTHOR_ROLE) continue
+      // Every control row, from the one list that knows them all. This used to
+      // name four roles explicitly, which silently counted assignment /
+      // lead_status rows as real conversation events (and would have counted
+      // the crm_* rows too) — inflating chats and skewing first/last role.
+      if (isControlRole(ev.role)) continue
       if (ev.message === '(session started)') continue
 
       hasRealMsg = true

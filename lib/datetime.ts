@@ -57,6 +57,25 @@ export function formatDateTime(ts: string | null | undefined): string {
   return d ? `${dateFmt.format(d)}, ${timeFmt.format(d)}` : '—'
 }
 
+// "2h ago" / "3d ago". Timezone-independent (it's a duration), but it still
+// goes through toDate so a naive-UTC timestamp isn't read as local time and
+// reported hours off.
+export function timeAgo(ts: string | null | undefined): string {
+  const d = toDate(ts)
+  if (!d) return '—'
+  const diff = Date.now() - d.getTime()
+  if (diff < 0) return 'just now'
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const days = Math.floor(h / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  return months < 12 ? `${months}mo ago` : `${Math.floor(days / 365)}y ago`
+}
+
 // The Karachi-local calendar day of an instant, as "YYYY-MM-DD".
 function dayKey(d: Date): string {
   return dayKeyFmt.format(d)

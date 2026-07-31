@@ -7,6 +7,7 @@ import { CONTACT_ROLE, TAGS_ROLE, parseTags, parseContact, asUtcIso } from '@/li
 import { parseAttachment } from '@/lib/attachment'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
 import { isControlRole } from '@/lib/controlroles'
+import { CRM_ROLES } from '@/lib/crm'
 import { isBotEnabled } from '@/lib/botflag'
 
 export const dynamic = 'force-dynamic'
@@ -50,21 +51,76 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(await legacyPath(scope, SINCE))
 }
 
+// ── Control-row guard for the DB-side summary ────────────────────────────────
+// session_message_summaries() filters control rows with its own hardcoded
+// DENYLIST inside Postgres, which cannot know about roles added later (verified:
+// an unrecognised role comes back as the session's preview/last_role/last_at —
+// i.e. raw control JSON rendered as the last message, the exact bug that shipped
+// once with reply_author). We have no DDL access to update that function, so the
+// summaries are re-checked here against the single source of truth in
+// lib/controlroles.ts, and any session it got wrong is re-derived from its real
+// messages. A session left with no real messages is dropped, matching the
+// legacy path (a session that only ever had control rows never shows up).
+async function withoutControlRows<T extends { session_id: string; preview: string | null; last_at: string; last_role: string; message_count: number | string }>(
+  summaries: T[],
+  since: string,
+): Promise<{ summaries: T[]; repaired: Set<string> }> {
+  const dirty = summaries.filter((s) => isControlRole(s.last_role))
+  if (dirty.length === 0) return { summaries, repaired: new Set() }
+
+  const ids = dirty.map((s) => s.session_id)
+  // Same window as the summary itself, so a CRM action on an old lead can't
+  // drag its long-finished conversation back into the live list.
+  const { data: rows } = await supabase
+    .from('chat_logs')
+    .select('session_id, role, message, created_at')
+    .in('session_id', ids)
+    .gte('created_at', since)
+    .order('created_at', { ascending: true })
+    .limit(4000)
+
+  const fixed = new Map<string, { preview: string; last_at: string; last_role: string; message_count: number }>()
+  for (const r of rows ?? []) {
+    if (isControlRole(r.role) || r.message === '(session started)') continue
+    const prev = fixed.get(r.session_id)
+    const att = parseAttachment(r.message)
+    fixed.set(r.session_id, {
+      preview: att ? `📎 ${att.name}` : r.message,
+      last_at: r.created_at,
+      last_role: r.role,
+      message_count: (prev?.message_count ?? 0) + 1,
+    })
+  }
+
+  const out: T[] = []
+  for (const s of summaries) {
+    if (!isControlRole(s.last_role)) { out.push(s); continue }
+    const repair = fixed.get(s.session_id)
+    if (repair) out.push({ ...s, ...repair })
+  }
+  return { summaries: out, repaired: new Set(fixed.keys()) }
+}
+
 // ── Fast path ────────────────────────────────────────────────────────────────
 // Message summaries come pre-aggregated from the DB. We still fetch the (few)
 // control rows — mode / assignment / tags / lead_capture / contact — and derive
 // per-session state from them, exactly as the legacy path does.
 async function fastPath(
-  summaries: { session_id: string; site_id: string; preview: string | null; last_at: string; last_role: string; message_count: number | string }[],
+  rawSummaries: { session_id: string; site_id: string; preview: string | null; last_at: string; last_role: string; message_count: number | string }[],
   scope: Set<string> | null,
   since: string,
 ) {
+  const { summaries, repaired } = await withoutControlRows(rawSummaries, since)
   const [controls, leadsRes, sitesRes] = await Promise.all([
     fetchAllPages<{ session_id: string; site_id: string; role: string; message: string; created_at: string }>(
       () => supabase.from('chat_logs')
         .select('session_id, site_id, role, message, created_at')
         .gte('created_at', since)
-        .in('role', [MODE_ROLE, ASSIGNMENT_ROLE, TAGS_ROLE, LEAD_CAPTURE_ROLE, CONTACT_ROLE])
+        // CRM_ROLES are here only to be SUBTRACTED from the message count
+        // below: the DB summary counts them as messages (its denylist predates
+        // them), so a lead with three notes would otherwise read as three extra
+        // chat messages in the list.
+        .in('role', [MODE_ROLE, ASSIGNMENT_ROLE, TAGS_ROLE, LEAD_CAPTURE_ROLE, CONTACT_ROLE, ...CRM_ROLES])
         .order('created_at', { ascending: true }),
       20000),
     supabase.from('leads').select('*'),
@@ -93,8 +149,14 @@ async function fastPath(
   // matching prior behaviour). emailToSession is still recorded for every row so
   // the leads-table match below works even for sessions off this page.
   const emailToSession: Record<string, string> = {}
+  const crmRoleSet: ReadonlySet<string> = new Set<string>(CRM_ROLES)
   for (const log of controls) {
     const e = sessionMap[log.session_id]
+    if (crmRoleSet.has(log.role)) {
+      // Sessions rebuilt by withoutControlRows already have an exact count.
+      if (e && !repaired.has(log.session_id)) e.message_count = Math.max(0, e.message_count - 1)
+      continue
+    }
     if (log.role === MODE_ROLE) { if (e) e.mode = log.message === 'human' ? 'human' : 'bot'; continue }
     if (log.role === ASSIGNMENT_ROLE) { if (e) { const em = (log.message ?? '').trim(); e.assignedTo = em || null } continue }
     if (log.role === TAGS_ROLE) { if (e) e.tags = parseTags(log.message); continue }
