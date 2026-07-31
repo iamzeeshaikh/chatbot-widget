@@ -1925,9 +1925,14 @@ export default function Dashboard() {
                 Performance
               </button>
             )}
-            {/* Tasks is a route, not a tab — a real href so it can be
-                middle-clicked into its own tab. The badge counts this member's
-                overdue + due-today tasks in Pakistan time. */}
+            {/* Pipeline and Tasks are routes, not tabs — real hrefs so they can
+                be middle-clicked into their own tab. */}
+            <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/pipeline') } }}
+              className="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all text-gray-500 hover:text-gray-700">
+              Pipeline
+            </a>
+            {/* The badge counts this member's overdue + due-today tasks in
+                Pakistan time. */}
             <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/tasks') } }}
               className="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 text-gray-500 hover:text-gray-700">
               Tasks

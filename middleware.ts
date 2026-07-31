@@ -13,5 +13,5 @@ export const config = {
   // task queue. This only bounces signed-out browsers to /login — per-site
   // access for a signed-in member is enforced server-side in /api/leads/[id]
   // and /api/tasks.
-  matcher: ['/', '/members', '/leads/:path*', '/tasks'],
+  matcher: ['/', '/members', '/leads/:path*', '/tasks', '/pipeline'],
 }
