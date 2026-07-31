@@ -44,6 +44,10 @@ yarn-error.log*
 # claude code — local machine settings may hold ad-hoc commands/credentials
 .claude/settings.local.json
 
+# throwaway scripts, probes and one-off tests — never committed.
+# Repo root must stay clean: put ad-hoc *.mjs test files in here, not at root.
+/scratch/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
