@@ -28,11 +28,11 @@ import { siteScope, HARDCODED_ACCOUNTS, type Member } from './auth'
 import { MODE_ROLE } from './mode'
 import { asUtcIso } from './visitor'
 import { isControlRole } from './controlroles'
-import { LEAD_CAPTURE_ROLE } from './leadtracking'
+import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
 import { REPLY_AUTHOR_ROLE, RESPONSE_SLA_MS, RESPONSE_OUTLIER_CAP_MS, parseReplyAuthor, type ReplyAuthor } from './replyauthor'
 import { findBurstKeys, burstKey } from './botfilter'
 import { isClosingMessage } from './closing'
-import { QUOTE_TAG, CHECKOUT_TAG, quoteSessionId } from './quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, quoteSessionId, stripQuoteTag } from './quoteintake'
 import { pktDayKey, pktDaysInRange, describeRange, type ReportRange } from './datetime'
 
 const ROW_CAP = 60000
@@ -74,6 +74,23 @@ export interface DayRow extends Metrics {
   date: string
 }
 
+/** One captured lead, as it appears on the client-facing leads report. */
+export interface LeadDetail {
+  capturedAt: string
+  name: string | null
+  email: string | null
+  phone: string | null
+  siteId: string
+  siteName: string
+  source: 'chat' | 'quote' | 'checkout'
+  /** True for the row that carries the charge. */
+  billable: boolean
+  /** Why a row is not billable — shown so the client can see nothing was hidden. */
+  reason: 'checkout order' | 'duplicate of an earlier lead' | null
+  /** The customer's own words, for quote and checkout leads. */
+  enquiry: string | null
+}
+
 export interface ReportData {
   range: ReportRange
   periodLabel: string
@@ -85,6 +102,8 @@ export interface ReportData {
   agentTotals: Pick<AgentRow, 'chats' | 'replies' | 'leads' | 'slowReplies' | 'measuredReplies'>
   sites: SiteRow[]
   days: DayRow[]
+  /** Every captured lead in the period, newest first. */
+  leadDetail: LeadDetail[]
   /** Replies with no reply_author row (predates attribution). */
   unattributedReplies: number
   truncated: boolean
@@ -114,7 +133,7 @@ export async function buildReport(member: Member, range: ReportRange): Promise<R
     workspace: member.workspace,
     workspaceLabel: member.workspace === 'packaging' ? 'ZeeOps Packaging' : 'ZeeOps Sports',
     generatedAt: new Date().toISOString(),
-    totals: emptyMetrics(), agents: [], sites: [], days: [],
+    totals: emptyMetrics(), agents: [], sites: [], days: [], leadDetail: [],
     agentTotals: { chats: 0, replies: 0, leads: 0, slowReplies: 0, measuredReplies: 0 },
     unattributedReplies: 0, truncated: false,
   }
@@ -133,9 +152,9 @@ export async function buildReport(member: Member, range: ReportRange): Promise<R
         .in('site_id', allowed).gte('created_at', from).lt('created_at', to)
         .order('created_at', { ascending: true }),
       ROW_CAP),
-    supabase.from('leads').select('id, site_id, email, created_at')
+    supabase.from('leads').select('id, site_id, name, email, phone, message, created_at')
       .ilike('message', `${QUOTE_TAG}%`).gte('created_at', from).lt('created_at', to),
-    supabase.from('leads').select('id, site_id, email, created_at')
+    supabase.from('leads').select('id, site_id, name, email, phone, message, created_at')
       .ilike('message', `${CHECKOUT_TAG}%`).gte('created_at', from).lt('created_at', to),
     supabase.from('sites').select('site_id, name'),
     supabase.from('members').select('id, email').eq('workspace', member.workspace),
@@ -280,21 +299,36 @@ export async function buildReport(member: Member, range: ReportRange): Promise<R
 
   // ── leads: chat captures + quote + checkout ────────────────────────────────
   // Shaped like the billing route so the billable key is computed identically.
-  interface LeadLike { site_id: string; email: string; session_id: string; created_at: string; source: 'chat' | 'quote' | 'checkout' }
+  interface LeadLike {
+    site_id: string; email: string; session_id: string; created_at: string
+    source: 'chat' | 'quote' | 'checkout'
+    name: string | null; phone: string | null; enquiry: string | null
+  }
   const leads: LeadLike[] = []
   for (const r of rows) {
     if (r.role !== LEAD_CAPTURE_ROLE) continue
-    let email = ''
-    try { email = String(JSON.parse(r.message)?.email ?? '') } catch { /* manual mark */ }
-    leads.push({ site_id: r.site_id, email, session_id: r.session_id, created_at: r.created_at, source: 'chat' })
+    const c = parseLeadCapture(r.message)
+    leads.push({
+      site_id: r.site_id, email: c?.email ?? '', session_id: r.session_id,
+      created_at: c?.at || r.created_at, source: 'chat',
+      name: c?.name ?? null, phone: c?.phone ?? null, enquiry: null,
+    })
   }
   for (const r of quoteRows.data ?? []) {
     if (!scope.has(r.site_id) || !r.email) continue
-    leads.push({ site_id: r.site_id, email: r.email, session_id: quoteSessionId(r.id), created_at: r.created_at, source: 'quote' })
+    leads.push({
+      site_id: r.site_id, email: r.email, session_id: quoteSessionId(r.id),
+      created_at: r.created_at, source: 'quote',
+      name: r.name ?? null, phone: r.phone ?? null, enquiry: stripQuoteTag(r.message),
+    })
   }
   for (const r of checkoutRows.data ?? []) {
     if (!scope.has(r.site_id) || !r.email) continue
-    leads.push({ site_id: r.site_id, email: r.email, session_id: quoteSessionId(r.id), created_at: r.created_at, source: 'checkout' })
+    leads.push({
+      site_id: r.site_id, email: r.email, session_id: quoteSessionId(r.id),
+      created_at: r.created_at, source: 'checkout',
+      name: r.name ?? null, phone: r.phone ?? null, enquiry: stripQuoteTag(r.message),
+    })
   }
 
   // Billable is deduped GLOBALLY for the totals, and again within each site and
@@ -305,16 +339,42 @@ export async function buildReport(member: Member, range: ReportRange): Promise<R
   const siteBillable = new Map<string, Set<string>>()
   const dayBillable = new Map<string, Set<string>>()
 
-  for (const l of leads) {
+  // Oldest first, so the FIRST time a customer appears is the row that carries
+  // the charge and any later repeat is the one marked as a duplicate. That
+  // matches how a client reads an invoice line.
+  const chronological = [...leads].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const charged = new Set<string>()
+  const detail: LeadDetail[] = []
+
+  for (const l of chronological) {
     const day = pktDayKey(l.created_at)
     const s = siteOf(l.site_id), d = dayOf(day)
     s.leads++; d.leads++; base.totals.leads++
-    if (l.source === 'checkout') { s.checkout++; d.checkout++; base.totals.checkout++; continue }
-    const k = billableKey(l)
-    globalBillable.add(k)
-    let ss = siteBillable.get(l.site_id); if (!ss) { ss = new Set(); siteBillable.set(l.site_id, ss) } ss.add(k)
-    let dd = dayBillable.get(day); if (!dd) { dd = new Set(); dayBillable.set(day, dd) } dd.add(k)
+
+    let billable = false
+    let reason: LeadDetail['reason'] = null
+    if (l.source === 'checkout') {
+      s.checkout++; d.checkout++; base.totals.checkout++
+      reason = 'checkout order'
+    } else {
+      const k = billableKey(l)
+      globalBillable.add(k)
+      let ss = siteBillable.get(l.site_id); if (!ss) { ss = new Set(); siteBillable.set(l.site_id, ss) } ss.add(k)
+      let dd = dayBillable.get(day); if (!dd) { dd = new Set(); dayBillable.set(day, dd) } dd.add(k)
+      if (charged.has(k)) reason = 'duplicate of an earlier lead'
+      else { charged.add(k); billable = true }
+    }
+
+    detail.push({
+      capturedAt: asUtcIso(l.created_at) ?? l.created_at,
+      name: l.name, email: l.email || null, phone: l.phone,
+      siteId: l.site_id, siteName: siteName[l.site_id] ?? l.site_id,
+      source: l.source, billable, reason,
+      enquiry: l.enquiry ? l.enquiry.replace(/\s+/g, ' ').trim() : null,
+    })
   }
+  // Newest first for reading; the billable flags were decided oldest-first above.
+  base.leadDetail = detail.reverse()
   base.totals.billable = globalBillable.size
 
   // ── assemble rows ──────────────────────────────────────────────────────────

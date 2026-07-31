@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { buildReport } from '@/lib/report'
 import { agentsCsv, sitesCsv, dailyCsv, buildPdf } from '@/lib/reportexport'
+import { buildLeadsPdf } from '@/lib/leadspdf'
 import {
   pktMonthRange, pktMonthOf, pktLastDaysRange, pktCustomRange, type ReportRange,
 } from '@/lib/datetime'
@@ -80,6 +81,20 @@ export async function GET(req: NextRequest) {
       case 'agents.csv': return csv(agentsCsv(data), 'agents')
       case 'sites.csv': return csv(sitesCsv(data), 'sites')
       case 'daily.csv': return csv(dailyCsv(data), 'daily')
+      case 'leads.pdf': {
+        // The client-facing document: every lead itemised, billable ones
+        // marked. `site=` narrows it to one client's own site.
+        const siteId = sp.get('site') || undefined
+        const bytes = await buildLeadsPdf(data, { siteId })
+        const suffix = siteId ? `-${siteId}` : ''
+        return new NextResponse(Buffer.from(bytes), {
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="zeeops-leads${suffix}-${slug}.pdf"`,
+            'Cache-Control': 'no-store',
+          },
+        })
+      }
       case 'pdf': {
         const bytes = await buildPdf(data)
         return new NextResponse(Buffer.from(bytes), {

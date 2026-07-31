@@ -37,6 +37,8 @@ export default function ReportsPage() {
   const [data, setData] = useState<ReportData | null>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'error' | 'forbidden'>('loading')
   const [error, setError] = useState('')
+  // Which site the client-facing leads PDF covers. Blank = every site in scope.
+  const [leadsSite, setLeadsSite] = useState('')
 
   useEffect(() => {
     try {
@@ -73,6 +75,7 @@ export default function ReportsPage() {
   useEffect(() => { load() }, [load])
 
   const href = (format: string) => `/api/admin/report?${query}&format=${format}`
+  const leadsHref = `${href('leads.pdf')}${leadsSite ? `&site=${encodeURIComponent(leadsSite)}` : ''}`
 
   if (status === 'forbidden') {
     return (
@@ -104,7 +107,20 @@ export default function ReportsPage() {
             </div>
 
             <div className="ml-auto flex items-center gap-1.5">
-              <ExportLink href={href('pdf')} icon={FileText} label="PDF" primary disabled={!data} />
+              {/* The client-facing one: every lead itemised with billable
+                  marked. Kept first because it is what gets sent out. */}
+              {/* A client owns one site, so the leads document can be narrowed
+                  to just theirs before it is sent. */}
+              <select value={leadsSite} onChange={(e) => setLeadsSite(e.target.value)}
+                aria-label="Site for the leads PDF" title="Limit the leads PDF to one site"
+                className="bg-gray-100 border border-gray-200 rounded-lg px-1.5 py-1.5 text-[11px] text-gray-800 cursor-pointer focus:outline-none focus:border-blue-500 max-w-[150px]">
+                <option value="">All sites</option>
+                {(data?.sites ?? []).map((s) => (
+                  <option key={s.siteId} value={s.siteId} className="bg-white text-gray-800">{s.siteName}</option>
+                ))}
+              </select>
+              <ExportLink href={leadsHref} icon={FileText} label="Leads PDF" primary disabled={!data} />
+              <ExportLink href={href('pdf')} icon={FileText} label="Performance PDF" disabled={!data} />
               <ExportLink href={href('agents.csv')} icon={FileSpreadsheet} label="Agents" disabled={!data} />
               <ExportLink href={href('sites.csv')} icon={FileSpreadsheet} label="Sites" disabled={!data} />
               <ExportLink href={href('daily.csv')} icon={FileSpreadsheet} label="Daily" disabled={!data} />
