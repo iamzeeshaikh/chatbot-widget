@@ -9,11 +9,20 @@
 // All state written here is a chat_logs control row (see lib/crm.ts) — no DDL,
 // no new tables. Access is decided server-side by /api/leads/[id]; this page
 // simply renders whatever that endpoint is willing to return.
+//
+// LAYOUT: sticky header, then 3 columns on desktop (identity / work / context),
+// 2 on tablet, stacked on mobile. Authored in the dashboard's light Tailwind
+// utilities so globals.css can remap them for dark mode — see ui.tsx.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { formatDateTime, timeAgo } from '@/lib/datetime'
+import {
+  ArrowLeft, MessagesSquare, StickyNote, ListTodo, Mail, Phone, Target,
+  Paperclip, Link2, Activity, FileText, Lock, Search, TriangleAlert,
+  Repeat, Building2, Globe, Tag, User, Inbox, ChevronRight,
+} from 'lucide-react'
+import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
 import {
   CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES,
   CURRENCY_SYMBOL, type CrmStage, type CrmCurrency,
@@ -23,7 +32,7 @@ import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
-import { Card, EmptyState, InlineField, MetaRow, QuickAction, Skeleton } from './ui'
+import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 
 export default function LeadRecordPage() {
   const params = useParams<{ id: string }>()
@@ -246,62 +255,69 @@ export default function LeadRecordPage() {
   if (status !== 'ok' || !record) return <NotAvailable status={status === 'ok' ? 'error' : status} />
 
   const followUpLabel = record.followUps.count === 0
-    ? 'No follow-ups yet'
+    ? 'No follow-ups'
     : `${record.followUps.count} follow-up${record.followUps.count === 1 ? '' : 's'}${record.followUps.lastAt ? ` · last ${timeAgo(record.followUps.lastAt)}` : ''}`
 
   const displayName = record.contact.name || record.contact.email || record.contact.phone || 'Unnamed lead'
 
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900">
-      {/* ── Header ── */}
+      {/* ══ Sticky header — anchors the page while the timeline scrolls ══ */}
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap">
-          <Link href="/" title="Back to the dashboard"
-            className="shrink-0 px-2 py-1 rounded-lg text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors">
-            ←
+        <div className="max-w-[1500px] mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-3 flex-wrap">
+          <Link href="/" title="Back to the dashboard" aria-label="Back to the dashboard"
+            className="shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors">
+            <ArrowLeft size={16} strokeWidth={2} aria-hidden />
           </Link>
+
+          <span className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold shrink-0" aria-hidden>
+            {(displayName[0] ?? '?').toUpperCase()}
+          </span>
+
           <div className="min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <h1 className="text-base font-bold text-gray-900 truncate">{displayName}</h1>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${CRM_STAGE_STYLE[record.stage]}`}>
-                {CRM_STAGE_LABEL[record.stage]}
-              </span>
+            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+              <h1 className="text-lg font-bold text-gray-900 leading-tight break-words">{displayName}</h1>
+              <StagePill stage={record.stage} />
             </div>
-            <p className="text-[11px] text-gray-500 truncate">
-              {record.siteName} · {record.sourceLabel} · created {formatDateTime(record.createdAt)}
+            <p className="text-[11px] text-gray-500 flex items-center gap-1.5 flex-wrap leading-tight mt-0.5">
+              <Building2 size={11} strokeWidth={2} aria-hidden />{record.siteName}
+              <span className="text-gray-300" aria-hidden>·</span>
+              {record.sourceLabel}
+              <span className="text-gray-300" aria-hidden>·</span>
+              <span className="tabular-nums" title={formatDateTime(record.createdAt)}>
+                created {formatShortDateTime(record.createdAt)}
+              </span>
             </p>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-1"
+              title="Counted automatically from agent replies — a burst of replies in one sitting counts as one follow-up">
+              <Repeat size={11} strokeWidth={2} aria-hidden />{followUpLabel}
+            </span>
             {record.hasConversation ? (
               <Link href={conversationHref}
-                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
-                💬 Full conversation
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <MessagesSquare size={13} strokeWidth={2} aria-hidden />
+                <span className="hidden sm:inline">Conversation</span>
               </Link>
             ) : (
               <span title="This lead arrived by email — there is no chat transcript"
-                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed">
-                💬 No chat
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed">
+                <MessagesSquare size={13} strokeWidth={2} aria-hidden />
+                <span className="hidden sm:inline">No chat</span>
               </span>
             )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-5 grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_290px] gap-4 items-start animate-in">
-        {/* ══ LEFT — identity ══ */}
-        <div className="space-y-4 min-w-0">
-          <Card>
-            <div className="flex items-center gap-3 px-4 pt-4 pb-3">
-              <span className="w-11 h-11 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-base font-bold shrink-0" aria-hidden>
-                {(displayName[0] ?? '?').toUpperCase()}
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{displayName}</p>
-                <p className="text-[11px] text-gray-500 truncate">{record.siteName}</p>
-              </div>
-            </div>
+      <main className="max-w-[1500px] mx-auto px-3 sm:px-5 py-3 grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_300px] gap-3 items-start animate-in">
 
-            <div className="border-t border-gray-100 divide-y divide-gray-100">
+        {/* ══ LEFT — identity ══ */}
+        <div className="space-y-3 min-w-0">
+          <Card>
+            <div className="divide-y divide-gray-100">
               <InlineField label="Name" value={record.contact.name} placeholder="Add a name"
                 overridden={record.overriddenFields.includes('name')} onSave={(v) => saveField('name', v)} />
               <InlineField label="Email" value={record.contact.email} placeholder="Add an email"
@@ -312,69 +328,94 @@ export default function LeadRecordPage() {
                 overridden={record.overriddenFields.includes('phone')} onSave={(v) => saveField('phone', v)} />
             </div>
 
-            <div className="flex items-center gap-1.5 px-3 py-3 border-t border-gray-100">
-              <QuickAction icon="📝" label="Note" onClick={() => {
-                document.getElementById('note-composer')?.focus()
-                document.getElementById('note-composer')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+            <div className="flex items-center gap-1 px-2 py-2 border-t border-gray-100">
+              <QuickAction icon={StickyNote} label="Note" onClick={() => {
+                const el = document.getElementById('note-composer')
+                el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                el?.focus()
               }} />
-              <QuickAction icon="✅" label="Task" hint="Add a task or follow-up" onClick={() => {
+              <QuickAction icon={ListTodo} label="Task" hint="Add a task or follow-up" onClick={() => {
                 const btn = document.getElementById('task-composer-open')
                 btn?.scrollIntoView({ block: 'center', behavior: 'smooth' })
                 btn?.click()
               }} />
-              <QuickAction icon="✉️" label="Email" disabled hint="Coming soon" />
-              <QuickAction icon="📞" label="Call" disabled hint="Coming soon" />
+              <QuickAction icon={Mail} label="Email" disabled hint="Coming soon" />
+              <QuickAction icon={Phone} label="Call" disabled hint="Coming soon" />
             </div>
           </Card>
 
-          <Card title="About this lead">
-            <div className="py-2">
-              <MetaRow label="Owner">
-                <select value={record.owner ?? ''} onChange={(e) => saveOwner(e.target.value)}
-                  aria-label="Lead owner"
-                  className="bg-gray-100 border border-gray-200 rounded-md px-1.5 py-0.5 text-xs text-gray-800 max-w-full focus:outline-none focus:border-gray-400 cursor-pointer">
-                  <option value="">Unassigned</option>
-                  {record.assignableMembers.map((m) => (
-                    <option key={m} value={m}>{m.split('@')[0]}</option>
-                  ))}
-                </select>
-              </MetaRow>
-              <MetaRow label="Stage">
-                <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full border ${CRM_STAGE_STYLE[record.stage]}`}>
-                  {CRM_STAGE_LABEL[record.stage]}
+          {/* Properties list — quiet labels, strong values, grouped. */}
+          <Card title="Details" icon={FileText} bodyClass="py-1">
+            <PropGroup label="Ownership">
+              <Prop label="Owner">
+                <span className="inline-flex items-center gap-1.5">
+                  <User size={11} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
+                  <select value={record.owner ?? ''} onChange={(e) => saveOwner(e.target.value)}
+                    aria-label="Lead owner"
+                    className="bg-transparent border border-transparent hover:border-gray-300 focus:border-gray-400 rounded px-1 -ml-1 py-0 text-xs font-medium text-gray-900 max-w-full focus:outline-none cursor-pointer transition-colors">
+                    <option value="">Unassigned</option>
+                    {record.assignableMembers.map((m) => (
+                      <option key={m} value={m} className="bg-white text-gray-800">{m.split('@')[0]}</option>
+                    ))}
+                  </select>
                 </span>
-                {record.stageBy && <span className="text-[10px] text-gray-500 ml-1.5">by {record.stageBy.split('@')[0]}</span>}
-              </MetaRow>
-              <MetaRow label="Source">{record.sourceLabel}</MetaRow>
-              <MetaRow label="Site">{record.siteName}</MetaRow>
-              <MetaRow label="First seen" title={formatDateTime(record.firstSeenAt)}>{formatDateTime(record.firstSeenAt)}</MetaRow>
-              <MetaRow label="Created" title={formatDateTime(record.createdAt)}>{formatDateTime(record.createdAt)}</MetaRow>
-              <MetaRow label="Last contact" title={record.lastContactedAt ? formatDateTime(record.lastContactedAt) : undefined}>
-                {record.lastContactedAt ? `${formatDateTime(record.lastContactedAt)} · ${timeAgo(record.lastContactedAt)}` : 'Never'}
-              </MetaRow>
-              <MetaRow label="Last activity" title={formatDateTime(record.lastActivityAt)}>
-                {record.lastActivityAt ? timeAgo(record.lastActivityAt) : '—'}
-              </MetaRow>
+              </Prop>
+              <Prop label="Stage">
+                <span className="inline-flex items-center gap-1.5 flex-wrap">
+                  <StagePill stage={record.stage} small />
+                  {record.stageBy && <span className="text-[10px] text-gray-500">by {record.stageBy.split('@')[0]}</span>}
+                </span>
+              </Prop>
+            </PropGroup>
+
+            <PropGroup label="Source">
+              <Prop label="Channel">
+                <span className="font-medium text-gray-900">{record.sourceLabel}</span>
+              </Prop>
+              <Prop label="Site" title={record.siteName}>
+                <span className="font-medium text-gray-900">{record.siteName}</span>
+              </Prop>
               {(record.country || record.referrer) && (
-                <MetaRow label="Origin" title={record.referrer ?? undefined}>
-                  {[record.country, record.referrer].filter(Boolean).join(' · ')}
-                </MetaRow>
+                <Prop label="Origin" title={[record.country, record.referrer].filter(Boolean).join(' · ')}>
+                  <span className="inline-flex items-start gap-1">
+                    <Globe size={11} strokeWidth={2} className="text-gray-400 shrink-0 mt-0.5" aria-hidden />
+                    <span>{[record.country, hostOf(record.referrer)].filter(Boolean).join(' · ')}</span>
+                  </span>
+                </Prop>
               )}
               {record.tags.length > 0 && (
-                <MetaRow label="Tags">
-                  <span className="flex items-center gap-1 flex-wrap">
+                <Prop label="Tags">
+                  <span className="inline-flex items-center gap-1 flex-wrap">
+                    <Tag size={11} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
                     {record.tags.map((t) => (
-                      <span key={t} className="text-[10px] px-1.5 py-px rounded-full bg-gray-200 border border-gray-300 text-gray-700">{t}</span>
+                      <span key={t} className="text-[10px] px-1.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{t}</span>
                     ))}
                   </span>
-                </MetaRow>
+                </Prop>
               )}
-            </div>
+            </PropGroup>
+
+            <PropGroup label="Timeline">
+              <Prop label="First seen" title={formatDateTime(record.firstSeenAt)}>
+                <span className="tabular-nums">{formatShortDateTime(record.firstSeenAt)}</span>
+              </Prop>
+              <Prop label="Created" title={formatDateTime(record.createdAt)}>
+                <span className="tabular-nums">{formatShortDateTime(record.createdAt)}</span>
+              </Prop>
+              <Prop label="Last contact" title={record.lastContactedAt ? formatDateTime(record.lastContactedAt) : 'Never contacted'}>
+                {record.lastContactedAt
+                  ? <span className="tabular-nums">{formatShortDateTime(record.lastContactedAt)}</span>
+                  : <span className="text-gray-400">Never</span>}
+              </Prop>
+              <Prop label="Last activity" title={formatDateTime(record.lastActivityAt)}>
+                <span className="tabular-nums">{record.lastActivityAt ? timeAgo(record.lastActivityAt) : '—'}</span>
+              </Prop>
+            </PropGroup>
           </Card>
         </div>
 
-        {/* ══ CENTER — tasks + deal + activity ══ */}
-        <div className="space-y-4 min-w-0">
+        {/* ══ CENTER — what to do, then what happened ══ */}
+        <div className="space-y-3 min-w-0">
           {/* Tasks sit above the deal on purpose: what has to happen next
               matters more at a glance than what the deal is worth. */}
           <Tasks
@@ -390,44 +431,33 @@ export default function LeadRecordPage() {
             onReassign={reassignTask}
           />
 
-          <Card title="Deal">
-            <div className="p-4 space-y-4">
+          <Card title="Deal" icon={Target}>
+            <div className="p-3 space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <label htmlFor="stage-select" className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Stage</label>
+                <label htmlFor="stage-select" className="sr-only">Stage</label>
                 <select id="stage-select" value={record.stage} onChange={(e) => changeStage(e.target.value as CrmStage)}
                   style={{ boxShadow: `inset 3px 0 0 ${CRM_STAGE_DOT[record.stage]}` }}
-                  className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${CRM_STAGE_STYLE[record.stage]}`}>
+                  className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${CRM_STAGE_STYLE[record.stage]}`}>
+                  {/* Each option previews its own stage colour. */}
                   {CRM_STAGES.map((s) => (
-                    <option key={s} value={s} className="bg-white text-gray-800">{CRM_STAGE_LABEL[s]}</option>
+                    <option key={s} value={s} className="bg-white font-semibold" style={{ color: CRM_STAGE_DOT[s] }}>
+                      {CRM_STAGE_LABEL[s]}
+                    </option>
                   ))}
                 </select>
                 <span className="text-[11px] text-gray-500">
                   {record.stageAt ? `changed ${timeAgo(record.stageAt)}` : 'never changed'}
                 </span>
-                <span className="ml-auto text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5"
-                  title="Counted automatically from agent replies — a burst of replies in one sitting counts as one follow-up">
-                  🔁 {followUpLabel}
-                </span>
               </div>
 
+              <StageRail stage={record.stage} />
+
               {stageError && (
-                <p role="alert" className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">
+                <p role="alert" className="flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1">
+                  <TriangleAlert size={12} strokeWidth={2} aria-hidden />
                   {stageError} — the stage was put back.
                 </p>
               )}
-
-              {/* Stage rail */}
-              <div className="flex items-center gap-1" aria-hidden>
-                {CRM_STAGES.filter((s) => s !== 'lost').map((s) => {
-                  const idx = CRM_STAGES.indexOf(s)
-                  const cur = CRM_STAGES.indexOf(record.stage)
-                  const done = record.stage !== 'lost' && idx <= cur
-                  return (
-                    <span key={s} title={CRM_STAGE_LABEL[s]} className="flex-1 h-1.5 rounded-full transition-colors"
-                      style={{ backgroundColor: done ? CRM_STAGE_DOT[record.stage] : 'rgba(148,163,184,0.28)' }} />
-                  )
-                })}
-              </div>
 
               {/* Keyed on the saved value so a change made elsewhere (or a
                   rolled-back save) re-seeds the inputs without an effect. */}
@@ -436,45 +466,53 @@ export default function LeadRecordPage() {
             </div>
           </Card>
 
-          <Card title="Activity"
-            action={<span className="text-[10px] text-gray-500">{record.messageCount} message{record.messageCount === 1 ? '' : 's'}</span>}>
-            <div className="px-4 pt-3">
+          <Card title="Activity" icon={Activity}
+            action={<span className="text-[10px] text-gray-500 tabular-nums">{record.messageCount} message{record.messageCount === 1 ? '' : 's'}</span>}>
+            <div className="px-3 pt-2.5">
               <label htmlFor="note-composer" className="sr-only">Add an internal note</label>
               <textarea id="note-composer" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addNote() } }}
-                rows={noteDraft ? 3 : 2} placeholder="Add an internal note… (only your team can see this)"
-                className="w-full bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-400 resize-y transition-colors" />
-              <div className="flex items-center gap-2 mt-2 mb-1">
-                <button onClick={addNote} disabled={!noteDraft.trim() || addingNote}
-                  className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
-                  {addingNote ? 'Saving…' : 'Add note'}
-                </button>
-                <span className="text-[10px] text-gray-400">⌘/Ctrl + Enter</span>
-              </div>
+                rows={noteDraft ? 3 : 1} placeholder="Add an internal note… (only your team can see this)"
+                className="w-full bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-y transition-colors" />
+              {noteDraft.trim() && (
+                <div className="flex items-center gap-2 mt-1.5 mb-1">
+                  <button onClick={addNote} disabled={addingNote}
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                    {addingNote ? 'Saving…' : 'Add note'}
+                  </button>
+                  <span className="text-[10px] text-gray-400">⌘/Ctrl + Enter</span>
+                </div>
+              )}
+              {!noteDraft.trim() && <div className="h-2" />}
             </div>
             <Timeline events={record.timeline} currency={record.value.currency}
               onEditNote={editNote} onDeleteNote={deleteNote} canManageNote={canManageNote} />
           </Card>
         </div>
 
-        {/* ══ RIGHT — related ══ */}
-        <div className="space-y-4 min-w-0">
-          <Card title="Attachments" action={<span className="text-[10px] text-gray-500">{record.attachments.length}</span>}>
+        {/* ══ RIGHT — context ══ */}
+        <div className="space-y-3 min-w-0">
+          <Card title="Attachments" icon={Paperclip}
+            action={<span className="text-[10px] text-gray-500 tabular-nums">{record.attachments.length}</span>}>
             {record.attachments.length === 0 ? (
-              <EmptyState icon="📎" title="No attachments" hint="Files shared in this chat show up here." />
+              <EmptyLine icon={Paperclip} text="No files shared" />
             ) : (
-              <ul className="p-2 space-y-1">
+              <ul className="divide-y divide-gray-100">
                 {record.attachments.map((f) => (
                   <li key={f.url}>
                     <a href={f.url} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                       {isImageMime(f.mime)
                         /* eslint-disable-next-line @next/next/no-img-element */
-                        ? <img src={f.url} alt="" className="w-8 h-8 rounded object-cover shrink-0 border border-gray-200" />
-                        : <span className="w-8 h-8 rounded bg-gray-100 border border-gray-200 flex items-center justify-center text-sm shrink-0" aria-hidden>📄</span>}
+                        ? <img src={f.url} alt="" className="w-7 h-7 rounded object-cover shrink-0 border border-gray-200" />
+                        : <span className="w-7 h-7 rounded bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0" aria-hidden>
+                            <FileText size={12} strokeWidth={2} className="text-gray-500" />
+                          </span>}
                       <span className="min-w-0">
-                        <span className="block text-xs text-blue-700 truncate">{f.name}</span>
-                        <span className="block text-[10px] text-gray-500">{f.by} · {formatDateTime(f.at)}</span>
+                        <span className="block text-xs text-blue-700 truncate" title={f.name}>{f.name}</span>
+                        <span className="block text-[10px] text-gray-500 tabular-nums" title={formatDateTime(f.at)}>
+                          {f.by} · {formatShortDateTime(f.at)}
+                        </span>
                       </span>
                     </a>
                   </li>
@@ -483,25 +521,29 @@ export default function LeadRecordPage() {
             )}
           </Card>
 
-          <Card title="Related leads" action={<span className="text-[10px] text-gray-500">{record.related.length}</span>}>
+          <Card title="Related leads" icon={Link2}
+            action={<span className="text-[10px] text-gray-500 tabular-nums">{record.related.length}</span>}>
             {record.related.length === 0 ? (
-              <EmptyState icon="🔗" title="No related leads" hint="Other leads with the same email or phone appear here." />
+              <EmptyLine icon={Link2} text="No other leads from this person" />
             ) : (
-              <ul className="p-2 space-y-1">
+              <ul className="divide-y divide-gray-100">
                 {record.related.map((r) => (
                   <li key={r.id}>
                     <Link href={`/leads/${encodeURIComponent(r.id)}`}
-                      className="block rounded-xl px-2.5 py-2 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-xs font-medium text-gray-900 truncate">{r.name || r.email || r.phone || 'Lead'}</span>
-                        <span className="text-[9px] px-1 py-px rounded bg-gray-200 border border-gray-300 text-gray-600 shrink-0">
-                          {r.kind === 'chat' ? 'chat' : r.kind === 'quote' ? 'quote' : 'order'}
+                      className="group/rel flex items-center gap-2 px-3 py-1.5 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium text-gray-900 truncate">{r.name || r.email || r.phone || 'Lead'}</span>
+                          <span className="text-[9px] px-1 rounded bg-gray-200 border border-gray-300 text-gray-600 shrink-0">
+                            {r.kind === 'chat' ? 'chat' : r.kind === 'quote' ? 'quote' : 'order'}
+                          </span>
+                        </span>
+                        <span className="block text-[10px] text-gray-500 truncate tabular-nums" title={`${r.siteName} · ${formatDateTime(r.at)}`}>
+                          {r.siteName} · {formatShortDateTime(r.at)}
                         </span>
                       </span>
-                      <span className="block text-[10px] text-gray-500 truncate">
-                        {r.siteName} · {formatDateTime(r.at)}
-                      </span>
-                      <span className="block text-[10px] text-gray-400">matched on {r.matchedOn}</span>
+                      <ChevronRight size={13} strokeWidth={2}
+                        className="text-gray-300 shrink-0 group-hover/rel:text-gray-500 transition-colors" aria-hidden />
                     </Link>
                   </li>
                 ))}
@@ -510,23 +552,25 @@ export default function LeadRecordPage() {
           </Card>
 
           {record.quoteMessage && (
-            <Card title={record.kind === 'checkout' ? 'Order email' : 'Quote request'}>
-              <p className="px-4 py-3 text-[11px] text-gray-700 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+            <Card title={record.kind === 'checkout' ? 'Order email' : 'Quote request'} icon={Inbox}>
+              <p className="px-3 py-2 text-[11px] text-gray-700 whitespace-pre-wrap break-words max-h-60 overflow-y-auto leading-snug">
                 {record.quoteMessage}
               </p>
             </Card>
           )}
 
           <Card>
-            <div className="px-4 py-3">
+            <div className="px-3 py-2">
               {record.hasConversation ? (
-                <Link href={conversationHref} className="text-xs text-blue-700 hover:underline">
-                  💬 Open the full conversation →
+                <Link href={conversationHref}
+                  className="inline-flex items-center gap-1.5 text-xs text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+                  <MessagesSquare size={12} strokeWidth={2} aria-hidden />
+                  Open the full conversation
                 </Link>
               ) : (
-                <p className="text-xs text-gray-500">This lead arrived by email — there is no chat transcript.</p>
+                <p className="text-[11px] text-gray-500">Arrived by email — no chat transcript.</p>
               )}
-              <p className="text-[10px] text-gray-400 mt-1 font-mono truncate" title={record.id}>{record.id}</p>
+              <p className="text-[10px] text-gray-400 mt-1 font-mono break-all" title={record.id}>{record.id}</p>
             </div>
           </Card>
         </div>
@@ -535,9 +579,70 @@ export default function LeadRecordPage() {
   )
 }
 
+// A referrer's host, without the scheme or the www. A full URL has no spaces to
+// break on, so it either overflows the column or splits mid-word ("google.c /
+// om") — the host is the part that carries the meaning, and the whole URL stays
+// available on hover.
+function hostOf(url: string | null): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] || url
+  }
+}
+
+// ── Stage ────────────────────────────────────────────────────────────────────
+// The most important element on the page, so it carries real colour: the pill
+// is tinted with the stage's own palette and rimmed with its accent.
+function StagePill({ stage, small = false }: { stage: CrmStage; small?: boolean }) {
+  return (
+    <span
+      style={{ boxShadow: `inset 2px 0 0 ${CRM_STAGE_DOT[stage]}` }}
+      className={`inline-flex items-center font-bold rounded-full border shrink-0 ${CRM_STAGE_STYLE[stage]} ${
+        small ? 'text-[10px] px-2 py-px' : 'text-[11px] px-2.5 py-0.5'
+      }`}>
+      {CRM_STAGE_LABEL[stage]}
+    </span>
+  )
+}
+
+// Progress rail. Completed segments are filled with THEIR OWN stage colour, so
+// the bar reads as a journey rather than a single-colour meter; the current
+// segment is brighter and ringed. `lost` sits outside the funnel and greys the
+// whole rail, which is the honest picture of a dead deal.
+function StageRail({ stage }: { stage: CrmStage }) {
+  // findIndex rather than indexOf: `funnel` is narrowed to exclude 'lost', and
+  // `stage` may BE 'lost' — which is exactly the case handled below.
+  const funnel = CRM_STAGES.filter((s) => s !== 'lost')
+  const currentIdx = funnel.findIndex((s) => s === stage)
+  const isLost = stage === 'lost'
+
+  return (
+    <div className="flex items-center gap-1" role="img"
+      aria-label={`Stage ${isLost ? 'Lost' : `${currentIdx + 1} of ${funnel.length}`}: ${CRM_STAGE_LABEL[stage]}`}>
+      {funnel.map((s, i) => {
+        const done = !isLost && i <= currentIdx
+        const current = !isLost && i === currentIdx
+        return (
+          <span key={s} title={CRM_STAGE_LABEL[s]}
+            className={`flex-1 rounded-full transition-all ${current ? 'h-2' : 'h-1.5'}`}
+            style={{
+              backgroundColor: done ? CRM_STAGE_DOT[s] : 'rgba(148,163,184,0.25)',
+              opacity: done && !current ? 0.55 : 1,
+            }} />
+        )
+      })}
+      {isLost && (
+        <span className="text-[10px] font-semibold text-red-700 ml-1 shrink-0">Lost</span>
+      )}
+    </div>
+  )
+}
+
 // ── Deal value ───────────────────────────────────────────────────────────────
-// "Won revenue" only exists once the deal is Won — showing it earlier invites
-// someone to fill in a number that means nothing yet.
+// The number is the point: it gets the size and the weight. Currency is a small
+// inline selector beside it, and the "won revenue" note is plainly helper text.
 function DealValue({ record, onSave }: {
   record: LeadRecord
   onSave: (v: { estimated: number | null; won: number | null; currency: CrmCurrency }) => Promise<void>
@@ -558,93 +663,81 @@ function DealValue({ record, onSave }: {
       currency: next?.currency ?? currency,
     })
 
-  const inputClass = 'w-full bg-gray-100 border border-gray-200 rounded-lg pl-6 pr-2 py-1.5 text-sm text-gray-900 tabular-nums focus:outline-none focus:border-blue-400 transition-colors'
-
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3">
-      <div>
-        <label htmlFor="deal-estimated" className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+    <div className="flex items-end gap-4 flex-wrap">
+      <div className="min-w-0">
+        <label htmlFor="deal-estimated" className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-0.5">
           Estimated value
         </label>
-        <div className="relative">
-          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500" aria-hidden>
-            {CURRENCY_SYMBOL[currency]}
-          </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xl font-bold text-gray-400 tabular-nums" aria-hidden>{CURRENCY_SYMBOL[currency]}</span>
           <input id="deal-estimated" inputMode="decimal" value={estimated} placeholder="0"
             onChange={(e) => setEstimated(e.target.value)} onBlur={() => commit()}
             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-            className={inputClass} />
+            className="w-28 bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-500 px-0 py-0 text-2xl font-bold text-gray-900 tabular-nums focus:outline-none transition-colors" />
+          <label htmlFor="deal-currency" className="sr-only">Currency</label>
+          <select id="deal-currency" value={currency}
+            onChange={(e) => { const c = e.target.value as CrmCurrency; setCurrency(c); commit({ currency: c }) }}
+            className="bg-gray-100 border border-gray-200 rounded-md px-1 py-0.5 text-[10px] font-semibold text-gray-600 focus:outline-none focus:border-blue-500 cursor-pointer self-center">
+            {CRM_CURRENCIES.map((c) => <option key={c} value={c} className="bg-white text-gray-800">{c}</option>)}
+          </select>
         </div>
       </div>
 
       {record.stage === 'won' ? (
-        <div>
-          <label htmlFor="deal-won" className="block text-[10px] font-semibold uppercase tracking-wider text-green-700 mb-1">
+        <div className="min-w-0">
+          <label htmlFor="deal-won" className="block text-[10px] font-semibold uppercase tracking-wider text-green-700 mb-0.5">
             Won revenue
           </label>
-          <div className="relative">
-            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500" aria-hidden>
-              {CURRENCY_SYMBOL[currency]}
-            </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xl font-bold text-green-600 tabular-nums" aria-hidden>{CURRENCY_SYMBOL[currency]}</span>
             <input id="deal-won" inputMode="decimal" value={won} placeholder="0"
               onChange={(e) => setWon(e.target.value)} onBlur={() => commit()}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-              className={`${inputClass} border-green-300`} />
+              className="w-28 bg-transparent border-0 border-b border-green-300 focus:border-green-600 px-0 py-0 text-2xl font-bold text-green-700 tabular-nums focus:outline-none transition-colors" />
           </div>
         </div>
       ) : (
-        <div className="flex items-end">
-          <p className="text-[11px] text-gray-400 pb-2">Won revenue appears once the stage is Won.</p>
-        </div>
+        <p className="text-[11px] text-gray-400 pb-1.5">Won revenue appears once the stage is Won.</p>
       )}
-
-      <div>
-        <label htmlFor="deal-currency" className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
-          Currency
-        </label>
-        <select id="deal-currency" value={currency}
-          onChange={(e) => { const c = e.target.value as CrmCurrency; setCurrency(c); commit({ currency: c }) }}
-          className="bg-gray-100 border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-blue-400 cursor-pointer">
-          {CRM_CURRENCIES.map((c) => <option key={c} value={c} className="bg-white text-gray-800">{c}</option>)}
-        </select>
-      </div>
     </div>
   )
 }
 
 // ── Loading / failure states ─────────────────────────────────────────────────
-// The skeleton mirrors the real three-column layout so nothing jumps when the
-// record lands.
+// Mirrors the real three-column layout at the same widths and gaps, so nothing
+// jumps when the record lands.
 function LoadingSkeleton() {
   return (
     <div className="min-h-screen bg-gray-100">
       <header className="sticky top-0 z-20 bg-white/95 border-b border-gray-200">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
-          <Skeleton className="w-6 h-6 rounded-lg" />
+        <div className="max-w-[1500px] mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-3">
+          <Skeleton className="w-7 h-7 rounded-lg" />
+          <Skeleton className="w-9 h-9 rounded-full" />
           <div className="space-y-1.5">
             <Skeleton className="h-4 w-44" />
-            <Skeleton className="h-2.5 w-64" />
+            <Skeleton className="h-2.5 w-60" />
           </div>
         </div>
       </header>
-      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-5 grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_290px] gap-4 items-start">
+      <main className="max-w-[1500px] mx-auto px-3 sm:px-5 py-3 grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_300px] gap-3 items-start">
         {[0, 1, 2].map((col) => (
-          <div key={col} className="space-y-4 w-full">
-            <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 space-y-3">
-              <Skeleton className="h-3 w-24" />
-              <Skeleton className="h-9 w-full rounded-xl" />
-              <Skeleton className="h-9 w-full rounded-xl" />
-              <Skeleton className="h-9 w-2/3 rounded-xl" />
+          <div key={col} className="space-y-3 w-full">
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-3 space-y-2.5">
+              <Skeleton className="h-2.5 w-20" />
+              <Skeleton className="h-7 w-full rounded-lg" />
+              <Skeleton className="h-7 w-full rounded-lg" />
+              <Skeleton className="h-7 w-2/3 rounded-lg" />
             </div>
             {col === 1 && (
-              <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 space-y-3">
-                <Skeleton className="h-3 w-20" />
+              <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-3 space-y-2.5">
+                <Skeleton className="h-2.5 w-16" />
                 {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="flex gap-3">
-                    <Skeleton className="w-6 h-6 rounded-full shrink-0" />
+                  <div key={i} className="flex gap-2.5">
+                    <Skeleton className="w-5 h-5 rounded-full shrink-0" />
                     <div className="flex-1 space-y-1.5">
-                      <Skeleton className="h-3 w-1/3" />
-                      <Skeleton className="h-3 w-3/4" />
+                      <Skeleton className="h-2.5 w-1/3" />
+                      <Skeleton className="h-2.5 w-3/4" />
                     </div>
                   </div>
                 ))}
@@ -660,17 +753,21 @@ function LoadingSkeleton() {
 
 function NotAvailable({ status }: { status: 'forbidden' | 'missing' | 'error' | 'loading' }) {
   const copy = status === 'forbidden'
-    ? { icon: '🔒', title: 'You don’t have access to this lead', hint: 'It belongs to a site outside your assigned sites. Ask an admin if you need it.' }
+    ? { icon: Lock, title: 'You don’t have access to this lead', hint: 'It belongs to a site outside your assigned sites. Ask an admin if you need it.' }
     : status === 'missing'
-      ? { icon: '🔍', title: 'Lead not found', hint: 'The record may have been deleted, or the link is wrong.' }
-      : { icon: '⚠️', title: 'Could not load this lead', hint: 'Something went wrong on our side. Try again in a moment.' }
+      ? { icon: Search, title: 'Lead not found', hint: 'The record may have been deleted, or the link is wrong.' }
+      : { icon: TriangleAlert, title: 'Could not load this lead', hint: 'Something went wrong on our side. Try again in a moment.' }
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm max-w-sm w-full py-8 animate-in">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm max-w-sm w-full py-6 animate-in">
         <EmptyState icon={copy.icon} title={copy.title} hint={copy.hint} />
-        <div className="flex justify-center pb-2">
-          <Link href="/" className="text-xs font-medium text-blue-700 hover:underline">← Back to the dashboard</Link>
+        <div className="flex justify-center pb-1">
+          <Link href="/"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+            <ArrowLeft size={12} strokeWidth={2} aria-hidden />
+            Back to the dashboard
+          </Link>
         </div>
       </div>
     </div>

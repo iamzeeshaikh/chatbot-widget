@@ -34,6 +34,11 @@ const dateFmt = new Intl.DateTimeFormat('en-US', {
 const dateLongFmt = new Intl.DateTimeFormat('en-US', {
   timeZone: PKT_TZ, weekday: 'long', year: 'numeric', month: 'short', day: 'numeric',
 })
+// "30 Jul" — day first, no year. en-GB gives "30 Jul" where en-US gives
+// "Jul 30"; day-first reads better in a dense properties list.
+const shortDateFmt = new Intl.DateTimeFormat('en-GB', {
+  timeZone: PKT_TZ, day: 'numeric', month: 'short',
+})
 // Sortable Karachi-local day key ("2026-06-19"), used for Today/Yesterday logic.
 const dayKeyFmt = new Intl.DateTimeFormat('en-CA', {
   timeZone: PKT_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -55,6 +60,21 @@ export function formatDate(ts: string | null | undefined): string {
 export function formatDateTime(ts: string | null | undefined): string {
   const d = toDate(ts)
   return d ? `${dateFmt.format(d)}, ${timeFmt.format(d)}` : '—'
+}
+
+// "30 Jul, 9:43 AM" in Pakistan time — the compact form for narrow columns
+// (the properties list, timeline meta, attachment rows). Callers should still
+// put the full formatDateTime() value in a title attribute so the year and the
+// exact time are one hover away; nothing important should only exist truncated.
+export function formatShortDateTime(ts: string | null | undefined): string {
+  const d = toDate(ts)
+  return d ? `${shortDateFmt.format(d)}, ${timeFmt.format(d)}` : '—'
+}
+
+// "30 Jul" on its own, for rows where the time is noise.
+export function formatShortDate(ts: string | null | undefined): string {
+  const d = toDate(ts)
+  return d ? shortDateFmt.format(d) : '—'
 }
 
 // "2h ago" / "3d ago". Timezone-independent (it's a duration), but it still
@@ -168,7 +188,9 @@ export function formatDueLabel(ts: string | null | undefined, now: Date = new Da
   if (key === dayKey(now)) return `Today, ${timeFmt.format(d)}`
   if (key === pktDayKeyOffset(1, now)) return `Tomorrow, ${timeFmt.format(d)}`
   if (key === pktDayKeyOffset(-1, now)) return `Yesterday, ${timeFmt.format(d)}`
-  return `${dateFmt.format(d)}, ${timeFmt.format(d)}`
+  // Short form: due dates sit in narrow task rows, and "Jul 25, 2026, 3:00 PM"
+  // is too long for one. The full value belongs in a title attribute.
+  return `${shortDateFmt.format(d)}, ${timeFmt.format(d)}`
 }
 
 // Date-divider label for the message view. Keeps the friendly "Today" /
