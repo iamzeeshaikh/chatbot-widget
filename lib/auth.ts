@@ -1,7 +1,10 @@
 import { NextRequest } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { supabase } from './supabase'
-import { Workspace, workspaceSites } from './workspaces'
+// `type` on Workspace so the import erases cleanly — it is a type, and marking
+// it lets these modules load under Node's native TypeScript stripping (which is
+// how the scratch tests exercise the real code).
+import { type Workspace, workspaceSites } from './workspaces'
 
 // ── Cookie names ─────────────────────────────────────────────────────────────
 // zee-session : httpOnly, HMAC-signed — the source of truth for authz (server)

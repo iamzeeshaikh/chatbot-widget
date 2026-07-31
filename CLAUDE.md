@@ -68,9 +68,28 @@ chat messages.
 ### Registered control roles today
 `mode`, `contact`, `tags`, `lead_capture`, `reply_author`, `lead_status`, `assignment`,
 `blocked_visitor`, `push_sub`, and the CRM ones — `crm_stage`, `crm_note`, `crm_field`,
-`crm_value`, `crm_task`. The `crm_*` set lives in `CRM_ROLES` (`lib/crm.ts`), which
-`controlroles.ts` spreads and the conversations route subtracts from the message count,
-so adding a new `crm_*` role to that one array wires up both protections at once.
+`crm_value`, `crm_task`, `crm_prefs`, `crm_reminder`. The `crm_*` set lives in
+`CRM_ROLES` (`lib/crm.ts`), which `controlroles.ts` spreads and the conversations route
+subtracts from the message count, so adding a new `crm_*` role to that one array wires
+up both protections at once.
+
+### Member-scoped rows go on a reserved site, not a lead
+`crm_prefs` and `crm_reminder` belong to a *member*, not a conversation, so they live on
+the reserved `zeeops-crm` site (`lib/reminders.ts`) — the same trick `push_sub` uses with
+`zeeops-push`. A reserved site is in nobody's site scope, so those rows cannot reach a
+conversation list, a task list or a preview at all. They are registered in `CRM_ROLES`
+anyway as a second line of defence.
+
+### Scheduled work: a secret-protected endpoint driven by an external clock
+`/api/tasks/reminders/sweep` (declared in `vercel.json` as a `*/5` Vercel Cron; the team
+plan is Pro, so sub-daily schedules are allowed). It accepts
+`Authorization: Bearer $CRON_SECRET` (what Vercel Cron sends) or `x-cron-secret`, mirroring
+the `x-quote-secret` style `/api/quote-intake` already uses; a signed-in admin can also run
+it by hand, and `?dryRun=1` reports without sending or writing.
+**`CRON_SECRET` must exist in the Vercel environment or every scheduled run 401s and
+reminders silently never fire** — the endpoint says so explicitly in its 401 body.
+The job derives everything from current task state and is idempotent, so running late,
+twice, or after missing a window is safe.
 
 ### Pakistan-time calendar math lives in `lib/datetime.ts`
 `pktDayKey` / `pktOffsetMs` / `pktDateTimeToUtc` / `pktPartsOf` / `pktDayKeyOffset` /

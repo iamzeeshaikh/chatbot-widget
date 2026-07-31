@@ -81,10 +81,38 @@ export interface PushPayload {
 
 // Fire-and-forget: never throws (a push failure must never break chat).
 export async function sendPushToWorkspace(ws: Workspace, payload: PushPayload): Promise<void> {
+  return deliver(await safeSubs(ws), payload)
+}
+
+// One member's devices only. Task reminders are personal — the assignee gets
+// them and nobody else — so this filters the workspace's subscriptions down to
+// a single email rather than broadcasting.
+//
+// Returns how many devices actually accepted the push, so the reminder sweep
+// can tell "delivered" from "this member has no device registered".
+export async function sendPushToMember(email: string, ws: Workspace, payload: PushPayload): Promise<number> {
+  const target = email.trim().toLowerCase()
+  if (!target) return 0
+  const subs = (await safeSubs(ws)).filter((s) => (s.email ?? '').trim().toLowerCase() === target)
+  if (subs.length === 0) return 0
+  await deliver(subs, payload)
+  return subs.length
+}
+
+async function safeSubs(ws: Workspace): Promise<SubRow[]> {
   try {
-    if (!ensureVapid()) return
-    const subs = await listSubscriptions(ws)
+    if (!ensureVapid()) return []
+    return await listSubscriptions(ws)
+  } catch (err) {
+    console.error('[push] listSubscriptions failed (non-fatal):', err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+async function deliver(subs: SubRow[], payload: PushPayload): Promise<void> {
+  try {
     if (subs.length === 0) return
+    if (!ensureVapid()) return
     const body = JSON.stringify(payload)
     await Promise.all(subs.map(async (s) => {
       try {
@@ -100,6 +128,6 @@ export async function sendPushToWorkspace(ws: Workspace, payload: PushPayload): 
       }
     }))
   } catch (err) {
-    console.error('[push] sendPushToWorkspace failed (non-fatal):', err instanceof Error ? err.message : err)
+    console.error('[push] deliver failed (non-fatal):', err instanceof Error ? err.message : err)
   }
 }

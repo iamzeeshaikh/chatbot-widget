@@ -17,6 +17,7 @@ import {
   TASK_TYPES, TASK_TYPE_LABEL, TASK_TYPE_ICON, TASK_TYPE_STYLE, type TaskType,
 } from '@/lib/tasks'
 import type { TaskWithLead, TaskGroups } from '@/lib/taskquery'
+import ReminderSettings from './ReminderSettings'
 
 interface TasksResponse {
   groups: TaskGroups
@@ -40,6 +41,7 @@ export default function TasksPage() {
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [error, setError] = useState('')
   const [showDone, setShowDone] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   // Same theme restore the record page does — a hard load of this route has to
   // re-apply the dashboard's dark class or it opens light.
@@ -140,11 +142,18 @@ export default function TasksPage() {
                 {status === 'loading' ? 'Loading…' : `${openCount} open · due dates in Pakistan time`}
               </p>
             </div>
-            {groups.overdue.length > 0 && (
-              <span className="ml-auto text-[11px] font-semibold px-2 py-1 rounded-full bg-red-100 text-red-700 border border-red-300">
-                {groups.overdue.length} overdue
-              </span>
-            )}
+            <span className="ml-auto flex items-center gap-2">
+              {groups.overdue.length > 0 && (
+                <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-red-100 text-red-700 border border-red-300">
+                  {groups.overdue.length} overdue
+                </span>
+              )}
+              <button onClick={() => setShowSettings(true)}
+                title="Reminder settings — lead time, digest and quiet hours"
+                className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                🔔 Reminders
+              </button>
+            </span>
           </div>
 
           {/* ── Filters ── */}
@@ -216,6 +225,8 @@ export default function TasksPage() {
           </>
         )}
       </main>
+
+      {showSettings && <ReminderSettings onClose={() => setShowSettings(false)} />}
     </div>
   )
 }

@@ -16,8 +16,9 @@
 
 import type { LeadStatus } from './leadstatus'
 import { CRM_TASK_ROLE } from './tasks'
+import { CRM_PREFS_ROLE, CRM_REMINDER_ROLE } from './reminders'
 
-export { CRM_TASK_ROLE }
+export { CRM_TASK_ROLE, CRM_PREFS_ROLE, CRM_REMINDER_ROLE }
 
 export const CRM_STAGE_ROLE = 'crm_stage'
 export const CRM_NOTE_ROLE = 'crm_note'
@@ -31,8 +32,14 @@ export const CRM_VALUE_ROLE = 'crm_value'
 // must land in this array or it leaks (see the denylist note in controlroles.ts).
 // crm_task is defined in lib/tasks.ts, which owns the task semantics; only the
 // role name is imported so this stays the one registration point.
+// crm_prefs and crm_reminder normally live on a RESERVED site/session rather
+// than a lead conversation (see lib/reminders.ts), so they cannot reach a
+// preview in the first place — they are listed here anyway so that a row
+// written to a lead session by mistake is still filtered out of the transcript,
+// the previews and the message counts. One entry, both protections.
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
+  CRM_PREFS_ROLE, CRM_REMINDER_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────
