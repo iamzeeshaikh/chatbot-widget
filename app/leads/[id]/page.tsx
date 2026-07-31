@@ -20,7 +20,9 @@ import {
 } from '@/lib/crm'
 import { isImageMime } from '@/lib/attachment'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
+import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
+import Tasks, { type TaskDraft } from './Tasks'
 import { Card, EmptyState, InlineField, MetaRow, QuickAction, Skeleton } from './ui'
 
 export default function LeadRecordPage() {
@@ -33,6 +35,10 @@ export default function LeadRecordPage() {
   const [noteDraft, setNoteDraft] = useState('')
   const [addingNote, setAddingNote] = useState(false)
   const [stageError, setStageError] = useState('')
+  // Tasks mid-write. Keyed by task id so completing one doesn't grey out the
+  // rest of the list.
+  const [taskBusy, setTaskBusy] = useState<Set<string>>(new Set())
+  const [taskError, setTaskError] = useState('')
 
   // The theme is a `dark` class on <html>, persisted by the dashboard header
   // toggle. A hard load of this route has to re-apply it or the page opens
@@ -131,6 +137,85 @@ export default function LeadRecordPage() {
       setAddingNote(false)
     }
   }
+
+  // ── Tasks ─────────────────────────────────────────────────────────────────
+  const markBusy = useCallback((taskId: string, busy: boolean) => {
+    setTaskBusy((prev) => {
+      const next = new Set(prev)
+      if (busy) next.add(taskId); else next.delete(taskId)
+      return next
+    })
+  }, [])
+
+  const createTask = useCallback(async (draft: TaskDraft) => {
+    setTaskError('')
+    try {
+      await post('/tasks', {
+        title: draft.title, type: draft.type,
+        dueDate: draft.dueDate, dueTime: draft.dueTime, assignee: draft.assignee,
+      })
+      await load()
+    } catch (err) {
+      setTaskError(err instanceof Error ? err.message : 'Could not add the task')
+    }
+  }, [post, load])
+
+  // Optimistic: the task moves to done (or back) the instant the circle is
+  // clicked. On failure the previous list is restored so the page never shows a
+  // completion the database rejected.
+  const toggleTask = useCallback(async (task: CrmTaskEntry, done: boolean) => {
+    setTaskError('')
+    markBusy(task.id, true)
+    let rolledBack: LeadRecord | null = null
+    setRecord((r) => {
+      if (!r) return r
+      rolledBack = r
+      const moved: CrmTaskEntry = {
+        ...task,
+        status: done ? 'done' : 'open',
+        completed_at: done ? new Date().toISOString() : undefined,
+        completed_by: done ? me : undefined,
+      }
+      return done
+        ? { ...r, openTasks: r.openTasks.filter((t) => t.id !== task.id), doneTasks: [moved, ...r.doneTasks] }
+        : { ...r, doneTasks: r.doneTasks.filter((t) => t.id !== task.id), openTasks: [...r.openTasks, moved] }
+    })
+    try {
+      await post('/tasks', { taskId: task.id, status: done ? 'done' : 'open' }, 'PATCH')
+      await load()
+    } catch (err) {
+      if (rolledBack) setRecord(rolledBack)
+      setTaskError(err instanceof Error ? err.message : 'Could not update the task — it was put back')
+    } finally {
+      markBusy(task.id, false)
+    }
+  }, [post, load, markBusy, me])
+
+  const reassignTask = useCallback(async (task: CrmTaskEntry, assignee: string) => {
+    setTaskError('')
+    markBusy(task.id, true)
+    try {
+      await post('/tasks', { taskId: task.id, assignee }, 'PATCH')
+      await load()
+    } catch (err) {
+      setTaskError(err instanceof Error ? err.message : 'Could not reassign the task')
+    } finally {
+      markBusy(task.id, false)
+    }
+  }, [post, load, markBusy])
+
+  const deleteTask = useCallback(async (task: CrmTaskEntry) => {
+    setTaskError('')
+    markBusy(task.id, true)
+    try {
+      await post('/tasks', { taskId: task.id }, 'DELETE')
+      await load()
+    } catch (err) {
+      setTaskError(err instanceof Error ? err.message : 'Could not delete the task')
+    } finally {
+      markBusy(task.id, false)
+    }
+  }, [post, load, markBusy])
 
   const editNote = useCallback(async (noteId: string, body: string) => {
     await post('/notes', { noteId, body }, 'PATCH')
@@ -232,7 +317,11 @@ export default function LeadRecordPage() {
                 document.getElementById('note-composer')?.focus()
                 document.getElementById('note-composer')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
               }} />
-              <QuickAction icon="✅" label="Task" disabled hint="Coming soon" />
+              <QuickAction icon="✅" label="Task" hint="Add a task or follow-up" onClick={() => {
+                const btn = document.getElementById('task-composer-open')
+                btn?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                btn?.click()
+              }} />
               <QuickAction icon="✉️" label="Email" disabled hint="Coming soon" />
               <QuickAction icon="📞" label="Call" disabled hint="Coming soon" />
             </div>
@@ -284,8 +373,23 @@ export default function LeadRecordPage() {
           </Card>
         </div>
 
-        {/* ══ CENTER — deal + activity ══ */}
+        {/* ══ CENTER — tasks + deal + activity ══ */}
         <div className="space-y-4 min-w-0">
+          {/* Tasks sit above the deal on purpose: what has to happen next
+              matters more at a glance than what the deal is worth. */}
+          <Tasks
+            openTasks={record.openTasks}
+            doneTasks={record.doneTasks}
+            members={record.assignableMembers}
+            me={me}
+            busyIds={taskBusy}
+            error={taskError}
+            onCreate={createTask}
+            onToggle={toggleTask}
+            onDelete={deleteTask}
+            onReassign={reassignTask}
+          />
+
           <Card title="Deal">
             <div className="p-4 space-y-4">
               <div className="flex items-center gap-2 flex-wrap">

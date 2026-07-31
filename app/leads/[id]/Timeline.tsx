@@ -10,16 +10,18 @@
 import { useMemo, useState } from 'react'
 import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
+import { TASK_TYPE_LABEL, TASK_TYPE_ICON, TASK_TYPE_STYLE } from '@/lib/tasks'
 import { isImageMime } from '@/lib/attachment'
 import type { TimelineEvent } from '@/lib/leadrecord'
 import { EmptyState } from './ui'
 
-type FilterKey = 'all' | 'notes' | 'messages' | 'stage' | 'system'
+type FilterKey = 'all' | 'notes' | 'messages' | 'tasks' | 'stage' | 'system'
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'notes', label: 'Notes' },
   { key: 'messages', label: 'Messages' },
+  { key: 'tasks', label: 'Tasks' },
   { key: 'stage', label: 'Stage changes' },
   { key: 'system', label: 'System' },
 ]
@@ -33,11 +35,13 @@ const ICON: Record<TimelineEvent['kind'], string> = {
   attachment: '📎',
   field: '✎',
   value: '💰',
+  task: '✅',
 }
 
 function dotColor(e: TimelineEvent): string {
   if (e.kind === 'stage' && e.stage) return CRM_STAGE_DOT[e.stage]
   switch (e.kind) {
+    case 'task': return e.taskDone ? '#22c55e' : '#8b5cf6'
     case 'note': return '#6366f1'
     case 'created': return '#22c55e'
     case 'attachment': return '#0ea5e9'
@@ -60,7 +64,7 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
   const [busy, setBusy] = useState(false)
 
   const counts = useMemo(() => {
-    const c: Record<FilterKey, number> = { all: events.length, notes: 0, messages: 0, stage: 0, system: 0 }
+    const c: Record<FilterKey, number> = { all: events.length, notes: 0, messages: 0, tasks: 0, stage: 0, system: 0 }
     for (const e of events) c[e.group as FilterKey]++
     return c
   }, [events])
@@ -131,6 +135,11 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                         {CRM_STAGE_LABEL[e.stage]}
                       </span>
                     )}
+                    {e.kind === 'task' && e.taskType && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full border ${TASK_TYPE_STYLE[e.taskType]}`}>
+                        {TASK_TYPE_ICON[e.taskType]} {TASK_TYPE_LABEL[e.taskType]}
+                      </span>
+                    )}
                     <span className="text-[10px] text-gray-400 ml-auto whitespace-nowrap" title={formatTime(e.at)}>
                       {formatTime(e.at)} · {timeAgo(e.at)}
                     </span>
@@ -180,6 +189,10 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                     </a>
                   ) : e.kind === 'value' && e.body ? (
                     <p className="mt-1 text-xs text-gray-600">{describeValue(e.body, currency)}</p>
+                  ) : e.kind === 'task' && e.body ? (
+                    <p className={`mt-1 text-xs break-words ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
+                      {e.body}
+                    </p>
                   ) : e.body ? (
                     <p className={`mt-1 text-xs text-gray-700 whitespace-pre-wrap break-words ${e.kind === 'message' ? 'line-clamp-6' : ''}`}>
                       {e.kind === 'stage' ? `from ${CRM_STAGE_LABEL[e.body as keyof typeof CRM_STAGE_LABEL] ?? e.body}` : e.body}

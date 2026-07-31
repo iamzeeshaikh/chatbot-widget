@@ -15,13 +15,25 @@
 // stage list, colors and parsers with the API routes.
 
 import type { LeadStatus } from './leadstatus'
+import { CRM_TASK_ROLE } from './tasks'
+
+export { CRM_TASK_ROLE }
 
 export const CRM_STAGE_ROLE = 'crm_stage'
 export const CRM_NOTE_ROLE = 'crm_note'
 export const CRM_FIELD_ROLE = 'crm_field'
 export const CRM_VALUE_ROLE = 'crm_value'
 
-export const CRM_ROLES = [CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE] as const
+// CRM_ROLES is the canonical list of every crm_* control role. lib/controlroles.ts
+// spreads it into CONTROL_ROLES, and app/api/admin/conversations subtracts it
+// from the DB-side message count — so a role added HERE is automatically kept
+// out of chat views and out of the conversation previews. Any new crm_* role
+// must land in this array or it leaks (see the denylist note in controlroles.ts).
+// crm_task is defined in lib/tasks.ts, which owns the task semantics; only the
+// role name is imported so this stays the one registration point.
+export const CRM_ROLES = [
+  CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
+] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────
 export const CRM_STAGES = [

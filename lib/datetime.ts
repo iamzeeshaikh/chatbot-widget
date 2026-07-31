@@ -81,6 +81,96 @@ function dayKey(d: Date): string {
   return dayKeyFmt.format(d)
 }
 
+// ── Pakistan-time calendar math ──────────────────────────────────────────────
+// Everything below reasons about Asia/Karachi CALENDAR days, not instants —
+// which is what "due today", "overdue" and "tomorrow 10am" have to mean for
+// agents sitting in Pakistan. A task due 11pm PKT is due TODAY even though it
+// is already tomorrow in UTC terms for part of the evening.
+//
+// Never reimplement any of this as a hardcoded "+5". It all goes through the
+// timezone database via Intl, so the day boundary stays correct even if the
+// offset ever changed, and there is exactly one place to fix if it did.
+
+// Karachi-local wall-clock fields of an instant. hourCycle 'h23' is deliberate:
+// with hour12:false some ICU builds render midnight as "24", which would push
+// the day forward by one when reassembled.
+const pktFieldsFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: PKT_TZ,
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+  hourCycle: 'h23',
+})
+
+function pktFields(d: Date): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const p of pktFieldsFmt.formatToParts(d)) {
+    if (p.type !== 'literal') out[p.type] = p.value
+  }
+  return out
+}
+
+// The Karachi-local day of an instant, as a sortable "YYYY-MM-DD".
+export function pktDayKey(ts: string | Date | null | undefined): string {
+  const d = ts instanceof Date ? ts : toDate(ts)
+  return d ? dayKey(d) : ''
+}
+
+// How far ahead of UTC Asia/Karachi is at a given instant, in ms.
+export function pktOffsetMs(at: Date): number {
+  const f = pktFields(at)
+  const asIfUtc = Date.UTC(+f.year, +f.month - 1, +f.day, +f.hour, +f.minute, +f.second)
+  // Drop sub-second precision on both sides so the difference is a clean offset.
+  return asIfUtc - Math.floor(at.getTime() / 1000) * 1000
+}
+
+// A Karachi wall-clock date + time ("2026-08-01", "23:00") as a real UTC
+// instant. Returns null on malformed input rather than an Invalid Date, so
+// callers can reject bad form input instead of storing NaN.
+export function pktDateTimeToUtc(date: string, time: string): string | null {
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec((date ?? '').trim())
+  const t = /^(\d{1,2}):(\d{2})$/.exec((time ?? '').trim())
+  if (!d || !t) return null
+  const hh = +t[1]
+  const mm = +t[2]
+  if (hh > 23 || mm > 59) return null
+
+  const naive = Date.UTC(+d[1], +d[2] - 1, +d[3], hh, mm, 0)
+  // Two passes. The first is already exact for a fixed-offset zone like PKT;
+  // the second only matters if the zone ever gained a DST edge, and costs
+  // nothing.
+  let instant = naive - pktOffsetMs(new Date(naive))
+  instant = naive - pktOffsetMs(new Date(instant))
+  const out = new Date(instant)
+  return isNaN(out.getTime()) ? null : out.toISOString()
+}
+
+// The inverse: an instant split into the Karachi date/time strings a
+// <input type="date"> and <input type="time"> expect.
+export function pktPartsOf(ts: string | Date | null | undefined): { date: string; time: string } | null {
+  const d = ts instanceof Date ? ts : toDate(ts)
+  if (!d) return null
+  const f = pktFields(d)
+  return { date: `${f.year}-${f.month}-${f.day}`, time: `${f.hour}:${f.minute}` }
+}
+
+// The Karachi day N days from an instant, as "YYYY-MM-DD". Used for "tomorrow"
+// defaults and for the Today/Upcoming split.
+export function pktDayKeyOffset(days: number, from: Date = new Date()): string {
+  return dayKey(new Date(from.getTime() + days * 24 * 60 * 60 * 1000))
+}
+
+// "Due today, 10:00 AM" / "Overdue — was due Jul 30, 2026, 5:00 PM".
+// Kept here so no caller hand-builds a due-date string.
+export function formatDueLabel(ts: string | null | undefined, now: Date = new Date()): string {
+  const d = toDate(ts)
+  if (!d) return 'No due date'
+  const key = dayKey(d)
+  if (key === dayKey(now)) return `Today, ${timeFmt.format(d)}`
+  if (key === pktDayKeyOffset(1, now)) return `Tomorrow, ${timeFmt.format(d)}`
+  if (key === pktDayKeyOffset(-1, now)) return `Yesterday, ${timeFmt.format(d)}`
+  return `${dateFmt.format(d)}, ${timeFmt.format(d)}`
+}
+
 // Date-divider label for the message view. Keeps the friendly "Today" /
 // "Yesterday" labels but always appends the real date, and shows a full
 // weekday+date for older days — all computed in Asia/Karachi, not the browser's

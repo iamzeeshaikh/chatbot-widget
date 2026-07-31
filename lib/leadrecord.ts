@@ -26,14 +26,17 @@ import {
   stageFromLeadStatus, deriveFollowUps, DEFAULT_CURRENCY,
   type CrmStage, type CrmNoteEntry, type CrmCurrency, type FollowUpSummary,
 } from './crm'
+import {
+  CRM_TASK_ROLE, parseCrmTask, byDueAsc, byCompletedDesc, type CrmTaskEntry,
+} from './tasks'
 
 export type LeadKind = 'chat' | 'quote' | 'checkout'
 
 export interface TimelineEvent {
   id: string
   at: string
-  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value'
-  group: 'messages' | 'notes' | 'stage' | 'system'
+  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task'
+  group: 'messages' | 'notes' | 'stage' | 'system' | 'tasks'
   actor: string
   title: string
   body?: string
@@ -41,6 +44,9 @@ export interface TimelineEvent {
   attachment?: AttachmentInfo
   noteId?: string
   editedAt?: string
+  /** Set on `task` events so the timeline can badge them by type. */
+  taskType?: CrmTaskEntry['type']
+  taskDone?: boolean
 }
 
 export interface RelatedLead {
@@ -80,6 +86,10 @@ export interface LeadRecord {
   tags: string[]
   quoteMessage: string | null
   notes: CrmNoteEntry[]
+  /** Still open, soonest due first. */
+  openTasks: CrmTaskEntry[]
+  /** Most recently finished first, for the collapsed "done" list. */
+  doneTasks: CrmTaskEntry[]
   attachments: (AttachmentInfo & { at: string; by: string })[]
   related: RelatedLead[]
   timeline: TimelineEvent[]
@@ -200,6 +210,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   let value = { estimated: null as number | null, won: null as number | null, currency: DEFAULT_CURRENCY as CrmCurrency }
   const overrides = new Map<string, string>()
   const notesById = new Map<string, CrmNoteEntry>()
+  const tasksById = new Map<string, CrmTaskEntry>()
   const authorByAt = new Map<string, string>()
   // Setting a stage from this page writes a crm_stage row AND a legacy
   // lead_status row sharing one created_at, so Billing stays in sync. Collect
@@ -265,6 +276,11 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
         if (n) notesById.set(n.id, n) // ascending → newest revision of each note wins
         break
       }
+      case CRM_TASK_ROLE: {
+        const t = parseCrmTask(row.message)
+        if (t) tasksById.set(t.id, t) // same rule: newest revision of each task wins
+        break
+      }
     }
   }
 
@@ -307,6 +323,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   // ── Timeline ──────────────────────────────────────────────────────────────
   const timeline: TimelineEvent[] = []
   const push = (e: TimelineEvent) => timeline.push(e)
+  // Previous revision of each task id, rebuilt as the loop walks forward.
+  const seenTask = new Map<string, CrmTaskEntry>()
 
   push({
     id: 'created',
@@ -378,6 +396,31 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       })
       continue
     }
+    if (row.role === CRM_TASK_ROLE) {
+      const t = parseCrmTask(row.message)
+      if (!t) continue
+      // Each row is one revision, so what CHANGED is only knowable by diffing
+      // against the revision before it. seenTask holds the previous state of
+      // every task id as we walk forward in time.
+      const prev = seenTask.get(t.id)
+      seenTask.set(t.id, t)
+      const actor = AGENT_LABEL(t.updated_by || t.completed_by || t.created_by)
+      let title: string
+      if (!prev) title = 'Task created'
+      else if (t.deleted && !prev.deleted) title = 'Task deleted'
+      else if (t.status === 'done' && prev.status !== 'done') title = 'Task completed'
+      else if (t.status === 'open' && prev.status === 'done') title = 'Task reopened'
+      else if (t.assignee !== prev.assignee) {
+        title = t.assignee ? `Task reassigned to ${AGENT_LABEL(t.assignee)}` : 'Task unassigned'
+      } else if (t.due_at !== prev.due_at) title = 'Task rescheduled'
+      else title = 'Task updated'
+
+      push({
+        id: `task-${row.id ?? at}`, at, kind: 'task', group: 'tasks', actor, title,
+        body: t.title, taskType: t.type, taskDone: t.status === 'done',
+      })
+      continue
+    }
   }
 
   timeline.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
@@ -397,6 +440,10 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const notes = Array.from(notesById.values())
     .filter((n) => !n.deleted)
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+
+  const liveTasks = Array.from(tasksById.values()).filter((t) => !t.deleted)
+  const openTasks = liveTasks.filter((t) => t.status === 'open').sort(byDueAsc)
+  const doneTasks = liveTasks.filter((t) => t.status === 'done').sort(byCompletedDesc)
 
   return {
     id,
@@ -427,6 +474,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     tags,
     quoteMessage: lead?.message ? stripQuoteTag(lead.message) : null,
     notes,
+    openTasks,
+    doneTasks,
     attachments: attachments.reverse(),
     related,
     timeline,

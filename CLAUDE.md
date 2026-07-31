@@ -65,6 +65,22 @@ Also: the DB summary **counts** control rows as messages. New roles must be subt
 from `message_count` in the same file, or (say) three CRM notes read as three extra
 chat messages.
 
+### Registered control roles today
+`mode`, `contact`, `tags`, `lead_capture`, `reply_author`, `lead_status`, `assignment`,
+`blocked_visitor`, `push_sub`, and the CRM ones — `crm_stage`, `crm_note`, `crm_field`,
+`crm_value`, `crm_task`. The `crm_*` set lives in `CRM_ROLES` (`lib/crm.ts`), which
+`controlroles.ts` spreads and the conversations route subtracts from the message count,
+so adding a new `crm_*` role to that one array wires up both protections at once.
+
+### Pakistan-time calendar math lives in `lib/datetime.ts`
+`pktDayKey` / `pktOffsetMs` / `pktDateTimeToUtc` / `pktPartsOf` / `pktDayKeyOffset` /
+`formatDueLabel`. Anything that means "today", "overdue" or "tomorrow 10am" must go
+through these — they use the timezone database via `Intl`, never a hardcoded `+5`.
+Task due dates are entered as Karachi wall-clock and converted **server-side**; the
+browser's own zone never enters into it. `scratch/pkt-real-impl.test.mjs` asserts the
+buckets against the real modules and passes under `TZ=America/Los_Angeles`,
+`TZ=Pacific/Kiritimati` and `TZ=UTC` — re-run it after touching any of this.
+
 ### Do not restructure `app/page.tsx`
 It is one ~3,400-line client component and it works. Edit it **surgically** — add to it,
 never reorganise, re-split or "clean it up". Keep list sorts stable (sort by

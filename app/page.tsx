@@ -549,6 +549,9 @@ export default function Dashboard() {
   // whole theme — sports admins never see packaging and vice versa.
   const [workspace, setWorkspace] = useState<'sports' | 'packaging'>('packaging')
   const [authReady, setAuthReady] = useState(false)
+  // Navigation badge for /tasks — overdue + due today for this member.
+  const [taskBadge, setTaskBadge] = useState(0)
+  const [taskBadgeOverdue, setTaskBadgeOverdue] = useState(0)
   // Identity comes from the server (validated session), never the readable
   // cookie — so a stale cookie can't show the wrong workspace/role.
   useEffect(() => {
@@ -1137,6 +1140,25 @@ export default function Dashboard() {
     const iv = setInterval(whenVisible(fetchSessions), 13000)
     return () => clearInterval(iv)
   }, [authReady, fetchSessions, visibleTick])
+
+  // Tasks badge: this member's overdue + due-today count, in Pakistan time.
+  // Polled at 60s — far slower than the visitor/conversation polls on purpose.
+  // A due-date badge does not need to be second-accurate, and chat_logs has no
+  // index on `role`, so this query must stay cheap (CLAUDE.md §6).
+  useEffect(() => {
+    if (!authReady) return
+    const pull = () => fetch('/api/tasks/count')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return
+        setTaskBadge(typeof d.count === 'number' ? d.count : 0)
+        setTaskBadgeOverdue(typeof d.overdue === 'number' ? d.overdue : 0)
+      })
+      .catch(() => {})
+    pull()
+    const iv = setInterval(whenVisible(pull), 60000)
+    return () => clearInterval(iv)
+  }, [authReady, visibleTick])
 
   // Load the IP blocklist once for admins, so the "Ban / Unban" state is correct
   // on the conversation panel too (not just the Visitors tab).
@@ -1903,6 +1925,19 @@ export default function Dashboard() {
                 Performance
               </button>
             )}
+            {/* Tasks is a route, not a tab — a real href so it can be
+                middle-clicked into its own tab. The badge counts this member's
+                overdue + due-today tasks in Pakistan time. */}
+            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/tasks') } }}
+              className="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 text-gray-500 hover:text-gray-700">
+              Tasks
+              {taskBadge > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold text-white ${taskBadgeOverdue > 0 ? 'bg-red-600' : 'bg-amber-500'}`}
+                  title={`${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today`}>
+                  {taskBadge}
+                </span>
+              )}
+            </a>
           </div>
           {pushState !== 'unsupported' && (
             <button onClick={togglePush}
