@@ -3665,6 +3665,13 @@ export default function Dashboard() {
               <p className="text-gray-500 text-xs mt-0.5">Per-agent responsiveness &amp; accountability for {WORKSPACE_LABEL[workspace]} — who&apos;s replying, who&apos;s slow, who&apos;s missing chats.</p>
             </div>
             <div className="flex items-center gap-2">
+              {/* The full month-end report (all three breakdowns, CSV + PDF)
+                  lives on its own route so this tab stays a quick daily view. */}
+              <a href="/reports" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/reports') } }}
+                title="Full month-end report with per-agent, per-site and daily breakdowns, plus CSV and PDF export"
+                className="px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                Month-end report
+              </a>
               <button onClick={() => setPerfMonth(shiftMonth(perfMonth, -1))}
                 className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month">◀</button>
               <input type="month" value={perfMonth} max={currentMonth()} onChange={(e) => e.target.value && setPerfMonth(e.target.value)}

@@ -179,6 +179,92 @@ export function pktDayKeyOffset(days: number, from: Date = new Date()): string {
   return dayKey(new Date(from.getTime() + days * 24 * 60 * 60 * 1000))
 }
 
+// ── Reporting ranges ─────────────────────────────────────────────────────────
+// Every reporting boundary is a KARACHI wall-clock instant, converted here.
+// chat_logs stores naive-UTC timestamps, so a UTC calendar month silently
+// includes five hours of the wrong day at each end: rows between 19:00 and
+// 23:59 UTC on 30 June are already 1 July in Karachi, and rows after 19:00 UTC
+// on 31 July are already August. `to` is EXCLUSIVE, matching the `.lt()` the
+// existing performance and billing queries use.
+export interface ReportRange { from: string; to: string }
+
+/** `month` is 1-based: pktMonthRange(2026, 7) is July 2026. */
+export function pktMonthRange(year: number, month: number): ReportRange {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const nextY = month === 12 ? year + 1 : year
+  const nextM = month === 12 ? 1 : month + 1
+  const from = pktDateTimeToUtc(`${year}-${pad(month)}-01`, '00:00')
+  const to = pktDateTimeToUtc(`${nextY}-${pad(nextM)}-01`, '00:00')
+  if (!from || !to) throw new Error(`bad month range ${year}-${month}`)
+  return { from, to }
+}
+
+/** The Karachi calendar month an instant falls in. */
+export function pktMonthOf(at: Date = new Date()): { year: number; month: number } {
+  const key = pktDayKey(at) // YYYY-MM-DD in Karachi terms
+  return { year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)) }
+}
+
+/** The last N Karachi days INCLUDING today, from 00:00 PKT of the first day. */
+export function pktLastDaysRange(days: number, now: Date = new Date()): ReportRange {
+  const startDay = pktDayKeyOffset(-(days - 1), now)
+  const endDay = pktDayKeyOffset(1, now)
+  const from = pktDateTimeToUtc(startDay, '00:00')
+  const to = pktDateTimeToUtc(endDay, '00:00')
+  if (!from || !to) throw new Error('bad day range')
+  return { from, to }
+}
+
+/** Inclusive Karachi day range from two YYYY-MM-DD strings (a custom range). */
+export function pktCustomRange(fromDay: string, toDay: string): ReportRange | null {
+  const from = pktDateTimeToUtc(fromDay, '00:00')
+  const toExclusive = pktDateTimeToUtc(toDay, '00:00')
+  if (!from || !toExclusive) return null
+  // The picker's end date is inclusive, so the query bound is the next midnight.
+  const to = new Date(new Date(toExclusive).getTime() + 24 * 60 * 60 * 1000).toISOString()
+  return { from, to }
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December']
+
+/** "1–31 July 2026" / "28 June – 4 July 2026" — the period in plain English. */
+export function describeRange(range: ReportRange): string {
+  const start = toDate(range.from)
+  // `to` is exclusive, so the last day shown is the instant before it.
+  const endInstant = toDate(range.to)
+  if (!start || !endInstant) return '—'
+  const end = new Date(endInstant.getTime() - 1000)
+  const [sy, sm, sd] = pktDayKey(start).split('-').map(Number)
+  const [ey, em, ed] = pktDayKey(end).split('-').map(Number)
+
+  if (sy === ey && sm === em) return `${sd}–${ed} ${MONTH_NAMES[sm - 1]} ${sy}`
+  if (sy === ey) return `${sd} ${MONTH_NAMES[sm - 1]} – ${ed} ${MONTH_NAMES[em - 1]} ${sy}`
+  return `${sd} ${MONTH_NAMES[sm - 1]} ${sy} – ${ed} ${MONTH_NAMES[em - 1]} ${ey}`
+}
+
+/** Every Karachi day in a range, as YYYY-MM-DD, so empty days still get a row. */
+export function pktDaysInRange(range: ReportRange): string[] {
+  const start = toDate(range.from)
+  const endInstant = toDate(range.to)
+  if (!start || !endInstant) return []
+  const out: string[] = []
+  const lastKey = pktDayKey(new Date(endInstant.getTime() - 1000))
+  let cursor = new Date(start.getTime())
+  for (let guard = 0; guard < 800; guard++) {
+    const key = pktDayKey(cursor)
+    out.push(key)
+    if (key >= lastKey) break
+    cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000)
+  }
+  return out
+}
+
+/** The Karachi day an instant belongs to — the grouping key for daily rows. */
+export function pktDayOf(ts: string): string {
+  return pktDayKey(ts)
+}
+
 // "Due today, 10:00 AM" / "Overdue — was due Jul 30, 2026, 5:00 PM".
 // Kept here so no caller hand-builds a due-date string.
 export function formatDueLabel(ts: string | null | undefined, now: Date = new Date()): string {
