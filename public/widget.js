@@ -125,7 +125,23 @@
 
   var messages = [];
   var botMessageCount = 0;
-  var leadCaptured = false;
+
+  // sessionId whose lead form was submitted, and (separately) whose confirmation
+  // the visitor dismissed. Same per-session shape as AUTOOPEN_KEY/DING_KEY, but
+  // declared HERE rather than with those keys further down: `var` hoisting would
+  // otherwise make LEAD_KEY undefined at the line below and the restore would
+  // silently never fire.
+  //
+  // The transcript is NOT rebuilt on reload (messages starts empty, pollSince is
+  // "now"), so without this a visitor who refreshes gets the empty form again as
+  // if they had never submitted. Client-side on purpose — the lead itself is
+  // already written server-side, so this needs no new control role.
+  var LEAD_KEY = 'zee-lead-' + siteId;
+  var LEAD_ACK_KEY = 'zee-lead-ack-' + siteId;
+
+  // Scoped to the CURRENT sessionId: once the session rotates
+  // (ensureFreshSession) that is a new conversation, and asking again is right.
+  var leadCaptured = lsGet(LEAD_KEY) === sessionId;
   var greetingSent = false;
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
@@ -272,6 +288,28 @@
 .zee-lead-input:focus { border-color: ' + primaryColor + '; }\
 #zee-lead-submit { width: 100%; background: ' + primaryColor + '; color: white; border: none; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }\
 #zee-lead-submit:hover { opacity: 0.88; }\
+#zee-lead-submit:disabled { opacity: 0.6; cursor: default; }\
+.zee-lead-input.zee-invalid { border-color: #dc2626; }\
+/* Inline validation/submit error. Replaces an alert(), which on a phone is a\
+   system modal over the whole page — it hides the widget, cannot be styled, and\
+   reads as the SITE breaking rather than one field needing attention. */\
+.zee-lead-err { font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 6px 9px; margin-bottom: 8px; }\
+/* Confirmation state. Same band as the form so the panel does not jump, but\
+   green rather than the form blue — a visitor should be able to tell at a\
+   glance that this is "done", not another thing to fill in. Kept to two lines\
+   because on mobile this sits directly above the input area. */\
+#zee-lead-done { padding: 12px 14px; background: #f0fdf4; border-top: 1px solid #bbf7d0; flex-shrink: 0; display: none; }\
+#zee-lead-done.shown { display: block; }\
+.zee-done-row { display: flex; align-items: flex-start; gap: 9px; }\
+.zee-done-check { width: 20px; height: 20px; border-radius: 50%; background: #16a34a; flex-shrink: 0; display: flex; align-items: center; justify-content: center; margin-top: 1px; }\
+.zee-done-check svg { width: 12px; height: 12px; fill: white; display: block; }\
+.zee-done-text { min-width: 0; flex: 1; }\
+.zee-done-title { font-size: 13px; font-weight: 600; color: #14532d; line-height: 1.35; }\
+.zee-done-sub { font-size: 12px; color: #166534; line-height: 1.45; margin-top: 2px; }\
+.zee-done-mail { font-weight: 600; overflow-wrap: anywhere; }\
+.zee-done-x { background: none; border: none; cursor: pointer; padding: 2px; margin: -2px -2px 0 0; flex-shrink: 0; line-height: 0; border-radius: 4px; opacity: 0.65; }\
+.zee-done-x:hover { opacity: 1; background: rgba(22,101,52,0.1); }\
+.zee-done-x svg { width: 13px; height: 13px; fill: #166534; display: block; }\
 .zee-ol { margin: 6px 0 6px 18px; padding: 0; }\
 /* These three used to be style="" attributes on the markup. A site whose CSP\
    carries style hashes blocks inline style ATTRIBUTES too, which left the file\
@@ -338,10 +376,21 @@
 <div id="zee-chat-messages"></div>\
 <div id="zee-lead-form">\
   <p>Leave your details and we\'ll follow up with you!</p>\
-  <input class="zee-lead-input" id="zee-lead-name" placeholder="Your Name *" type="text" />\
-  <input class="zee-lead-input" id="zee-lead-email" placeholder="Email Address *" type="email" />\
-  <input class="zee-lead-input" id="zee-lead-phone" placeholder="Phone (optional)" type="tel" />\
+  <div id="zee-lead-error" class="zee-lead-err" role="alert" hidden></div>\
+  <input class="zee-lead-input" id="zee-lead-name" placeholder="Your Name *" type="text" autocomplete="name" />\
+  <input class="zee-lead-input" id="zee-lead-email" placeholder="Email Address *" type="email" autocomplete="email" inputmode="email" />\
+  <input class="zee-lead-input" id="zee-lead-phone" placeholder="Phone (optional)" type="tel" autocomplete="tel" inputmode="tel" />\
   <button id="zee-lead-submit">Submit & Continue Chat</button>\
+</div>\
+<div id="zee-lead-done" role="status" aria-live="polite">\
+  <div class="zee-done-row">\
+    <span class="zee-done-check"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></span>\
+    <span class="zee-done-text">\
+      <span class="zee-done-title" id="zee-done-title">Thanks — we\'ve got your details.</span>\
+      <span class="zee-done-sub" id="zee-done-sub"></span>\
+    </span>\
+    <button class="zee-done-x" id="zee-lead-done-x" aria-label="Dismiss confirmation" title="Dismiss"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>\
+  </div>\
 </div>\
 <div id="zee-chat-input-area">\
   <input id="zee-chat-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,application/pdf" />\
@@ -438,6 +487,27 @@
     });
 
     document.getElementById('zee-lead-submit').addEventListener('click', handleLeadSubmit);
+
+    var leadDoneX = document.getElementById('zee-lead-done-x');
+    if (leadDoneX) leadDoneX.addEventListener('click', dismissLeadConfirmation);
+
+    // Enter submits from any of the three fields — on a phone keyboard the "go"
+    // key is far more reachable than the button once it scrolls under the
+    // keyboard. Clearing the error on input stops a stale message sitting there
+    // while the visitor is already fixing the field it refers to.
+    ['zee-lead-name', 'zee-lead-email', 'zee-lead-phone'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); handleLeadSubmit(); }
+      });
+      el.addEventListener('input', clearLeadError);
+    });
+
+    // A lead captured earlier in this session: show the confirmation instead of
+    // the form, so a refresh does not present an empty form as if nothing had
+    // been submitted.
+    if (leadCaptured) showLeadConfirmation('', '');
 
     // Auto-open after 5 seconds — but only ONCE per session, and never after the
     // visitor has closed it. Without these two guards every page load re-opened
@@ -572,6 +642,7 @@
   }
 
   function showLeadForm() {
+    if (leadCaptured) return; // never ask twice in one conversation
     var form = document.getElementById('zee-lead-form');
     if (form) form.style.display = 'block';
   }
@@ -640,6 +711,7 @@
   // Show the lead form with a friendly "we'll follow up" message. Reuses the same
   // styled form as the inline capture so the look stays consistent.
   function showSafetyNetForm() {
+    if (leadCaptured) return;
     var form = document.getElementById('zee-lead-form');
     if (!form) return;
     var p = form.querySelector('p');
@@ -1048,31 +1120,130 @@
   }
 
   // ─── Lead ──────────────────────────────────────────────────────────────────
-  function handleLeadSubmit() {
-    var name = (document.getElementById('zee-lead-name').value || '').trim();
-    var email = (document.getElementById('zee-lead-email').value || '').trim();
-    var phone = (document.getElementById('zee-lead-phone').value || '').trim();
+  function showLeadError(msg) {
+    var box = document.getElementById('zee-lead-error');
+    if (!box) return;
+    box.textContent = msg;
+    box.hidden = false;
+    scrollToBottom();
+  }
 
-    if (!name || !email) {
-      alert('Please enter your name and email.');
+  function clearLeadError() {
+    var box = document.getElementById('zee-lead-error');
+    if (box) { box.hidden = true; box.textContent = ''; }
+    ['zee-lead-name', 'zee-lead-email'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.remove('zee-invalid');
+    });
+  }
+
+  function markInvalid(id) {
+    var el = document.getElementById(id);
+    if (el) { el.classList.add('zee-invalid'); el.focus(); }
+  }
+
+  // Render the confirmation band and hide the form. `name`/`email` are optional:
+  // on a restore after reload we only know that a lead was captured, not who by,
+  // so the copy degrades to the impersonal version rather than inventing detail.
+  //
+  // Deliberately promises no timeframe. There is no per-site business-hours or
+  // response-time data in the widget config (bot_name, primary_color,
+  // bot_enabled) and lib/botschedule.ts describes when the BOT is on, which is
+  // the inverse of when humans are around — so any "we reply within X" here
+  // would be invented.
+  function showLeadConfirmation(name, email) {
+    var form = document.getElementById('zee-lead-form');
+    var done = document.getElementById('zee-lead-done');
+    if (form) form.style.display = 'none';
+    if (!done) return;
+    if (lsGet(LEAD_ACK_KEY) === sessionId) return; // visitor dismissed it earlier
+    var title = document.getElementById('zee-done-title');
+    var sub = document.getElementById('zee-done-sub');
+    if (title) title.textContent = name ? 'Thanks, ' + name + ' — we’ve got your details.' : 'Thanks — we’ve got your details.';
+    if (sub) {
+      // textContent throughout, never innerHTML: name and email are visitor
+      // input and this runs on customer sites.
+      sub.textContent = '';
+      if (email) {
+        sub.appendChild(document.createTextNode('Our team will reply here in the chat, and can reach you at '));
+        var strong = document.createElement('span');
+        strong.className = 'zee-done-mail';
+        strong.textContent = email;
+        sub.appendChild(strong);
+        sub.appendChild(document.createTextNode('. You can keep typing below.'));
+      } else {
+        sub.textContent = 'Our team will reply here in the chat. You can keep typing below.';
+      }
+    }
+    done.classList.add('shown');
+    scrollToBottom();
+  }
+
+  function dismissLeadConfirmation() {
+    var done = document.getElementById('zee-lead-done');
+    if (done) done.classList.remove('shown');
+    lsSet(LEAD_ACK_KEY, sessionId);
+  }
+
+  function handleLeadSubmit() {
+    var nameEl = document.getElementById('zee-lead-name');
+    var emailEl = document.getElementById('zee-lead-email');
+    var phoneEl = document.getElementById('zee-lead-phone');
+    var btn = document.getElementById('zee-lead-submit');
+    if (!nameEl || !emailEl || !btn) return;
+    if (btn.disabled) return; // already in flight — never create a second lead
+
+    var name = (nameEl.value || '').trim();
+    var email = (emailEl.value || '').trim();
+    var phone = ((phoneEl && phoneEl.value) || '').trim();
+
+    clearLeadError();
+    if (!name) { showLeadError('Please enter your name.'); markInvalid('zee-lead-name'); return; }
+    if (!email) { showLeadError('Please enter your email address.'); markInvalid('zee-lead-email'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showLeadError('That email address does not look right. Please check it.');
+      markInvalid('zee-lead-email');
       return;
     }
+
+    var originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    var restore = function () { btn.disabled = false; btn.textContent = originalLabel; };
 
     fetch(baseUrl + '/api/lead', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId: siteId, sessionId: sessionId, name: name, email: email, phone: phone, message: messages.map(function(m){return m.role+': '+m.content;}).join('\n') }),
     })
-      .then(function () {
+      // The confirmation is gated on the response ACTUALLY succeeding. This
+      // used to be `.then(function () { ...show thanks... })`, which ignored the
+      // status entirely: a 400 or a 500 still told the visitor their details were
+      // saved and set leadCaptured, so the form never came back and the lead was
+      // lost silently. Nothing here may run before r.ok is confirmed.
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, data: d || {} }; });
+      })
+      .then(function (res) {
+        if (!res.ok || !res.data.success) {
+          restore();
+          showLeadError(res.data.error === 'siteId required'
+            ? 'Something went wrong on our side. Please try again.'
+            : 'We could not save your details. Please try again.');
+          return; // values stay in the inputs so nothing is retyped
+        }
         leadCaptured = true;
+        lsSet(LEAD_KEY, sessionId);
         clearSafetyNetTimer();
-        var form = document.getElementById('zee-lead-form');
-        if (form) form.style.display = 'none';
-        appendMessage('bot', 'Thanks ' + name + '! We\'ve saved your details and will be in touch. Feel free to keep chatting!');
+        showLeadConfirmation(name, email);
+        // Context for the bot only — not shown to the visitor, who now has the
+        // confirmation band instead of a bot message claiming to have saved it
+        // (which read oddly during human-only hours, when the bot is silent).
         messages.push({ role: 'assistant', content: 'Lead captured for ' + name });
       })
       .catch(function () {
-        appendMessage('bot', 'There was an issue saving your details. Please try again.');
+        restore();
+        showLeadError('We could not reach our server. Please check your connection and try again.');
       });
   }
 
