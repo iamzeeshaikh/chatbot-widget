@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
-  ArrowLeft, LayoutGrid, List as ListIcon, RefreshCw, TriangleAlert, Filter,
+  ArrowLeft, LayoutGrid, List as ListIcon, RefreshCw, TriangleAlert, Filter, X,
 } from 'lucide-react'
 import { CRM_STAGES, CRM_STAGE_LABEL, type CrmStage } from '@/lib/crm'
 import {
@@ -210,14 +210,18 @@ export default function PipelinePage() {
 
   const allCards = useMemo(() => columns.flatMap((c) => c.cards), [columns])
   const mode: Mode = narrow ? 'list' : prefs.mode
+  const filtersOn = !!prefs.site || !!prefs.owner || prefs.stage !== 'all' || prefs.range !== DEFAULT_PREFS.range
   const shownColumns = useMemo(
     () => (prefs.stage === 'all' ? columns : columns.filter((c) => c.stage === prefs.stage)),
     [columns, prefs.stage],
   )
 
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900">
-      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
+    // h-screen + overflow-hidden: the PAGE never scrolls vertically. The board
+    // gets the remaining height and each column scrolls its own list. List mode
+    // opts back into normal page scrolling, since a table wants it.
+    <div className={`bg-gray-100 text-gray-900 ${mode === 'board' ? 'h-screen flex flex-col overflow-hidden' : 'min-h-screen'}`}>
+      <header className="shrink-0 sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
         <div className="max-w-[1600px] mx-auto px-3 sm:px-5 py-2.5">
           <div className="flex items-center gap-3 flex-wrap">
             <Link href="/" title="Back to the dashboard" aria-label="Back to the dashboard"
@@ -254,31 +258,33 @@ export default function PipelinePage() {
           </div>
 
           {/* ── Filters, shared by both modes ── */}
-          <div className="flex items-center gap-2 flex-wrap mt-2">
-            <Filter size={12} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
-            <Select label="Site" value={prefs.site} onChange={(v) => setPrefs((p) => ({ ...p, site: v }))}
+          <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+            <Filter size={11} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
+            <Select label="Site" value={prefs.site} active={!!prefs.site} onChange={(v) => setPrefs((p) => ({ ...p, site: v }))}
               options={[{ value: '', label: 'All sites' }, ...options.sites.map((s) => ({ value: s.siteId, label: s.name }))]} />
-            <Select label="Owner" value={prefs.owner} onChange={(v) => setPrefs((p) => ({ ...p, owner: v }))}
+            <Select label="Owner" value={prefs.owner} active={!!prefs.owner} onChange={(v) => setPrefs((p) => ({ ...p, owner: v }))}
               options={[
                 { value: '', label: 'Anyone' },
                 { value: '__unassigned__', label: 'Unassigned' },
                 ...options.owners.map((o) => ({ value: o, label: o.split('@')[0] })),
               ]} />
-            <Select label="Stage" value={prefs.stage} onChange={(v) => setPrefs((p) => ({ ...p, stage: v as CrmStage | 'all' }))}
+            <Select label="Stage" value={prefs.stage} active={prefs.stage !== 'all'} onChange={(v) => setPrefs((p) => ({ ...p, stage: v as CrmStage | 'all' }))}
               options={[{ value: 'all', label: 'All stages' }, ...CRM_STAGES.map((s) => ({ value: s, label: CRM_STAGE_LABEL[s] }))]} />
-            <Select label="Created" value={prefs.range} onChange={(v) => setPrefs((p) => ({ ...p, range: v as DatePresetKey }))}
+            <Select label="Created" value={prefs.range} active={prefs.range !== DEFAULT_PREFS.range} onChange={(v) => setPrefs((p) => ({ ...p, range: v as DatePresetKey }))}
               options={DATE_PRESETS.map((d) => ({ value: d.key, label: d.label }))} />
-            {(prefs.site || prefs.owner || prefs.stage !== 'all' || prefs.range !== '90d') && (
+            {filtersOn && (
               <button onClick={() => setPrefs((p) => ({ ...DEFAULT_PREFS, mode: p.mode }))}
-                className="text-[11px] text-gray-500 hover:text-gray-900 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
-                Reset
+                className="inline-flex items-center gap-0.5 text-[10px] font-medium text-gray-600 hover:text-gray-900 px-1.5 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <X size={9} strokeWidth={2.5} aria-hidden /> Clear
               </button>
             )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto px-3 sm:px-5 py-3 space-y-2 animate-in">
+      <main className={`max-w-[1600px] w-full mx-auto px-3 sm:px-5 animate-in ${
+        mode === 'board' ? 'flex-1 min-h-0 flex flex-col gap-2 py-2' : 'py-3 space-y-2'
+      }`}>
         {error && (
           <p role="alert" className="flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">
             <TriangleAlert size={12} strokeWidth={2} aria-hidden />{error}
@@ -296,8 +302,10 @@ export default function PipelinePage() {
             <p className="text-xs text-gray-500 mt-0.5">Something went wrong on our side. Try again in a moment.</p>
           </section>
         ) : mode === 'board' ? (
-          <Board columns={shownColumns} loading={status === 'loading'} movingId={movingId}
-            loadingMore={loadingMore} onMove={move} onLoadMore={loadMore} />
+          <div className="flex-1 min-h-0">
+            <Board columns={shownColumns} loading={status === 'loading'} movingId={movingId}
+              loadingMore={loadingMore} onMove={move} onLoadMore={loadMore} />
+          </div>
         ) : (
           <ListView cards={allCards} movingId={movingId} onMove={move} loading={status === 'loading'} />
         )}
@@ -328,19 +336,26 @@ function adjustTotals(
     : next
 }
 
-function Select({ label, value, onChange, options }: {
+// A filter that is ON looks different from one left at its default, so it is
+// obvious at a glance why the board is showing fewer leads than expected.
+function Select({ label, value, onChange, options, active }: {
   label: string
   value: string
   onChange: (v: string) => void
   options: { value: string; label: string }[]
+  active?: boolean
 }) {
   return (
-    <label className="flex items-center gap-1">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}
-        className="bg-gray-100 border border-gray-200 rounded-md px-1.5 py-0.5 text-[11px] text-gray-800 cursor-pointer focus:outline-none focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500">
+    <label className="flex items-center gap-1" title={label}>
+      <span className="sr-only">{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}
+        className={`rounded-md px-1.5 py-0.5 text-[10px] cursor-pointer border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 max-w-[132px] ${
+          active
+            ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold'
+            : 'bg-gray-100 border-gray-200 text-gray-600'
+        }`}>
         {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-white text-gray-800">{o.label}</option>
+          <option key={o.value} value={o.value} className="bg-white text-gray-800 font-normal">{o.label}</option>
         ))}
       </select>
     </label>

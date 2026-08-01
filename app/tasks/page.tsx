@@ -12,10 +12,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import {
+  ArrowLeft, Bell, TriangleAlert, PartyPopper, AlertTriangle, type LucideIcon,
+} from 'lucide-react'
 import { formatDueLabel, timeAgo } from '@/lib/datetime'
 import {
-  TASK_TYPES, TASK_TYPE_LABEL, TASK_TYPE_ICON, TASK_TYPE_STYLE, type TaskType,
+  TASK_TYPES, TASK_TYPE_LABEL, TASK_TYPE_STYLE, type TaskType,
 } from '@/lib/tasks'
+import { TASK_ICON } from '@/app/leads/[id]/icons'
 import type { TaskWithLead, TaskGroups } from '@/lib/taskquery'
 import ReminderSettings from './ReminderSettings'
 
@@ -132,9 +136,9 @@ export default function TasksPage() {
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
         <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-3">
           <div className="flex items-center gap-3 flex-wrap">
-            <Link href="/" title="Back to the dashboard"
-              className="shrink-0 px-2 py-1 rounded-lg text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors">
-              ←
+            <Link href="/" title="Back to the dashboard" aria-label="Back to the dashboard"
+              className="shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors">
+              <ArrowLeft size={16} strokeWidth={2} aria-hidden />
             </Link>
             <div className="min-w-0">
               <h1 className="text-base font-bold text-gray-900">Tasks &amp; follow-ups</h1>
@@ -150,8 +154,8 @@ export default function TasksPage() {
               )}
               <button onClick={() => setShowSettings(true)}
                 title="Reminder settings — lead time, digest and quiet hours"
-                className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
-                🔔 Reminders
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <Bell size={11} strokeWidth={2} aria-hidden /> Reminders
               </button>
             </span>
           </div>
@@ -169,7 +173,7 @@ export default function TasksPage() {
             <Filter label="Type" value={type} onChange={(v) => setType(v as TaskType | 'all')}
               options={[
                 { value: 'all', label: 'All types' },
-                ...TASK_TYPES.map((t) => ({ value: t, label: `${TASK_TYPE_ICON[t]} ${TASK_TYPE_LABEL[t]}` })),
+                ...TASK_TYPES.map((t) => ({ value: t, label: TASK_TYPE_LABEL[t] })),
               ]} />
           </div>
         </div>
@@ -186,12 +190,12 @@ export default function TasksPage() {
           <LoadingSkeleton />
         ) : status === 'error' ? (
           <Panel>
-            <Empty icon="⚠️" title="Could not load your tasks"
+            <Empty icon={TriangleAlert} title="Could not load your tasks"
               hint="Something went wrong on our side. Try again in a moment." />
           </Panel>
         ) : openCount === 0 && groups.completed.length === 0 ? (
           <Panel>
-            <Empty icon="🎉" title="Nothing on your list"
+            <Empty icon={PartyPopper} title="Nothing on your list"
               hint={assignee === 'me'
                 ? 'Tasks you add from a lead record show up here. Open a lead and add a follow-up.'
                 : 'No tasks match these filters. Try widening them.'} />
@@ -293,6 +297,7 @@ function Row({ task, busy, onToggle }: {
 }) {
   const done = task.status === 'done'
   const overdue = !done && task.bucket === 'overdue'
+  const TypeIcon = TASK_ICON[task.type]
 
   return (
     <li className={`flex items-start gap-2.5 rounded-xl px-2.5 py-2 border transition-colors ${
@@ -313,7 +318,7 @@ function Row({ task, busy, onToggle }: {
             {task.title}
           </span>
           <span className={`text-[9px] px-1 py-px rounded border shrink-0 ${TASK_TYPE_STYLE[task.type]}`}>
-            {TASK_TYPE_ICON[task.type]} {TASK_TYPE_LABEL[task.type]}
+            <TypeIcon size={8} strokeWidth={2.5} aria-hidden />{TASK_TYPE_LABEL[task.type]}
           </span>
         </div>
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
@@ -326,7 +331,8 @@ function Row({ task, busy, onToggle }: {
           </span>
           <span className="text-[10px] text-gray-400">·</span>
           <span className={`text-[10px] ${overdue ? 'text-red-700 font-semibold' : 'text-gray-500'}`}>
-            {overdue ? '⚠ Overdue — ' : ''}{formatDueLabel(task.due_at)}
+            {overdue && <AlertTriangle size={9} strokeWidth={2.5} aria-hidden />}
+            {overdue ? 'Overdue — ' : ''}{formatDueLabel(task.due_at)}
           </span>
           <span className="text-[10px] text-gray-400">·</span>
           <span className="text-[10px] text-gray-500">{task.assignee ? task.assignee.split('@')[0] : 'Unassigned'}</span>
@@ -339,10 +345,12 @@ function Row({ task, busy, onToggle }: {
   )
 }
 
-function Empty({ icon, title, hint }: { icon: string; title: string; hint: string }) {
+function Empty({ icon: Icon, title, hint }: { icon: LucideIcon; title: string; hint: string }) {
   return (
     <div className="flex flex-col items-center text-center px-4 py-10">
-      <div className="w-10 h-10 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-lg mb-2" aria-hidden>{icon}</div>
+      <div className="w-9 h-9 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center mb-2" aria-hidden>
+        <Icon size={16} strokeWidth={2} className="text-gray-500" />
+      </div>
       <p className="text-sm font-medium text-gray-700">{title}</p>
       <p className="text-xs text-gray-500 mt-0.5 max-w-[300px]">{hint}</p>
     </div>
