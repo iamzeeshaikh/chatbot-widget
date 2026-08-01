@@ -1588,6 +1588,15 @@ export default function Dashboard() {
   // Relative on purpose: the dashboard may later be served from a second
   // domain alias, and every link has to keep working under that origin.
   const leadRecordHref = (recordId: string) => `/leads/${encodeURIComponent(recordId)}`
+  // Opening a lead is a REAL browser navigation, not a client-side route swap.
+  // router.push() only moves the URL and then asks the current bundle to render
+  // the new segment — so if this tab is running an older build (a dashboard left
+  // open across a deploy) or an extension has mutated the DOM out from under
+  // React, the URL changes and nothing else happens, with no error anywhere.
+  // A full navigation cannot fail silently: the browser either lands on the
+  // record or shows its own error. The record page is a separate heavy route,
+  // so there is nothing to gain from a soft transition here anyway.
+  const openLeadRecord = (recordId: string) => { window.location.assign(leadRecordHref(recordId)) }
   // A record is keyed by the conversation id where there is one; leads that
   // arrived by email use the same synthetic `quote-<leadId>` id the Billing
   // tab already gives them.
@@ -2249,18 +2258,17 @@ export default function Dashboard() {
                           )
 
                           return (
-                            <tr key={lead.id} onClick={() => router.push(leadRecordHref(leadRecordId(lead)))}
+                            <tr key={lead.id} onClick={() => openLeadRecord(leadRecordId(lead))}
                               title="Open this lead's record"
                               className="group border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                               <td className="px-3 py-3 whitespace-nowrap">
                                 <LeadSourceBadge message={lead.message} />
                               </td>
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
-                              {/* A real href so the record can be middle-clicked
-                                  into a new tab; the row click handles the
-                                  normal case. */}
+              {/* A plain anchor: normal click, middle-click and cmd-click all
+                  behave the way the browser intends, with nothing intercepted. */}
                               <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">
-                                <a href={leadRecordHref(leadRecordId(lead))} onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault() }}
+                                <a href={leadRecordHref(leadRecordId(lead))} onClick={(e) => e.stopPropagation()}
                                   className="hover:underline">{lead.name || '-'}</a>
                               </td>
                               <td className="px-3 py-3 text-blue-600 whitespace-nowrap">{lead.email || '-'}</td>
@@ -2456,7 +2464,6 @@ export default function Dashboard() {
                     {/* Additive: opening the CRM record is a separate link —
                         clicking the conversation itself behaves exactly as before. */}
                     <a href={leadRecordHref(selectedSession.session_id)}
-                      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); router.push(leadRecordHref(selectedSession.session_id)) }}
                       title="Open the full lead record — stage, notes, deal value, activity"
                       className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors whitespace-nowrap">
                       📇 Open record
@@ -3422,11 +3429,11 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ) : chatLeadsShown.map((l) => (
-                          <tr key={l.session_id} onClick={() => router.push(leadRecordHref(l.session_id))} title="Open this lead's record"
+                          <tr key={l.session_id} onClick={() => openLeadRecord(l.session_id)} title="Open this lead's record"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap">
                               <a href={leadRecordHref(l.session_id)} className="text-blue-700 hover:underline"
-                                onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault() }}>
+                                onClick={(e) => e.stopPropagation()}>
                                 {l.email ?? <span className="text-gray-500 italic">Marked as lead</span>}
                               </a>
                             </td>
@@ -3476,7 +3483,7 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ) : emailLeadsShown.map((l) => (
-                          <tr key={l.session_id} onClick={() => router.push(leadRecordHref(l.session_id))} title="Open this lead's record"
+                          <tr key={l.session_id} onClick={() => openLeadRecord(l.session_id)} title="Open this lead's record"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
