@@ -21,7 +21,7 @@ import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadsta
 import { isClosingMessage } from '@/lib/closing'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
-import { isQuoteLeadMessage, stripQuoteTag, leadSource, type LeadSource } from '@/lib/quoteintake'
+import { isQuoteLeadMessage, stripQuoteTag, cleanQuoteSubject, leadSource, type LeadSource } from '@/lib/quoteintake'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -163,6 +163,13 @@ function parseLeadCapture(message: string | null): { email: string | null; name:
 
 function cleanLeadMessage(msg: string | null): string {
   if (!msg) return '-'
+  // Quote/checkout leads are an email; their first line is the subject, which
+  // can carry Gmail's "[image: 📋]" placeholder and emoji from the customer's
+  // own mail client. Cleaned for display only — nothing stored changes.
+  if (isQuoteLeadMessage(msg) || msg.startsWith('[Checkout] ')) {
+    const subject = cleanQuoteSubject(stripQuoteTag(msg).split('\n')[0])
+    if (subject) return subject.slice(0, 150)
+  }
   if (/^(Product|Quantity|Budget|Timeline):/i.test(msg)) {
     const firstLine = msg.split('\n')[0]
     const val = firstLine.slice(firstLine.indexOf(': ') + 2).trim()

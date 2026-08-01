@@ -22,6 +22,7 @@ import {
 } from '@/lib/pipeline'
 import Board from './Board'
 import ListView from './ListView'
+import BulkBar, { type BulkResult } from './BulkBar'
 
 type Mode = 'board' | 'list'
 const PREFS_KEY = 'zee-pipeline-prefs'
@@ -36,6 +37,10 @@ interface Prefs {
 
 const DEFAULT_PREFS: Prefs = { mode: 'board', site: '', owner: '', stage: 'all', range: '90d' }
 
+// One shared empty set, so a selection invalidated by a filter change does not
+// allocate a new Set on every render.
+const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>()
+
 const EMPTY_COLUMNS: PipelineColumn[] = CRM_STAGES.map((stage) => ({
   stage, count: 0, totals: [], unvalued: 0, cards: [], hasMore: false,
 }))
@@ -45,6 +50,7 @@ export default function PipelinePage() {
   const [prefsReady, setPrefsReady] = useState(false)
   const [columns, setColumns] = useState<PipelineColumn[]>(EMPTY_COLUMNS)
   const [options, setOptions] = useState<{ sites: { siteId: string; name: string }[]; owners: string[] }>({ sites: [], owners: [] })
+  const [me, setMe] = useState('')   // the signed-in member, for "assign to me"
   const [total, setTotal] = useState(0)
   const [truncated, setTruncated] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading')
@@ -118,6 +124,7 @@ export default function PipelinePage() {
         const d = await res.json()
         setColumns(d.columns ?? EMPTY_COLUMNS)
         setOptions(d.options ?? { sites: [], owners: [] })
+        setMe(d.me ?? '')
         setTotal(d.total ?? 0)
         setTruncated(!!d.truncated)
         setStatus('ok')
@@ -209,6 +216,113 @@ export default function PipelinePage() {
   }, [columns, movingId, load])
 
   const allCards = useMemo(() => columns.flatMap((c) => c.cards), [columns])
+
+  // ── Bulk selection ─────────────────────────────────────────────────────────
+  // `selected` holds ids, not cards, so a selection made with "select all
+  // matching" survives even though most of those leads were never loaded.
+  const [rawSelected, setSelected] = useState<Set<string>>(new Set())
+  const [allMatching, setAllMatching] = useState(false)
+  // The filter string the selection was made under. A selection means "these
+  // leads, under those filters" — "all 401 matching" is only meaningful for the
+  // filters that produced the 401 — so it is DERIVED as empty when the filters
+  // move, rather than cleared from an effect. Deriving also avoids painting one
+  // frame of a stale selection over a freshly filtered list.
+  const [selectionQuery, setSelectionQuery] = useState('')
+  const selectionValid = selectionQuery === query
+  const selected = selectionValid ? rawSelected : EMPTY_SELECTION
+  const [selectingAll, setSelectingAll] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
+
+  const clearSelection = useCallback(() => {
+    setSelected(new Set()); setAllMatching(false)
+  }, [])
+
+  const toggleOne = useCallback((id: string) => {
+    setAllMatching(false)
+    setSelectionQuery(query)
+    setSelected((prev) => {
+      const base = selectionValid ? prev : new Set<string>()
+      const next = new Set(base)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [query, selectionValid])
+
+  const toggleLoaded = useCallback((ids: string[], on: boolean) => {
+    setAllMatching(false)
+    setSelectionQuery(query)
+    setSelected((prev) => {
+      const base = selectionValid ? prev : new Set<string>()
+      const next = new Set(base)
+      for (const id of ids) { if (on) next.add(id); else next.delete(id) }
+      return next
+    })
+  }, [query, selectionValid])
+
+  // Ids only — the server already folds the whole filtered set to build its
+  // column counts, so this is the same scan without the card payloads.
+  const selectAllMatching = useCallback(async () => {
+    setSelectingAll(true)
+    try {
+      const res = await fetch(`/api/pipeline?${query}&ids=1`)
+      if (!res.ok) throw new Error('Could not select them all')
+      const d = await res.json()
+      setSelected(new Set<string>(d.ids ?? []))
+      setSelectionQuery(query)
+      setAllMatching(true)
+    } catch {
+      setError('Could not select every matching lead. Try again.')
+    } finally {
+      setSelectingAll(false)
+    }
+  }, [query])
+
+  const runBulkAction = useCallback(async (body: Record<string, unknown>) => {
+    setBulkBusy(true)
+    setError('')
+    try {
+      const res = await fetch('/api/pipeline/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, ids: Array.from(selected) }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d.error || 'The bulk update failed')
+      setBulkResult({
+        applied: d.applied ?? 0, skipped: d.skipped ?? [], failed: d.failed ?? [],
+        note: d.note ?? '', undo: d.undo,
+      })
+      clearSelection()
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The bulk update failed')
+    } finally {
+      setBulkBusy(false)
+    }
+  }, [selected, clearSelection, load])
+
+  // Undo is a compensating write, not a rollback: it posts the per-lead
+  // previous values the server handed back.
+  const undoBulk = useCallback(async () => {
+    if (!bulkResult?.undo) return
+    setBulkBusy(true)
+    try {
+      const res = await fetch('/api/pipeline/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bulkResult.undo),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d.error || 'Could not undo')
+      setBulkResult(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not undo')
+    } finally {
+      setBulkBusy(false)
+    }
+  }, [bulkResult, load])
   const mode: Mode = narrow ? 'list' : prefs.mode
   const filtersOn = !!prefs.site || !!prefs.owner || prefs.stage !== 'all' || prefs.range !== DEFAULT_PREFS.range
   const shownColumns = useMemo(
@@ -307,9 +421,24 @@ export default function PipelinePage() {
               loadingMore={loadingMore} onMove={move} onLoadMore={loadMore} />
           </div>
         ) : (
-          <ListView cards={allCards} movingId={movingId} onMove={move} loading={status === 'loading'} />
+          <ListView cards={allCards} movingId={movingId} onMove={move} loading={status === 'loading'}
+            selected={selected} onToggleOne={toggleOne} onToggleLoaded={toggleLoaded}
+            onSelectAllMatching={selectAllMatching} onClearSelection={clearSelection}
+            totalMatching={total} allMatching={allMatching} selectingAll={selectingAll} />
         )}
       </main>
+
+      {/* List mode only: the board has no row to tick. */}
+      {mode === 'list' && (
+        <BulkBar
+          count={selected.size} allMatching={allMatching}
+          owners={options.owners} me={me} busy={bulkBusy} result={bulkResult}
+          onApply={(body) => runBulkAction(body)}
+          onUndo={undoBulk}
+          onClear={clearSelection}
+          onDismissResult={() => setBulkResult(null)}
+        />
+      )}
     </div>
   )
 }

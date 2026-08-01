@@ -33,11 +33,23 @@ const COLUMNS: { key: SortKey; label: string; align?: 'right'; hideSm?: boolean 
 import { CRM_STAGES } from '@/lib/crm'
 const stageRank = (s: CrmStage) => CRM_STAGES.indexOf(s)
 
-export default function ListView({ cards, movingId, onMove, loading }: {
+export default function ListView({
+  cards, movingId, onMove, loading,
+  selected, onToggleOne, onToggleLoaded, onSelectAllMatching, onClearSelection,
+  totalMatching, allMatching, selectingAll,
+}: {
   cards: PipelineCard[]
   movingId: string | null
   onMove: (card: PipelineCard, to: CrmStage) => void
   loading: boolean
+  selected: ReadonlySet<string>
+  onToggleOne: (id: string) => void
+  onToggleLoaded: (ids: string[], on: boolean) => void
+  onSelectAllMatching: () => void
+  onClearSelection: () => void
+  totalMatching: number
+  allMatching: boolean
+  selectingAll: boolean
 }) {
   const [sort, setSort] = useState<SortKey>('lastActivityAt')
   const [dir, setDir] = useState<'asc' | 'desc'>('desc')
@@ -64,6 +76,14 @@ export default function ListView({ cards, movingId, onMove, loading }: {
     })
   }, [cards, sort, dir])
 
+  const loadedIds = cards.map((c) => c.id)
+  const loadedSelected = loadedIds.filter((id) => selected.has(id)).length
+  const allLoadedSelected = loadedIds.length > 0 && loadedSelected === loadedIds.length
+  // Indeterminate is set via a ref callback — React has no prop for it.
+  const headerRef = (el: HTMLInputElement | null) => {
+    if (el) el.indeterminate = loadedSelected > 0 && !allLoadedSelected
+  }
+
   function toggle(key: SortKey) {
     if (key === sort) setDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSort(key); setDir(key === 'name' || key === 'siteName' || key === 'owner' ? 'asc' : 'desc') }
@@ -79,10 +99,43 @@ export default function ListView({ cards, movingId, onMove, loading }: {
 
   return (
     <section className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      {/* Selecting the header checkbox only ever covers the rows on screen.
+          Whether that is the whole result set is never left to be inferred:
+          when there are more matching leads than are loaded, the offer to take
+          the rest is explicit and states the real number. */}
+      {allLoadedSelected && totalMatching > loadedIds.length && !allMatching && (
+        <div className="px-2.5 py-1.5 bg-blue-50 border-b border-blue-200 text-[11px] text-blue-900 flex items-center gap-2 flex-wrap">
+          <span>
+            All <span className="tabular-nums font-semibold">{loadedIds.length}</span> loaded lead{loadedIds.length === 1 ? '' : 's'} selected — the rest of the {totalMatching} matching are not.
+          </span>
+          <button onClick={onSelectAllMatching} disabled={selectingAll}
+            className="font-semibold underline underline-offset-2 hover:text-blue-700 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+            {selectingAll ? 'Selecting…' : `Select all ${totalMatching} matching`}
+          </button>
+        </div>
+      )}
+      {allMatching && (
+        <div className="px-2.5 py-1.5 bg-blue-100 border-b border-blue-300 text-[11px] text-blue-900 flex items-center gap-2 flex-wrap">
+          <span>
+            All <span className="tabular-nums font-semibold">{totalMatching}</span> leads matching these filters are selected, including ones not shown below.
+          </span>
+          <button onClick={onClearSelection}
+            className="font-semibold underline underline-offset-2 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+            Clear selection
+          </button>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="border-b border-gray-200">
+              <th scope="col" className="w-8 px-2.5 py-1.5">
+                <input type="checkbox" ref={headerRef} checked={allLoadedSelected}
+                  onChange={(e) => onToggleLoaded(loadedIds, e.target.checked)}
+                  aria-label={`Select the ${loadedIds.length} loaded leads`}
+                  title={`Select the ${loadedIds.length} loaded leads`}
+                  className="w-3.5 h-3.5 align-middle accent-blue-600 cursor-pointer" />
+              </th>
               {COLUMNS.map((c) => {
                 const active = sort === c.key
                 return (
@@ -107,6 +160,7 @@ export default function ListView({ cards, movingId, onMove, loading }: {
             {loading
               ? Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-100">
+                    <td className="px-2.5 py-2"><div className="h-3 w-3.5 bg-gray-200 rounded animate-pulse" /></td>
                     {COLUMNS.map((c) => (
                       <td key={c.key} className={`px-2.5 py-2 ${c.hideSm ? 'hidden sm:table-cell' : ''}`}>
                         <div className="h-3 bg-gray-200 rounded animate-pulse" />
@@ -115,7 +169,15 @@ export default function ListView({ cards, movingId, onMove, loading }: {
                   </tr>
                 ))
               : sorted.map((card) => (
-                  <tr key={card.id} className={`border-b border-gray-100 hover:bg-gray-100 transition-colors ${movingId === card.id ? 'opacity-40' : ''}`}>
+                  <tr key={card.id} className={`border-b border-gray-100 transition-colors ${
+                    selected.has(card.id) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-100'
+                  } ${movingId === card.id ? 'opacity-40' : ''}`}>
+                    <td className="px-2.5 py-1.5">
+                      <input type="checkbox" checked={selected.has(card.id)}
+                        onChange={() => onToggleOne(card.id)}
+                        aria-label={`Select ${card.name}`}
+                        className="w-3.5 h-3.5 align-middle accent-blue-600 cursor-pointer" />
+                    </td>
                     <td className="px-2.5 py-1.5 min-w-0">
                       <Link href={`/leads/${encodeURIComponent(card.id)}`}
                         className="text-xs font-medium text-gray-900 hover:text-blue-700 hover:underline break-words focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
@@ -168,8 +230,9 @@ export default function ListView({ cards, movingId, onMove, loading }: {
       </div>
       {!loading && (
         <p className="px-2.5 py-1.5 text-[10px] text-gray-500 border-t border-gray-100">
-          Showing <span className="tabular-nums font-medium">{cards.length}</span> loaded lead{cards.length === 1 ? '' : 's'}.
-          Sorting applies to these; use “Show more” on the board to pull in the rest of a stage.
+          Showing <span className="tabular-nums font-medium">{cards.length}</span> loaded lead{cards.length === 1 ? '' : 's'}
+          {totalMatching > cards.length && <> of <span className="tabular-nums font-medium">{totalMatching}</span> matching</>}.
+          Sorting and the tick boxes apply to these; use “Show more” on the board to pull in the rest of a stage.
         </p>
       )}
     </section>

@@ -44,6 +44,32 @@ export function stripQuoteTag(message: string | null | undefined): string {
   return message
 }
 
+// Tidy a quote's subject line for DISPLAY. Gmail renders an inline image in the
+// subject as a literal "[image: 📋]" placeholder, so leads arrive in the
+// dashboard reading "[Custom Quote] [image: 📋] Multi-Step Quote Request".
+//
+// Display-only, and deliberately NOT folded into stripQuoteTag: that function
+// feeds normalizeQuoteBody, which is the dedupe key. Changing what the dedupe
+// sees would shift every existing key and let previously-deduped forwards back
+// in as new leads. Nothing stored is rewritten either — cleaning at read time
+// also fixes the leads already sitting in the table.
+const IMAGE_PLACEHOLDER_RE = /\[\s*(?:image|cid|attachment|inline image)\s*:[^\]]*\]/gi
+const EMOJI_RE = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}]/gu
+
+export function cleanQuoteSubject(subject: string | null | undefined): string {
+  if (!subject) return ''
+  const stripped = subject.replace(IMAGE_PLACEHOLDER_RE, ' ').replace(EMOJI_RE, '')
+  // Tidy-up only runs when something was actually removed. Applied
+  // unconditionally it chewed a dash off subjects that legitimately end in a
+  // rule — "---------- Forwarded message ---------" came back one short.
+  const tidied = stripped === subject
+    ? stripped
+    : stripped
+        .replace(/\(\s*\)|\[\s*\]/g, ' ')          // orphaned brackets
+        .replace(/\s+[-–—|·]\s*$/, '')             // one stranded separator
+  return tidied.replace(/\s{2,}/g, ' ').trim()
+}
+
 // Short code (matches the labels/mental-model the user already uses, e.g.
 // "SCB" for Shop Cardboard Boxes) -> site_id. Extend as new sites join the
 // lead-gen roster; the Apps Script has its own copy of this same map.

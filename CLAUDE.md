@@ -73,6 +73,31 @@ chat messages.
 subtracts from the message count, so adding a new `crm_*` role to that one array wires
 up both protections at once.
 
+### One lead or four hundred: stage changes go through `lib/stagechange.ts`
+`applyStageChange()` is the ONLY place a stage is written. `/api/leads/[id]/stage`
+and `/api/pipeline/bulk` both call it, which is what guarantees the two-row write —
+`crm_stage` plus the legacy `lead_status` mirror sharing one `created_at` — cannot
+drift between the single and bulk paths. Do not inline that write anywhere else.
+
+Bulk edits (`lib/bulk.ts`, `/api/pipeline/bulk`) follow three rules:
+- **Access is decided per lead, never per batch.** `resolveSitesForIds` batches the
+  *lookup* (two queries for the whole selection) but still runs `canAccessSite` for
+  every id. Out-of-scope leads are skipped and reported, never applied, and never
+  fatal to the batch.
+- **Writes run in waves of `BULK_CONCURRENCY`** — not all at once (800 sockets at a
+  Micro Postgres that has already fallen over once) and not sequentially (400 round
+  trips would time out).
+- **Partial failure is normal and reported.** Control rows are append-only, so there
+  is no transaction to roll back and the response says exactly which ids landed.
+  Undo is a *compensating write* (a further row restoring the previous value), not a
+  rollback — history keeps both events on purpose.
+
+Anything reading a lead's current stage for a "before" value must mirror
+`loadPipeline`'s fold, including the legacy `lead_status` fallback and its
+`stagePairAt` guard. Reading only the newest `crm_stage` row calls a pre-CRM lead
+"new" and writes a false `previous` into the timeline — see `currentStateFor` in the
+bulk route.
+
 ### Member-scoped rows go on a reserved site, not a lead
 `crm_prefs` and `crm_reminder` belong to a *member*, not a conversation, so they live on
 the reserved `zeeops-crm` site (`lib/reminders.ts`) — the same trick `push_sub` uses with
@@ -217,7 +242,11 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
 ## 8. Domain facts worth knowing
 
 - **Lead sources are encoded as a message prefix**, not a column: `[Custom Quote] ` and
-  `[Checkout] ` (`lib/quoteintake.ts`).
+  `[Checkout] ` (`lib/quoteintake.ts`). `cleanQuoteSubject()` tidies a subject for
+  DISPLAY (Gmail writes inline images into it as `[image: 📋]`). Keep it out of
+  `stripQuoteTag`, which feeds `normalizeQuoteBody` — the dedupe key. Changing what
+  the dedupe sees would shift every existing key and let previously-deduped forwards
+  back in as new leads.
 - **Checkout leads count in TOTAL but never in BILLABLE.** The UI's "N overlaps removed"
   line compares against `billableBase`, not `total`.
 - Email-only leads have no chat session and use the synthetic id `quote-<leadId>` —

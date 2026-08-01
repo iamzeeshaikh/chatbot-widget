@@ -35,6 +35,17 @@ export async function GET(req: NextRequest) {
   const offset = Math.max(0, Number(sp.get('offset') ?? 0) || 0)
 
   try {
+    // Every matching lead id, for "select all N matching" in the list view.
+    // loadPipeline already folds over the whole filtered set to build its exact
+    // column counts, so this costs the same query and returns ids only — no
+    // card payloads — which is what makes selecting beyond the loaded page
+    // honest rather than a guess.
+    if (sp.get('ids') === '1') {
+      const result = await loadPipeline(member, filters, { perColumn: Number.MAX_SAFE_INTEGER })
+      const ids = result.columns.flatMap((c) => c.cards.map((card) => card.id))
+      return NextResponse.json({ ids, total: ids.length, truncated: result.truncated })
+    }
+
     if (more && isCrmStage(more)) {
       // Load-more for a single column. The aggregate is recomputed rather than
       // cached: it is the same bounded fold, and a stale total on a board people
