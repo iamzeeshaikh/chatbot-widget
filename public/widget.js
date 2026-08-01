@@ -62,6 +62,12 @@
     sessionId = genUUID();
     lsSet(SESSION_ID_KEY, sessionId);
     lsSet(SESSION_START_KEY, String(now));
+    // A rotation means a NEW conversation: the agent side sees a fresh session,
+    // so the widget must not keep showing "we've got your details" from the old
+    // one, and the visitor becomes askable again. The localStorage keys are all
+    // scoped by sessionId and so stop matching on their own; these are the page
+    // variables and the two visible bands, which would otherwise persist.
+    resetLeadStateForNewSession();
   }
 
   // Rotate to a fresh session if the visitor has been idle past the gap or the
@@ -138,6 +144,7 @@
   // already written server-side, so this needs no new control role.
   var LEAD_KEY = 'zee-lead-' + siteId;
   var LEAD_ACK_KEY = 'zee-lead-ack-' + siteId;
+  var LEAD_X_KEY = 'zee-lead-x-' + siteId;   // visitor dismissed the ASK
 
   // Scoped to the CURRENT sessionId: once the session rotates
   // (ensureFreshSession) that is a new conversation, and asking again is right.
@@ -145,16 +152,44 @@
   var greetingSent = false;
   var config = { bot_name: 'Assistant', primary_color: '#2563eb', site_id: siteId, name: '' };
 
-  // ─── Safety-net lead capture ────────────────────────────────────────────────
-  // When the bot WON'T reply (scheduled off-hours OR manual human takeover) and a
-  // human agent is slow to respond, a visitor can give up and leave — a lost lead.
-  // To catch that, whenever the server tells us the bot stayed silent on a visitor
-  // message (the X-Bot-Silent header), we arm a timer. If no agent reply arrives
-  // within SAFETY_NET_DELAY_MS, we proactively show the lead form so the visitor
-  // can leave their details. An agent reply (picked up by polling) cancels it, and
-  // we never nag a visitor who already left an email.
-  var SAFETY_NET_DELAY_MS = 2 * 60 * 1000; // 2 minutes — easy to edit
-  var safetyNetTimer = null;
+  // ─── Lead prompt: WHEN we ask for contact details ───────────────────────────
+  // EVERY THRESHOLD FOR ASKING LIVES IN THIS ONE OBJECT. Tune here, nowhere else.
+  //
+  // Why this was rebuilt: the form used to need a bot reply, an agent reply or a
+  // file upload to even be considered, and then >= 3 visitor messages on top.
+  // Measured over all 412 real conversations in chat_logs (see
+  // scratch/trigger-coverage.mjs): 48.8% of conversations are a SINGLE message,
+  // only 34.7% ever reach three, and with the bot globally disabled the only
+  // live path left was a 2-minute timer. 46.4% of visitors were never asked for
+  // their details at all.
+  //
+  // The rule now: the visitor said something and nobody answered → ask. Plus a
+  // last chance when they leave. Both are non-blocking bands; the composer stays
+  // usable the whole time.
+  var LEAD_PROMPT = {
+    // Ask this long after a visitor message that received no reply. 30s of
+    // silence after asking a question is a real "nobody is there" moment.
+    // 87% of visitors are still on the page at 30s (92% at 15s, 79% at 60s).
+    idleMs: 30 * 1000,
+    // Minimum genuine visitor messages before we will ask at all. 1 is
+    // deliberate: half of all conversations never send a second message.
+    minMessages: 1,
+    // An agent replied this recently → the conversation is live, so wait rather
+    // than cutting in. The prompt re-checks instead of being dropped.
+    activeConvoMs: 60 * 1000,
+    // How long to wait before re-checking when a fire was deferred.
+    retryMs: 15 * 1000,
+    // Stop re-deferring eventually so a timer cannot live forever.
+    maxDefers: 8,
+    // Catch visitors who leave before idleMs: desktop pointer leaving the top of
+    // the viewport, or the tab being hidden/closed (the mobile equivalent —
+    // 42% of these conversations are mobile, where there is no exit intent).
+    exitIntent: true,
+  };
+  var leadPromptTimer = null;
+  var leadPromptDefers = 0;
+  var lastAgentReplyMs = 0;
+  var leadPromptDismissed = lsGet(LEAD_X_KEY) === sessionId;
 
   // ─── Visit count + original referrer (persistent per browser/site) ──────────
   // visitCount increments on every page load; firstReferrer is captured once on
@@ -282,8 +317,11 @@
 .zee-att-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; }\
 .zee-att-size { font-size: 11px; opacity: 0.7; }\
 .zee-upload-err { align-self: center; font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 6px 10px; }\
-#zee-lead-form { padding: 14px 16px; background: #f0f9ff; border-top: 1px solid #bae6fd; flex-shrink: 0; }\
-#zee-lead-form p { font-size: 13px; color: #0369a1; font-weight: 500; margin-bottom: 10px; }\
+#zee-lead-form { padding: 14px 16px; background: #f0f9ff; border-top: 1px solid #bae6fd; flex-shrink: 0; position: relative; }\
+#zee-lead-form p { font-size: 13px; color: #0369a1; font-weight: 500; margin-bottom: 10px; padding-right: 20px; }\
+.zee-lead-x { position: absolute; top: 10px; right: 11px; background: none; border: none; cursor: pointer; padding: 3px; line-height: 0; border-radius: 4px; opacity: 0.55; }\
+.zee-lead-x:hover { opacity: 1; background: rgba(3,105,161,0.1); }\
+.zee-lead-x svg { width: 13px; height: 13px; fill: #0369a1; display: block; }\
 .zee-lead-input { width: 100%; border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; outline: none; transition: border-color 0.2s; }\
 .zee-lead-input:focus { border-color: ' + primaryColor + '; }\
 #zee-lead-submit { width: 100%; background: ' + primaryColor + '; color: white; border: none; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }\
@@ -375,6 +413,7 @@
 </div>\
 <div id="zee-chat-messages"></div>\
 <div id="zee-lead-form">\
+  <button class="zee-lead-x" id="zee-lead-dismiss" aria-label="Not now" title="Not now"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>\
   <p>Leave your details and we\'ll follow up with you!</p>\
   <div id="zee-lead-error" class="zee-lead-err" role="alert" hidden></div>\
   <input class="zee-lead-input" id="zee-lead-name" placeholder="Your Name *" type="text" autocomplete="name" />\
@@ -490,6 +529,11 @@
 
     var leadDoneX = document.getElementById('zee-lead-done-x');
     if (leadDoneX) leadDoneX.addEventListener('click', dismissLeadConfirmation);
+
+    var leadDismiss = document.getElementById('zee-lead-dismiss');
+    if (leadDismiss) leadDismiss.addEventListener('click', dismissLeadPrompt);
+
+    bindExitIntent();
 
     // Enter submits from any of the three fields — on a phone keyboard the "go"
     // key is far more reachable than the button once it scrolls under the
@@ -641,12 +685,6 @@
     if (el) el.remove();
   }
 
-  function showLeadForm() {
-    if (leadCaptured) return; // never ask twice in one conversation
-    var form = document.getElementById('zee-lead-form');
-    if (form) form.style.display = 'block';
-  }
-
   // Number of genuine user messages (excludes the '(session started)' sentinel).
   function genuineUserCount() {
     var n = 0;
@@ -655,12 +693,6 @@
     }
     return n;
   }
-
-  // The bot keeps chatting normally; the lead form is shown inline as an
-  // additional option. It appears once the user has sent a few genuine messages
-  // (or explicitly asks to leave details). Showing it never interrupts the
-  // conversation — the visitor can fill it in OR keep chatting, both work.
-  var LEAD_FORM_MIN_USER_MSGS = 3;
 
   function lastUserText() {
     for (var i = messages.length - 1; i >= 0; i--) {
@@ -690,43 +722,121 @@
     return false;
   }
 
-  // ─── Safety-net timer ───────────────────────────────────────────────────────
-  function clearSafetyNetTimer() {
-    if (safetyNetTimer) { clearTimeout(safetyNetTimer); safetyNetTimer = null; }
-  }
-
-  // Arm (or restart) the no-reply timer after a visitor message the bot left
-  // unanswered. Skips entirely if we already have the visitor's email.
-  function armSafetyNetTimer() {
-    clearSafetyNetTimer();
-    if (leadCaptured || visitorHasProvidedEmail()) return;
-    safetyNetTimer = setTimeout(function () {
-      safetyNetTimer = null;
-      // Re-check at fire time: an email may have arrived in the meantime.
-      if (leadCaptured || visitorHasProvidedEmail()) return;
-      showSafetyNetForm();
-    }, SAFETY_NET_DELAY_MS);
-  }
-
-  // Show the lead form with a friendly "we'll follow up" message. Reuses the same
-  // styled form as the inline capture so the look stays consistent.
-  function showSafetyNetForm() {
-    if (leadCaptured) return;
+  // ─── Lead prompt ────────────────────────────────────────────────────────────
+  // Called by startNewSession when a session rotates (30+ min idle). Declared as
+  // a function so hoisting makes it callable from there, which runs before this
+  // point during init — the DOM does not exist yet on that first call, hence the
+  // null guards.
+  function resetLeadStateForNewSession() {
+    leadCaptured = false;
+    leadPromptDismissed = false;
+    leadPromptDefers = 0;
+    lastAgentReplyMs = 0;
+    if (typeof cancelLeadPrompt === 'function') cancelLeadPrompt();
+    var done = document.getElementById('zee-lead-done');
+    if (done) done.classList.remove('shown');
     var form = document.getElementById('zee-lead-form');
-    if (!form) return;
+    if (form) form.style.display = 'none';
+  }
+
+  function cancelLeadPrompt() {
+    if (leadPromptTimer) { clearTimeout(leadPromptTimer); leadPromptTimer = null; }
+  }
+
+  // The single "may we ask right now?" gate. Everything that wants to show the
+  // form goes through this, so the never-nag rules cannot be bypassed by adding
+  // another trigger later.
+  function leadPromptAllowed() {
+    if (leadCaptured || leadPromptDismissed) return false;       // asked and answered
+    if (visitorHasProvidedEmail()) return false;                 // we already have it
+    if (genuineUserCount() < LEAD_PROMPT.minMessages) return false;
+    var form = document.getElementById('zee-lead-form');
+    if (!form) return false;
+    if (form.style.display === 'block') return false;            // already up
+    return true;
+  }
+
+  // True when cutting in would interrupt: an agent is mid-conversation, or the
+  // visitor is part-way through typing and a band appearing under the composer
+  // would shift what they are looking at.
+  function leadPromptWouldInterrupt() {
+    if (Date.now() - lastAgentReplyMs < LEAD_PROMPT.activeConvoMs) return true;
+    var input = document.getElementById('zee-chat-input');
+    if (input && input.value.trim()) return true;
+    return false;
+  }
+
+  // Arm (or restart) the no-reply prompt. Called after every genuine visitor
+  // message: the trigger is "you said something and nobody answered".
+  function armLeadPrompt() {
+    cancelLeadPrompt();
+    leadPromptDefers = 0;
+    if (!leadPromptAllowed()) return;
+    leadPromptTimer = setTimeout(function fire() {
+      leadPromptTimer = null;
+      // Re-checked at fire time, not just at arm time — an email may have been
+      // typed into the chat, or the lead captured, in the meantime.
+      if (!leadPromptAllowed()) return;
+      if (leadPromptWouldInterrupt() && leadPromptDefers < LEAD_PROMPT.maxDefers) {
+        leadPromptDefers++;
+        leadPromptTimer = setTimeout(fire, LEAD_PROMPT.retryMs);
+        return;
+      }
+      showLeadPrompt('idle');
+    }, LEAD_PROMPT.idleMs);
+  }
+
+  // Show the form. `reason` only picks the wording — an unanswered question and
+  // someone on their way out want different sentences.
+  function showLeadPrompt(reason) {
+    if (!leadPromptAllowed()) return;
+    cancelLeadPrompt();
+    var form = document.getElementById('zee-lead-form');
     var p = form.querySelector('p');
-    if (p) p.textContent = "We'll get back to you shortly! Leave your details so our team can follow up.";
+    if (p) {
+      p.textContent = reason === 'exit'
+        ? 'Before you go — leave your details and our team will follow up.'
+        : reason === 'asked'
+          ? 'Happy to help — leave your details and our team will get back to you.'
+          : "We'll get back to you shortly! Leave your details so our team can follow up.";
+    }
     form.style.display = 'block';
     scrollToBottom();
   }
 
+  // The visitor closed the ask. Never raise it again this session — that is the
+  // whole point of a dismiss, and re-asking is what makes a widget hated.
+  function dismissLeadPrompt() {
+    cancelLeadPrompt();
+    leadPromptDismissed = true;
+    lsSet(LEAD_X_KEY, sessionId);
+    var form = document.getElementById('zee-lead-form');
+    if (form) form.style.display = 'none';
+  }
+
+  // ── Exit intent ─────────────────────────────────────────────────────────────
+  // Last chance for the ~13% who leave before idleMs elapses. Desktop: the
+  // pointer leaving through the top of the viewport. Mobile (42% of these
+  // conversations, and no pointer to track): the tab being hidden or unloaded.
+  function bindExitIntent() {
+    if (!LEAD_PROMPT.exitIntent) return;
+    document.addEventListener('mouseout', function (e) {
+      if (e.relatedTarget || e.toElement) return;   // moved to another element, not out
+      if ((e.clientY || 0) > 24) return;            // only out through the TOP
+      showLeadPrompt('exit');
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') showLeadPrompt('exit');
+    });
+    // pagehide fires on mobile Safari where visibilitychange can be missed.
+    window.addEventListener('pagehide', function () { showLeadPrompt('exit'); });
+  }
+
   function maybeShowLeadForm() {
-    if (leadCaptured) return;
-    // Explicit intent shows it immediately; otherwise show it once the visitor
-    // has sent at least LEAD_FORM_MIN_USER_MSGS genuine messages. Either way the
-    // bot keeps chatting — the form is shown inline alongside the conversation.
-    if (userWantsToLeaveDetails()) { showLeadForm(); return; }
-    if (genuineUserCount() >= LEAD_FORM_MIN_USER_MSGS) showLeadForm();
+    // Explicit intent ("email me", "call me", or a typed address) is the one case
+    // that shows immediately — the visitor just asked for this.
+    if (userWantsToLeaveDetails()) { showLeadPrompt('asked'); return; }
+    armLeadPrompt();
   }
 
   // ─── Polling ──────────────────────────────────────────────────────────────
@@ -746,13 +856,16 @@
             pollSince = newMsgs[i].created_at;
           }
           if (newMsgs.length > 0) {
-            // A human agent replied — the conversation is being handled, so cancel
-            // any pending safety-net prompt.
-            clearSafetyNetTimer();
+            // A human agent replied, so the conversation is being handled: drop
+            // the pending prompt entirely rather than re-arming it. Asking for
+            // details 30s after an agent answers would be interrupting a live
+            // conversation, and an agent who needs the details can ask. Exit
+            // intent still covers this visitor if they leave.
+            lastAgentReplyMs = Date.now();
+            cancelLeadPrompt();
             playNotificationSound();
             // On another tab? Flash the title so the reply isn't missed.
             if (typeof document !== 'undefined' && document.hidden) flashTitle(newMsgs.length);
-            maybeShowLeadForm();
             // The reply arrived — drop the typing dots so they don't sit above it.
             if (agentTypingShown) { hideTyping(); agentTypingShown = false; }
           }
@@ -968,6 +1081,13 @@
     appendMessage('user', text);
     messages.push({ role: 'user', content: text });
 
+    // THE primary trigger. Armed on every visitor message, regardless of whether
+    // the bot is enabled, whether an agent is around, or how many messages have
+    // been sent — the old gate needed a reply to arrive first AND three messages,
+    // which no-one hit once the bot was switched off. A reply cancels it, so an
+    // answered question never produces a prompt.
+    maybeShowLeadForm();
+
     showTyping(); // immediate — before fetch starts
 
     var chatUrl = baseUrl + '/api/chat';
@@ -988,11 +1108,9 @@
           // just sees their own message; a human agent will reply from the dashboard.
           if (r.headers.get('X-Bot-Silent') === '1') {
             hideTyping();
-            // Bot won't reply (globally disabled, off-hours or human takeover).
-            // If no human agent answers within the threshold, the safety-net form
-            // will offer the visitor a way to leave their details so the lead
-            // isn't lost.
-            armSafetyNetTimer();
+            // The prompt is already armed by handleSend for every visitor
+            // message, so nothing extra is needed here: a silent bot simply
+            // means no reply arrives to cancel it.
             // Global bot-off only: the server sends a ONE-TIME static ack with
             // the visitor's first message so they know a human will follow up.
             // It's rendered here only — never stored server-side.
@@ -1234,7 +1352,7 @@
         }
         leadCaptured = true;
         lsSet(LEAD_KEY, sessionId);
-        clearSafetyNetTimer();
+        cancelLeadPrompt();
         showLeadConfirmation(name, email);
         // Context for the bot only — not shown to the visitor, who now has the
         // confirmation band instead of a bot message claiming to have saved it

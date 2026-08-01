@@ -200,6 +200,19 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
   `<meta http-equiv="content-security-policy">`.
 - Any new widget sound must be gated in `playChime` — that is the single mute/dismiss
   chokepoint, and an ungated ding once cost a real sale.
+- **When the widget asks for contact details is tuned in ONE object: `LEAD_PROMPT` in
+  `public/widget.js`.** Every threshold (idle delay, minimum messages, active-conversation
+  grace, retry/defer, exit intent on/off) lives there — do not scatter new constants.
+  Everything that wants to show the form must go through `showLeadPrompt()`, whose
+  `leadPromptAllowed()` gate holds the never-nag rules (captured, dismissed, email already
+  given, minimum messages). A new trigger that calls it inherits those rules; one that
+  sets `display` directly bypasses them.
+  History worth not repeating: the form used to need a bot/agent reply or a file upload
+  *and* >= 3 visitor messages. With the bot globally off, 46.4% of real conversations were
+  never asked at all — measured over 412 conversations, of which 48.8% are a single
+  message. `scratch/trigger-coverage.mjs` recomputes this from `chat_logs` +
+  `active_visitors.last_seen` (use that for presence — a session's last chat_logs row can
+  be an agent reply days later and will tell you a bounced visitor stayed 16 days).
 
 ## 8. Domain facts worth knowing
 
