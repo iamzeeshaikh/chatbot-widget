@@ -398,7 +398,7 @@ function Row({ task, busy, onToggle, onPatch, members }: { task: TaskWithLead } 
           {task.leadName}
         </Link>
         <span className="text-[10px] text-gray-400 truncate shrink-0 max-w-[104px]">{task.siteName}</span>
-        <span className="ml-auto text-[10px] text-gray-300 tabular-nums shrink-0"
+        <span className="ml-auto text-[10px] text-gray-400 tabular-nums shrink-0"
           title={`Task created ${formatDateTime(task.created_at)}`}>
           {formatShortDate(task.created_at)}
         </span>
@@ -477,7 +477,7 @@ function Filter({ label, value, onChange, options, active }: {
       <span className="sr-only">{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}
         className={`rounded-md px-1.5 py-0.5 text-[10px] cursor-pointer border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 max-w-[140px] ${
-          active ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : 'bg-gray-100 border-gray-200 text-gray-600'
+          active ? 'bg-blue-100 border-blue-500 text-blue-700 font-semibold' : 'bg-gray-100 border-gray-300 text-gray-600'
         }`}>
         {options.map((o) => (
           <option key={o.value} value={o.value} className="bg-white text-gray-800 font-normal">{o.label}</option>

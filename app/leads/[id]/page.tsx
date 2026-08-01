@@ -564,7 +564,7 @@ export default function LeadRecordPage() {
                         </span>
                       </span>
                       <ChevronRight size={13} strokeWidth={2}
-                        className="text-gray-300 shrink-0 group-hover/rel:text-gray-500 transition-colors" aria-hidden />
+                        className="text-gray-400 shrink-0 group-hover/rel:text-gray-600 transition-colors" aria-hidden />
                     </Link>
                   </li>
                 ))}
@@ -709,7 +709,7 @@ function DealValue({ record, onSave }: {
           <label htmlFor="deal-currency" className="sr-only">Currency</label>
           <select id="deal-currency" value={currency}
             onChange={(e) => { const c = e.target.value as CrmCurrency; setCurrency(c); commit({ currency: c }) }}
-            className="bg-gray-100 border border-gray-200 rounded-md px-1 py-0.5 text-[10px] font-semibold text-gray-600 focus:outline-none focus:border-blue-500 cursor-pointer self-center">
+            className="bg-gray-100 border border-gray-300 rounded-md px-1 py-0.5 text-[10px] font-semibold text-gray-600 focus:outline-none focus:border-blue-500 cursor-pointer self-center">
             {CRM_CURRENCIES.map((c) => <option key={c} value={c} className="bg-white text-gray-800">{c}</option>)}
           </select>
         </div>

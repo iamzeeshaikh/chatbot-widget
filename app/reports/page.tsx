@@ -113,7 +113,7 @@ export default function ReportsPage() {
                   to just theirs before it is sent. */}
               <select value={leadsSite} onChange={(e) => setLeadsSite(e.target.value)}
                 aria-label="Site for the leads PDF" title="Limit the leads PDF to one site"
-                className="bg-gray-100 border border-gray-200 rounded-lg px-1.5 py-1.5 text-[11px] text-gray-800 cursor-pointer focus:outline-none focus:border-blue-500 max-w-[150px]">
+                className="bg-gray-100 border border-gray-300 rounded-lg px-1.5 py-1.5 text-[11px] text-gray-800 cursor-pointer focus:outline-none focus:border-blue-500 max-w-[150px]">
                 <option value="">All sites</option>
                 {(data?.sites ?? []).map((s) => (
                   <option key={s.siteId} value={s.siteId} className="bg-white text-gray-800">{s.siteName}</option>
@@ -128,7 +128,7 @@ export default function ReportsPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap mt-2">
-            <div className="flex gap-0.5 bg-gray-100 p-0.5 rounded-lg border border-gray-200" role="tablist" aria-label="Date range">
+            <div className="flex gap-0.5 bg-gray-100 p-0.5 rounded-lg border border-gray-300" role="tablist" aria-label="Date range">
               {PRESETS.map((p) => (
                 <button key={p.key} role="tab" aria-selected={preset === p.key} onClick={() => setPreset(p.key)}
                   className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
@@ -350,7 +350,7 @@ function SortableTable<T extends object>({ columns, rows, render, totals, loadin
                     {c.label}
                     {active
                       ? (dir === 'asc' ? <ArrowUp size={10} strokeWidth={2.5} aria-hidden /> : <ArrowDown size={10} strokeWidth={2.5} aria-hidden />)
-                      : <ChevronsUpDown size={10} strokeWidth={2} className="text-gray-300" aria-hidden />}
+                      : <ChevronsUpDown size={10} strokeWidth={2} className="text-gray-400" aria-hidden />}
                   </button>
                 </th>
               )

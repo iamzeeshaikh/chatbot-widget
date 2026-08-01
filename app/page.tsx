@@ -608,7 +608,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     document.title = brand === 'sports' ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
-    document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']").forEach((l) => l.remove())
+    // Swap the TAB icon to the workspace's own mark. Deliberately leaves
+    // rel='apple-touch-icon' alone: "Add to Home Screen" reads the live DOM, so
+    // removing it here left agents installing the dashboard for task reminders
+    // with a blank home-screen icon.
+    document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']").forEach((l) => l.remove())
     const link = document.createElement('link')
     link.rel = 'icon'; link.type = 'image/svg+xml'
     link.href = brand === 'sports' ? FAVICON_SPORTS : FAVICON_PACKAGING

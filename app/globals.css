@@ -21,6 +21,44 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ── Light-mode contrast floor ──────────────────────────────────────────────
+   Tailwind's grey ramp was built to sit on dark surfaces. On this app's white
+   cards the lighter steps fall well under WCAG AA, so secondary text reads as
+   disabled and control borders vanish. These rules raise the floor in ONE place
+   rather than per component, and are scoped html:not(.dark) so the dark ramp
+   below is untouched.
+
+   Measured on #ffffff / #f3f4f6 (card) / a -50 tint:
+     text-gray-400  #99a1af  2.60 / 2.36 / 2.38   →  #646d7c  5.22 / 4.75 / 4.77
+     text-gray-500  #6a7282  4.84 / 4.39 / 4.42   →  #525b68  6.87 / 6.25 / 6.28
+     text-gray-300  #d1d5dc  1.47 / 1.34 / 1.35   →  #9aa2ae  2.58 / 2.34 / 2.36
+     border-gray-300 #d1d5dc 1.47 / 1.34          →  #848b98  3.43 / 3.11
+     border-gray-200 #e5e7eb 1.24                 →  #d8dce2  1.38
+
+   gray-600 (7.56) and gray-700 (10.30) already pass and are left alone, so the
+   ladder 400 → 500 → 600 → 700 stays a real hierarchy rather than flattening.
+   gray-300 stays deliberately quiet: it is only used for decorative separators
+   and em-dash placeholders, never for information. */
+html:not(.dark) .text-gray-400 { color: #646d7c; }
+html:not(.dark) .text-gray-500 { color: #525b68; }
+html:not(.dark) .text-gray-300 { color: #9aa2ae; }
+html:not(.dark) .placeholder-gray-400::placeholder { color: #646d7c; }
+html:not(.dark) .hover\:text-gray-600:hover { color: #414b5a; }
+
+/* Borders. gray-300 carries interactive edges — dropdowns, checkboxes, the
+   empty-column drop target — so it must clear 3:1. gray-200 is card and row
+   structure, which is not an identification boundary, so it is lifted just
+   enough to define a card without turning the UI into a grid of hard lines. */
+/* green-700 on a green-100 chip lands at 4.496:1 — a hair under AA, and it is
+   the label on "Won" and "Call" pills, so it is real text, not decoration.
+   Every other -700-on--100 tint pair already clears 4.5. */
+html:not(.dark) .text-green-700 { color: #00702e; }
+
+html:not(.dark) .border-gray-300 { border-color: #848b98; }
+html:not(.dark) .hover\:border-gray-300:hover { border-color: #848b98; }
+html:not(.dark) .border-gray-200 { border-color: #d8dce2; }
+html:not(.dark) .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #e8eaee; }
+
 /* ── Dark mode ─────────────────────────────────────────────────────────────
    Opt-in via the header 🌙 toggle (class "dark" on <html>, persisted in
    localStorage). The dashboard's markup uses light Tailwind utilities, so dark

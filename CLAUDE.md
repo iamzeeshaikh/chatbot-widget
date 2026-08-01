@@ -128,6 +128,28 @@ API route — never only by hiding UI. A member without access to a lead's site 
   Tailwind shades** the rest of the UI uses. A hand-picked hex is the one thing that
   will go dark-on-dark when the theme flips. Where a solid accent is unavoidable, pick a
   saturated mid-tone that reads on both themes (see `CRM_STAGE_DOT` in `lib/crm.ts`).
+- **Both themes have a contrast floor in `globals.css`, not per component.** Light mode
+  is remapped under `html:not(.dark)` the same way dark is under `html.dark`, because
+  Tailwind's grey ramp was drawn for dark surfaces and `gray-400`/`gray-500` fall under
+  AA on this app's white cards. Raise a colour **there**, once; do not hand-pick a hex in
+  a component to work around it. What the tiers mean now:
+  `gray-400` = tertiary, `gray-500` = secondary, `gray-600/700` = body/strong,
+  `gray-300` = **decoration only** (aria-hidden separators, em-dash placeholders) — if a
+  span carries information it must be `gray-400` or darker. For borders,
+  `border-gray-300` is the **interactive** tier (≥3:1: dropdowns, buttons, drop targets)
+  and `border-gray-200` is structure (card outlines, row rules). Put a control on the
+  interactive tier rather than darkening the structural one.
+  `scratch/contrast-audit.mjs` measures it — run with `THEME=light|dark` against a
+  **production build**, never `next dev`, whose CSS cache serves a stale stylesheet and
+  will quietly report the wrong numbers.
+- **Icons come from the App Router file convention**, not `metadata.icons` and not loose
+  files in `public/`: `app/favicon.ico` (16/32/48), `app/icon.svg`, `app/apple-icon.png`.
+  Regenerate the whole set — including the PWA `icon-192/512/maskable-512` that
+  `app/manifest.ts` and `public/sw.js` (push notifications) point at — with
+  `node scratch/gen-icons.mjs`, which draws them all from one mark so they cannot drift.
+  Note `app/page.tsx` swaps the *tab* icon per workspace at runtime; it deliberately
+  leaves `rel='apple-touch-icon'` in place, because "Add to Home Screen" reads the live
+  DOM and removing it blanked the installed icon.
 - New links should be real `<a href>` so they can be middle-clicked into a new tab, with
   `router.push` on plain click (check `metaKey`/`ctrlKey`/`shiftKey` before
   `preventDefault`).
@@ -139,6 +161,9 @@ API route — never only by hiding UI. A member without access to a lead's site 
 - `npm run build` and `npx tsc --noEmit` must both stay green.
 - **Known-acceptable pre-existing lint state — introduce zero new problems.**
   Measured on this commit: **`npx eslint .` → 54 problems (23 errors, 31 warnings)**.
+  `scratch/**` is in `eslint.config.mjs`'s ignore list — throwaway probes were being
+  linted, so the "baseline" drifted by a dozen warnings depending on which scripts
+  happened to be lying around, which made the number useless for comparison.
   (An earlier note put the error count at 38; the difference was ad-hoc root-level test
   scripts that have since been deleted. **23 errors is the real baseline** — re-measure
   rather than trusting either number, and compare before/after using `git stash`.)

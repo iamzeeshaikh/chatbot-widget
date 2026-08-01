@@ -238,7 +238,7 @@ export function QuickAction({ icon: Icon, label, onClick, disabled, hint }: {
       className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-lg border text-[10px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
         disabled
           ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
-          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-100 hover:border-gray-300 cursor-pointer'
+          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 hover:border-gray-400 cursor-pointer'
       }`}>
       <Icon size={15} strokeWidth={2} aria-hidden />
       {label}

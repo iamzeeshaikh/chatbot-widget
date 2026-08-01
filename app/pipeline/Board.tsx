@@ -187,7 +187,7 @@ function BoardCard({ card, moving, onDragStart, onDragEnd, onMove }: {
 
       <div className="flex items-start gap-1 min-w-0">
         <GripVertical size={10} strokeWidth={2}
-          className="text-gray-300 shrink-0 mt-[3px] opacity-0 group-hover/card:opacity-100 transition-opacity" aria-hidden />
+          className="text-gray-400 shrink-0 mt-[3px] opacity-0 group-hover/card:opacity-100 transition-opacity" aria-hidden />
         <Link href={`/leads/${encodeURIComponent(card.id)}`}
           className="text-[11px] font-semibold text-gray-900 hover:text-blue-700 hover:underline leading-tight break-words min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
           {card.name}

@@ -237,12 +237,12 @@ export default function PipelinePage() {
 
             <div className="ml-auto flex items-center gap-2">
               <button onClick={() => load()} title="Refresh" aria-label="Refresh"
-                className="p-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                className="p-1.5 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                 <RefreshCw size={13} strokeWidth={2} aria-hidden />
               </button>
               {/* Mode toggle is hidden on phones, where list is the only mode. */}
               {!narrow && (
-                <div className="flex gap-0.5 bg-gray-100 p-0.5 rounded-lg border border-gray-200" role="tablist" aria-label="View mode">
+                <div className="flex gap-0.5 bg-gray-100 p-0.5 rounded-lg border border-gray-300" role="tablist" aria-label="View mode">
                   {([['board', LayoutGrid, 'Board'], ['list', ListIcon, 'List']] as const).map(([m, Icon, label]) => (
                     <button key={m} role="tab" aria-selected={prefs.mode === m}
                       onClick={() => setPrefs((p) => ({ ...p, mode: m }))}
@@ -274,7 +274,7 @@ export default function PipelinePage() {
               options={DATE_PRESETS.map((d) => ({ value: d.key, label: d.label }))} />
             {filtersOn && (
               <button onClick={() => setPrefs((p) => ({ ...DEFAULT_PREFS, mode: p.mode }))}
-                className="inline-flex items-center gap-0.5 text-[10px] font-medium text-gray-600 hover:text-gray-900 px-1.5 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                className="inline-flex items-center gap-0.5 text-[10px] font-medium text-gray-600 hover:text-gray-900 px-1.5 py-0.5 rounded-md border border-gray-300 bg-white hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                 <X size={9} strokeWidth={2.5} aria-hidden /> Clear
               </button>
             )}
@@ -351,8 +351,8 @@ function Select({ label, value, onChange, options, active }: {
       <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}
         className={`rounded-md px-1.5 py-0.5 text-[10px] cursor-pointer border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 max-w-[132px] ${
           active
-            ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold'
-            : 'bg-gray-100 border-gray-200 text-gray-600'
+            ? 'bg-blue-100 border-blue-500 text-blue-700 font-semibold'
+            : 'bg-gray-100 border-gray-300 text-gray-600'
         }`}>
         {options.map((o) => (
           <option key={o.value} value={o.value} className="bg-white text-gray-800 font-normal">{o.label}</option>

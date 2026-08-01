@@ -96,7 +96,7 @@ export default function ListView({ cards, movingId, onMove, loading }: {
                       {c.label}
                       {active
                         ? (dir === 'asc' ? <ArrowUp size={10} strokeWidth={2.5} aria-hidden /> : <ArrowDown size={10} strokeWidth={2.5} aria-hidden />)
-                        : <ChevronsUpDown size={10} strokeWidth={2} className="text-gray-300" aria-hidden />}
+                        : <ChevronsUpDown size={10} strokeWidth={2} className="text-gray-400" aria-hidden />}
                     </button>
                   </th>
                 )

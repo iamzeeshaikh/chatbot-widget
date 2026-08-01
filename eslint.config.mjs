@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Throwaway probes and one-off verification scripts (gitignored). Linting
+    // them made the documented lint baseline drift every session depending on
+    // which scripts happened to be lying around.
+    "scratch/**",
   ]),
 ]);
 

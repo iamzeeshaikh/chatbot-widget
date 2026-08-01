@@ -101,7 +101,7 @@ export default function ReminderSettings({ onClose }: { onClose: () => void }) {
             <Row label="Early reminder" disabled={!prefs.enabled}>
               <select value={prefs.leadMinutes} disabled={!prefs.enabled}
                 onChange={(e) => save({ leadMinutes: Number(e.target.value) })}
-                className="bg-gray-100 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400 disabled:opacity-50">
+                className="bg-gray-100 border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400 disabled:opacity-50">
                 {LEAD_TIME_CHOICES.map((m) => (
                   <option key={m} value={m} className="bg-white text-gray-800">{leadTimeLabel(m)}</option>
                 ))}
@@ -120,7 +120,7 @@ export default function ReminderSettings({ onClose }: { onClose: () => void }) {
             <Row label="Digest at" disabled={!prefs.digestEnabled}>
               <select value={prefs.digestHour} disabled={!prefs.digestEnabled}
                 onChange={(e) => save({ digestHour: Number(e.target.value) })}
-                className="bg-gray-100 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400 disabled:opacity-50">
+                className="bg-gray-100 border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400 disabled:opacity-50">
                 {HOURS.map((h) => <option key={h} value={h} className="bg-white text-gray-800">{hourLabel(h)}</option>)}
               </select>
               <span className="text-[10px] text-gray-400">PKT</span>
@@ -137,13 +137,13 @@ export default function ReminderSettings({ onClose }: { onClose: () => void }) {
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <select value={prefs.quietStart} onChange={(e) => save({ quietStart: Number(e.target.value) })}
                   aria-label="Quiet hours start"
-                  className="bg-gray-100 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400">
+                  className="bg-gray-100 border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400">
                   {HOURS.map((h) => <option key={h} value={h} className="bg-white text-gray-800">{hourLabel(h)}</option>)}
                 </select>
                 <span className="text-[11px] text-gray-500">to</span>
                 <select value={prefs.quietEnd} onChange={(e) => save({ quietEnd: Number(e.target.value) })}
                   aria-label="Quiet hours end"
-                  className="bg-gray-100 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400">
+                  className="bg-gray-100 border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 cursor-pointer focus:outline-none focus:border-blue-400">
                   {HOURS.map((h) => <option key={h} value={h} className="bg-white text-gray-800">{hourLabel(h)}</option>)}
                 </select>
                 <span className="text-[10px] text-gray-400">PKT</span>

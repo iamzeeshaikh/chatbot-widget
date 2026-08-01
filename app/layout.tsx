@@ -21,9 +21,12 @@ export const metadata: Metadata = {
     title: "ZeeOps",
     statusBarStyle: "default",
   },
-  icons: {
-    apple: "/apple-touch-icon.png",
-  },
+  // No `icons` field on purpose. The icons come from the App Router file
+  // convention instead — app/favicon.ico, app/icon.svg and app/apple-icon.png —
+  // which emits the <link> tags with content-hashed URLs and serves
+  // /favicon.ico for the legacy request browsers make whether we link it or
+  // not. Declaring `icons` here would override those files with hand-written
+  // paths and put us back to maintaining two lists.
   // Stops Chrome offering to translate the dashboard at all — see the
   // translate="no" note on <html> below for why that matters here.
   other: { google: "notranslate" },
