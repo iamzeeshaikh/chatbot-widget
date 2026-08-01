@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Download } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -80,7 +81,7 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="text-center mt-4">
-          <a href="/install" className="text-xs text-blue-600 hover:text-blue-700 font-medium">📲 Install this dashboard as an app</a>
+          <a href="/install" className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1.5"><Download size={12} strokeWidth={2} aria-hidden /> Install this dashboard as an app</a>
         </p>
       </div>
     </div>

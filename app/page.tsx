@@ -2,6 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+// Same icon set, stroke weight and sizing the CRM pages use, so the dashboard
+// and /tasks · /pipeline · /leads read as one product. Emoji rendered at the
+// mercy of each OS's font; these follow currentColor and the type scale.
+import {
+  Smartphone, Tablet, Monitor, Circle, UserCheck, UserRound, Mail, ShoppingCart,
+  MessageSquare, BarChart3, Lock, Vibrate, Sun, Moon, Bell, BellOff, Users,
+  Trophy, Globe, Bot, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
+  ChevronRight, Repeat, Eye, Contact, UserPlus, Languages, Pin, User, FileText,
+  Paperclip, Ban, Flame, AlertTriangle, ChevronUp, ChevronDown, Download,
+  CreditCard, Info, Check, X, TrendingDown, type LucideIcon,
+} from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
@@ -99,7 +110,7 @@ interface Visitor { session_id: string; site_id: string; site_name: string; prim
 interface HistVisitor extends Visitor { status: string; has_chat: boolean; awaiting_reply?: boolean; pages: number; history: { u: string | null; t: string | null; ts: string }[]; ip: string | null; ip_blocked: boolean }
 
 // Buying-intent score for a visitor: pages browsed + time on site + return
-// visits. 3+ points = a 🔥 hot visitor worth proactively messaging first.
+// visits. 3+ points = a "hot" visitor worth proactively messaging first.
 function hotPoints(v: { pages: number; visits: number; created_at: string; last_seen: string }): number {
   const durMs = new Date(v.last_seen).getTime() - new Date(v.created_at).getTime()
   return (v.pages >= 6 ? 2 : v.pages >= 3 ? 1 : 0)
@@ -210,8 +221,9 @@ function formatMs(ms: number | null | undefined): string {
 }
 
 // Device type → icon.
-function deviceIcon(d: string | null): string {
-  return d === 'Mobile' ? '📱' : d === 'Tablet' ? '📟' : '💻'
+function DeviceIcon({ d, className = '', size = 15 }: { d: string | null; className?: string; size?: number }) {
+  const I = d === 'Mobile' ? Smartphone : d === 'Tablet' ? Tablet : Monitor
+  return <I size={size} strokeWidth={2} className={className} aria-hidden />
 }
 
 // Duration between two ISO timestamps as a compact human string ("3m 12s").
@@ -273,7 +285,7 @@ function SiteIcon({ siteId, name, size = 32, accent }: { siteId: string; name: s
 function AssignBadge({ email, me }: { email: string | null | undefined; me: string }) {
   if (!email) {
     return (
-      <span className="text-[9px] font-medium text-gray-500 bg-gray-100 border border-gray-200 rounded-full px-1.5 py-px whitespace-nowrap">⚪ Unassigned</span>
+      <span className="text-[9px] font-medium text-gray-500 bg-gray-100 border border-gray-200 rounded-full px-1.5 py-px whitespace-nowrap inline-flex items-center gap-1"><Circle size={8} strokeWidth={2.5} aria-hidden /> Unassigned</span>
     )
   }
   const mine = email === me
@@ -281,7 +293,9 @@ function AssignBadge({ email, me }: { email: string | null | undefined; me: stri
     <span
       title={mine ? `Assigned to you (${email})` : `Assigned to ${email}`}
       className={`text-[9px] font-semibold rounded-full px-1.5 py-px whitespace-nowrap border ${mine ? 'text-green-700 bg-green-100 border-green-200' : 'text-amber-700 bg-amber-100 border-amber-200'}`}>
-      {mine ? '🟢 You' : `🙋 ${agentShort(email)}`}
+      {mine
+        ? <span className="inline-flex items-center gap-1"><UserCheck size={9} strokeWidth={2.5} aria-hidden /> You</span>
+        : <span className="inline-flex items-center gap-1"><UserRound size={9} strokeWidth={2.5} aria-hidden /> {agentShort(email)}</span>}
     </span>
   )
 }
@@ -343,15 +357,15 @@ function OverviewSkeleton() {
 // Where a lead came from. Checkout leads are cart orders pulled out of Gmail:
 // they count everywhere a lead counts EXCEPT the Billing tab, which only ever
 // queries QUOTE_TAG rows (see lib/quoteintake.ts).
-const LEAD_SOURCE_BADGE: Record<LeadSource, { label: string; cls: string }> = {
-  quote: { label: '📧 Quote', cls: 'text-amber-700 bg-amber-100 border-amber-200' },
-  checkout: { label: '🛒 Checkout', cls: 'text-purple-700 bg-purple-100 border-purple-200' },
-  chat: { label: '💬 Chat', cls: 'text-blue-700 bg-blue-100 border-blue-200' },
+const LEAD_SOURCE_BADGE: Record<LeadSource, { label: string; Icon: LucideIcon; cls: string }> = {
+  quote: { label: 'Quote', Icon: Mail, cls: 'text-amber-700 bg-amber-100 border-amber-200' },
+  checkout: { label: 'Checkout', Icon: ShoppingCart, cls: 'text-purple-700 bg-purple-100 border-purple-200' },
+  chat: { label: 'Chat', Icon: MessageSquare, cls: 'text-blue-700 bg-blue-100 border-blue-200' },
 }
 
 function LeadSourceBadge({ message, className = '' }: { message: string | null | undefined; className?: string }) {
-  const { label, cls } = LEAD_SOURCE_BADGE[leadSource(message)]
-  return <span className={`text-[11px] font-semibold border rounded-full px-2 py-0.5 whitespace-nowrap ${cls} ${className}`}>{label}</span>
+  const { label, Icon, cls } = LEAD_SOURCE_BADGE[leadSource(message)]
+  return <span className={`text-[11px] font-semibold border rounded-full px-2 py-0.5 whitespace-nowrap inline-flex items-center gap-1 ${cls} ${className}`}><Icon size={11} strokeWidth={2} aria-hidden /> {label}</span>
 }
 
 // Lightweight dependency-free SVG line chart: Visitors vs Chats over time.
@@ -430,7 +444,7 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
       </div>
       {totalVisitors === 0 && totalChats === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 text-center">
-          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-lg">📊</div>
+          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-gray-500"><BarChart3 size={18} strokeWidth={2} aria-hidden /></div>
           <p className="text-xs text-gray-500">No activity in this period yet</p>
         </div>
       ) : (
@@ -770,7 +784,7 @@ export default function Dashboard() {
   const [markingLead, setMarkingLead] = useState(false)
   // null = idle; 'new' = just counted; 'already' = this conversation was
   // already a lead, so the click changed nothing (worth saying, otherwise a
-  // plain ✓ looks like it counted a second time).
+  // a plain tick looks like it counted a second time).
   const [leadMarked, setLeadMarked] = useState<'new' | 'already' | null>(null)
   const [markLeadError, setMarkLeadError] = useState('')
   // Tags for the open conversation (locally editable; persisted on each change).
@@ -853,7 +867,7 @@ export default function Dashboard() {
   }, [])
 
   // Web Push: 'unsupported' | 'off' | 'on'. Subscribing needs a user gesture
-  // (required on iOS), so it's driven by the header 📳 button.
+  // (required on iOS), so it's driven by the header push button.
   const [pushState, setPushState] = useState<'unsupported' | 'off' | 'on'>('unsupported')
   useEffect(() => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
@@ -1463,7 +1477,7 @@ export default function Dashboard() {
     // box locks, and tell the agent to take over.
     if (resp.status === 409) {
       if (res?.assignedTo) applyAssignment(selectedSession.session_id, res.assignedTo)
-      setUploadError(`🔒 ${agentShort(res?.assignedTo)} took this chat — take over to reply.`)
+      setUploadError(`${agentShort(res?.assignedTo)} took this chat — take over to reply.`)
       setSending(false)
       return
     }
@@ -1543,7 +1557,7 @@ export default function Dashboard() {
     setUploadingFile(false)
     if (res.status === 409) { // locked by another agent
       if (res.d?.assignedTo) applyAssignment(selectedSession.session_id, res.d.assignedTo)
-      setUploadError(`🔒 ${agentShort(res.d?.assignedTo)} is handling this chat — take over to send.`)
+      setUploadError(`${agentShort(res.d?.assignedTo)} is handling this chat — take over to send.`)
       return
     }
     if (!res.ok) { setUploadError(res.d?.error || 'Upload failed'); return }
@@ -1961,16 +1975,18 @@ export default function Dashboard() {
             <button onClick={togglePush}
               title={pushState === 'on' ? 'Push notifications ON for this device — new chats ping you even with the app closed. Click to turn off.' : 'Enable push notifications on this device — get pinged about new chats even when the app is closed'}
               className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${pushState === 'on' ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'}`}>
-              {pushState === 'on' ? '📳 On' : '📳'}
+              {pushState === 'on'
+                  ? <span className="inline-flex items-center gap-1"><Vibrate size={13} strokeWidth={2} aria-hidden /> On</span>
+                  : <Vibrate size={13} strokeWidth={2} aria-hidden />}
             </button>
           )}
           <button onClick={toggleTheme} title={darkMode ? 'Dark mode on — click for light mode' : 'Light mode — click for dark mode'}
             className="px-2.5 py-1.5 text-xs rounded-lg border bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200 transition-colors">
-            {darkMode ? '☀️' : '🌙'}
+            {darkMode ? <Sun size={14} strokeWidth={2} aria-hidden /> : <Moon size={14} strokeWidth={2} aria-hidden />}
           </button>
           <button onClick={toggleSound} title={soundOn ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting; click to mute' : 'Sound off — click to unmute'}
             className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200' : 'bg-gray-100 text-gray-500 border-gray-200 hover:text-gray-600'}`}>
-            {soundOn ? '🔔' : '🔕'}
+            {soundOn ? <Bell size={14} strokeWidth={2} aria-hidden /> : <BellOff size={14} strokeWidth={2} aria-hidden />}
           </button>
           {/* Team presence — who's online right now (any member can see it). */}
           <div className="relative">
@@ -2003,7 +2019,7 @@ export default function Dashboard() {
           </div>
           {userRole === 'admin' && (
             <a href="/members" className="px-3 py-1.5 text-xs text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors flex items-center gap-1.5">
-              👥 Members
+              <Users size={13} strokeWidth={2} aria-hidden /> Members
             </a>
           )}
           <button onClick={handleLogout} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors">
@@ -2023,11 +2039,11 @@ export default function Dashboard() {
                   for the Recent Leads table below (click again to clear). */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 {[
-                  { label: 'Total Sites', value: roleSites.length, icon: '🏆', color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
-                  { label: 'Total Leads', value: overviewSummaryLeads.length, icon: '👥', color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
-                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? '🌐' : '🤖', color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
-                  { label: "Today's Leads", value: todayLeads, icon: '☀️', color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
-                  { label: "This Week", value: thisWeekLeads, icon: '📈', color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20', dateFilter: 'week' as const },
+                  { label: 'Total Sites', value: roleSites.length, icon: Trophy, color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
+                  { label: 'Total Leads', value: overviewSummaryLeads.length, icon: Users, color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
+                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? Globe : Bot, color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
+                  { label: "Today's Leads", value: todayLeads, icon: Sun, color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
+                  { label: "This Week", value: thisWeekLeads, icon: TrendingUp, color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20', dateFilter: 'week' as const },
                 ].map((s) => {
                   const clickable = s.dateFilter !== undefined
                   const active = clickable && overviewLeadDate === s.dateFilter
@@ -2043,7 +2059,7 @@ export default function Dashboard() {
                       className={`group text-left bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${active ? 'border-gray-400 ring-2 ring-gray-300' : s.border} bg-gray-100 transition-all duration-200 ${clickable ? 'hover:-translate-y-0.5 hover:border-gray-400 hover:shadow-lg hover:shadow-black/20 cursor-pointer' : ''}`}>
                       <div className="flex items-center justify-between mb-3">
                         <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
-                        <span className="text-lg opacity-80 group-hover:opacity-100 transition-opacity">{s.icon}</span>
+                        <span className="text-gray-500 opacity-80 group-hover:opacity-100 transition-opacity"><s.icon size={18} strokeWidth={2} aria-hidden /></span>
                       </div>
                       <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tracking-tight tabular-nums">{s.value}</p>
                     </button>
@@ -2125,7 +2141,7 @@ export default function Dashboard() {
                           className={`block w-full text-left rounded-lg px-2 py-1.5 -mx-2 transition-colors ${active ? 'bg-white ring-1 ring-gray-300' : 'hover:bg-white/70'}`}>
                           <div className="flex items-center justify-between mb-1">
                             <span className={`text-xs truncate ${active ? 'text-gray-900 font-semibold' : 'text-gray-700'}`}>{site.name}</span>
-                            <span className="text-xs text-gray-500 shrink-0 ml-2">{count} leads {active ? '✕' : '→'}</span>
+                            <span className="text-xs text-gray-500 shrink-0 ml-2">{count} leads {active ? <X size={11} strokeWidth={2} aria-hidden /> : '→'}</span>
                           </div>
                           <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
                             <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent }} />
@@ -2189,15 +2205,15 @@ export default function Dashboard() {
                   <select value={overviewLeadType} onChange={(e) => { setOverviewLeadType(e.target.value as typeof overviewLeadType); setOverviewLeadPage(0) }}
                     className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All types</option>
-                    <option value="chat">💬 Chat only</option>
-                    <option value="quote">📧 Quote only</option>
-                    <option value="checkout">🛒 Checkout only</option>
+                    <option value="chat">Chat only</option>
+                    <option value="quote">Quote only</option>
+                    <option value="checkout">Checkout only</option>
                   </select>
                   {overviewLeadSite && (
                     <button onClick={() => { setOverviewLeadSite(''); setOverviewLeadPage(0) }}
                       className="text-[11px] font-medium text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5 hover:bg-blue-200 transition-colors"
                       title="Clear the site filter">
-                      {roleSites.find((s) => s.site_id === overviewLeadSite)?.name ?? overviewLeadSite} ✕
+                      {roleSites.find((s) => s.site_id === overviewLeadSite)?.name ?? overviewLeadSite} <X size={11} strokeWidth={2} aria-hidden />
                     </button>
                   )}
                   {(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') && (
@@ -2219,7 +2235,7 @@ export default function Dashboard() {
                           <tr>
                             <td colSpan={13} className="text-center py-8">
                               <div className="flex flex-col items-center">
-                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">📭</div>
+                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-gray-500"><Inbox size={18} strokeWidth={2} aria-hidden /></div>
                                 <p className="text-gray-700 text-sm font-medium">{(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') ? 'No leads match this filter' : 'No leads captured yet'}</p>
                                 <p className="text-gray-500 text-xs mt-0.5">{(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') ? 'Try a different date range, site, or type' : 'Leads appear here when the bot qualifies a visitor'}</p>
                               </div>
@@ -2304,10 +2320,10 @@ export default function Dashboard() {
                                         old "row opens the chat" behaviour lives
                                         on as its own button. */}
                                     {!isEmailLead && (
-                                      <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation">💬</button>
+                                      <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation"><MessageSquare size={13} strokeWidth={2} aria-hidden /></button>
                                     )}
-                                    <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit">✏️</button>
-                                    <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete">🗑</button>
+                                    <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit"><Pencil size={13} strokeWidth={2} aria-hidden /></button>
+                                    <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete"><Trash2 size={13} strokeWidth={2} aria-hidden /></button>
                                   </div>
                                 )}
                               </td>
@@ -2326,10 +2342,10 @@ export default function Dashboard() {
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button onClick={() => setOverviewLeadPage(Math.max(0, overviewLeadPageClamped - 1))} disabled={overviewLeadPageClamped === 0}
-                        className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">◀ Prev</button>
+                        className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={12} strokeWidth={2} aria-hidden /> Prev</button>
                       <span className="text-xs text-gray-600 px-2">Page {overviewLeadPageClamped + 1} / {overviewLeadPageCount}</span>
                       <button onClick={() => setOverviewLeadPage(Math.min(overviewLeadPageCount - 1, overviewLeadPageClamped + 1))} disabled={overviewLeadPageClamped >= overviewLeadPageCount - 1}
-                        className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next ▶</button>
+                        className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next <ChevronRight size={12} strokeWidth={2} aria-hidden /></button>
                     </div>
                   </div>
                 )}
@@ -2360,13 +2376,13 @@ export default function Dashboard() {
                 <button key={v.session_id} onClick={() => openVisitorSession(v)}
                   className="w-full text-left px-3 py-2 border-b border-gray-100 hover:bg-green-50 transition-colors flex items-start gap-2.5"
                   style={{ borderLeft: `3px solid ${accent}` }}>
-                  <span className="text-base shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
+                  <span className="shrink-0 mt-0.5 text-gray-500" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}><DeviceIcon d={v.device_type} /></span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-xs font-semibold text-gray-900 truncate">{v.site_name}</span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {v.visits > 1 && (
-                          <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>
+                          <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px inline-flex items-center gap-1" title={`${v.visits} visits — returning visitor`}><Repeat size={8} strokeWidth={2.5} aria-hidden /> {v.visits}</span>
                         )}
                         {/* The live list only ever contains visitors active within the
                             last 60s (server-filtered), so these are genuinely live. */}
@@ -2408,7 +2424,7 @@ export default function Dashboard() {
             <div className="flex-1 min-h-0 overflow-y-auto">
               {roleVisitors.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8 animate-in">
-                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👀</div>
+                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-gray-500"><Eye size={18} strokeWidth={2} aria-hidden /></div>
                   <p className="text-sm text-gray-700 font-medium">Nobody on your sites right now</p>
                   <p className="text-xs text-gray-500 mt-0.5">Live visitors appear here the moment they land. Past visitors &amp; chats are in the Visitors tab.</p>
                 </div>
@@ -2419,7 +2435,7 @@ export default function Dashboard() {
                   {assignedVisitors.length > 0 && (
                     <>
                       <div className="px-3 py-1.5 bg-green-50 border-b border-green-100 flex items-center gap-1.5 sticky top-0 z-[1]">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-green-700">✓ Currently served</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-green-700 inline-flex items-center gap-1"><Check size={10} strokeWidth={2.5} aria-hidden /> Currently served</span>
                         <span className="text-[10px] text-green-600">({assignedVisitors.length})</span>
                       </div>
                       {assignedVisitors.map(renderVisitorCard)}
@@ -2429,7 +2445,7 @@ export default function Dashboard() {
                       can always see which chats nobody has picked up yet. */}
                   {unassignedVisitors.length > 0 && (
                     <div className="px-3 py-1.5 bg-gray-100 border-b border-gray-200 flex items-center gap-1.5 sticky top-0 z-[1]">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">👁 Active visitors</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 inline-flex items-center gap-1"><Eye size={11} strokeWidth={2} aria-hidden /> Active visitors</span>
                       <span className="text-[10px] text-gray-400">({unassignedVisitors.length})</span>
                     </div>
                   )}
@@ -2470,7 +2486,7 @@ export default function Dashboard() {
                     <a href={leadRecordHref(selectedSession.session_id)}
                       title="Open the full lead record — stage, notes, deal value, activity"
                       className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors whitespace-nowrap">
-                      📇 Open record
+                      <span className="inline-flex items-center gap-1.5"><Contact size={12} strokeWidth={2} aria-hidden /> Open record</span>
                     </a>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
@@ -2483,14 +2499,14 @@ export default function Dashboard() {
                           <button onClick={() => claimSession(true)} disabled={claimingSession}
                             title="Pick up this chat so other agents know you're handling it"
                             className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50 whitespace-nowrap">
-                            🙋 Assign to me
+                            <span className="inline-flex items-center gap-1.5"><UserPlus size={12} strokeWidth={2} aria-hidden /> Assign to me</span>
                           </button>
                         )
                       }
                       if (assignee === userEmail) {
                         return (
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-green-200 bg-green-100 text-green-700 whitespace-nowrap">✓ You have this</span>
+                            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-green-200 bg-green-100 text-green-700 whitespace-nowrap inline-flex items-center gap-1.5"><Check size={12} strokeWidth={2.5} aria-hidden /> You have this</span>
                             <button onClick={() => claimSession(false)} disabled={claimingSession}
                               title="Release this chat back to the unassigned pool"
                               className="text-[11px] text-gray-500 hover:text-gray-800 underline disabled:opacity-50">Release</button>
@@ -2500,7 +2516,7 @@ export default function Dashboard() {
                       return (
                         <div className="flex items-center gap-1.5">
                           <span title={`${assignee} is handling this chat`}
-                            className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-amber-200 bg-amber-100 text-amber-700 whitespace-nowrap">🙋 {agentShort(assignee)} has this</span>
+                            className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-amber-200 bg-amber-100 text-amber-700 whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><UserRound size={11} strokeWidth={2} aria-hidden /> {agentShort(assignee)} has this</span></span>
                           <button onClick={() => claimSession(true)} disabled={claimingSession}
                             title={`Take this chat over from ${assignee}`}
                             className="text-[11px] text-gray-500 hover:text-gray-800 underline disabled:opacity-50">Take over</button>
@@ -2513,7 +2529,7 @@ export default function Dashboard() {
                       className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors flex items-center gap-1.5 ${
                         translateOn ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-gray-200 text-gray-500 border-gray-300 hover:text-gray-700'
                       }`}>
-                      🌐 Translate{translateOn ? ' on' : ''}
+                      <Languages size={12} strokeWidth={2} aria-hidden /> Translate{translateOn ? ' on' : ''}
                     </button>
                     {/* Global kill switch on: there is no bot to toggle and no
                         bot/AI wording should appear anywhere — show nothing. */}
@@ -2527,7 +2543,7 @@ export default function Dashboard() {
                         </button>
                         <span className={`text-xs font-medium ${!botEffectivelyActive ? 'text-orange-600' : 'text-gray-500'}`}>Human</span>
                         {scheduledBotOff && selectedSession.mode === 'bot' ? (
-                          <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200" title="The packaging bot is off on this schedule — replies are human-only right now">🌙 Bot off (scheduled)</span>
+                          <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200" title="The packaging bot is off on this schedule — replies are human-only right now"><span className="inline-flex items-center gap-1"><Moon size={10} strokeWidth={2} aria-hidden /> Bot off (scheduled)</span></span>
                         ) : selectedSession.mode === 'human' ? (
                           <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">AI off</span>
                         ) : null}
@@ -2577,7 +2593,7 @@ export default function Dashboard() {
                             {dateDivider}
                             <div className="flex justify-center mb-2">
                               <span className="text-[10px] text-amber-800 bg-amber-100 border border-amber-300 rounded-full px-2.5 py-1">
-                                📌 Marked as a lead by an admin · {formatTime(msg.created_at)}
+                                <span className="inline-flex items-center gap-1.5"><Pin size={10} strokeWidth={2} aria-hidden /> Marked as a lead by an admin · {formatTime(msg.created_at)}</span>
                               </span>
                             </div>
                           </div>
@@ -2605,7 +2621,11 @@ export default function Dashboard() {
                         {dateDivider}
                         <div className={`flex flex-col mb-2 ${isUser ? 'items-end' : 'items-start'}`}>
                           <div className="flex items-center gap-1.5 mb-1 px-1">
-                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-600' : 'text-blue-600'}`} title={isAdmin && msg.author ? msg.author : undefined}>{isAdmin ? `👤 ${msg.author ? agentShort(msg.author) : 'Agent'}` : botGlobalOff ? '💬 Auto-reply' : '🤖 Bot'}</span>}
+                            {!isUser && <span className={`text-[11px] font-semibold ${isAdmin ? 'text-orange-600' : 'text-blue-600'}`} title={isAdmin && msg.author ? msg.author : undefined}><span className="inline-flex items-center gap-1">{isAdmin
+                              ? <><User size={10} strokeWidth={2.5} aria-hidden /> {msg.author ? agentShort(msg.author) : 'Agent'}</>
+                              : botGlobalOff
+                                ? <><MessageSquare size={10} strokeWidth={2.5} aria-hidden /> Auto-reply</>
+                                : <><Bot size={10} strokeWidth={2.5} aria-hidden /> Bot</>}</span></span>}
                             {isUser && <span className="text-[11px] text-gray-500">Visitor</span>}
                             <span className="text-[10px] text-gray-500">{formatTime(msg.created_at)}</span>
                           </div>
@@ -2621,7 +2641,7 @@ export default function Dashboard() {
                               ) : (
                                 <a href={file.url} target="_blank" rel="noopener noreferrer"
                                   className="flex items-center gap-2.5 px-4 py-3 bg-gray-100 hover:bg-gray-200 transition-colors">
-                                  <span className="text-2xl shrink-0">📄</span>
+                                  <span className="shrink-0 text-gray-500"><FileText size={24} strokeWidth={1.75} aria-hidden /></span>
                                   <span className="min-w-0">
                                     <span className="block text-sm text-blue-700 underline truncate max-w-[200px]">{file.name}</span>
                                     <span className="block text-[10px] text-gray-500">{file.size ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ` : ''}Download</span>
@@ -2689,18 +2709,18 @@ export default function Dashboard() {
                       blocked (below) until you take over; you can still read it. */}
                   {lockedByOther && (
                     <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5">🔒 <b>{agentShort(selectedSession.assignedTo)}</b> is handling this chat — you can view but not message.</span>
+                      <span className="flex items-center gap-1.5"><Lock size={12} strokeWidth={2} aria-hidden /> <b>{agentShort(selectedSession.assignedTo)}</b> is handling this chat — you can view but not message.</span>
                       <button onClick={() => claimSession(true)} disabled={claimingSession}
                         className="shrink-0 font-semibold text-amber-900 underline hover:text-amber-700 disabled:opacity-50">Take over</button>
                     </div>
                   )}
                   {botEffectivelyActive ? (
                     <p className="text-[11px] text-blue-700 mb-2 flex items-center gap-1.5">
-                      <span>🤖</span> Bot is active — toggle to Human to reply, or send a file to take over
+                      <Bot size={13} strokeWidth={2} aria-hidden /> Bot is active — toggle to Human to reply, or send a file to take over
                     </p>
                   ) : !botGlobalOff && scheduledBotOff && selectedSession.mode === 'bot' ? (
                     <p className="text-[11px] text-indigo-700 mb-2 flex items-center gap-1.5">
-                      <span>🌙</span> Bot is off (scheduled) — human only. The bot won&apos;t reply right now; type to respond.
+                      <Moon size={13} strokeWidth={2} aria-hidden /> Bot is off (scheduled) — human only. The bot won&apos;t reply right now; type to respond.
                     </p>
                   ) : null}
                   {/* Quick replies: one-tap canned openers/answers the agent can
@@ -2711,14 +2731,16 @@ export default function Dashboard() {
                     const v = visitors.find((x) => x.session_id === selectedSession.session_id)
                     const product = (v?.page_title || '').split(/ [|\-–—] |·/)[0].trim()
                     const hasProduct = !!product && product.length >= 3 && product.length <= 70
-                    const quicks: { label: string; text: string }[] = [
+                    // `text` is the button label AND what gets inserted; there
+                    // was also an emoji `label` here that nothing ever rendered.
+                    const quicks: { text: string }[] = [
                       hasProduct
-                        ? { label: '👋', text: `Hi! Are you looking for ${product}?` }
-                        : { label: '👋', text: 'Hi! How can I help you today?' },
-                      { label: '💰', text: 'Would you like a quick quote? Please share your size and quantity.' },
-                      { label: '🎨', text: 'We offer custom printing and design support. Would you like the details?' },
-                      { label: '🚚', text: 'We offer free shipping and design support on all orders.' },
-                      { label: '❓', text: 'Happy to help with sizes, quantities, or pricing — what do you need?' },
+                        ? { text: `Hi! Are you looking for ${product}?` }
+                        : { text: 'Hi! How can I help you today?' },
+                      { text: 'Would you like a quick quote? Please share your size and quantity.' },
+                      { text: 'We offer custom printing and design support. Would you like the details?' },
+                      { text: 'We offer free shipping and design support on all orders.' },
+                      { text: 'Happy to help with sizes, quantities, or pricing — what do you need?' },
                     ]
                     return (
                       <div className="flex flex-col gap-1 mb-2 max-h-40 overflow-y-auto">
@@ -2738,7 +2760,7 @@ export default function Dashboard() {
                     <label className="flex items-center gap-1.5 mb-2 text-[11px] text-indigo-700 cursor-pointer select-none w-fit">
                       <input type="checkbox" checked={translateOut} onChange={(e) => setTranslateOut(e.target.checked)}
                         className="rounded accent-indigo-500 cursor-pointer" />
-                      🌐 Translate my reply to {visitorLang} before sending
+                      <Languages size={12} strokeWidth={2} aria-hidden /> Translate my reply to {visitorLang} before sending
                     </label>
                   )}
                   <div className="flex gap-2">
@@ -2751,7 +2773,7 @@ export default function Dashboard() {
                       title={lockedByOther ? 'Locked — take over to send' : 'Attach a file'}
                       className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-200 hover:text-gray-900 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-center"
                     >
-                      {uploadingFile ? '…' : '📎'}
+                      {uploadingFile ? '…' : <Paperclip size={16} strokeWidth={2} aria-hidden />}
                     </button>
                     <textarea
                       value={replyText}
@@ -2771,7 +2793,7 @@ export default function Dashboard() {
                         }
                       }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-                      placeholder={lockedByOther ? `🔒 ${agentShort(selectedSession.assignedTo)} is handling this — take over to reply` : botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
+                      placeholder={lockedByOther ? `${agentShort(selectedSession.assignedTo)} is handling this — take over to reply` : botEffectivelyActive ? 'Switch to Human to reply' : 'Type a reply…'}
                       disabled={botEffectivelyActive || sending || lockedByOther}
                       rows={2}
                       className="flex-1 bg-white border-2 border-orange-500 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:border-orange-600 focus:ring-2 focus:ring-orange-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -2793,7 +2815,7 @@ export default function Dashboard() {
           {selectedSession && (
             <aside className="hidden lg:block w-[320px] xl:w-[360px] flex-shrink-0 border-l border-gray-200 bg-gray-50 overflow-y-auto">
               <div className="px-4 py-3 border-b border-gray-200 bg-white sticky top-0 backdrop-blur z-10 flex items-center gap-2">
-                <span className="text-base">{deviceIcon(visitorDetail?.technical.device_type ?? null)}</span>
+                <span className="text-gray-500"><DeviceIcon d={visitorDetail?.technical.device_type ?? null} /></span>
                 <div className="min-w-0">
                   {/* Once an agent saves a contact name, show it here instead of
                       the generic "Visitor details" so this reads as the customer. */}
@@ -2868,16 +2890,16 @@ export default function Dashboard() {
                           style={{ backgroundColor: accentColor }}>
                           {savingContact ? 'Saving…' : 'Save contact'}
                         </button>
-                        {contactSaved && <span className="text-[11px] text-green-600">✓ Saved</span>}
+                        {contactSaved && <span className="text-[11px] text-green-600 inline-flex items-center gap-1"><Check size={11} strokeWidth={2.5} aria-hidden /> Saved</span>}
                       </div>
                       {userRole === 'admin' && (
                         <div className="pt-2 mt-2 border-t border-gray-200">
                           <div className="flex items-center gap-2">
                             <button onClick={markAsLead} disabled={markingLead}
                               className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-800 bg-amber-100 border border-amber-300 hover:bg-amber-200 disabled:opacity-50 transition-colors">
-                              📌 {markingLead ? 'Marking…' : 'Mark as lead'}
+                              <span className="inline-flex items-center gap-1.5"><Pin size={12} strokeWidth={2} aria-hidden /> {markingLead ? 'Marking…' : 'Mark as lead'}</span>
                             </button>
-                            {leadMarked === 'new' && <span className="text-[11px] text-green-600">✓ Counted as a lead</span>}
+                            {leadMarked === 'new' && <span className="text-[11px] text-green-600 inline-flex items-center gap-1"><Check size={11} strokeWidth={2.5} aria-hidden /> Counted as a lead</span>}
                             {leadMarked === 'already' && <span className="text-[11px] text-gray-500">Already counted — no change</span>}
                           </div>
                           <p className="text-[10px] text-gray-500 mt-1">For when the customer clearly became a lead (e.g. &quot;I emailed you&quot;) without ever typing their email into the chat. Counts toward Billing with no contact info attached.</p>
@@ -2954,12 +2976,12 @@ export default function Dashboard() {
                       {blockedIps.includes(visitorDetail.technical.ip) ? (
                         <button onClick={() => toggleIpBlock(visitorDetail!.technical.ip!, false)}
                           className="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-gray-300 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
-                          ✓ Blocked — tap to unban
+                          <span className="inline-flex items-center gap-1.5"><Check size={12} strokeWidth={2.5} aria-hidden /> Blocked — tap to unban</span>
                         </button>
                       ) : (
                         <button onClick={() => { const ip = visitorDetail!.technical.ip!; if (confirm(`Ban this visitor (IP ${ip})?\n\nThey won't be able to load the widget or chat on any of your sites. Use for spam / bots.`)) toggleIpBlock(ip, true) }}
                           className="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 transition-colors">
-                          🚫 Ban visitor (spam / bot)
+                          <span className="inline-flex items-center gap-1.5"><Ban size={12} strokeWidth={2} aria-hidden /> Ban visitor (spam / bot)</span>
                         </button>
                       )}
                       <p className="text-[10px] text-gray-500 mt-1.5 leading-relaxed">Blocks this IP across all sites — takes effect within a minute. Admins only.</p>
@@ -2992,7 +3014,7 @@ export default function Dashboard() {
             if (myChats.length === 0) return null
             return (
               <div className="flex items-stretch gap-1 px-2 py-1.5 border-t border-gray-200 bg-gray-100 overflow-x-auto flex-shrink-0">
-                <span className="flex items-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 px-2 shrink-0">💬 My chats ({myChats.length})</span>
+                <span className="flex items-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 px-2 shrink-0 gap-1"><MessageSquare size={11} strokeWidth={2} aria-hidden /> My chats ({myChats.length})</span>
                 {myChats.map((s) => {
                   const active = selectedSession?.session_id === s.session_id
                   const waiting = s.last_role === 'user' && !active
@@ -3071,7 +3093,7 @@ export default function Dashboard() {
               <select value={histStatusFilter} onChange={(e) => setHistFilter(setHistStatusFilter)(e.target.value as 'all' | 'live' | 'left')}
                 className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
                 <option value="all">All ({base.length})</option>
-                <option value="live">🟢 Live now ({liveTotal})</option>
+                <option value="live">Live now ({liveTotal})</option>
                 <option value="left">Left ({base.length - liveTotal})</option>
               </select>
               <select value={histCountryFilter} onChange={(e) => setHistFilter(setHistCountryFilter)(e.target.value)}
@@ -3082,7 +3104,7 @@ export default function Dashboard() {
               <select value={histDeviceFilter} onChange={(e) => setHistFilter(setHistDeviceFilter)(e.target.value)}
                 className="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400">
                 <option value="">All Devices</option>
-                {histDevices.map((d) => <option key={d} value={d}>{deviceIcon(d)} {d}</option>)}
+                {histDevices.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
               <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
                 <input type="checkbox" checked={histChatOnly} onChange={(e) => setHistFilter(setHistChatOnly)(e.target.checked)} className="rounded accent-blue-500 cursor-pointer" />
@@ -3090,7 +3112,7 @@ export default function Dashboard() {
               </label>
               <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none" title="High buying intent: browsed several pages, stayed a while, or keeps coming back">
                 <input type="checkbox" checked={histHotOnly} onChange={(e) => setHistFilter(setHistHotOnly)(e.target.checked)} className="rounded accent-orange-500 cursor-pointer" />
-                🔥 Hot only
+                <span className="inline-flex items-center gap-1.5"><Flame size={12} strokeWidth={2} aria-hidden /> Hot only</span>
               </label>
               {anyFilter && (
                 <button onClick={() => { setHistSiteFilter(''); setHistChatOnly(false); setHistStatusFilter('all'); setHistCountryFilter(''); setHistDeviceFilter(''); setHistSearch(''); setHistHotOnly(false); setHistPage(0) }}
@@ -3100,11 +3122,11 @@ export default function Dashboard() {
 
             {userRole === 'admin' && blockedIps.length > 0 && (
               <div className="flex items-center gap-1.5 flex-wrap mb-3">
-                <span className="text-[11px] text-gray-500 font-medium">🚫 Blocked IPs:</span>
+                <span className="text-[11px] text-gray-500 font-medium"><span className="inline-flex items-center gap-1"><Ban size={11} strokeWidth={2} aria-hidden /> Blocked IPs:</span></span>
                 {blockedIps.map((ip) => (
                   <button key={ip} onClick={() => { if (confirm(`Unblock ${ip}?`)) toggleIpBlock(ip, false) }}
                     className="text-[11px] font-mono text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5 hover:bg-red-100 transition-colors" title="Click to unblock">
-                    {ip} ✕
+                    {ip} <X size={11} strokeWidth={2} aria-hidden />
                   </button>
                 ))}
               </div>
@@ -3138,7 +3160,7 @@ export default function Dashboard() {
                       <div onClick={clickable ? open : undefined}
                         className={`px-4 py-2.5 border-b border-gray-100 flex items-start gap-3 ${clickable ? 'cursor-pointer hover:bg-gray-100 transition-colors' : ''}`}
                         style={{ borderLeft: `3px solid ${accent}` }}>
-                        <span className="text-lg shrink-0 mt-0.5" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}>{deviceIcon(v.device_type)}</span>
+                        <span className="shrink-0 mt-0.5 text-gray-500" title={[v.device_type, v.browser, v.os].filter(Boolean).join(' · ')}><DeviceIcon d={v.device_type} size={16} /></span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-semibold text-gray-900">{v.site_name}</span>
@@ -3148,31 +3170,31 @@ export default function Dashboard() {
                               <span className="text-[10px] text-gray-500">left · {timeAgo(v.last_seen)}</span>
                             )}
                             {v.has_chat && (v.awaiting_reply ? (
-                              <span className="text-[10px] font-bold text-red-700 bg-red-100 border border-red-300 rounded-full px-1.5 py-px" title="The visitor messaged and NO agent has replied yet — click to open and answer">⚠ no agent reply</span>
+                              <span className="text-[10px] font-bold text-red-700 bg-red-100 border border-red-300 rounded-full px-1.5 py-px" title="The visitor messaged and NO agent has replied yet — click to open and answer"><span className="inline-flex items-center gap-1"><AlertTriangle size={9} strokeWidth={2.5} aria-hidden /> no agent reply</span></span>
                             ) : (
-                              <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px" title="This visitor chatted and an agent replied — click to open the conversation">💬 chatted</span>
+                              <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1.5 py-px" title="This visitor chatted and an agent replied — click to open the conversation"><span className="inline-flex items-center gap-1"><MessageSquare size={9} strokeWidth={2.5} aria-hidden /> chatted</span></span>
                             ))}
-                            {isHotVisitor(v) && <span className="text-[10px] font-bold text-orange-700 bg-orange-100 border border-orange-300 rounded-full px-1.5 py-px" title={`High buying intent: ${v.pages} page${v.pages !== 1 ? 's' : ''}, ${formatDuration(v.created_at, v.last_seen)} on site, ${v.visits} visit${v.visits !== 1 ? 's' : ''}`}>🔥 hot</span>}
-                            {v.visits > 1 && <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px" title={`${v.visits} visits — returning visitor`}>🔁 {v.visits}</span>}
+                            {isHotVisitor(v) && <span className="text-[10px] font-bold text-orange-700 bg-orange-100 border border-orange-300 rounded-full px-1.5 py-px" title={`High buying intent: ${v.pages} page${v.pages !== 1 ? 's' : ''}, ${formatDuration(v.created_at, v.last_seen)} on site, ${v.visits} visit${v.visits !== 1 ? 's' : ''}`}><span className="inline-flex items-center gap-1"><Flame size={9} strokeWidth={2.5} aria-hidden /> hot</span></span>}
+                            {v.visits > 1 && <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-px inline-flex items-center gap-1" title={`${v.visits} visits — returning visitor`}><Repeat size={8} strokeWidth={2.5} aria-hidden /> {v.visits}</span>}
                             {v.pages > 1 && (
                               <button onClick={(e) => { e.stopPropagation(); setExpandedVisitor(expandedVisitor === v.session_id ? null : v.session_id) }}
                                 className="text-[10px] font-medium text-gray-600 bg-gray-100 border border-gray-300 rounded-full px-1.5 py-px hover:bg-gray-200 transition-colors"
                                 title="Show the pages this visitor browsed, in order">
-                                📄 {v.pages} pages {expandedVisitor === v.session_id ? '▴' : '▾'}
+                                <span className="inline-flex items-center gap-1"><FileText size={10} strokeWidth={2.5} aria-hidden /> {v.pages} pages {expandedVisitor === v.session_id ? <ChevronUp size={10} strokeWidth={2.5} aria-hidden /> : <ChevronDown size={10} strokeWidth={2.5} aria-hidden />}</span>
                               </button>
                             )}
                             {v.ip_blocked && (
                               <button onClick={(e) => { e.stopPropagation(); if (userRole === 'admin' && confirm(`Unblock ${v.ip}?`)) toggleIpBlock(v.ip!, false) }}
                                 className="text-[10px] font-bold text-red-700 bg-red-100 border border-red-300 rounded-full px-1.5 py-px"
                                 title={userRole === 'admin' ? `Blocked (${v.ip}) — click to unblock` : `This visitor's IP is blocked`}>
-                                🚫 blocked
+                                <span className="inline-flex items-center gap-1.5"><Ban size={10} strokeWidth={2.5} aria-hidden /> blocked</span>
                               </button>
                             )}
                             {userRole === 'admin' && v.ip && !v.ip_blocked && (
                               <button onClick={(e) => { e.stopPropagation(); if (confirm(`Block ${v.ip}?\n\nThis visitor won't see the widget or be able to chat on ANY of your sites until unblocked.`)) toggleIpBlock(v.ip!, true) }}
                                 className="text-[10px] text-gray-400 hover:text-red-600 transition-colors"
                                 title={`Block this visitor's IP (${v.ip}) — hides the widget and drops their messages on all sites`}>
-                                🚫
+                                <Ban size={12} strokeWidth={2} aria-hidden />
                               </button>
                             )}
                           </div>
@@ -3218,10 +3240,10 @@ export default function Dashboard() {
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => setHistPage(Math.max(0, page - 1))} disabled={page === 0}
-                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">◀ Prev</button>
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={12} strokeWidth={2} aria-hidden /> Prev</button>
                   <span className="text-xs text-gray-600 px-2">Page {page + 1} / {pageCount}</span>
                   <button onClick={() => setHistPage(Math.min(pageCount - 1, page + 1))} disabled={page >= pageCount - 1}
-                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next ▶</button>
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next <ChevronRight size={12} strokeWidth={2} aria-hidden /></button>
                 </div>
               </div>
             )}
@@ -3239,15 +3261,15 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => { setBillingMonth(shiftMonth(billingMonth, -1)); setBillingSiteFilter(null) }}
-                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month">◀</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month"><ChevronLeft size={13} strokeWidth={2} aria-hidden /></button>
               <input type="month" value={billingMonth} max={currentMonth()} onChange={(e) => { if (e.target.value) { setBillingMonth(e.target.value); setBillingSiteFilter(null) } }}
                 className="bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400 [color-scheme:dark]" />
               <button onClick={() => { const next = shiftMonth(billingMonth, 1); if (next <= currentMonth()) { setBillingMonth(next); setBillingSiteFilter(null) } }}
                 disabled={billingMonth >= currentMonth()}
-                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month"><ChevronRight size={13} strokeWidth={2} aria-hidden /></button>
               <button onClick={downloadBillingCsv} disabled={!billing || billing.leads.length === 0}
                 className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-40" style={{ backgroundColor: accentColor }}>
-                ⬇ Download CSV
+                <span className="inline-flex items-center gap-1.5"><Download size={13} strokeWidth={2} aria-hidden /> Download CSV</span>
               </button>
             </div>
           </div>
@@ -3291,7 +3313,12 @@ export default function Dashboard() {
                       Last month: <span className="font-semibold text-gray-700">{billing.prevTotal}</span>
                       {billing.prevTotal > 0 && (
                         <span className={`ml-1.5 font-semibold ${billing.total >= billing.prevTotal ? 'text-green-600' : 'text-red-600'}`}>
-                          {billing.total >= billing.prevTotal ? '▲' : '▼'} {Math.abs(Math.round(((billing.total - billing.prevTotal) / billing.prevTotal) * 100))}%
+                          <span className="inline-flex items-center gap-0.5">
+                            {billing.total >= billing.prevTotal
+                              ? <TrendingUp size={11} strokeWidth={2.5} aria-hidden />
+                              : <TrendingDown size={11} strokeWidth={2.5} aria-hidden />}
+                            {Math.abs(Math.round(((billing.total - billing.prevTotal) / billing.prevTotal) * 100))}%
+                          </span>
                         </span>
                       )}
                     </p>
@@ -3313,7 +3340,7 @@ export default function Dashboard() {
                     tiles below stay as raw per-channel totals on purpose;
                     this is the only place the overlap is collapsed. */}
                 <div className="bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-2xl p-5 border border-emerald-200">
-                  <p className="text-emerald-800 text-[11px] font-semibold uppercase tracking-wide mb-2">💳 Billable Leads</p>
+                  <p className="text-emerald-800 text-[11px] font-semibold uppercase tracking-wide mb-2 inline-flex items-center gap-1.5"><CreditCard size={11} strokeWidth={2} aria-hidden /> Billable Leads</p>
                   {/* Fixed light-green card — use emerald text (NOT gray, which the
                       dark theme remaps to near-white and would vanish here). */}
                   <p className="text-[2.5rem] leading-none font-extrabold text-emerald-900 tabular-nums">{billing?.billable ?? 0}</p>
@@ -3331,7 +3358,7 @@ export default function Dashboard() {
                 {/* Chat / Quote tabs — click either to switch the table below */}
                 <button onClick={() => { setBillingLeadType('chat'); setBillingSiteFilter(null) }}
                   className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'chat' ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'chat' ? 'text-blue-700' : 'text-gray-500'}`}>💬 Chat Leads</p>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 inline-flex items-center gap-1.5 ${billingLeadType === 'chat' ? 'text-blue-700' : 'text-gray-500'}`}><MessageSquare size={11} strokeWidth={2} aria-hidden /> Chat Leads</p>
                   {/* Plain gray text on purpose: these three tab cards get a dark
                       background in dark mode (see .bg-blue-50/.bg-amber-50/.bg-purple-50
                       in globals.css), so the theme's gray→near-white remap is what
@@ -3343,7 +3370,7 @@ export default function Dashboard() {
 
                 <button onClick={() => { setBillingLeadType('quote'); setBillingSiteFilter(null) }}
                   className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'quote' ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'quote' ? 'text-amber-700' : 'text-gray-500'}`}>📧 Quote Leads</p>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 inline-flex items-center gap-1.5 ${billingLeadType === 'quote' ? 'text-amber-700' : 'text-gray-500'}`}><Mail size={11} strokeWidth={2} aria-hidden /> Quote Leads</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{quoteLeads.length}</p>
                   <p className="text-[11px] text-gray-500 mt-2">From your Gmail-labeled custom-quote-request emails.</p>
                 </button>
@@ -3353,7 +3380,7 @@ export default function Dashboard() {
                     but never charged for as generated leads. */}
                 <button onClick={() => { setBillingLeadType('checkout'); setBillingSiteFilter(null) }}
                   className={`text-left rounded-2xl p-5 border transition-all ${billingLeadType === 'checkout' ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200' : 'bg-gray-100 border-gray-200 hover:border-gray-300'}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${billingLeadType === 'checkout' ? 'text-purple-700' : 'text-gray-500'}`}>🛒 Checkout Leads</p>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 inline-flex items-center gap-1.5 ${billingLeadType === 'checkout' ? 'text-purple-700' : 'text-gray-500'}`}><ShoppingCart size={11} strokeWidth={2} aria-hidden /> Checkout Leads</p>
                   <p className="text-[2.5rem] leading-none font-extrabold text-gray-900 tabular-nums">{checkoutLeads.length}</p>
                   <p className="text-[11px] text-gray-500 mt-2">WooCommerce cart orders — counted in the total, not billed.</p>
                 </button>
@@ -3367,11 +3394,15 @@ export default function Dashboard() {
               <div className="bg-gray-100 rounded-2xl p-5 border border-gray-200 mb-5">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
-                    By site — {billingLeadType === 'chat' ? '💬 Chat' : billingLeadType === 'quote' ? '📧 Quote' : '🛒 Checkout'}
+                    By site — <span className="inline-flex items-center gap-1 align-middle">{billingLeadType === 'chat'
+                      ? <><MessageSquare size={11} strokeWidth={2} aria-hidden /> Chat</>
+                      : billingLeadType === 'quote'
+                        ? <><Mail size={11} strokeWidth={2} aria-hidden /> Quote</>
+                        : <><ShoppingCart size={11} strokeWidth={2} aria-hidden /> Checkout</>}</span>
                   </p>
                   {billingSiteFilter && (
                     <button onClick={() => setBillingSiteFilter(null)}
-                      className="text-[11px] font-medium text-indigo-700 hover:text-indigo-800 hover:underline">Clear filter ✕</button>
+                      className="text-[11px] font-medium text-indigo-700 hover:text-indigo-800 hover:underline"><span className="inline-flex items-center gap-1">Clear filter <X size={11} strokeWidth={2} aria-hidden /></span></button>
                   )}
                 </div>
                 {bySiteActive.length === 0 ? (
@@ -3426,7 +3457,7 @@ export default function Dashboard() {
                           <tr>
                             <td colSpan={9} className="text-center py-10">
                               <div className="flex flex-col items-center">
-                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">💬</div>
+                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-gray-500"><MessageSquare size={18} strokeWidth={2} aria-hidden /></div>
                                 <p className="text-gray-700 text-sm font-medium">No chat leads this period{billingSiteFilter ? ' for this site' : ''}</p>
                                 <p className="text-gray-500 text-xs mt-0.5">Recorded when a visitor shares an email while chatting on a tracked site.</p>
                               </div>
@@ -3480,7 +3511,7 @@ export default function Dashboard() {
                           <tr>
                             <td colSpan={userRole === 'admin' ? 8 : 7} className="text-center py-10">
                               <div className="flex flex-col items-center">
-                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">{billingLeadType === 'checkout' ? '🛒' : '📧'}</div>
+                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-gray-500">{billingLeadType === 'checkout' ? <ShoppingCart size={18} strokeWidth={2} aria-hidden /> : <Mail size={18} strokeWidth={2} aria-hidden />}</div>
                                 <p className="text-gray-700 text-sm font-medium">No {billingLeadType} leads this period{billingSiteFilter ? ' for this site' : ''}</p>
                                 <p className="text-gray-500 text-xs mt-0.5">{billingLeadType === 'checkout' ? 'Sent by your Gmail Apps Script when a WooCommerce order email carries the checkout label.' : 'Sent by your Gmail Apps Script when a labeled quote-request email arrives.'}</p>
                               </div>
@@ -3518,7 +3549,7 @@ export default function Dashboard() {
                                   </div>
                                 ) : (
                                   <button onClick={() => setConfirmQuoteDeleteId(l.session_id)}
-                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete this quote lead">🗑</button>
+                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete this quote lead"><Trash2 size={13} strokeWidth={2} aria-hidden /></button>
                                 )}
                               </td>
                             )}
@@ -3549,7 +3580,7 @@ export default function Dashboard() {
                   {viewOverviewLead.created_at ? ` · ${formatDateTime(viewOverviewLead.created_at)}` : ''}
                 </p>
               </div>
-              <button onClick={() => setViewOverviewLead(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+              <button onClick={() => setViewOverviewLead(null)} className="text-gray-400 hover:text-gray-700 leading-none flex-shrink-0" title="Close"><X size={15} strokeWidth={2} aria-hidden /></button>
             </div>
             <div className="px-5 py-4 overflow-y-auto">
               <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{stripQuoteTag(viewOverviewLead.message) || 'No message text.'}</p>
@@ -3576,7 +3607,7 @@ export default function Dashboard() {
                 </p>
                 <p className="text-xs text-gray-500">{viewDayChats.chatSessions.length} chat{viewDayChats.chatSessions.length !== 1 ? 's' : ''}</p>
               </div>
-              <button onClick={() => setViewDayChats(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+              <button onClick={() => setViewDayChats(null)} className="text-gray-400 hover:text-gray-700 leading-none flex-shrink-0" title="Close"><X size={15} strokeWidth={2} aria-hidden /></button>
             </div>
             <div className="overflow-y-auto">
               {viewDayChats.chatSessions.map((cs, i) => {
@@ -3614,7 +3645,7 @@ export default function Dashboard() {
                 </p>
                 <p className="text-xs text-gray-500">Chats picked up per agent · {viewDayAgents.picked} total</p>
               </div>
-              <button onClick={() => setViewDayAgents(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none flex-shrink-0" title="Close">✕</button>
+              <button onClick={() => setViewDayAgents(null)} className="text-gray-400 hover:text-gray-700 leading-none flex-shrink-0" title="Close"><X size={15} strokeWidth={2} aria-hidden /></button>
             </div>
             <div className="overflow-y-auto">
               {(viewDayAgents.byAgent ?? []).map((a, i) => (
@@ -3644,7 +3675,9 @@ export default function Dashboard() {
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
               <div className="min-w-0">
-                <p className={`text-[11px] font-semibold rounded-full px-2 py-0.5 inline-block mb-1.5 border ${viewQuote.source === 'checkout' ? 'text-purple-700 bg-purple-100 border-purple-200' : 'text-amber-700 bg-amber-100 border-amber-200'}`}>{viewQuote.source === 'checkout' ? '🛒 Checkout' : '📧 Quote'}</p>
+                <p className={`text-[11px] font-semibold rounded-full px-2 py-0.5 inline-block mb-1.5 border ${viewQuote.source === 'checkout' ? 'text-purple-700 bg-purple-100 border-purple-200' : 'text-amber-700 bg-amber-100 border-amber-200'}`}><span className="inline-flex items-center gap-1.5">{viewQuote.source === 'checkout'
+                  ? <><ShoppingCart size={11} strokeWidth={2} aria-hidden /> Checkout</>
+                  : <><Mail size={11} strokeWidth={2} aria-hidden /> Quote</>}</span></p>
                 <p className="text-sm font-semibold text-gray-900 truncate">{viewQuote.name || viewQuote.email}</p>
                 <p className="text-xs text-gray-500 truncate">{viewQuote.email} · {viewQuote.site_name} · {formatDateTime(viewQuote.captured_at)}</p>
               </div>
@@ -3654,7 +3687,7 @@ export default function Dashboard() {
                   className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors" title="Previous lead">‹</button>
                 <button onClick={() => hasNext && setViewQuote(navList[idx + 1])} disabled={!hasNext}
                   className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors" title="Next lead">›</button>
-                <button onClick={() => setViewQuote(null)} className="text-gray-400 hover:text-gray-700 text-lg leading-none ml-1.5 px-1" title="Close">✕</button>
+                <button onClick={() => setViewQuote(null)} className="text-gray-400 hover:text-gray-700 leading-none ml-1.5 px-1" title="Close"><X size={15} strokeWidth={2} aria-hidden /></button>
               </div>
             </div>
             <div className="px-5 py-4 overflow-y-auto">
@@ -3684,12 +3717,12 @@ export default function Dashboard() {
                 Month-end report
               </a>
               <button onClick={() => setPerfMonth(shiftMonth(perfMonth, -1))}
-                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month">◀</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month"><ChevronLeft size={13} strokeWidth={2} aria-hidden /></button>
               <input type="month" value={perfMonth} max={currentMonth()} onChange={(e) => e.target.value && setPerfMonth(e.target.value)}
                 className="bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-gray-400 [color-scheme:dark]" />
               <button onClick={() => { const next = shiftMonth(perfMonth, 1); if (next <= currentMonth()) setPerfMonth(next) }}
                 disabled={perfMonth >= currentMonth()}
-                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month">▶</button>
+                className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Next month"><ChevronRight size={13} strokeWidth={2} aria-hidden /></button>
             </div>
           </div>
 
@@ -3745,7 +3778,7 @@ export default function Dashboard() {
               {/* Attribution status — historical-estimate vs accurate-going-forward */}
               {perf && perf.summary.totalReplies > 0 && perf.unattributedReplies > 0 && (
                 <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-[11px] text-gray-500 flex items-start gap-2">
-                  <span className="text-gray-500">ℹ️</span>
+                  <span className="text-gray-500 mt-px shrink-0"><Info size={13} strokeWidth={2} aria-hidden /></span>
                   <span>
                     <span className="text-gray-700 font-medium">{perf.summary.attributedReplies}</span> of <span className="text-gray-700 font-medium">{perf.summary.totalReplies}</span> agent replies this period are attributed to a specific agent.
                     The remaining <span className="text-gray-700 font-medium">{perf.unattributedReplies}</span> were sent before per-agent tracking was added, so they aren&apos;t counted in the per-agent rows below (the workspace totals above include everything). Attribution is exact going forward.
@@ -3769,7 +3802,7 @@ export default function Dashboard() {
                         <tr>
                           <td colSpan={9} className="text-center py-10">
                             <div className="flex flex-col items-center">
-                              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-lg mb-2">👥</div>
+                              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-gray-500"><Users size={18} strokeWidth={2} aria-hidden /></div>
                               <p className="text-gray-700 text-sm font-medium">No agents in this workspace</p>
                               <p className="text-gray-500 text-xs mt-0.5">Add members to see per-agent performance.</p>
                             </div>

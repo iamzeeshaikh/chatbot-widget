@@ -6,6 +6,7 @@
 // walks through it. No auth required (middleware only guards / and /members).
 
 import { useEffect, useState } from 'react'
+import { CheckCircle2, TriangleAlert, Smartphone, Apple, Monitor, Download, Vibrate } from 'lucide-react'
 
 type Platform = 'ios' | 'android' | 'desktop'
 
@@ -63,24 +64,24 @@ export default function InstallPage() {
 
         {installed || done ? (
           <div className="bg-green-100 border border-green-300 rounded-2xl p-5 text-center">
-            <p className="text-2xl mb-1">✅</p>
+            <p className="flex justify-center mb-1 text-green-700"><CheckCircle2 size={26} strokeWidth={2} aria-hidden /></p>
             <p className="text-sm font-semibold text-green-700">App installed!</p>
-            <p className="text-xs text-gray-700 mt-2">Open it from your home screen, sign in, then tap the <b>📳 button</b> in the header and allow notifications — new customer chats will ping this device even when the app is closed.</p>
+            <p className="text-xs text-gray-700 mt-2">Open it from your home screen, sign in, then tap the <b className="inline-flex items-center gap-1 align-middle"><Vibrate size={13} strokeWidth={2} aria-hidden /> button</b> in the header and allow notifications — new customer chats will ping this device even when the app is closed.</p>
           </div>
         ) : inAppBrowser ? (
           <div className="bg-amber-100 border border-amber-300 rounded-2xl p-5">
-            <p className="text-sm font-semibold text-amber-700 mb-1">⚠ You&apos;re inside another app&apos;s browser</p>
+            <p className="text-sm font-semibold text-amber-700 mb-1 flex items-center gap-1.5"><TriangleAlert size={14} strokeWidth={2} aria-hidden /> You&apos;re inside another app&apos;s browser</p>
             <p className="text-sm text-gray-800">Apps like WhatsApp can&apos;t install anything. Tap the menu (⋮ or …) and choose <b>&quot;Open in browser&quot;</b> / <b>&quot;Open in Safari&quot;</b>, then come back to this page.</p>
           </div>
         ) : (
           <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
             {platform === 'android' && (
               <>
-                <p className="text-sm font-semibold text-gray-900 mb-2">📱 Android</p>
+                <p className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-1.5"><Smartphone size={14} strokeWidth={2} aria-hidden /> Android</p>
                 {promptEvent ? (
                   <button onClick={installNow}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl text-sm transition-colors mb-3">
-                    📲 Install App now
+                    <span className="inline-flex items-center justify-center gap-1.5"><Download size={15} strokeWidth={2} aria-hidden /> Install App now</span>
                   </button>
                 ) : (
                   <p className="text-xs text-gray-500 mb-2">If no install button appears, do it manually:</p>
@@ -92,7 +93,7 @@ export default function InstallPage() {
             )}
             {platform === 'ios' && (
               <>
-                <p className="text-sm font-semibold text-gray-900 mb-1">🍎 iPhone / iPad</p>
+                <p className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-1.5"><Apple size={14} strokeWidth={2} aria-hidden /> iPhone / iPad</p>
                 <p className="text-xs text-gray-500 mb-2">Must be done in <b>Safari</b>.</p>
                 <Step n={1}>Open <b>chat.zeeops.dev/install</b> in <b>Safari</b> (the blue compass icon 🧭).</Step>
                 <Step n={2}>Tap the <b>Share</b> button — the square with an arrow pointing up <b>□↑</b> (bottom bar, or next to the address bar).</Step>
@@ -109,11 +110,11 @@ export default function InstallPage() {
             )}
             {platform === 'desktop' && (
               <>
-                <p className="text-sm font-semibold text-gray-900 mb-2">💻 Computer (Chrome / Edge)</p>
+                <p className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-1.5"><Monitor size={14} strokeWidth={2} aria-hidden /> Computer (Chrome / Edge)</p>
                 {promptEvent && (
                   <button onClick={installNow}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl text-sm transition-colors mb-3">
-                    📲 Install App now
+                    <span className="inline-flex items-center justify-center gap-1.5"><Download size={15} strokeWidth={2} aria-hidden /> Install App now</span>
                   </button>
                 )}
                 <Step n={1}>Open <b>chat.zeeops.dev</b> in Chrome or Edge.</Step>

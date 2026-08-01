@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { Trophy, Package, Pencil, Trash2 } from 'lucide-react'
 
 interface Member {
   id: string
@@ -135,7 +136,9 @@ export default function MembersPage() {
           <button onClick={() => router.push('/')} className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors">← Dashboard</button>
           <div>
             <h1 className="text-base font-bold text-gray-900 leading-tight flex items-center gap-2">
-              {workspace === 'sports' ? '🏆 Sports' : '📦 Packaging'} Members
+              {workspace === 'sports'
+                ? <><Trophy size={15} strokeWidth={2} aria-hidden /> Sports</>
+                : <><Package size={15} strokeWidth={2} aria-hidden /> Packaging</>} Members
             </h1>
             <p className="text-gray-500 text-[11px]">Manage who can access the {workspace} dashboard</p>
           </div>
@@ -244,8 +247,8 @@ export default function MembersPage() {
                           </div>
                         ) : (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => startEdit(m)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg" title="Edit">✏️</button>
-                            <button onClick={() => setConfirmDeleteId(m.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg" title="Remove">🗑</button>
+                            <button onClick={() => startEdit(m)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg" title="Edit"><Pencil size={13} strokeWidth={2} aria-hidden /></button>
+                            <button onClick={() => setConfirmDeleteId(m.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg" title="Remove"><Trash2 size={13} strokeWidth={2} aria-hidden /></button>
                           </div>
                         )}
                       </td>
