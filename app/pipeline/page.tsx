@@ -23,6 +23,7 @@ import {
 import Board from './Board'
 import ListView from './ListView'
 import BulkBar, { type BulkResult } from './BulkBar'
+import GlobalSearch from '@/app/components/GlobalSearch'
 
 type Mode = 'board' | 'list'
 const PREFS_KEY = 'zee-pipeline-prefs'
@@ -350,6 +351,7 @@ export default function PipelinePage() {
             </div>
 
             <div className="ml-auto flex items-center gap-2">
+              <GlobalSearch />
               <button onClick={() => load()} title="Refresh" aria-label="Refresh"
                 className="p-1.5 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                 <RefreshCw size={13} strokeWidth={2} aria-hidden />

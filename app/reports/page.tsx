@@ -19,6 +19,7 @@ import {
 import { formatDateTime } from '@/lib/datetime'
 import { pct, durationLabel, type ReportData, type Metrics, type AgentRow, type SiteRow, type DayRow } from '@/lib/report'
 import { Card, Skeleton } from '@/app/leads/[id]/ui'
+import GlobalSearch from '@/app/components/GlobalSearch'
 
 type Preset = 'this-month' | 'last-month' | 'last-7' | 'last-30' | 'custom'
 
@@ -107,6 +108,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="ml-auto flex items-center gap-1.5">
+              <GlobalSearch />
               {/* The client-facing one: every lead itemised with billable
                   marked. Kept first because it is what gets sent out. */}
               {/* A client owns one site, so the leads document can be narrowed

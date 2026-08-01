@@ -27,6 +27,7 @@ import { TASK_TYPES, TASK_TYPE_LABEL, TASK_TYPE_STYLE, type TaskType } from '@/l
 import { TASK_ICON } from '@/app/leads/[id]/icons'
 import type { TaskWithLead, TaskGroups } from '@/lib/taskquery'
 import ReminderSettings from './ReminderSettings'
+import GlobalSearch from '@/app/components/GlobalSearch'
 
 interface TasksResponse {
   groups: TaskGroups
@@ -169,6 +170,7 @@ export default function TasksPage() {
               </p>
             </div>
             <span className="ml-auto flex items-center gap-1.5">
+              <GlobalSearch />
               {groups.overdue.length > 0 && (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-red-100 text-red-700 border border-red-300 tabular-nums">
                   <AlertTriangle size={10} strokeWidth={2.5} aria-hidden />

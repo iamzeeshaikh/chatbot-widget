@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import GlobalSearch from '@/app/components/GlobalSearch'
 // Same icon set, stroke weight and sizing the CRM pages use, so the dashboard
 // and /tasks · /pipeline · /leads read as one product. Emoji rendered at the
 // mercy of each OS's font; these follow currentColor and the type scale.
@@ -1978,6 +1979,9 @@ export default function Dashboard() {
               )}
             </a>
           </div>
+          {/* Global lead search — the same palette the CRM pages carry, so ⌘K
+              works wherever an agent happens to be when the phone rings. */}
+          <GlobalSearch />
           {pushState !== 'unsupported' && (
             <button onClick={togglePush}
               title={pushState === 'on' ? 'Push notifications ON for this device — new chats ping you even with the app closed. Click to turn off.' : 'Enable push notifications on this device — get pinged about new chats even when the app is closed'}

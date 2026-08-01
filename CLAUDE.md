@@ -98,6 +98,16 @@ Anything reading a lead's current stage for a "before" value must mirror
 "new" and writes a false `previous` into the timeline — see `currentStateFor` in the
 bulk route.
 
+### Identity — "is this the same person?" — lives in `lib/identity.ts`
+`samePhone` / `phoneKey` / `groupSameParty`. Phones are compared on their **last 9
+digits**, never on the full digit string: the same line arrives as `+92 300 4567890`,
+`0300 4567890`, `00923004567890` and `3004567890`, and no two of those are equal.
+`findRelatedLeads` and search grouping both go through it, so the record page and the
+search palette can never disagree about who is who. Search also builds its SQL phone
+pattern from that same key — built from the typed digits instead, the wildcards demand
+a digit that a differently-prefixed stored number does not have, and the row is never
+fetched for Node to verify.
+
 ### Member-scoped rows go on a reserved site, not a lead
 `crm_prefs` and `crm_reminder` belong to a *member*, not a conversation, so they live on
 the reserved `zeeops-crm` site (`lib/reminders.ts`) — the same trick `push_sub` uses with
@@ -206,6 +216,15 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
 
 - Two indexes must exist: `idx_chat_logs_created_at`, `idx_chat_logs_session_created`.
   Check with `select indexname from pg_indexes where tablename='chat_logs'`.
+- **Recommended, not yet applied** — the one index lead search wants:
+  `create index concurrently idx_chat_logs_role_site on chat_logs (role, site_id);`
+  Search finds chat leads with `role = 'lead_capture'`, which is 88 rows inside a
+  40k-row table and has no index, so every search seq-scans the lot. Harmless today
+  (~10ms of a ~180ms round trip) and linear in a table that grows ~1k rows/month.
+  `CONCURRENTLY` so it does not lock writes. This is the only DDL worth asking for
+  right now; `leads` is 1.1k rows and needs nothing. Revisit `pg_trgm` GIN indexes on
+  `leads.name`/`leads.email` only past roughly 20k leads — below that a seq scan of
+  1.1k rows beats maintaining a trigram index.
 - Queries are windowed (7–30 days) and row-capped on purpose. **Do not widen a window or
   remove a cap** without accounting for the load.
 - Poll intervals: visitors 5s, conversations 10s, messages 3s, detail 20s. Don't tighten

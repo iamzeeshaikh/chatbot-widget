@@ -3,18 +3,18 @@ import { getMember, HARDCODED_ACCOUNTS } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { writeControlRow } from '@/lib/leadrecord'
 import { applyStageChange } from '@/lib/stagechange'
-import { setAssignment, ASSIGNMENT_ROLE } from '@/lib/assignment'
-import { CRM_STAGE_ROLE, isCrmStage, parseCrmStage, stageFromLeadStatus, type CrmStage } from '@/lib/crm'
-import { LEAD_STATUS_ROLE, parseLeadStatus } from '@/lib/leadstatus'
+import { setAssignment } from '@/lib/assignment'
+import { isCrmStage, type CrmStage } from '@/lib/crm'
 import { pktDateTimeToUtc } from '@/lib/datetime'
 import {
   CRM_TASK_ROLE, MAX_TASK_TITLE, isTaskType, newTaskId, parseCrmTask,
   type CrmTaskEntry, type TaskType,
 } from '@/lib/tasks'
 import {
-  BULK_MAX_IDS, resolveSitesForIds, runBulk, describeSkipped, chunks,
+  BULK_MAX_IDS, resolveSitesForIds, runBulk, describeSkipped,
   type BulkOutcome,
 } from '@/lib/bulk'
+import { currentStateForIds } from '@/lib/leadstate'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -29,54 +29,6 @@ export const maxDuration = 60
 // Stage changes go through lib/stagechange.ts, the same function the
 // single-lead endpoint uses, so the legacy lead_status dual-write and its
 // shared created_at cannot drift between the two paths.
-
-/**
- * The authoritative "before" for each lead.
- *
- * Deliberately mirrors loadPipeline's fold rather than just reading the newest
- * crm_stage row: a lead moved before the CRM existed has only a legacy
- * lead_status row, and the pipeline shows it as (say) Contacted. Reading
- * crm_stage alone would call that lead "new", which would write a false
- * `previous` into the timeline and make Undo restore a stage it was never in.
- * The stagePairAt guard is the same one loadPipeline uses to ignore the mirror
- * row written alongside a real stage change.
- */
-async function currentStateFor(ids: string[]): Promise<Map<string, { stage: CrmStage; owner: string | null }>> {
-  const out = new Map<string, { stage: CrmStage; owner: string | null }>()
-  for (const id of ids) out.set(id, { stage: 'new', owner: null })
-
-  for (const chunk of chunks(ids, 200)) {
-    const { data } = await supabase
-      .from('chat_logs')
-      .select('session_id, role, message, created_at')
-      .in('session_id', chunk)
-      .in('role', [CRM_STAGE_ROLE, LEAD_STATUS_ROLE, ASSIGNMENT_ROLE])
-      .order('created_at', { ascending: true })
-
-    const rows = data ?? []
-    const stagePairAt = new Set<string>()
-    for (const r of rows) if (r.role === CRM_STAGE_ROLE) stagePairAt.add(`${r.session_id}|${r.created_at}`)
-
-    // Ascending, so the last row per session wins — the same fold the pipeline
-    // and the conversations list use.
-    for (const r of rows) {
-      const cur = out.get(r.session_id)
-      if (!cur) continue
-      if (r.role === CRM_STAGE_ROLE) {
-        const s = parseCrmStage(r.message)
-        if (s && isCrmStage(s.stage)) cur.stage = s.stage
-      } else if (r.role === LEAD_STATUS_ROLE) {
-        if (stagePairAt.has(`${r.session_id}|${r.created_at}`)) continue
-        const mapped = stageFromLeadStatus(parseLeadStatus(r.message)?.status)
-        if (mapped) cur.stage = mapped
-      } else {
-        const email = (r.message ?? '').trim()
-        cur.owner = email || null
-      }
-    }
-  }
-  return out
-}
 
 function respond(outcome: BulkOutcome, extra: Record<string, unknown> = {}) {
   return NextResponse.json({
@@ -132,7 +84,7 @@ export async function POST(req: NextRequest) {
       for (const id of targets) perLead.set(id, body.stage)
     }
 
-    const before = await currentStateFor(targets)
+    const before = await currentStateForIds(targets)
     // One timestamp for the whole action: the leads moved together, and the
     // per-lead rows still carry their own previous stage.
     const at = new Date().toISOString()
@@ -192,7 +144,7 @@ export async function POST(req: NextRequest) {
     // A lead whose site the new owner cannot reach is skipped, not silently
     // parked on someone who could never open it.
     const unassignable = targets.filter((id) => !perLead.has(id))
-    const before = await currentStateFor(targets)
+    const before = await currentStateForIds(targets)
 
     const work = targets.filter((id) => perLead.has(id)).map((id) => ({ id, email: perLead.get(id)! }))
     const { applied, failed } = await runBulk(work, (w) => w.id, async (w) => {

@@ -19,6 +19,7 @@ import { ASSIGNMENT_ROLE } from './assignment'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from './replyauthor'
 import { parseAttachment, type AttachmentInfo } from './attachment'
 import { isQuoteSessionId, quoteSessionId, stripQuoteTag, isQuoteLeadMessage, isCheckoutLeadMessage } from './quoteintake'
+import { digitsOnly, samePhone } from './identity'
 import { workspaceSites } from './workspaces'
 import {
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE,
@@ -528,7 +529,8 @@ function referrerOf(packed: string | null): string | null {
   }
 }
 
-const digitsOnly = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
+// The same-party rule lives in lib/identity.ts so search groups results by
+// exactly the rule Related Leads matches on.
 
 // Other leads from the same person — matched on email or phone, across every
 // site the member is allowed to see (never beyond: a shared email must not
@@ -569,8 +571,7 @@ export async function findRelatedLeads(
     if (r.session_id === self.id) continue
     const c = parseLeadCapture(r.message)
     const rowEmail = (c?.email ?? '').toLowerCase()
-    const rowPhone = digitsOnly(c?.phone)
-    const matchedOn = rowEmail && rowEmail === email ? 'email' : rowPhone && rowPhone === phone ? 'phone' : null
+    const matchedOn = rowEmail && rowEmail === email ? 'email' : samePhone(c?.phone, self.phone) ? 'phone' : null
     if (!matchedOn) continue
     out.set(r.session_id, {
       id: r.session_id, siteId: r.site_id, siteName: siteName[r.site_id] ?? r.site_id,
@@ -583,8 +584,7 @@ export async function findRelatedLeads(
     const recordId = quoteSessionId(l.id)
     if (recordId === self.id) continue
     const rowEmail = (l.email ?? '').toLowerCase()
-    const rowPhone = digitsOnly(l.phone)
-    const matchedOn = rowEmail && rowEmail === email ? 'email' : rowPhone && rowPhone === phone ? 'phone' : null
+    const matchedOn = rowEmail && rowEmail === email ? 'email' : samePhone(l.phone, self.phone) ? 'phone' : null
     if (!matchedOn) continue
     // A chat lead already surfaced above via its lead_capture row is the same
     // person on the same site — don't list it twice under two ids.

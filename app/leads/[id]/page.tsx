@@ -34,6 +34,7 @@ import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
 import EmailComposer from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
+import GlobalSearch from '@/app/components/GlobalSearch'
 
 export default function LeadRecordPage() {
   const params = useParams<{ id: string }>()
@@ -293,6 +294,7 @@ export default function LeadRecordPage() {
           </div>
 
           <div className="ml-auto flex items-center gap-2 shrink-0">
+            <GlobalSearch compact />
             <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-1"
               title="Counted automatically from agent replies — a burst of replies in one sitting counts as one follow-up">
               <Repeat size={11} strokeWidth={2} aria-hidden />{followUpLabel}
