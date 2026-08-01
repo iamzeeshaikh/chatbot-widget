@@ -1,9 +1,8 @@
 // Task-type → icon, kept in the UI layer on purpose.
 //
-// lib/tasks.ts also exports TASK_TYPE_ICON as emoji; that module is imported by
-// the reminder sweep on the server, so it must stay free of React components.
-// The record page maps to lucide here instead, which keeps one stroke weight and
-// size across the whole page and leaves the shared module pure.
+// lib/tasks.ts is imported by the reminder sweep on the server, so it must stay
+// free of React components. The icon map therefore lives here, in the UI layer —
+// which also keeps one stroke weight and size across the whole CRM.
 
 import { Phone, Mail, RefreshCw, Palette, Pin, type LucideIcon } from 'lucide-react'
 import type { TaskType } from '@/lib/tasks'

@@ -10,6 +10,7 @@
 // and the digest hour are Karachi hours, not the browser's.
 
 import { useCallback, useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { LEAD_TIME_CHOICES, leadTimeLabel, hourLabel, type ReminderPrefs } from '@/lib/reminders'
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
@@ -69,7 +70,7 @@ export default function ReminderSettings({ onClose }: { onClose: () => void }) {
           {saving && <span className="text-[10px] text-gray-400">saving…</span>}
           <button onClick={onClose} aria-label="Close"
             className="ml-auto p-1 rounded-md text-gray-400 hover:text-gray-800 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
-            ✕
+            <X size={13} strokeWidth={2} aria-hidden />
           </button>
         </header>
 

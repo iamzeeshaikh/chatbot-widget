@@ -35,14 +35,6 @@ export const TASK_TYPE_LABEL: Record<TaskType, string> = {
   other: 'Other',
 }
 
-export const TASK_TYPE_ICON: Record<TaskType, string> = {
-  call: '📞',
-  email: '✉️',
-  follow_up: '🔁',
-  design: '🎨',
-  other: '📌',
-}
-
 // Same reasoning as CRM_STAGE_STYLE: these are the -100/-300/-700 Tailwind
 // shades globals.css remaps for dark mode. A hand-picked hex would be the one
 // thing that goes dark-on-dark when the theme is flipped.
