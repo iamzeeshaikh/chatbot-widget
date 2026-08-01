@@ -29,13 +29,14 @@ import {
 import {
   CRM_TASK_ROLE, parseCrmTask, byDueAsc, byCompletedDesc, type CrmTaskEntry,
 } from './tasks'
+import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 
 export type LeadKind = 'chat' | 'quote' | 'checkout'
 
 export interface TimelineEvent {
   id: string
   at: string
-  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task'
+  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task' | 'email'
   group: 'messages' | 'notes' | 'stage' | 'system' | 'tasks'
   actor: string
   title: string
@@ -47,6 +48,8 @@ export interface TimelineEvent {
   /** Set on `task` events so the timeline can badge them by type. */
   taskType?: CrmTaskEntry['type']
   taskDone?: boolean
+  /** Set on `email` events — the full sent message, expandable in the timeline. */
+  email?: CrmEmailEntry
 }
 
 export interface RelatedLead {
@@ -211,6 +214,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const overrides = new Map<string, string>()
   const notesById = new Map<string, CrmNoteEntry>()
   const tasksById = new Map<string, CrmTaskEntry>()
+  const emailsSent: CrmEmailEntry[] = []
   const authorByAt = new Map<string, string>()
   // Setting a stage from this page writes a crm_stage row AND a legacy
   // lead_status row sharing one created_at, so Billing stays in sync. Collect
@@ -281,6 +285,13 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
         if (t) tasksById.set(t.id, t) // same rule: newest revision of each task wins
         break
       }
+      case CRM_EMAIL_ROLE: {
+        // An email we sent is a contact, so it counts as an outbound touch just
+        // like an agent reply — it moves "last contacted" and feeds follow-ups.
+        const e = parseCrmEmail(row.message)
+        if (e) emailsSent.push(e)
+        break
+      }
     }
   }
 
@@ -313,6 +324,15 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       outboundAt.push(asUtcIso(m.created_at) as string)
       lastContactedAt = asUtcIso(m.created_at)
     }
+  }
+
+  // An email we sent is an outbound touch too: it moves "last contacted" and
+  // counts toward the follow-up tally, exactly like an agent reply in chat.
+  for (const e of emailsSent) {
+    const at = asUtcIso(e.at)
+    if (!at) continue
+    outboundAt.push(at)
+    if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
   }
 
   const createdAt = asUtcIso(capturedAt ?? lead?.created_at ?? logs[0]?.created_at ?? null)
@@ -394,6 +414,17 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
         title: n.deleted ? 'Note deleted' : n.edited_at ? 'Note edited' : 'Note added',
         body: n.deleted ? undefined : n.body, noteId: n.id, editedAt: n.edited_at,
       })
+      continue
+    }
+    if (row.role === CRM_EMAIL_ROLE) {
+      const e = parseCrmEmail(row.message)
+      if (e) {
+        push({
+          id: `email-${row.id ?? at}`, at, kind: 'email', group: 'messages',
+          actor: AGENT_LABEL(e.sentBy), title: `Emailed ${e.to}`,
+          body: e.subject, email: e,
+        })
+      }
       continue
     }
     if (row.role === CRM_TASK_ROLE) {

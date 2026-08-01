@@ -32,6 +32,7 @@ import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
+import EmailComposer from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 
 export default function LeadRecordPage() {
@@ -48,6 +49,7 @@ export default function LeadRecordPage() {
   // rest of the list.
   const [taskBusy, setTaskBusy] = useState<Set<string>>(new Set())
   const [taskError, setTaskError] = useState('')
+  const [composing, setComposing] = useState(false)
 
   // The theme is a `dark` class on <html>, persisted by the dashboard header
   // toggle. A hard load of this route has to re-apply it or the page opens
@@ -344,7 +346,10 @@ export default function LeadRecordPage() {
                 btn?.scrollIntoView({ block: 'center', behavior: 'smooth' })
                 btn?.click()
               }} />
-              <QuickAction icon={Mail} label="Email" disabled hint="Coming soon" />
+              <QuickAction icon={Mail} label="Email"
+                hint={record.contact.email ? 'Email this lead from your Gmail' : 'Add an email address first'}
+                disabled={!record.contact.email}
+                onClick={() => setComposing(true)} />
               <QuickAction icon={Phone} label="Call" disabled hint="Coming soon" />
             </div>
           </Card>
@@ -591,6 +596,18 @@ export default function LeadRecordPage() {
           </Card>
         </div>
       </main>
+
+      {composing && (
+        <EmailComposer
+          leadId={record.id}
+          leadEmail={record.contact.email}
+          leadName={record.contact.name}
+          siteId={record.siteId}
+          siteName={record.siteName}
+          onClose={() => setComposing(false)}
+          onSent={() => load()}
+        />
+      )}
     </div>
   )
 }

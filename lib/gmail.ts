@@ -1,0 +1,375 @@
+// Gmail send-as-the-agent, over the Gmail REST API.
+//
+// ── Why its own OAuth ────────────────────────────────────────────────────────
+// This flow is deliberately standalone: its own route, its own scopes
+// (gmail.send + gmail.settings.basic) and its own consent screen. It is not
+// layered onto any other Google integration, so revoking mail access can never
+// take anything else down with it. (There is, as it happens, no other Google
+// OAuth in this repo today.)
+//
+// ── No DDL ───────────────────────────────────────────────────────────────────
+// Tokens live where every other piece of per-member state lives: a chat_logs
+// control row on the reserved zeeops-crm site, newest row per email wins.
+//
+// ── Tokens are secrets ───────────────────────────────────────────────────────
+// A refresh token is a standing permission to send mail as that person, so it is
+// NEVER stored in plaintext. It is sealed with AES-256-GCM under GMAIL_TOKEN_KEY,
+// which lives only in the environment. A dump of chat_logs therefore hands over
+// nothing usable. The plaintext token never leaves this module — no route
+// returns it, and it is never logged.
+
+import { createCipheriv, createDecipheriv, randomBytes, createHash, createHmac, timingSafeEqual } from 'crypto'
+import { supabase } from './supabase'
+import { REMINDER_SITE } from './reminders'
+
+export const GMAIL_TOKEN_ROLE = 'gmail_token'
+export const GMAIL_TOKEN_SESSION = 'zeeops-crm-gmail'
+
+export const GMAIL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.settings.basic',
+] as const
+
+const TOKEN_URL = 'https://oauth2.googleapis.com/token'
+const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
+
+// ── config ───────────────────────────────────────────────────────────────────
+export interface GoogleConfig { clientId: string; clientSecret: string; redirectUri: string }
+
+export function googleConfig(origin: string): GoogleConfig | null {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET
+  if (!clientId || !clientSecret) return null
+  // The redirect URI is derived from the request's own origin so the same
+  // credentials work on localhost and on every deployed alias, but it must be
+  // registered in the Google console for each.
+  return { clientId, clientSecret, redirectUri: `${origin}/api/google/gmail/callback` }
+}
+
+/** Human-readable reason the integration cannot run, or null when it can. */
+export function configProblem(): string | null {
+  if (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
+    return 'Google OAuth is not configured on the server (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET).'
+  }
+  if (!process.env.GMAIL_TOKEN_KEY) {
+    return 'GMAIL_TOKEN_KEY is not set, so refresh tokens cannot be encrypted at rest.'
+  }
+  return null
+}
+
+// ── encryption ───────────────────────────────────────────────────────────────
+function key(): Buffer {
+  const raw = process.env.GMAIL_TOKEN_KEY
+  if (!raw) throw new Error('GMAIL_TOKEN_KEY is not set')
+  // Accept a 32-byte key in hex or base64; anything else is hashed to 32 bytes
+  // so a passphrase still yields a valid key rather than throwing at send time.
+  if (/^[0-9a-f]{64}$/i.test(raw)) return Buffer.from(raw, 'hex')
+  const b = Buffer.from(raw, 'base64')
+  if (b.length === 32) return b
+  return createHash('sha256').update(raw).digest()
+}
+
+function seal(plain: string): string {
+  const iv = randomBytes(12)
+  const c = createCipheriv('aes-256-gcm', key(), iv)
+  const enc = Buffer.concat([c.update(plain, 'utf8'), c.final()])
+  return `${iv.toString('base64url')}.${c.getAuthTag().toString('base64url')}.${enc.toString('base64url')}`
+}
+
+function open(sealed: string): string | null {
+  try {
+    const [iv, tag, data] = sealed.split('.')
+    if (!iv || !tag || !data) return null
+    const d = createDecipheriv('aes-256-gcm', key(), Buffer.from(iv, 'base64url'))
+    d.setAuthTag(Buffer.from(tag, 'base64url'))
+    return Buffer.concat([d.update(Buffer.from(data, 'base64url')), d.final()]).toString('utf8')
+  } catch {
+    // A wrong or rotated key must read as "not connected", not crash a page.
+    return null
+  }
+}
+
+// ── stored connection ────────────────────────────────────────────────────────
+interface StoredToken {
+  email: string
+  enc: string
+  connectedAt: string
+  scope: string
+  /** Set when Google refused the refresh token — the agent must reconnect. */
+  revoked?: boolean
+  revokedReason?: string
+}
+
+export interface GmailConnection {
+  email: string
+  connectedAt: string
+  revoked: boolean
+  revokedReason?: string
+}
+
+async function writeToken(row: StoredToken): Promise<void> {
+  await supabase.from('chat_logs').insert({
+    site_id: REMINDER_SITE,
+    session_id: GMAIL_TOKEN_SESSION,
+    role: GMAIL_TOKEN_ROLE,
+    message: JSON.stringify(row),
+  })
+}
+
+async function readToken(email: string): Promise<StoredToken | null> {
+  const { data } = await supabase
+    .from('chat_logs')
+    .select('message, created_at')
+    .eq('role', GMAIL_TOKEN_ROLE)
+    .eq('session_id', GMAIL_TOKEN_SESSION)
+    .order('created_at', { ascending: false })
+    .limit(400)
+  const target = email.toLowerCase()
+  for (const r of data ?? []) {
+    try {
+      const o = JSON.parse(r.message) as StoredToken
+      if (o?.email?.toLowerCase() === target) return o // descending → newest first
+    } catch { /* skip */ }
+  }
+  return null
+}
+
+export async function connectionFor(email: string): Promise<GmailConnection | null> {
+  const t = await readToken(email)
+  if (!t) return null
+  return { email: t.email, connectedAt: t.connectedAt, revoked: !!t.revoked, revokedReason: t.revokedReason }
+}
+
+export async function saveConnection(email: string, refreshToken: string, scope: string): Promise<void> {
+  await writeToken({ email, enc: seal(refreshToken), connectedAt: new Date().toISOString(), scope })
+}
+
+export async function markRevoked(email: string, reason: string): Promise<void> {
+  const t = await readToken(email)
+  await writeToken({
+    email,
+    enc: t?.enc ?? '',
+    connectedAt: t?.connectedAt ?? new Date().toISOString(),
+    scope: t?.scope ?? '',
+    revoked: true,
+    revokedReason: reason,
+  })
+}
+
+export async function disconnect(email: string): Promise<void> {
+  await markRevoked(email, 'Disconnected by the agent')
+}
+
+// ── OAuth state ──────────────────────────────────────────────────────────────
+// Signed with the app's own AUTH_SECRET and carrying the member's email, so the
+// callback can prove the code it receives belongs to the session that began the
+// flow (CSRF) without any server-side store. It also ferries the page to return
+// to afterwards.
+export function signState(email: string, back: string): string {
+  const payload = Buffer.from(JSON.stringify({ e: email, b: back, t: Date.now() })).toString('base64url')
+  return `${payload}.${createHmac('sha256', stateSecret()).update(payload).digest('base64url')}`
+}
+
+export function verifyState(state: string): { email: string; back: string } | null {
+  const [payload, sig] = (state ?? '').split('.')
+  if (!payload || !sig) return null
+  const expect = createHmac('sha256', stateSecret()).update(payload).digest('base64url')
+  // Constant-time compare on equal-length buffers.
+  const a = Buffer.from(sig), b = Buffer.from(expect)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  try {
+    const o = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    // Ten minutes is plenty for a consent screen and keeps a leaked link short-lived.
+    if (typeof o?.t !== 'number' || Date.now() - o.t > 10 * 60 * 1000) return null
+    return { email: String(o.e ?? ''), back: typeof o.b === 'string' ? o.b : '/' }
+  } catch {
+    return null
+  }
+}
+
+function stateSecret(): string {
+  return process.env.AUTH_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'dev-secret'
+}
+
+// ── OAuth ────────────────────────────────────────────────────────────────────
+export function consentUrl(cfg: GoogleConfig, state: string, loginHint?: string): string {
+  const p = new URLSearchParams({
+    client_id: cfg.clientId,
+    redirect_uri: cfg.redirectUri,
+    response_type: 'code',
+    scope: GMAIL_SCOPES.join(' '),
+    // offline + consent is what actually yields a refresh token; without
+    // prompt=consent Google withholds it on a repeat authorisation and the
+    // connection silently cannot be renewed later.
+    access_type: 'offline',
+    prompt: 'consent',
+    include_granted_scopes: 'false',
+    state,
+  })
+  if (loginHint) p.set('login_hint', loginHint)
+  return `${AUTH_URL}?${p.toString()}`
+}
+
+export interface TokenExchange { accessToken: string; refreshToken: string | null; scope: string; email: string | null }
+
+export async function exchangeCode(cfg: GoogleConfig, code: string): Promise<TokenExchange> {
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code, client_id: cfg.clientId, client_secret: cfg.clientSecret,
+      redirect_uri: cfg.redirectUri, grant_type: 'authorization_code',
+    }),
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(j.error_description || j.error || 'Google rejected the authorisation code')
+
+  // The id_token carries the account that actually consented. Only the payload
+  // is read (to learn which mailbox was connected); it is not trusted for
+  // authorisation, which comes from our own session.
+  let email: string | null = null
+  if (typeof j.id_token === 'string') {
+    try {
+      const payload = JSON.parse(Buffer.from(j.id_token.split('.')[1], 'base64url').toString('utf8'))
+      if (typeof payload?.email === 'string') email = payload.email
+    } catch { /* leave null */ }
+  }
+  return { accessToken: j.access_token, refreshToken: j.refresh_token ?? null, scope: j.scope ?? '', email }
+}
+
+export class GmailAuthError extends Error {
+  constructor(message: string) { super(message); this.name = 'GmailAuthError' }
+}
+
+/** Fresh access token for an agent, or a clear error saying to reconnect. */
+async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<string> {
+  const t = await readToken(email)
+  if (!t) throw new GmailAuthError('Gmail is not connected for this account. Connect it to send email.')
+  if (t.revoked) throw new GmailAuthError(t.revokedReason || 'Gmail access was revoked. Reconnect to send email.')
+  const refresh = open(t.enc)
+  if (!refresh) {
+    throw new GmailAuthError('The stored Gmail credential could not be read. Reconnect Gmail to send email.')
+  }
+
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: cfg.clientId, client_secret: cfg.clientSecret,
+      refresh_token: refresh, grant_type: 'refresh_token',
+    }),
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    // invalid_grant means the user revoked access or changed their password.
+    // Record it so the UI can say "reconnect" instead of retrying forever.
+    const reason = j.error === 'invalid_grant'
+      ? 'Google has revoked this Gmail connection (access withdrawn or password changed). Reconnect to send email.'
+      : `Google refused to refresh the Gmail token: ${j.error_description || j.error || res.status}`
+    await markRevoked(email, reason)
+    throw new GmailAuthError(reason)
+  }
+  return j.access_token as string
+}
+
+// ── verified aliases ─────────────────────────────────────────────────────────
+export interface SendAsAlias {
+  email: string
+  displayName: string
+  isPrimary: boolean
+  isDefault: boolean
+}
+
+// The list Google itself considers verified. The client is never trusted for
+// this: a from-address is checked against THIS list at send time, so an agent
+// cannot spoof an address Google has not confirmed they own.
+export async function verifiedAliases(email: string, cfg: GoogleConfig): Promise<SendAsAlias[]> {
+  const token = await accessTokenFor(email, cfg)
+  const res = await fetch(`${API}/settings/sendAs`, { headers: { Authorization: `Bearer ${token}` } })
+  if (res.status === 401 || res.status === 403) {
+    throw new GmailAuthError('Gmail refused the request. Reconnect Gmail and grant the alias permission.')
+  }
+  if (!res.ok) throw new Error(`Could not read your Gmail aliases (${res.status})`)
+  const j = await res.json()
+  return (j.sendAs ?? [])
+    .filter((a: { verificationStatus?: string; isPrimary?: boolean }) =>
+      // The primary address needs no verification; every alias must be
+      // 'accepted' before Google will let it be used as a From.
+      a.isPrimary === true || a.verificationStatus === 'accepted')
+    .map((a: { sendAsEmail: string; displayName?: string; isPrimary?: boolean; isDefault?: boolean }) => ({
+      email: a.sendAsEmail,
+      displayName: a.displayName ?? '',
+      isPrimary: a.isPrimary === true,
+      isDefault: a.isDefault === true,
+    }))
+}
+
+// ── sending ──────────────────────────────────────────────────────────────────
+export interface OutgoingEmail {
+  from: string
+  fromName?: string
+  to: string
+  cc?: string
+  subject: string
+  body: string
+}
+
+export interface SentResult { id: string; threadId: string; messageId: string }
+
+/** RFC 5322 with a UTF-8 body. Headers are encoded so non-ASCII names survive. */
+function buildMime(m: OutgoingEmail, messageId: string): string {
+  const enc = (s: string) => (/^[\x20-\x7E]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s, 'utf8').toString('base64')}?=`)
+  // Strip CR/LF from header values — an unescaped newline in a subject is a
+  // header-injection vector.
+  const h = (s: string) => s.replace(/[\r\n]+/g, ' ').trim()
+  const from = m.fromName ? `${enc(h(m.fromName))} <${h(m.from)}>` : h(m.from)
+
+  const lines = [
+    `From: ${from}`,
+    `To: ${h(m.to)}`,
+    ...(m.cc ? [`Cc: ${h(m.cc)}`] : []),
+    `Subject: ${enc(h(m.subject))}`,
+    `Message-ID: ${messageId}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(m.body, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n'),
+  ]
+  return lines.join('\r\n')
+}
+
+export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: OutgoingEmail): Promise<SentResult> {
+  const token = await accessTokenFor(agentEmail, cfg)
+
+  // Verify the From against Google's own list on every send — the composer's
+  // dropdown is a convenience, not the authority.
+  const aliases = await verifiedAliases(agentEmail, cfg)
+  const match = aliases.find((a) => a.email.toLowerCase() === m.from.trim().toLowerCase())
+  if (!match) {
+    throw new Error(`"${m.from}" is not a verified send-as address on your Google account.`)
+  }
+
+  // A Message-ID we generate ourselves, so a future inbound reply can be tied
+  // back to this exact send via its In-Reply-To/References header (Phase 6).
+  const domain = m.from.split('@')[1] || 'zeeops.dev'
+  const messageId = `<${Date.now().toString(36)}.${randomBytes(8).toString('hex')}@${domain}>`
+
+  const raw = Buffer.from(buildMime({ ...m, fromName: m.fromName || match.displayName }, messageId), 'utf8')
+    .toString('base64url')
+
+  const res = await fetch(`${API}/messages/send`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw }),
+  })
+  const j = await res.json().catch(() => ({}))
+  if (res.status === 401 || res.status === 403) {
+    throw new GmailAuthError(j.error?.message || 'Gmail refused to send. Reconnect Gmail and try again.')
+  }
+  if (!res.ok) throw new Error(j.error?.message || `Gmail rejected the message (${res.status})`)
+  if (!j.id) throw new Error('Gmail did not confirm the send.')
+
+  return { id: j.id, threadId: j.threadId ?? j.id, messageId }
+}

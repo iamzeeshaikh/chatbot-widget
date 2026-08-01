@@ -17,8 +17,9 @@
 import type { LeadStatus } from './leadstatus'
 import { CRM_TASK_ROLE } from './tasks'
 import { CRM_PREFS_ROLE, CRM_REMINDER_ROLE } from './reminders'
+import { CRM_EMAIL_ROLE } from './crmemail'
 
-export { CRM_TASK_ROLE, CRM_PREFS_ROLE, CRM_REMINDER_ROLE }
+export { CRM_TASK_ROLE, CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE }
 
 export const CRM_STAGE_ROLE = 'crm_stage'
 export const CRM_NOTE_ROLE = 'crm_note'
@@ -39,7 +40,7 @@ export const CRM_VALUE_ROLE = 'crm_value'
 // the previews and the message counts. One entry, both protections.
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
-  CRM_PREFS_ROLE, CRM_REMINDER_ROLE,
+  CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

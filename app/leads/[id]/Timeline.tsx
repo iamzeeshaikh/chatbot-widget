@@ -17,7 +17,7 @@
 import { useMemo, useState } from 'react'
 import {
   Sparkles, MessageSquare, StickyNote, Target, UserCheck, Paperclip,
-  Pencil, Banknote, CircleCheck, History, type LucideIcon,
+  Pencil, Banknote, CircleCheck, History, Send, ChevronDown, ChevronRight, type LucideIcon,
 } from 'lucide-react'
 import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
@@ -48,6 +48,7 @@ const ICON: Record<TimelineEvent['kind'], LucideIcon> = {
   field: Pencil,
   value: Banknote,
   task: CircleCheck,
+  email: Send,
 }
 
 // Accent per event type. Saturated mid-tones, chosen to read on both themes —
@@ -55,6 +56,7 @@ const ICON: Record<TimelineEvent['kind'], LucideIcon> = {
 function accent(e: TimelineEvent): string {
   if (e.kind === 'stage' && e.stage) return CRM_STAGE_DOT[e.stage]
   switch (e.kind) {
+    case 'email': return '#0284c7'
     case 'task': return e.taskDone ? '#22c55e' : '#8b5cf6'
     case 'note': return '#6366f1'
     case 'created': return '#22c55e'
@@ -218,6 +220,8 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                       </a>
                     ) : e.kind === 'value' && e.body ? (
                       <p className="mt-0.5 text-xs text-gray-600 tabular-nums">{describeValue(e.body, currency)}</p>
+                    ) : e.kind === 'email' && e.email ? (
+                      <EmailEntry entry={e.email} />
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
                         {e.body}
@@ -233,6 +237,32 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
             )
           })}
         </ol>
+      )}
+    </div>
+  )
+}
+
+// A sent email: subject and snippet by default, the whole message one click
+// away. The full body is already on the record, so opening it costs no request.
+function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email']> }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mt-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5">
+      <p className="text-xs font-semibold text-gray-900 break-words">{entry.subject}</p>
+      <p className="text-[10px] text-gray-500 mt-0.5 break-words">
+        from {entry.from}{entry.cc ? ` · cc ${entry.cc}` : ''}
+      </p>
+      {open ? (
+        <p className="mt-1.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{entry.body}</p>
+      ) : (
+        <p className="mt-1 text-xs text-gray-700 break-words leading-snug">{entry.snippet}</p>
+      )}
+      {entry.body.trim() !== entry.snippet && (
+        <button onClick={() => setOpen((v) => !v)}
+          className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-sky-700 hover:text-sky-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+          {open ? <ChevronDown size={9} strokeWidth={2.5} aria-hidden /> : <ChevronRight size={9} strokeWidth={2.5} aria-hidden />}
+          {open ? 'Hide full email' : 'Show full email'}
+        </button>
       )}
     </div>
   )
