@@ -21,6 +21,9 @@ export interface GmailStatus {
   reason?: string | null
   needsReconnect?: boolean
   connectedAt?: string
+  /** False when the consent predates reply capture — sending still works. */
+  canReadReplies?: boolean
+  replyCaptureReason?: string | null
 }
 
 interface Draft { from: string; to: string; cc: string; subject: string; body: string }
@@ -178,6 +181,24 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
           </div>
         ) : (
           <>
+            {/* Connected, but the consent cannot read replies. Sending is fine,
+                so this warns rather than blocking — the old behaviour showed a
+                wholly healthy composer while replies silently never arrived. */}
+            {status.canReadReplies === false && (
+              <div className="mx-3 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2">
+                <p className="flex items-start gap-1.5 text-[11px] text-amber-900">
+                  <TriangleAlert size={12} strokeWidth={2} className="shrink-0 mt-px" aria-hidden />
+                  <span>
+                    <b>Replies will not appear on this record.</b>{' '}
+                    {status.replyCaptureReason ?? 'This Gmail connection predates reply capture.'}
+                  </span>
+                </p>
+                <a href={connectHref}
+                  className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                  <Link2 size={11} strokeWidth={2} aria-hidden /> Reconnect Gmail
+                </a>
+              </div>
+            )}
             <div className="p-3 space-y-2 overflow-y-auto">
               <Row label="From">
                 <select value={draft.from} onChange={(e) => set({ from: e.target.value })}

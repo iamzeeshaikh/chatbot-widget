@@ -52,6 +52,10 @@ export default function LeadRecordPage() {
   const [taskBusy, setTaskBusy] = useState<Set<string>>(new Set())
   const [taskError, setTaskError] = useState('')
   const [composing, setComposing] = useState(false)
+  // Whether THIS agent's Gmail consent can read replies. Only consulted on a
+  // record that has actually sent an email — a lead with no email thread has no
+  // reply to miss, and warning there would be noise on every record.
+  const [replyCaptureOk, setReplyCaptureOk] = useState<boolean | null>(null)
 
   // The theme is a `dark` class on <html>, persisted by the dashboard header
   // toggle. A hard load of this route has to re-apply it or the page opens
@@ -97,6 +101,16 @@ export default function LeadRecordPage() {
     // `load` is defined below; referencing it here is fine because both are
     // stable callbacks created before first render completes.
   }, [record])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const hasSentEmail = !!record?.timeline.some((e) => e.kind === 'email')
+
+  useEffect(() => {
+    if (!hasSentEmail || replyCaptureOk !== null) return
+    fetch('/api/google/gmail/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && d.connected) setReplyCaptureOk(d.canReadReplies !== false) })
+      .catch(() => { /* the banner is an extra, never a blocker */ })
+  }, [hasSentEmail, replyCaptureOk])
 
   const load = useCallback((): Promise<void> => {
     if (!id) return Promise.resolve()
@@ -541,6 +555,19 @@ export default function LeadRecordPage() {
               )}
               {!noteDraft.trim() && <div className="h-2" />}
             </div>
+            {/* This record has an email thread but the connection cannot read
+                replies, so any answer is arriving in Gmail and nowhere here. */}
+            {replyCaptureOk === false && (
+              <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 flex items-start gap-1.5">
+                <TriangleAlert size={12} strokeWidth={2} className="shrink-0 mt-px text-amber-700" aria-hidden />
+                <p className="text-[11px] text-amber-900">
+                  <b>Replies to this lead will not appear below.</b> Your Gmail connection was made before
+                  reply capture existed. Sending still works.{' '}
+                  <a href={`/api/google/gmail/connect?back=${encodeURIComponent(`/leads/${record.id}`)}`}
+                    className="underline font-semibold hover:text-amber-950">Reconnect Gmail</a> to switch it on.
+                </p>
+              </div>
+            )}
             <Timeline events={record.timeline} currency={record.value.currency}
               onEditNote={editNote} onDeleteNote={deleteNote} canManageNote={canManageNote} />
           </Card>
