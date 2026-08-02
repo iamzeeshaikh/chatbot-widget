@@ -31,13 +31,17 @@ import {
   CRM_TASK_ROLE, parseCrmTask, byDueAsc, byCompletedDesc, type CrmTaskEntry,
 } from './tasks'
 import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
+import {
+  CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
+  type CrmEmailInEntry,
+} from './emailreply'
 
 export type LeadKind = 'chat' | 'quote' | 'checkout'
 
 export interface TimelineEvent {
   id: string
   at: string
-  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task' | 'email'
+  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task' | 'email' | 'email_in'
   group: 'messages' | 'notes' | 'stage' | 'system' | 'tasks'
   actor: string
   title: string
@@ -51,6 +55,10 @@ export interface TimelineEvent {
   taskDone?: boolean
   /** Set on `email` events — the full sent message, expandable in the timeline. */
   email?: CrmEmailEntry
+  /** Set on `email_in` events — the customer's reply. */
+  inbound?: CrmEmailInEntry
+  /** True while nobody has opened this reply. */
+  unread?: boolean
 }
 
 export interface RelatedLead {
@@ -85,6 +93,10 @@ export interface LeadRecord {
   firstSeenAt: string | null
   lastActivityAt: string | null
   lastContactedAt: string | null
+  /** When the customer last emailed back, if ever. */
+  lastReplyAt: string | null
+  /** Replies nobody has opened yet — what makes a lead "waiting on us". */
+  unreadReplies: number
   country: string | null
   referrer: string | null
   tags: string[]
@@ -216,6 +228,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const notesById = new Map<string, CrmNoteEntry>()
   const tasksById = new Map<string, CrmTaskEntry>()
   const emailsSent: CrmEmailEntry[] = []
+  const emailsIn = new Map<string, CrmEmailInEntry>()   // gmailId -> reply
+  const readIds = new Set<string>()
   const authorByAt = new Map<string, string>()
   // Setting a stage from this page writes a crm_stage row AND a legacy
   // lead_status row sharing one created_at, so Billing stays in sync. Collect
@@ -293,6 +307,18 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
         if (e) emailsSent.push(e)
         break
       }
+      case CRM_EMAIL_IN_ROLE: {
+        // Deduped on Gmail's message id, so a re-captured reply cannot appear
+        // twice even if the sweep wrote it more than once.
+        const e = parseCrmEmailIn(row.message)
+        if (e) emailsIn.set(e.gmailId, e)
+        break
+      }
+      case CRM_EMAIL_READ_ROLE: {
+        const r = parseCrmEmailRead(row.message)
+        if (r) readIds.add(r.gmailId)
+        break
+      }
     }
   }
 
@@ -335,6 +361,18 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     outboundAt.push(at)
     if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
   }
+
+  // A customer reply is deliberately NOT an outbound touch: `lastContactedAt`
+  // measures OUR outreach and feeds the follow-up cadence, so folding an
+  // inbound message into it would make a lead we have ignored look freshly
+  // worked. The reply gets its own timestamp instead, and the unread count is
+  // what says the ball is in our court.
+  let lastReplyAt: string | null = null
+  for (const e of emailsIn.values()) {
+    const at = asUtcIso(e.at)
+    if (at && (!lastReplyAt || at > lastReplyAt)) lastReplyAt = at
+  }
+  const unreadReplies = [...emailsIn.values()].filter((e) => !readIds.has(e.gmailId)).length
 
   const createdAt = asUtcIso(capturedAt ?? lead?.created_at ?? logs[0]?.created_at ?? null)
   const firstSeenAt = asUtcIso(visRes.data?.created_at ?? logs[0]?.created_at ?? lead?.created_at ?? null)
@@ -428,6 +466,19 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       }
       continue
     }
+    if (row.role === CRM_EMAIL_IN_ROLE) {
+      const e = parseCrmEmailIn(row.message)
+      // Only the newest row per gmailId reaches the timeline, so a reply the
+      // sweep happened to write twice still appears once.
+      if (e && emailsIn.get(e.gmailId) === e) {
+        push({
+          id: `email-in-${e.gmailId}`, at, kind: 'email_in', group: 'messages',
+          actor: e.fromName || e.from, title: 'Replied by email',
+          body: e.subject, inbound: e, unread: !readIds.has(e.gmailId),
+        })
+      }
+      continue
+    }
     if (row.role === CRM_TASK_ROLE) {
       const t = parseCrmTask(row.message)
       if (!t) continue
@@ -501,6 +552,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     firstSeenAt,
     lastActivityAt,
     lastContactedAt,
+    lastReplyAt,
+    unreadReplies,
     country: visRes.data?.country ?? null,
     referrer: referrerOf(visRes.data?.page_url ?? null),
     tags,

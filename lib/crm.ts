@@ -18,8 +18,10 @@ import type { LeadStatus } from './leadstatus'
 import { CRM_TASK_ROLE } from './tasks'
 import { CRM_PREFS_ROLE, CRM_REMINDER_ROLE } from './reminders'
 import { CRM_EMAIL_ROLE } from './crmemail'
+import { CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE } from './emailreply'
 
 export { CRM_TASK_ROLE, CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE }
+export { CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE }
 
 export const CRM_STAGE_ROLE = 'crm_stage'
 export const CRM_NOTE_ROLE = 'crm_note'
@@ -41,6 +43,7 @@ export const CRM_VALUE_ROLE = 'crm_value'
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
+  CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

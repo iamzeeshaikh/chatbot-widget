@@ -41,6 +41,7 @@ export default function LeadRecordPage() {
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : ''
 
   const [record, setRecord] = useState<LeadRecord | null>(null)
+  const [markingRead, setMarkingRead] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ok' | 'forbidden' | 'missing' | 'error'>('loading')
   const [me, setMe] = useState('')
   const [noteDraft, setNoteDraft] = useState('')
@@ -73,6 +74,30 @@ export default function LeadRecordPage() {
   // Never flips the status back to `loading` — the skeleton is shown from the
   // initial state and from the derived id mismatch below, so a background
   // refresh can't blank out a record the agent is looking at.
+  // Marking read is explicit rather than "seen on load": an agent who opens a
+  // record to check the phone number has not dealt with the reply, and having
+  // the badge vanish underneath them would lose the one signal that says this
+  // lead still needs an answer.
+  const markRepliesRead = useCallback(async () => {
+    if (!record) return
+    const ids = record.timeline
+      .filter((e) => e.kind === 'email_in' && e.unread && e.inbound)
+      .map((e) => e.inbound!.gmailId)
+    if (ids.length === 0) return
+    setMarkingRead(true)
+    try {
+      await fetch(`/api/leads/${encodeURIComponent(record.id)}/email/read`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gmailIds: ids }),
+      })
+      await load()
+    } finally {
+      setMarkingRead(false)
+    }
+    // `load` is defined below; referencing it here is fine because both are
+    // stable callbacks created before first render completes.
+  }, [record])   // eslint-disable-line react-hooks/exhaustive-deps
+
   const load = useCallback((): Promise<void> => {
     if (!id) return Promise.resolve()
     return fetch(`/api/leads/${encodeURIComponent(id)}`)
@@ -294,6 +319,17 @@ export default function LeadRecordPage() {
           </div>
 
           <div className="ml-auto flex items-center gap-2 shrink-0">
+            {/* The one badge that means "this lead is waiting on YOU". Clicking
+                it marks the replies read; it then disappears from here and from
+                the pipeline. */}
+            {record.unreadReplies > 0 && (
+              <button onClick={markRepliesRead} disabled={markingRead}
+                title={`${record.unreadReplies} unread email repl${record.unreadReplies === 1 ? 'y' : 'ies'} — click to mark read`}
+                className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-violet-600 text-white border border-violet-700 hover:bg-violet-700 transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <Inbox size={11} strokeWidth={2.5} aria-hidden />
+                {markingRead ? 'Marking…' : `${record.unreadReplies} new repl${record.unreadReplies === 1 ? 'y' : 'ies'}`}
+              </button>
+            )}
             <GlobalSearch compact />
             <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-1"
               title="Counted automatically from agent replies — a burst of replies in one sitting counts as one follow-up">

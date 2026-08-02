@@ -9,7 +9,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowDown, ArrowUp, ChevronsUpDown, ListTodo, AlertTriangle } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronsUpDown, ListTodo, AlertTriangle, Inbox } from 'lucide-react'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
 import { formatMoney, type CrmStage } from '@/lib/crm'
 import type { PipelineCard } from '@/lib/pipeline'
@@ -209,9 +209,16 @@ export default function ListView({
                       </span>
                     </td>
                     <td className="px-2.5 py-1.5 text-right">
-                      {card.openTasks === 0 ? (
+                      {card.unreadReplies > 0 && (
+                        <span title={`${card.unreadReplies} unread email repl${card.unreadReplies === 1 ? 'y' : 'ies'} — waiting on you`}
+                          className="mr-1 inline-flex items-center gap-0.5 text-[10px] font-bold px-1 rounded border tabular-nums bg-violet-600 text-white border-violet-700">
+                          <Inbox size={8} strokeWidth={2.5} aria-hidden />
+                          {card.unreadReplies}
+                        </span>
+                      )}
+                      {card.openTasks === 0 && card.unreadReplies === 0 ? (
                         <span className="text-[11px] text-gray-300">—</span>
-                      ) : (
+                      ) : card.openTasks > 0 ? (
                         <span title={card.overdueTasks > 0 ? `${card.overdueTasks} overdue of ${card.openTasks} open` : `${card.openTasks} open`}
                           className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1 rounded border tabular-nums ${
                             card.overdueTasks > 0 ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-200 text-gray-600 border-gray-300'
@@ -221,7 +228,7 @@ export default function ListView({
                             : <ListTodo size={8} strokeWidth={2.5} aria-hidden />}
                           {card.openTasks}
                         </span>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 ))}

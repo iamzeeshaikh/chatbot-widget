@@ -25,10 +25,29 @@ import { REMINDER_SITE } from './reminders'
 export const GMAIL_TOKEN_ROLE = 'gmail_token'
 export const GMAIL_TOKEN_SESSION = 'zeeops-crm-gmail'
 
+// REQUIRED to connect at all. Deliberately unchanged by Phase 6: an agent who
+// consented before it shipped keeps sending without interruption.
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.settings.basic',
 ] as const
+
+// ADDITIONAL, and optional. Reading a customer's reply needs a read scope, and
+// the Gmail API has no per-thread one: gmail.metadata returns headers without
+// bodies, and nothing narrower than gmail.readonly exists. So the restriction
+// has to be enforced by us — the sweep only ever fetches threadIds we recorded
+// when WE sent something, and never lists the mailbox (see lib/emailreply.ts).
+//
+// It is requested alongside the two required scopes but NOT required: a
+// connection missing it still sends, and reply capture reports itself as
+// needing a reconnect rather than silently doing nothing.
+export const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+
+export const ALL_GMAIL_SCOPES = [...GMAIL_SCOPES, GMAIL_READ_SCOPE] as const
+
+export function hasReadScope(scope: string | null | undefined): boolean {
+  return (scope ?? '').split(/\s+/).includes(GMAIL_READ_SCOPE)
+}
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -106,6 +125,8 @@ export interface GmailConnection {
   connectedAt: string
   revoked: boolean
   revokedReason?: string
+  /** Whether this consent included the read scope, i.e. can capture replies. */
+  canRead: boolean
 }
 
 async function writeToken(row: StoredToken): Promise<void> {
@@ -138,7 +159,10 @@ async function readToken(email: string): Promise<StoredToken | null> {
 export async function connectionFor(email: string): Promise<GmailConnection | null> {
   const t = await readToken(email)
   if (!t) return null
-  return { email: t.email, connectedAt: t.connectedAt, revoked: !!t.revoked, revokedReason: t.revokedReason }
+  return {
+    email: t.email, connectedAt: t.connectedAt, revoked: !!t.revoked,
+    revokedReason: t.revokedReason, canRead: hasReadScope(t.scope),
+  }
 }
 
 export async function saveConnection(email: string, refreshToken: string, scope: string): Promise<void> {
@@ -198,7 +222,7 @@ export function consentUrl(cfg: GoogleConfig, state: string, loginHint?: string)
     client_id: cfg.clientId,
     redirect_uri: cfg.redirectUri,
     response_type: 'code',
-    scope: GMAIL_SCOPES.join(' '),
+    scope: ALL_GMAIL_SCOPES.join(' '),
     // offline + consent is what actually yields a refresh token; without
     // prompt=consent Google withholds it on a repeat authorisation and the
     // connection silently cannot be renewed later.
@@ -243,7 +267,7 @@ export class GmailAuthError extends Error {
 }
 
 /** Fresh access token for an agent, or a clear error saying to reconnect. */
-async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<string> {
+export async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<string> {
   const t = await readToken(email)
   if (!t) throw new GmailAuthError('Gmail is not connected for this account. Connect it to send email.')
   if (t.revoked) throw new GmailAuthError(t.revokedReason || 'Gmail access was revoked. Reconnect to send email.')
@@ -372,4 +396,105 @@ export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: Outgoi
   if (!j.id) throw new Error('Gmail did not confirm the send.')
 
   return { id: j.id, threadId: j.threadId ?? j.id, messageId }
+}
+
+// ── reading replies (Phase 6) ────────────────────────────────────────────────
+// Fetch ONE thread by the id we recorded when we sent. There is deliberately no
+// list/search helper in this module: the only way to reach a message is to
+// already know the thread we started, so an agent's wider mailbox is
+// unreachable by construction rather than by policy.
+
+export interface InboundMessage {
+  gmailId: string
+  threadId: string
+  messageId: string
+  inReplyTo: string | null
+  from: string
+  to: string
+  subject: string
+  bodyText: string
+  at: string
+  /** Gmail labels — used only to skip our own copy in SENT. */
+  labelIds: string[]
+}
+
+function headerOf(headers: { name: string; value: string }[], name: string): string {
+  const h = headers.find((x) => x.name.toLowerCase() === name.toLowerCase())
+  return h?.value ?? ''
+}
+
+// Walk the MIME tree for the best body. text/plain is strongly preferred: it is
+// what the quote-stripping heuristics are written against, and it avoids having
+// to sanitise arbitrary sender HTML before rendering it.
+function extractBody(payload: unknown): string {
+  const plain = findPart(payload, 'text/plain')
+  if (plain) return plain
+  const html = findPart(payload, 'text/html')
+  return html ? htmlToText(html) : ''
+}
+
+function findPart(node: unknown, mime: string): string | null {
+  if (!node || typeof node !== 'object') return null
+  const p = node as { mimeType?: string; body?: { data?: string }; parts?: unknown[] }
+  if (p.mimeType === mime && p.body?.data) {
+    return Buffer.from(p.body.data, 'base64url').toString('utf8')
+  }
+  for (const child of p.parts ?? []) {
+    const found = findPart(child, mime)
+    if (found) return found
+  }
+  return null
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export class GmailScopeError extends Error {
+  constructor(message: string) { super(message); this.name = 'GmailScopeError' }
+}
+
+/** Every message in one thread we started. Throws rather than returning []. */
+export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadId: string): Promise<InboundMessage[]> {
+  const token = await accessTokenFor(agentEmail, cfg)
+  const res = await fetch(`${API}/threads/${encodeURIComponent(threadId)}?format=full`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 403) {
+    // Sending works, reading does not — the connection predates the read scope.
+    throw new GmailScopeError('Gmail replies need the read permission. Reconnect Gmail to enable reply capture.')
+  }
+  if (res.status === 401) throw new GmailAuthError('Gmail refused the request. Reconnect Gmail.')
+  // A thread the agent deleted permanently: not an error worth alarming about.
+  if (res.status === 404) return []
+  if (!res.ok) throw new Error(`Could not read the Gmail thread (${res.status})`)
+
+  const j = await res.json()
+  return (j.messages ?? []).map((m: {
+    id: string; threadId: string; internalDate?: string; labelIds?: string[]
+    payload?: { headers?: { name: string; value: string }[] }
+  }) => {
+    const headers = m.payload?.headers ?? []
+    return {
+      gmailId: m.id,
+      threadId: m.threadId,
+      messageId: headerOf(headers, 'Message-ID'),
+      inReplyTo: headerOf(headers, 'In-Reply-To') || null,
+      from: headerOf(headers, 'From'),
+      to: headerOf(headers, 'To'),
+      subject: headerOf(headers, 'Subject'),
+      bodyText: extractBody(m.payload),
+      at: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : '',
+      labelIds: m.labelIds ?? [],
+    }
+  })
 }

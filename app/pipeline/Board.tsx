@@ -20,7 +20,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ListTodo, AlertTriangle, User, Building2, GripVertical, Loader2 } from 'lucide-react'
+import { ListTodo, AlertTriangle, User, Building2, GripVertical, Loader2, Inbox } from 'lucide-react'
 import { timeAgo } from '@/lib/datetime'
 import {
   CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, formatMoney, type CrmStage,
@@ -211,6 +211,16 @@ function BoardCard({ card, moving, onDragStart, onDragEnd, onMove }: {
         <span className="text-[9px] text-gray-500 truncate">
           {card.owner ? card.owner.split('@')[0] : 'Unassigned'}
         </span>
+        {/* An unanswered customer reply outranks everything else on the card —
+            it is the one state that means this lead is waiting on US. */}
+        {card.unreadReplies > 0 && (
+          <span
+            title={`${card.unreadReplies} unread email repl${card.unreadReplies === 1 ? 'y' : 'ies'} — waiting on you`}
+            className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold px-1 rounded border tabular-nums bg-violet-600 text-white border-violet-700">
+            <Inbox size={7} strokeWidth={2.5} aria-hidden />
+            {card.unreadReplies}
+          </span>
+        )}
         {/* Likewise: no badge at all when there are no tasks. */}
         {card.openTasks > 0 && (
           <span

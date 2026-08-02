@@ -108,6 +108,29 @@ pattern from that same key — built from the typed digits instead, the wildcard
 a digit that a differently-prefixed stored number does not have, and the row is never
 fetched for Node to verify.
 
+### Inbound email (Phase 6): poll threads we started, never the mailbox
+`lib/emailsweep.ts`, cron `*/10` in `vercel.json`. Reading replies needs
+**`gmail.readonly`** — the Gmail API has no per-thread read scope, and
+`gmail.metadata` returns headers without bodies. The restriction is therefore
+ours to enforce: the sweep only ever calls `fetchThread(threadId)` for a
+`threadId` off a `crm_email` row WE wrote. There is deliberately **no list or
+search helper in `lib/gmail.ts`**, so the wider inbox is unreachable by
+construction rather than by policy. Do not add one.
+
+`GMAIL_SCOPES` (send + settings.basic) stays the *required* set; `GMAIL_READ_SCOPE`
+is requested alongside but optional, so a connection made before Phase 6 keeps
+sending and only reply capture reports "reconnect". Deduped on Gmail's immutable
+message id, so the sweep is safe run late, twice or after a missed window.
+
+Failures are never swallowed: every per-agent error lands in a `crm_email_sweep`
+row on the reserved `zeeops-crm` site and is surfaced by the sweep endpoint.
+
+A customer reply deliberately does **not** move `lastContactedAt` — that measures
+OUR outreach and feeds the follow-up cadence, so folding inbound into it would
+make an ignored lead look freshly worked. It sets `lastReplyAt` and increments
+`unreadReplies` instead, which is what drives the "waiting on you" badge on the
+record, the board card and the list.
+
 ### Member-scoped rows go on a reserved site, not a lead
 `crm_prefs` and `crm_reminder` belong to a *member*, not a conversation, so they live on
 the reserved `zeeops-crm` site (`lib/reminders.ts`) — the same trick `push_sub` uses with

@@ -17,7 +17,8 @@
 import { useMemo, useState } from 'react'
 import {
   Sparkles, MessageSquare, StickyNote, Target, UserCheck, Paperclip,
-  Pencil, Banknote, CircleCheck, History, Send, ChevronDown, ChevronRight, type LucideIcon,
+  Pencil, Banknote, CircleCheck, History, Send, ChevronDown, ChevronRight,
+  Inbox, Quote, type LucideIcon,
 } from 'lucide-react'
 import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
@@ -49,6 +50,7 @@ const ICON: Record<TimelineEvent['kind'], LucideIcon> = {
   value: Banknote,
   task: CircleCheck,
   email: Send,
+  email_in: Inbox,
 }
 
 // Accent per event type. Saturated mid-tones, chosen to read on both themes —
@@ -57,6 +59,9 @@ function accent(e: TimelineEvent): string {
   if (e.kind === 'stage' && e.stage) return CRM_STAGE_DOT[e.stage]
   switch (e.kind) {
     case 'email': return '#0284c7'
+    // Inbound is deliberately a different hue from outbound sky-blue: at a
+    // glance down the rail, who spoke last is the thing you want to see.
+    case 'email_in': return '#7c3aed'
     case 'task': return e.taskDone ? '#22c55e' : '#8b5cf6'
     case 'note': return '#6366f1'
     case 'created': return '#22c55e'
@@ -222,6 +227,8 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                       <p className="mt-0.5 text-xs text-gray-600 tabular-nums">{describeValue(e.body, currency)}</p>
                     ) : e.kind === 'email' && e.email ? (
                       <EmailEntry entry={e.email} />
+                    ) : e.kind === 'email_in' && e.inbound ? (
+                      <InboundEntry entry={e.inbound} unread={!!e.unread} />
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
                         {e.body}
@@ -244,6 +251,52 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
 
 // A sent email: subject and snippet by default, the whole message one click
 // away. The full body is already on the record, so opening it costs no request.
+// A customer's reply. Visually the mirror of EmailEntry — violet rather than
+// sky, and labelled with who wrote it — so the two directions never blur
+// together when you are scanning the rail.
+function InboundEntry({ entry, unread }: {
+  entry: NonNullable<TimelineEvent['inbound']>
+  unread: boolean
+}) {
+  const [showQuoted, setShowQuoted] = useState(false)
+  return (
+    <div className={`mt-1 rounded-lg border px-2.5 py-1.5 ${
+      unread ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-300' : 'border-violet-200 bg-violet-50'
+    }`}>
+      <div className="flex items-baseline gap-1.5 flex-wrap">
+        <p className="text-xs font-semibold text-gray-900 break-words">{entry.subject || '(no subject)'}</p>
+        {unread && (
+          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 rounded-full bg-violet-600 text-white">
+            New
+          </span>
+        )}
+      </div>
+      <p className="text-[10px] text-gray-500 mt-0.5 break-words">
+        from {entry.fromName ? `${entry.fromName} <${entry.from}>` : entry.from}
+      </p>
+      {/* The new content, always shown in full — this is what they actually
+          wrote, and it is never the thing hidden behind a toggle. */}
+      <p className="mt-1.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{entry.body}</p>
+      {entry.quoted && (
+        <>
+          <button onClick={() => setShowQuoted((v) => !v)}
+            title="The quoted conversation history underneath this reply"
+            className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-violet-700 hover:text-violet-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+            {showQuoted ? <ChevronDown size={9} strokeWidth={2.5} aria-hidden /> : <ChevronRight size={9} strokeWidth={2.5} aria-hidden />}
+            <Quote size={9} strokeWidth={2.5} aria-hidden />
+            {showQuoted ? 'Hide quoted text' : 'Show quoted text'}
+          </button>
+          {showQuoted && (
+            <p className="mt-1 text-[11px] text-gray-500 whitespace-pre-wrap break-words leading-snug border-l-2 border-violet-200 pl-2">
+              {entry.quoted}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email']> }) {
   const [open, setOpen] = useState(false)
   return (

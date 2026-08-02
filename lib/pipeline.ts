@@ -30,10 +30,12 @@ import { ASSIGNMENT_ROLE } from './assignment'
 import { quoteSessionId, isCheckoutLeadMessage, isQuoteLeadMessage } from './quoteintake'
 import {
   CRM_STAGE_ROLE, CRM_VALUE_ROLE, CRM_STAGES, DEFAULT_CURRENCY,
+  CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE,
   parseCrmStage, parseCrmValue, stageFromLeadStatus,
   type CrmStage, type CrmCurrency,
 } from './crm'
 import { CRM_TASK_ROLE, parseCrmTask, taskBucket } from './tasks'
+import { parseCrmEmailIn, parseCrmEmailRead } from './emailreply'
 import type { LeadKind } from './leadrecord'
 
 const CONTROL_ROW_CAP = 30000
@@ -57,6 +59,8 @@ export interface PipelineCard {
   lastActivityAt: string | null
   openTasks: number
   overdueTasks: number
+  /** Customer replies nobody has opened — "this lead is waiting on you". */
+  unreadReplies: number
 }
 
 /** Per-currency subtotal. Values are NEVER summed across currencies. */
@@ -142,7 +146,7 @@ export async function loadPipeline(
     fetchAllPages<ControlRow>(
       () => supabase.from('chat_logs')
         .select('session_id, site_id, role, message, created_at')
-        .in('role', [CRM_STAGE_ROLE, LEAD_STATUS_ROLE, CRM_VALUE_ROLE, ASSIGNMENT_ROLE, CONTACT_ROLE, CRM_TASK_ROLE])
+        .in('role', [CRM_STAGE_ROLE, LEAD_STATUS_ROLE, CRM_VALUE_ROLE, ASSIGNMENT_ROLE, CONTACT_ROLE, CRM_TASK_ROLE, CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE])
         .in('site_id', sites)
         .gte('created_at', since).order('created_at', { ascending: true }),
       CONTROL_ROW_CAP),
@@ -160,7 +164,7 @@ export async function loadPipeline(
   const blank = (id: string, siteId: string, kind: LeadKind, createdAt: string | null): PipelineCard => ({
     id, name: '', email: null, siteId, siteName: siteName[siteId] ?? siteId, kind,
     stage: 'new', value: null, currency: DEFAULT_CURRENCY, owner: null,
-    createdAt, lastActivityAt: createdAt, openTasks: 0, overdueTasks: 0,
+    createdAt, lastActivityAt: createdAt, openTasks: 0, overdueTasks: 0, unreadReplies: 0,
   })
 
   for (const r of captureRows) {
@@ -190,6 +194,7 @@ export async function loadPipeline(
 
   const now = new Date()
   const taskState = new Map<string, Map<string, { due: string; status: string; deleted: boolean }>>()
+  const replyState = new Map<string, { seen: Set<string>; read: Set<string> }>()
   const money = new Map<string, { estimated: number | null; won: number | null; currency: CrmCurrency }>()
 
   for (const r of controlRows) {
@@ -237,7 +242,34 @@ export async function loadPipeline(
         per.set(t.id, { due: t.due_at, status: t.status, deleted: t.deleted === true })
         break
       }
+      // Inbound replies and their read marks are folded the same way tasks are:
+      // collect per session first, subtract after, so a read row that arrives
+      // before its reply (possible, since both are appended) still counts.
+      case CRM_EMAIL_IN_ROLE: {
+        const e = parseCrmEmailIn(r.message)
+        if (!e) break
+        let per = replyState.get(r.session_id)
+        if (!per) { per = { seen: new Set(), read: new Set() }; replyState.set(r.session_id, per) }
+        per.seen.add(e.gmailId)
+        break
+      }
+      case CRM_EMAIL_READ_ROLE: {
+        const e = parseCrmEmailRead(r.message)
+        if (!e) break
+        let per = replyState.get(r.session_id)
+        if (!per) { per = { seen: new Set(), read: new Set() }; replyState.set(r.session_id, per) }
+        per.read.add(e.gmailId)
+        break
+      }
     }
+  }
+
+  for (const [sessionId, st] of replyState) {
+    const card = cards.get(sessionId)
+    if (!card) continue
+    let unread = 0
+    for (const id of st.seen) if (!st.read.has(id)) unread++
+    card.unreadReplies = unread
   }
 
   // Now that every stage row has been seen, pick the number to show: won
