@@ -21,6 +21,7 @@
 // are all visible rather than swallowed.
 
 import { supabase } from './supabase'
+import { chunks } from './bulk'
 import { writeControlRow } from './leadrecord'
 import { REMINDER_SITE } from './reminders'
 import { CRM_EMAIL_ROLE, parseCrmEmail } from './crmemail'
@@ -35,10 +36,33 @@ import {
 
 export const SWEEP_STATUS_SESSION = 'zeeops-crm-email-sweep'
 
+// ── TUNING ───────────────────────────────────────────────────────────────────
+// Everything that decides how much work one run does lives here.
+
 /** Threads older than this stop being polled — a dead thread is not worth a call. */
 export const THREAD_ACTIVE_DAYS = 30
-/** Ceiling on Gmail calls per run, so one sweep can never stampede the API. */
-export const MAX_THREADS_PER_RUN = 60
+
+/**
+ * Gmail thread fetches per run.
+ *
+ * The binding constraint is the FUNCTION TIMEOUT, not Gmail's quota and not the
+ * database. threads.get costs 10 quota units against a 15,000/user/minute
+ * budget, so even 300 fetches is ~2% of it; the DB side is one paginated read.
+ * What actually runs out is the 60s maxDuration, and only because the fetches
+ * used to be sequential. They now run THREAD_CONCURRENCY at a time, so 240
+ * threads cost roughly 240/8 x ~300ms = 9s of the budget.
+ */
+export const MAX_THREADS_PER_RUN = 240
+
+/** Parallel Gmail fetches. Same reasoning as BULK_CONCURRENCY in lib/bulk.ts. */
+export const THREAD_CONCURRENCY = 8
+
+/**
+ * A thread with activity this recent is checked on EVERY run regardless of
+ * rotation — a conversation someone is in the middle of should not wait for its
+ * turn in the queue.
+ */
+export const FRESH_ACTIVITY_MS = 3 * 60 * 60 * 1000
 
 export interface SweepAgentResult {
   agent: string
@@ -55,37 +79,145 @@ export interface SweepResult {
   captured: number
   errors: number
   dryRun?: boolean
+  /** Live threads in the window, vs how many this run checked. */
+  totalThreads?: number
+  checkedThreads?: number
+  /** Where rotation resumes next run. */
+  cursor?: string | null
+  /** True when there are more live threads than one run can cover. */
+  rotating?: boolean
+  /** Runs needed to visit every thread once, at the current cap. */
+  fullCycleRuns?: number
 }
 
-interface ThreadRef { threadId: string; sessionId: string; siteId: string; agent: string; lastAt: string }
+export interface ThreadRef {
+  threadId: string; sessionId: string; siteId: string; agent: string
+  /** Newest activity on the thread, sent OR received. */
+  lastAt: string
+}
 
 /**
- * Every thread we started that is still worth polling: one entry per
- * (thread, lead), newest activity first, capped.
+ * Every thread we started inside the window — ALL of them, not a page.
+ *
+ * The previous version took the 500 newest crm_email rows and then the 60
+ * newest threads out of those. Both were silent truncations: with more than 60
+ * live threads the same 60 won every run forever and thread 61 was never
+ * looked at again, so its replies were never captured and nothing said so.
  */
-export async function activeThreads(now = new Date()): Promise<ThreadRef[]> {
+async function allThreads(now: Date): Promise<ThreadRef[]> {
   const since = new Date(now.getTime() - THREAD_ACTIVE_DAYS * 86_400_000).toISOString()
-  const { data } = await supabase
-    .from('chat_logs')
-    .select('session_id, site_id, message, created_at')
-    .eq('role', CRM_EMAIL_ROLE)
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(500)
 
   const seen = new Map<string, ThreadRef>()
-  for (const r of data ?? []) {
-    const e = parseCrmEmail(r.message)
-    if (!e?.threadId || !e.sentBy) continue
-    // One poll per thread, attributed to whoever sent it — that is whose
-    // mailbox the reply lands in.
-    if (seen.has(e.threadId)) continue
-    seen.set(e.threadId, {
-      threadId: e.threadId, sessionId: r.session_id, siteId: r.site_id,
-      agent: e.sentBy, lastAt: r.created_at,
-    })
+  // Outbound rows define which threads exist and who owns them.
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from('chat_logs')
+      .select('session_id, site_id, message, created_at')
+      .eq('role', CRM_EMAIL_ROLE)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .range(from, from + 999)
+    for (const r of data ?? []) {
+      const e = parseCrmEmail(r.message)
+      if (!e?.threadId || !e.sentBy) continue
+      const prev = seen.get(e.threadId)
+      if (prev) {
+        if (r.created_at > prev.lastAt) prev.lastAt = r.created_at
+        continue
+      }
+      seen.set(e.threadId, {
+        threadId: e.threadId, sessionId: r.session_id, siteId: r.site_id,
+        agent: e.sentBy, lastAt: r.created_at,
+      })
+    }
+    if (!data || data.length < 1000) break
   }
-  return [...seen.values()].slice(0, MAX_THREADS_PER_RUN)
+
+  // A captured reply also counts as activity, so an active back-and-forth stays
+  // in the fresh tier rather than ageing out because we happened not to send.
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from('chat_logs')
+      .select('message, created_at')
+      .eq('role', CRM_EMAIL_IN_ROLE)
+      .gte('created_at', since)
+      .range(from, from + 999)
+    for (const r of data ?? []) {
+      const e = parseCrmEmailIn(r.message)
+      if (!e?.threadId) continue
+      const t = seen.get(e.threadId)
+      if (t && r.created_at > t.lastAt) t.lastAt = r.created_at
+    }
+    if (!data || data.length < 1000) break
+  }
+
+  return [...seen.values()]
+}
+
+export interface Selection { picked: ThreadRef[]; nextCursor: string | null; total: number; starved: boolean }
+
+/**
+ * Choose which threads this run checks. Pure, so it can be tested without Gmail.
+ *
+ * Two tiers:
+ *  1. FRESH — anything active within FRESH_ACTIVITY_MS is always included. A
+ *     live conversation should not wait its turn.
+ *  2. ROTATION — everything else is walked in a stable threadId order from a
+ *     persisted cursor, wrapping at the end. That is what makes coverage a
+ *     guarantee rather than a hope: every thread is reached within
+ *     ceil(total / cap) runs no matter how many there are.
+ *
+ * threadId is used for the ordering rather than a timestamp because it never
+ * changes. Ordering by "last sent" would let a thread move under the cursor
+ * whenever someone emailed it, and a thread that keeps moving can be stepped
+ * over forever — the same starvation in a subtler form.
+ */
+export function selectThreads(
+  all: ThreadRef[],
+  opts: { cursor?: string | null; now?: Date; cap?: number; freshMs?: number } = {},
+): Selection {
+  const now = opts.now ?? new Date()
+  const cap = opts.cap ?? MAX_THREADS_PER_RUN
+  const freshMs = opts.freshMs ?? FRESH_ACTIVITY_MS
+  const cursor = opts.cursor ?? null
+
+  const cutoff = now.getTime() - freshMs
+  const fresh: ThreadRef[] = []
+  const rest: ThreadRef[] = []
+  for (const t of all) {
+    const at = new Date(t.lastAt.endsWith('Z') ? t.lastAt : `${t.lastAt}Z`).getTime()
+    if (Number.isFinite(at) && at >= cutoff) fresh.push(t)
+    else rest.push(t)
+  }
+  fresh.sort((a, b) => b.lastAt.localeCompare(a.lastAt))
+  rest.sort((a, b) => a.threadId.localeCompare(b.threadId))
+
+  const picked = fresh.slice(0, cap)
+  let nextCursor = cursor
+  const room = cap - picked.length
+
+  if (room > 0 && rest.length > 0) {
+    // Start just after the cursor, then wrap — so a run that reaches the end
+    // continues from the beginning instead of stopping short.
+    let start = rest.findIndex((t) => t.threadId > (cursor ?? ''))
+    if (start < 0) start = 0
+    const take = Math.min(room, rest.length)
+    for (let i = 0; i < take; i++) picked.push(rest[(start + i) % rest.length])
+    nextCursor = picked[picked.length - 1]?.threadId ?? cursor
+  }
+
+  return {
+    picked,
+    nextCursor,
+    total: all.length,
+    // True when one run cannot cover everything, i.e. rotation is doing work.
+    starved: all.length > cap,
+  }
+}
+
+/** Back-compat helper used by diagnostics: what this run would check. */
+export async function activeThreads(now = new Date(), cursor: string | null = null): Promise<ThreadRef[]> {
+  return selectThreads(await allThreads(now), { now, cursor }).picked
 }
 
 /** Gmail ids already captured for these leads, so the sweep never duplicates. */
@@ -121,7 +253,12 @@ export async function runEmailSweep(
     return { ranAt, agents: [], captured: 0, errors: 0, dryRun }
   }
 
-  const threads = await activeThreads(now)
+  // Rotation state rides on the previous run's status row, so no new storage
+  // and nothing to keep in sync.
+  const prev = await lastSweepStatus()
+  const all = await allThreads(now)
+  const sel = selectThreads(all, { now, cursor: prev?.cursor ?? null })
+  const threads = sel.picked
   const captured = await alreadyCaptured([...new Set(threads.map((t) => t.sessionId))])
 
   // Group by agent: one connection check and one token refresh per agent
@@ -149,9 +286,29 @@ export async function runEmailSweep(
       continue
     }
 
-    for (const ref of refs) {
-      try {
+    // Fetches run in waves rather than one after another: sequentially, 240
+    // threads at ~300ms each would blow the 60s function budget, which is the
+    // real ceiling on the cap (not Gmail quota, not the database).
+    let stop = false
+    for (const wave of chunks(refs, THREAD_CONCURRENCY)) {
+      if (stop) break
+      const settled = await Promise.allSettled(wave.map(async (ref: ThreadRef) => {
         const messages = await fetchThread(agent, cfg, ref.threadId)
+        return { ref, messages }
+      }))
+      for (const outcome of settled) {
+        if (outcome.status === 'rejected') {
+          const e = outcome.reason
+          const scopey = e instanceof GmailScopeError
+          const authy = e instanceof GmailAuthError
+          res.error = e instanceof Error ? e.message : 'Could not read Gmail.'
+          res.needsReconnect = scopey || authy
+          // A dead token or missing scope will fail identically for every other
+          // thread, so stop this agent rather than hammering the API.
+          if (scopey || authy) stop = true
+          continue
+        }
+        const { ref, messages } = outcome.value
         for (const m of messages) {
           if (captured.has(m.gmailId)) continue
           // Our own copy of the outbound message lives in the same thread.
@@ -191,13 +348,6 @@ export async function runEmailSweep(
           captured.add(m.gmailId)
           res.captured++
         }
-      } catch (e) {
-        // One bad thread must not stop the others, and the reason is kept.
-        const scopey = e instanceof GmailScopeError
-        const authy = e instanceof GmailAuthError
-        res.error = e instanceof Error ? e.message : 'Could not read Gmail.'
-        res.needsReconnect = scopey || authy
-        if (scopey || authy) break // no point trying this agent's other threads
       }
     }
     results.push(res)
@@ -209,6 +359,13 @@ export async function runEmailSweep(
     captured: results.reduce((n, r) => n + r.captured, 0),
     errors: results.filter((r) => r.error).length,
     dryRun,
+    totalThreads: sel.total,
+    checkedThreads: threads.length,
+    // A dry run must not advance rotation, or it would skip threads for the
+    // real run that follows it.
+    cursor: dryRun ? (prev?.cursor ?? null) : sel.nextCursor,
+    rotating: sel.starved,
+    fullCycleRuns: Math.max(1, Math.ceil(sel.total / MAX_THREADS_PER_RUN)),
   }
   // A dry run must not overwrite the real last-run status either.
   if (!dryRun) await recordSweepStatus(out)
