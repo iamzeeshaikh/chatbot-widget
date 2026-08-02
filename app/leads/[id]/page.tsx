@@ -32,7 +32,7 @@ import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
-import EmailComposer from './EmailComposer'
+import EmailComposer, { type ReplyTo } from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
 
@@ -52,6 +52,9 @@ export default function LeadRecordPage() {
   const [taskBusy, setTaskBusy] = useState<Set<string>>(new Set())
   const [taskError, setTaskError] = useState('')
   const [composing, setComposing] = useState(false)
+  // Set when the composer was opened by Reply on an inbound message; cleared on
+  // close so the next plain "Email" click is a fresh message, not a stale reply.
+  const [replyTo, setReplyTo] = useState<ReplyTo | null>(null)
   // Whether THIS agent's Gmail consent can read replies. Only consulted on a
   // record that has actually sent an email — a lead with no email thread has no
   // reply to miss, and warning there would be noise on every record.
@@ -569,6 +572,7 @@ export default function LeadRecordPage() {
               </div>
             )}
             <Timeline events={record.timeline} currency={record.value.currency}
+              onReply={(ctx) => { setReplyTo(ctx); setComposing(true) }}
               onEditNote={editNote} onDeleteNote={deleteNote} canManageNote={canManageNote} />
           </Card>
         </div>
@@ -669,7 +673,8 @@ export default function LeadRecordPage() {
           leadName={record.contact.name}
           siteId={record.siteId}
           siteName={record.siteName}
-          onClose={() => setComposing(false)}
+          replyTo={replyTo}
+          onClose={() => { setComposing(false); setReplyTo(null) }}
           onSent={() => load()}
         />
       )}

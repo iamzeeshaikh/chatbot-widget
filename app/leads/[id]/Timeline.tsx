@@ -18,7 +18,7 @@ import { useMemo, useState } from 'react'
 import {
   Sparkles, MessageSquare, StickyNote, Target, UserCheck, Paperclip,
   Pencil, Banknote, CircleCheck, History, Send, ChevronDown, ChevronRight,
-  Inbox, Quote, type LucideIcon,
+  Inbox, Quote, Reply, type LucideIcon,
 } from 'lucide-react'
 import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
@@ -72,12 +72,20 @@ function accent(e: TimelineEvent): string {
   }
 }
 
-export default function Timeline({ events, currency, onEditNote, onDeleteNote, canManageNote }: {
+export interface ReplyContext {
+  replyToGmailId: string
+  to: string
+  subject: string
+}
+
+export default function Timeline({ events, currency, onEditNote, onDeleteNote, canManageNote, onReply }: {
   events: TimelineEvent[]
   currency: CrmCurrency
   onEditNote: (noteId: string, body: string) => Promise<void>
   onDeleteNote: (noteId: string) => Promise<void>
   canManageNote: (e: TimelineEvent) => boolean
+  /** Opens the composer prefilled to reply into this thread. */
+  onReply?: (ctx: ReplyContext) => void
 }) {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [editingNote, setEditingNote] = useState<string | null>(null)
@@ -228,7 +236,7 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                     ) : e.kind === 'email' && e.email ? (
                       <EmailEntry entry={e.email} />
                     ) : e.kind === 'email_in' && e.inbound ? (
-                      <InboundEntry entry={e.inbound} unread={!!e.unread} />
+                      <InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} />
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
                         {e.body}
@@ -254,9 +262,10 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
 // A customer's reply. Visually the mirror of EmailEntry — violet rather than
 // sky, and labelled with who wrote it — so the two directions never blur
 // together when you are scanning the rail.
-function InboundEntry({ entry, unread }: {
+function InboundEntry({ entry, unread, onReply }: {
   entry: NonNullable<TimelineEvent['inbound']>
   unread: boolean
+  onReply?: (ctx: ReplyContext) => void
 }) {
   const [showQuoted, setShowQuoted] = useState(false)
   return (
@@ -277,6 +286,18 @@ function InboundEntry({ entry, unread }: {
       {/* The new content, always shown in full — this is what they actually
           wrote, and it is never the thing hidden behind a toggle. */}
       <p className="mt-1.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{entry.body}</p>
+      {onReply && (
+        <button
+          onClick={() => onReply({
+            replyToGmailId: entry.gmailId,
+            to: entry.from,
+            // Re: once, however many times it has been round.
+            subject: /^re:/i.test(entry.subject) ? entry.subject : `Re: ${entry.subject}`,
+          })}
+          className="mt-1.5 mr-2 inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          <Reply size={9} strokeWidth={2.5} aria-hidden /> Reply
+        </button>
+      )}
       {entry.quoted && (
         <>
           <button onClick={() => setShowQuoted((v) => !v)}

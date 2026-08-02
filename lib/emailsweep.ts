@@ -241,3 +241,60 @@ export function describeSweep(s: SweepResult | null): string {
   if (bad.length === 0) return `Replies checked — ${s.captured} new.`
   return `${bad.length} mailbox${bad.length === 1 ? '' : 'es'} could not be checked: ${bad[0].error}`
 }
+
+// ── replying into an existing thread (Phase 6) ───────────────────────────────
+export interface ThreadContext {
+  threadId: string
+  /** Message-ID of the message being replied to. */
+  inReplyTo: string
+  /** Every Message-ID in the conversation, oldest first. */
+  references: string[]
+}
+
+/**
+ * Rebuild the threading headers for a reply, from OUR OWN rows on this lead.
+ *
+ * The browser only says which message it is replying to; everything else is
+ * derived here. That is deliberate — a client-supplied threadId would let a
+ * request drop a message into a Gmail conversation belonging to a different
+ * lead, or one this member cannot see. Nothing is used unless it is on the lead
+ * the caller already passed guardLeadAccess for.
+ *
+ * Returns null when the id is not one of this lead's messages, in which case
+ * the caller sends a fresh (unthreaded) email rather than guessing.
+ */
+export async function threadContextFor(sessionId: string, replyToGmailId: string): Promise<ThreadContext | null> {
+  const { data } = await supabase
+    .from('chat_logs')
+    .select('role, message, created_at')
+    .eq('session_id', sessionId)
+    .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE])
+    .order('created_at', { ascending: true })
+    .limit(500)
+
+  interface Msg { gmailId: string; threadId: string; messageId: string }
+  const all: Msg[] = []
+  for (const r of data ?? []) {
+    if (r.role === CRM_EMAIL_ROLE) {
+      const e = parseCrmEmail(r.message)
+      if (e?.gmailId) all.push({ gmailId: e.gmailId, threadId: e.threadId, messageId: e.messageId })
+    } else {
+      const e = parseCrmEmailIn(r.message)
+      if (e?.gmailId) all.push({ gmailId: e.gmailId, threadId: e.threadId, messageId: e.messageId })
+    }
+  }
+
+  const target = all.find((m) => m.gmailId === replyToGmailId)
+  if (!target?.threadId) return null
+
+  // References is the ancestry of THIS thread only, oldest first.
+  const references = all
+    .filter((m) => m.threadId === target.threadId && m.messageId)
+    .map((m) => m.messageId)
+
+  return {
+    threadId: target.threadId,
+    inReplyTo: target.messageId,
+    references,
+  }
+}

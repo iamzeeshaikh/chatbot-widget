@@ -337,6 +337,18 @@ export interface OutgoingEmail {
   cc?: string
   subject: string
   body: string
+  // ── threading (Phase 6) ────────────────────────────────────────────────────
+  // Both halves are needed and they do different jobs. `threadId` is Gmail's
+  // own grouping and is what keeps the message in the same conversation in the
+  // sender's mailbox. In-Reply-To / References are the RFC 5322 headers every
+  // OTHER mail client threads on — without them the customer's Gmail, Outlook
+  // or Apple Mail shows a brand-new conversation even though ours looks right.
+  /** Gmail thread to append to. */
+  threadId?: string
+  /** RFC Message-ID of the message being replied to. */
+  inReplyTo?: string
+  /** The full chain, oldest first — In-Reply-To is appended to it. */
+  references?: string[]
 }
 
 export interface SentResult { id: string; threadId: string; messageId: string }
@@ -355,6 +367,16 @@ function buildMime(m: OutgoingEmail, messageId: string): string {
     ...(m.cc ? [`Cc: ${h(m.cc)}`] : []),
     `Subject: ${enc(h(m.subject))}`,
     `Message-ID: ${messageId}`,
+    ...(m.inReplyTo ? [`In-Reply-To: ${h(m.inReplyTo)}`] : []),
+    // References carries the whole ancestry; duplicates are dropped so a long
+    // exchange does not grow a header full of repeats.
+    ...(() => {
+      const chain = [...(m.references ?? []), ...(m.inReplyTo ? [m.inReplyTo] : [])]
+        .map((r) => h(r)).filter(Boolean)
+      const seen = new Set<string>()
+      const uniq = chain.filter((r) => (seen.has(r) ? false : (seen.add(r), true)))
+      return uniq.length ? [`References: ${uniq.join(' ')}`] : []
+    })(),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: base64',
@@ -386,7 +408,9 @@ export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: Outgoi
   const res = await fetch(`${API}/messages/send`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw }),
+    // threadId here is what makes Gmail file it in the existing conversation
+    // rather than starting a new one.
+    body: JSON.stringify(m.threadId ? { raw, threadId: m.threadId } : { raw }),
   })
   const j = await res.json().catch(() => ({}))
   if (res.status === 401 || res.status === 403) {

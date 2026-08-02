@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
 import { googleConfig, sendEmail, GmailAuthError, configProblem } from '@/lib/gmail'
+import { threadContextFor } from '@/lib/emailsweep'
 import {
   CRM_EMAIL_ROLE, MAX_SUBJECT, MAX_BODY, makeSnippet, newEmailId,
   parseAddressList, type CrmEmailEntry,
@@ -40,6 +41,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const cc = String(body.cc ?? '').trim()
   const subject = String(body.subject ?? '').trim().slice(0, MAX_SUBJECT)
   const text = String(body.body ?? '')
+  // The client only ever names WHICH message it is replying to. The thread and
+  // the header chain are rebuilt from our own rows below — a browser must not
+  // be able to post an arbitrary threadId and drop a message into a
+  // conversation on someone else's lead.
+  const replyToGmailId = String(body.replyToGmailId ?? '').trim()
 
   if (!from) return NextResponse.json({ error: 'Choose which address to send from.' }, { status: 400 })
   if (!subject) return NextResponse.json({ error: 'A subject is required.' }, { status: 400 })
@@ -58,11 +64,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const cfg = googleConfig(req.nextUrl.origin)
   if (!cfg) return NextResponse.json({ error: 'Google OAuth is not configured.', needsSetup: true }, { status: 503 })
 
+  // ── 0. resolve the thread from OUR rows, not from the request ─────────────
+  const thread = replyToGmailId ? await threadContextFor(id, replyToGmailId) : null
+
   // ── 1. Gmail first ─────────────────────────────────────────────────────────
   let sent
   try {
     sent = await sendEmail(access.member.email, cfg, {
       from, to: toList.list.join(', '), cc: cc || undefined, subject, body: text,
+      threadId: thread?.threadId,
+      inReplyTo: thread?.inReplyTo,
+      references: thread?.references,
     })
   } catch (e) {
     if (e instanceof GmailAuthError) {
