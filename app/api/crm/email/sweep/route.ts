@@ -39,13 +39,15 @@ export async function GET(req: NextRequest) {
   const auth = await authorise(req)
   if (!auth.ok) return NextResponse.json({ error: auth.why }, { status: 401 })
 
+  // ?dryRun=1 reports what would be captured and writes nothing.
   // ?status=1 reads the last run without performing one.
   if (req.nextUrl.searchParams.get('status') === '1') {
     return NextResponse.json({ ok: true, last: await lastSweepStatus() })
   }
 
   try {
-    const result = await runEmailSweep(req.nextUrl.origin)
+    const dryRun = req.nextUrl.searchParams.get('dryRun') === '1'
+    const result = await runEmailSweep(req.nextUrl.origin, new Date(), { dryRun })
     return NextResponse.json({ ok: true, by: auth.by, ...result })
   } catch (err) {
     // A total failure is still reported rather than swallowed — the cron log

@@ -51,8 +51,10 @@ export interface SweepAgentResult {
 export interface SweepResult {
   ranAt: string
   agents: SweepAgentResult[]
+  /** On a dry run this is what WOULD have been captured. */
   captured: number
   errors: number
+  dryRun?: boolean
 }
 
 interface ThreadRef { threadId: string; sessionId: string; siteId: string; agent: string; lastAt: string }
@@ -107,11 +109,16 @@ async function alreadyCaptured(sessionIds: string[]): Promise<Set<string>> {
  * One pass. `origin` is needed only to build the Google redirect URI, which the
  * token refresh requires; nothing here depends on the request.
  */
-export async function runEmailSweep(origin: string, now = new Date()): Promise<SweepResult> {
+export async function runEmailSweep(
+  origin: string,
+  now = new Date(),
+  opts: { dryRun?: boolean } = {},
+): Promise<SweepResult> {
+  const dryRun = opts.dryRun === true
   const ranAt = now.toISOString()
   const cfg = googleConfig(origin)
   if (!cfg) {
-    return { ranAt, agents: [], captured: 0, errors: 0 }
+    return { ranAt, agents: [], captured: 0, errors: 0, dryRun }
   }
 
   const threads = await activeThreads(now)
@@ -171,11 +178,16 @@ export async function runEmailSweep(origin: string, now = new Date()): Promise<S
             at: m.at || ranAt,
             direction: 'inbound',
           }
-          const { error } = await writeControlRow({
-            sessionId: ref.sessionId, siteId: ref.siteId,
-            role: CRM_EMAIL_IN_ROLE, at: entry.at, message: JSON.stringify(entry),
-          })
-          if (error) throw new Error(error)
+          // dryRun reports exactly what WOULD be captured and writes nothing —
+          // the same escape hatch the reminder sweep offers, so this can be
+          // inspected against a live mailbox without touching a lead.
+          if (!dryRun) {
+            const { error } = await writeControlRow({
+              sessionId: ref.sessionId, siteId: ref.siteId,
+              role: CRM_EMAIL_IN_ROLE, at: entry.at, message: JSON.stringify(entry),
+            })
+            if (error) throw new Error(error)
+          }
           captured.add(m.gmailId)
           res.captured++
         }
@@ -196,8 +208,10 @@ export async function runEmailSweep(origin: string, now = new Date()): Promise<S
     agents: results,
     captured: results.reduce((n, r) => n + r.captured, 0),
     errors: results.filter((r) => r.error).length,
+    dryRun,
   }
-  await recordSweepStatus(out)
+  // A dry run must not overwrite the real last-run status either.
+  if (!dryRun) await recordSweepStatus(out)
   return out
 }
 
