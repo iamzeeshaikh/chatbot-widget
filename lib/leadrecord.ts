@@ -467,16 +467,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       continue
     }
     if (row.role === CRM_EMAIL_IN_ROLE) {
-      const e = parseCrmEmailIn(row.message)
-      // Only the newest row per gmailId reaches the timeline, so a reply the
-      // sweep happened to write twice still appears once.
-      if (e && emailsIn.get(e.gmailId) === e) {
-        push({
-          id: `email-in-${e.gmailId}`, at, kind: 'email_in', group: 'messages',
-          actor: e.fromName || e.from, title: 'Replied by email',
-          body: e.subject, inbound: e, unread: !readIds.has(e.gmailId),
-        })
-      }
+      // Emitted after the loop from the deduped map — see below. Skipping here
+      // keeps one event per reply even if the sweep wrote the row twice.
       continue
     }
     if (row.role === CRM_TASK_ROLE) {
@@ -504,6 +496,24 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       })
       continue
     }
+  }
+
+  // Inbound replies, one event per Gmail message id.
+  //
+  // Emitted from the deduped map rather than inline in the row loop above: the
+  // loop parses each row afresh, so the previous identity check
+  // (`emailsIn.get(id) === parsed`) compared two different objects and was
+  // never true — the header counted three replies while the timeline showed
+  // none. Iterating the map cannot drift from the count for the same reason it
+  // produces it.
+  for (const e of emailsIn.values()) {
+    const at = asUtcIso(e.at)
+    if (!at) continue
+    push({
+      id: `email-in-${e.gmailId}`, at, kind: 'email_in', group: 'messages',
+      actor: e.fromName || e.from, title: 'Replied by email',
+      body: e.subject, inbound: e, unread: !readIds.has(e.gmailId),
+    })
   }
 
   timeline.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
