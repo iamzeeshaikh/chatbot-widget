@@ -60,6 +60,13 @@ export function useLiveVersion({ leadId, watch, intervalMs, paused, onChange }: 
         const v: string | null = watch === 'lead' ? d.lead : d.crm
         if (v === null) return
         // First answer only establishes the baseline — it is not a change.
+        //
+        // Which is exactly why the baseline must be taken AT MOUNT, not on the
+        // first interval tick: anything that happened in the opening interval
+        // would otherwise be absorbed into the baseline and never reported. A
+        // reply captured 8s after the record opened was invisible until a
+        // manual refresh, because the first poll 20s later saw the new value
+        // and simply recorded it as "how things have always been".
         if (seen.current === null) { seen.current = v; return }
         if (v === seen.current) return
         seen.current = v
@@ -81,7 +88,10 @@ export function useLiveVersion({ leadId, watch, intervalMs, paused, onChange }: 
       else { start(); check() }   // catch up immediately on return
     }
 
-    if (!document.hidden) start()
+    if (!document.hidden) {
+      start()
+      check()   // establish the baseline now, not one interval from now
+    }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', check)
 
