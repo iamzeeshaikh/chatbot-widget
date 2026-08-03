@@ -12,7 +12,7 @@ import {
   Trophy, Globe, Bot, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
   ChevronRight, Repeat, Eye, Contact, UserPlus, Languages, Pin, User, FileText,
   Paperclip, Ban, Flame, AlertTriangle, ChevronUp, ChevronDown, Download,
-  CreditCard, Info, Check, X, TrendingDown, type LucideIcon,
+  CreditCard, Info, Check, X, TrendingDown, LogOut, type LucideIcon,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
@@ -263,6 +263,30 @@ function cleanReferrer(r: string | null): string {
 
 // Short, human name for an agent from their email (ahmed@zeeops.dev → "ahmed").
 // Used on the compact assignment badges where the full email won't fit.
+// Header vocabulary, defined once so every tab and every utility button is
+// literally the same box. The uneven rhythm in the old bar came from each entry
+// carrying its own paddings; sharing them is what makes the spacing regular.
+//
+// NAV_TAB_ON is a background and a shadow ONLY — no border, no extra padding.
+// An active state that changes a tab's footprint moves its neighbours, and a
+// click already aimed at one of them then lands somewhere else.
+const NAV_TAB = 'relative h-8 px-2 xl:px-3 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 min-w-0 whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
+const NAV_TAB_ON = 'bg-white text-gray-900 shadow-sm'
+const NAV_TAB_OFF = 'text-gray-500 hover:text-gray-900 hover:bg-white/60'
+// Wide enough for the largest value each badge is allowed to display, which is
+// why the values are capped at 999+/99+ below. A reserve narrower than the
+// content is not a reserve: this strip moved 5px the moment a 3-digit chat count
+// arrived, which is the whole bug again in miniature.
+// On a phone the count rides the corner of its tab instead of sitting inside
+// it. Four equal cells only have room for a label, and a count in the flow was
+// ellipsising every one of them ("Ch…", "V…", "Ta…"); three wider columns fixed
+// that but pushed the sticky header to 169px with a lone tab stranded on a
+// third row. Absolutely positioned it costs no width at all — which also means
+// it can be hidden at zero on mobile without moving anything, while from `sm`
+// up it goes back in the flow and is always present.
+const NAV_COUNT = 'absolute -top-1 -right-1 sm:static text-[10px] leading-none px-1.5 py-1 rounded-full font-semibold tabular-nums text-center min-w-[1.9rem] shrink-0'
+const ICON_BTN = 'shrink-0 inline-flex items-center justify-center h-8 min-w-8 px-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
+
 function agentShort(email: string | null | undefined): string {
   if (!email) return ''
   const name = email.split('@')[0] || email
@@ -702,6 +726,7 @@ export default function Dashboard() {
   // Team presence — who's on shift right now (Zendesk-style online list).
   const [teamAgents, setTeamAgents] = useState<{ email: string; online: boolean; lastSeen: string | null }[]>([])
   const [showTeam, setShowTeam] = useState(false)
+  const [showAccount, setShowAccount] = useState(false)
   const [histSiteFilter, setHistSiteFilter] = useState('')
   const [histChatOnly, setHistChatOnly] = useState(false)
   const [histStatusFilter, setHistStatusFilter] = useState<'all' | 'live' | 'left'>('all')
@@ -1813,7 +1838,9 @@ export default function Dashboard() {
   })
   // Show the Billing tab only when the member can access a lead-tracked site.
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
-  const dashTitle = 'ZeeOps Chat Widget'
+  // The product is a chat inbox, a pipeline, tasks and email now, so the old
+  // "Chat Widget" undersold it. Confirmed with the user before changing.
+  const dashTitle = 'ZeeOps Desk'
   const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
   // Effective bot state for the open conversation. The packaging schedule can put
@@ -1939,112 +1966,151 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900">
 
-      {/* ── Header ── */}
-      <div ref={headerRef} className="border-b border-gray-200 bg-white/95 backdrop-blur px-3 sm:px-5 py-3 flex items-center justify-between flex-wrap gap-y-2 gap-x-3 sticky top-0 z-10">
-        {/* Logo + title double as a "home" button back to Overview. */}
+      {/* ── Header ────────────────────────────────────────────────────────────
+          Three bands, in order of how much authority each carries:
+
+            1. BRAND    — logo and a short label. Identity (email, role) lives in
+                          the account menu now; the user knows who they are.
+            2. NAV      — the primary control, one segmented group.
+            3. CONTROLS — bot state, search, then utilities that recede, then the
+                          account menu. Members and Sign out are account-level
+                          and belong together behind it, not loose in the bar.
+
+          Everything sits on one row from `lg` up. Below that the nav takes its
+          own full-width row (`order-last w-full`) — the SAME element, re-laid
+          out, so there is only ever one Pipeline link in the DOM.
+
+          Nothing here may change size after first paint: every count is
+          reserved at a fixed width and merely hidden until it has a value, and
+          the active tab is a background change only — no border, no extra
+          padding — so selecting a tab cannot re-flow the row. See CLAUDE.md. */}
+      <div ref={headerRef} className="border-b border-gray-200 bg-white/95 backdrop-blur px-3 sm:px-5 py-2 sm:py-2.5 flex items-center flex-wrap gap-x-2 xl:gap-x-3 sticky top-0 z-10">
+
+        {/* ── 1. Brand ── */}
         <button onClick={() => setTab('overview')} title="Go to Overview"
-          className="flex items-center gap-3 text-left focus:outline-none group cursor-pointer">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-lg transition-transform group-hover:scale-105" style={{ backgroundColor: accentColor }}>
-            <svg viewBox="0 0 24 24" className="w-4.5 h-4.5 fill-white w-5 h-5"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+          className="flex items-center gap-2.5 shrink-0 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group cursor-pointer">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-md transition-transform group-hover:scale-105" style={{ backgroundColor: accentColor }}>
+            <svg viewBox="0 0 24 24" className="w-4.5 h-4.5 fill-white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
           </div>
-          <div>
-            <h1 className="text-base font-bold text-gray-900 leading-tight group-hover:text-gray-700">{dashTitle}</h1>
-            <p className="text-gray-500 text-[11px] flex items-center gap-1.5">
-              {userEmail}
-              <span className={`px-1.5 py-px rounded-full text-[9px] font-semibold uppercase tracking-wide ${userRole === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-500'}`}>{userRole}</span>
-            </p>
-          </div>
+          <span className="hidden xl:block text-sm font-bold text-gray-900 whitespace-nowrap group-hover:text-gray-700">{dashTitle}</span>
         </button>
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          {/* Wraps rather than scrolls. As a horizontal scroller this strip was
-              678px of tabs in a 364px box on a phone, so Billing, Performance,
-              Pipeline and Tasks sat past the right edge with nothing to suggest
-              they were there — half the nav was unreachable without discovering
-              you could swipe it. Wrapping costs one extra row on a narrow screen
-              and makes every entry visible and tappable. */}
-          <div className="flex flex-wrap gap-0.5 bg-gray-100 p-1 rounded-lg border border-gray-200 max-w-full">
-            <button onClick={() => setTab('overview')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'overview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Overview</button>
-            <button onClick={() => setTab('conversations')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'conversations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              Conversations
-              {/* Rendered from first paint and merely hidden while the count is
-                  zero or still loading. A badge that appears a second later
-                  widens this strip, which pushes Pipeline and Tasks sideways —
-                  and once the strip is wide enough the whole header wraps to a
-                  second row, moving them 45px down as well. A click already
-                  aimed at Pipeline then lands on the logo instead, which quietly
-                  goes to Overview: the "first click does nothing" report.
-                  tabular-nums plus a min-width keeps 1, 2 and 3 digits the same
-                  width, so a count ticking over never moves anything either. */}
-              <span className={`bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold tabular-nums text-center min-w-[1.75rem] ${roleSessions.length > 0 ? '' : 'invisible'}`}>{roleSessions.length}</span>
-            </button>
-            <button onClick={() => setTab('visitors')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'visitors' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              Visitors
-              <span className={`bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold tabular-nums text-center min-w-[3rem] ${roleVisitors.length > 0 ? '' : 'invisible'}`}>{roleVisitors.length} live</span>
-            </button>
-            {hasTrackedSite && (
-              <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                Billing
-              </button>
-            )}
-            {userRole === 'admin' && (
-              <button onClick={() => setTab('performance')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'performance' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                Performance
-              </button>
-            )}
-            {/* Pipeline and Tasks are routes, not tabs — real hrefs so they can
-                be middle-clicked into their own tab. */}
-            <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/pipeline') } }}
-              className="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all text-gray-500 hover:text-gray-700">
-              Pipeline
-            </a>
-            {/* The badge counts this member's overdue + due-today tasks in
-                Pakistan time. */}
-            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
-              className="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 text-gray-500 hover:text-gray-700">
-              Tasks
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold text-white tabular-nums text-center min-w-[1.75rem] ${taskBadge > 0 ? (taskBadgeOverdue > 0 ? 'bg-red-600' : 'bg-amber-500') : 'invisible bg-amber-500'}`}
-                title={taskBadge > 0 ? `${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today` : undefined}>
-                {taskBadge}
-              </span>
-            </a>
-          </div>
-          {/* Replies waiting on this agent. Sits in the nav rather than only on
-              a record, because the whole problem was that the signal lived on a
-              page you had to already be looking at. */}
+
+        {/* ── 2. Primary navigation ──
+            One element, two layouts: an equal-width grid on a phone, a
+            segmented row from `lg` up. A phone gets a tidy block of same-sized
+            targets rather than a ragged wrap, and every entry stays one tap
+            away — which a "More" menu or a horizontal scroller would both cost.
+            Pipeline and Tasks are routes, not tabs, so they keep real hrefs and
+            can be middle-clicked into their own window. */}
+        <nav aria-label="Sections"
+          className="order-last w-full mt-1.5 grid grid-cols-4 gap-1 sm:flex sm:flex-wrap sm:gap-0.5 xl:order-none xl:mt-0 xl:w-auto xl:flex-nowrap bg-gray-100 p-1 rounded-xl border border-gray-200 min-w-0">
+          <button onClick={() => setTab('overview')} className={`${NAV_TAB} ${tab === 'overview' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Overview</button>
+          <button onClick={() => setTab('conversations')} className={`${NAV_TAB} ${tab === 'conversations' ? NAV_TAB_ON : NAV_TAB_OFF}`}>
+            <span className="truncate">Chats</span>
+            {/* Always present, and merely muted at zero. Hiding it would be
+                tidier for about a second and then the count would arrive, widen
+                this strip and move every tab to its right — a click already
+                aimed at one of them then lands somewhere else. Reserving the
+                space invisibly fixes that but leaves a conspicuous hole, which
+                is what made the spacing here look wrong in the first place. A
+                grey zero costs nothing and says something true. tabular-nums
+                and a min-width keep 1, 2 and 3 digits the same width. */}
+            <span className={`${NAV_COUNT} ${roleSessions.length > 0 ? 'bg-blue-600 text-white' : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}>{roleSessions.length > 999 ? '999+' : roleSessions.length}</span>
+          </button>
+          <button onClick={() => setTab('visitors')} className={`${NAV_TAB} ${tab === 'visitors' ? NAV_TAB_ON : NAV_TAB_OFF}`}
+            title={`${roleVisitors.length} visitor${roleVisitors.length === 1 ? '' : 's'} on your sites right now`}>
+            <span className="truncate">Visitors</span>
+            {/* A dot carries "live" in a fraction of the width the word did —
+                the old "N live" pill was half again as wide as any other tab and
+                was most of why the spacing round here read as uneven. */}
+            <span className={`${NAV_COUNT} !min-w-[2.5rem] items-center justify-center gap-1 ${roleVisitors.length > 0 ? 'inline-flex bg-green-600 text-white' : 'hidden sm:inline-flex bg-gray-200 text-gray-500'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-white/90' : 'bg-gray-400'}`} aria-hidden />
+              {roleVisitors.length > 999 ? '999+' : roleVisitors.length}
+            </span>
+          </button>
+          {hasTrackedSite && (
+            <button onClick={() => setTab('billing')} className={`${NAV_TAB} ${tab === 'billing' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Billing</button>
+          )}
+          {userRole === 'admin' && (
+            <button onClick={() => setTab('performance')} className={`${NAV_TAB} ${tab === 'performance' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Reports</button>
+          )}
+          <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/pipeline') } }}
+            className={`${NAV_TAB} ${NAV_TAB_OFF}`}>Pipeline</a>
           <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
-            aria-hidden={unreadReplies === 0} tabIndex={unreadReplies === 0 ? -1 : undefined}
-            title={unreadReplies > 0 ? `${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened` : undefined}
-            className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors tabular-nums ${unreadReplies > 0 ? '' : 'invisible pointer-events-none'}`}>
-            <Inbox size={12} strokeWidth={2.5} aria-hidden />
-            {unreadReplies}
+            className={`${NAV_TAB} ${NAV_TAB_OFF}`}>
+            <span className="truncate">Tasks</span>
+            {/* Overdue + due today for this member, in Pakistan time. */}
+            <span className={`${NAV_COUNT} ${taskBadge > 0 ? (taskBadgeOverdue > 0 ? 'bg-red-600 text-white' : 'bg-amber-500 text-white') : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}
+              title={taskBadge > 0 ? `${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today` : 'Nothing due'}>
+              {taskBadge > 99 ? '99+' : taskBadge}
+            </span>
           </a>
-          {/* Global lead search — the same palette the CRM pages carry, so ⌘K
-              works wherever an agent happens to be when the phone rings. */}
+        </nav>
+
+        {/* ── 3. Controls ── */}
+        <div className="ml-auto flex items-center gap-1 lg:gap-1.5 shrink-0">
+
+          {/* Whether the AI is answering customers on the live sites. It is a
+              standing fact about the product rather than a per-page detail, so
+              it gets a bordered chip with a lit dot instead of an icon — but
+              muted colours, because it should not outshout the navigation.
+              Read-only: there is no global on/off control in this bar today, it
+              follows lib/botflag.ts and the settings fetch. */}
+          <span title={botGlobalOff
+              ? 'The AI bot is OFF — every chat goes straight to a human'
+              : 'The AI bot is ON and answering visitors on your live sites'}
+            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2 lg:px-2.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap ${botGlobalOff ? 'bg-gray-100 border-gray-300 text-gray-600' : 'bg-green-50 border-green-300 text-green-800'}`}>
+            <span className={`w-2 h-2 rounded-full shrink-0 ${botGlobalOff ? 'bg-gray-400' : 'bg-green-600'}`} aria-hidden />
+            <span className="hidden xl:inline">Bot {botGlobalOff ? 'off' : 'on'}</span>
+            <span className="xl:hidden sr-only">Bot {botGlobalOff ? 'off' : 'on'}</span>
+          </span>
+
+          {/* Replies waiting on this agent. Sits up here rather than only on a
+              record, because the whole problem was that the signal lived on a
+              page you had to already be looking at. Always in the bar and lit
+              only when it has something to say — same reasoning as the tab
+              counts: an element that appears later moves its neighbours. */}
+          <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
+            title={unreadReplies > 0 ? `${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened` : 'No unread customer replies'}
+            className={`shrink-0 inline-flex items-center justify-center gap-1 h-8 px-2 rounded-lg text-[11px] font-bold tabular-nums transition-colors ${unreadReplies > 0 ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}>
+            <Inbox size={15} strokeWidth={2} aria-hidden />
+            {unreadReplies > 99 ? '99+' : unreadReplies}
+          </a>
+
+          {/* The same palette the CRM pages carry, so ⌘K works wherever an agent
+              happens to be when the phone rings. */}
           <GlobalSearch />
+
+          <span className="hidden sm:block w-px h-5 bg-gray-200 mx-0.5" aria-hidden />
+
+          {/* Utilities. Borderless and grey on purpose — they are switches you
+              set once, not things to be drawn to. */}
           {pushState !== 'unsupported' && (
             <button onClick={togglePush}
               title={pushState === 'on' ? 'Push notifications ON for this device — new chats ping you even with the app closed. Click to turn off.' : 'Enable push notifications on this device — get pinged about new chats even when the app is closed'}
-              className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${pushState === 'on' ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'}`}>
-              {pushState === 'on'
-                  ? <span className="inline-flex items-center gap-1"><Vibrate size={13} strokeWidth={2} aria-hidden /> On</span>
-                  : <Vibrate size={13} strokeWidth={2} aria-hidden />}
+              aria-label="Push notifications" aria-pressed={pushState === 'on'}
+              className={`${ICON_BTN} ${pushState === 'on' ? 'text-green-700' : ''}`}>
+              <Vibrate size={15} strokeWidth={2} aria-hidden />
             </button>
           )}
-          <button onClick={toggleTheme} title={darkMode ? 'Dark mode on — click for light mode' : 'Light mode — click for dark mode'}
-            className="px-2.5 py-1.5 text-xs rounded-lg border bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200 transition-colors">
-            {darkMode ? <Sun size={14} strokeWidth={2} aria-hidden /> : <Moon size={14} strokeWidth={2} aria-hidden />}
+          <button onClick={toggleSound} aria-label="Sound" aria-pressed={soundOn}
+            title={soundOn ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting; click to mute' : 'Sound off — click to unmute'}
+            className={ICON_BTN}>
+            {soundOn ? <Bell size={15} strokeWidth={2} aria-hidden /> : <BellOff size={15} strokeWidth={2} aria-hidden />}
           </button>
-          <button onClick={toggleSound} title={soundOn ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting; click to mute' : 'Sound off — click to unmute'}
-            className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${soundOn ? 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200' : 'bg-gray-100 text-gray-500 border-gray-200 hover:text-gray-600'}`}>
-            {soundOn ? <Bell size={14} strokeWidth={2} aria-hidden /> : <BellOff size={14} strokeWidth={2} aria-hidden />}
+          <button onClick={toggleTheme} aria-label="Theme"
+            title={darkMode ? 'Dark mode on — click for light mode' : 'Light mode — click for dark mode'}
+            className={ICON_BTN}>
+            {darkMode ? <Sun size={15} strokeWidth={2} aria-hidden /> : <Moon size={15} strokeWidth={2} aria-hidden />}
           </button>
-          {/* Team presence — who's online right now (any member can see it). */}
+
+          {/* Team presence — who is online right now (any member can see it). */}
           <div className="relative">
-            <button onClick={() => setShowTeam((v) => !v)}
-              title="See which teammates are online right now"
-              className="px-2.5 py-1.5 text-xs rounded-lg border bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200 transition-colors flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${teamAgents.some((a) => a.online) ? 'bg-green-500' : 'bg-gray-300'}`} />
-              Team <span className="font-semibold">{teamAgents.filter((a) => a.online).length}</span>
+            <button onClick={() => setShowTeam((v) => !v)} title="See which teammates are online right now"
+              aria-label="Team presence" aria-expanded={showTeam}
+              className={`${ICON_BTN} gap-1`}>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${teamAgents.some((a) => a.online) ? 'bg-green-500' : 'bg-gray-300'}`} aria-hidden />
+              <span className="text-[11px] font-semibold tabular-nums">{teamAgents.filter((a) => a.online).length}</span>
             </button>
             {showTeam && (
               <>
@@ -2067,14 +2133,40 @@ export default function Dashboard() {
               </>
             )}
           </div>
-          {userRole === 'admin' && (
-            <a href="/members" className="px-3 py-1.5 text-xs text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors flex items-center gap-1.5">
-              <Users size={13} strokeWidth={2} aria-hidden /> Members
-            </a>
-          )}
-          <button onClick={handleLogout} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors">
-            Sign out
-          </button>
+
+          <span className="hidden sm:block w-px h-5 bg-gray-200 mx-0.5" aria-hidden />
+
+          {/* Account. Identity and the two account-level actions live together
+              here instead of as loose buttons that used to be the first things
+              to fall onto a second row. */}
+          <div className="relative">
+            <button onClick={() => setShowAccount((v) => !v)} aria-expanded={showAccount}
+              title={`${userEmail} — account`} aria-label="Account menu"
+              className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full text-white text-[11px] font-bold uppercase shadow-md hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              style={{ backgroundColor: accentColor }}>
+              {(userEmail || '?').slice(0, 2)}
+            </button>
+            {showAccount && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowAccount(false)} />
+                <div className="absolute right-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1.5">
+                  <div className="px-3 py-2 border-b border-gray-100">
+                    <p className="text-xs font-semibold text-gray-900 truncate">{userEmail}</p>
+                    <span className={`mt-1 inline-block px-1.5 py-px rounded-full text-[9px] font-semibold uppercase tracking-wide ${userRole === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-600'}`}>{userRole}</span>
+                  </div>
+                  {userRole === 'admin' && (
+                    <a href="/members" className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-100 transition-colors">
+                      <Users size={14} strokeWidth={2} aria-hidden /> Members
+                    </a>
+                  )}
+                  <button onClick={handleLogout}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-100 transition-colors text-left">
+                    <LogOut size={14} strokeWidth={2} aria-hidden /> Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

@@ -142,12 +142,16 @@ export default function GlobalSearch({ compact = false }: { compact?: boolean })
         aria-keyshortcuts="Meta+K Control+K"
         className={compact
           ? 'shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
-          : 'shrink-0 inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'}>
-        <Search size={compact ? 16 : 13} strokeWidth={2} aria-hidden />
+          // Collapses to the icon alone below `lg`. Search is used often enough
+          // to earn a labelled, input-looking target on a wide screen, but the
+          // dashboard bar has to fit the whole nav beside it, and the label is
+          // the first thing that can go without losing the control.
+          : 'shrink-0 inline-flex items-center gap-1.5 p-1.5 lg:pl-2.5 lg:pr-2 rounded-lg border border-gray-300 bg-white text-gray-500 hover:text-gray-900 hover:border-gray-400 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'}>
+        <Search size={compact ? 16 : 14} strokeWidth={2} aria-hidden />
         {!compact && (
           <>
-            <span className="text-[11px] font-medium">Search leads</span>
-            <kbd className="text-[9px] font-semibold px-1 py-px rounded border border-gray-300 bg-gray-100 text-gray-600">⌘K</kbd>
+            <span className="hidden lg:inline text-[11px] font-medium">Search leads</span>
+            <kbd className="hidden lg:inline text-[9px] font-semibold px-1 py-px rounded border border-gray-300 bg-gray-100 text-gray-600">⌘K</kbd>
           </>
         )}
       </button>

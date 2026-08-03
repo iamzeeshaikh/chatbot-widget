@@ -150,6 +150,12 @@ html.dark .hover\:bg-violet-100:hover { background-color: rgba(139, 92, 246, 0.2
 /* Recessive card tone. bg-white is remapped, but the /70 variant was not, so a
    "muted" card came out near-white. */
 html.dark .bg-white\/70 { background-color: rgba(30, 41, 59, 0.7) !important; }
+/* The dashboard nav's hover tint. A translucent white reads as a highlight on a
+   light card and as a glare on a dark one, so dark gets a lift of its own. */
+html.dark .bg-white\/60 { background-color: rgba(148, 163, 184, 0.12) !important; }
+/* Paired with .bg-green-50 on the bot-state chip — without this the label is
+   dark green on a dark green tint. */
+html.dark .text-green-800 { color: #86efac !important; }
 
 html.dark .bg-green-50 { background-color: rgba(34, 197, 94, 0.1) !important; }
 html.dark .bg-green-100 { background-color: rgba(34, 197, 94, 0.16) !important; }
