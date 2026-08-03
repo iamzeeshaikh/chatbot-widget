@@ -201,6 +201,24 @@ The tab strip **wraps, it does not scroll**. As a horizontal scroller it was
 678px of tabs in a 364px box on a phone, so Billing, Performance, Pipeline and
 Tasks sat past the right edge with nothing to suggest they existed.
 
+The bar is one `<nav>` element re-laid out at two breakpoints, never two copies:
+four equal columns below `sm`, a wrapped full-width row up to `xl`, and inline
+beside the brand from `xl`. Duplicating it for mobile would put two Pipeline
+links in the DOM and the first `querySelector` would find the hidden one.
+Below `xl` it is the **nav** that takes its own row, not the controls — when the
+controls wrapped instead, Members and Sign out ended up orphaned on a second
+line while the first still had space.
+
+Counts are always rendered and go grey at zero rather than being hidden: an
+invisible reservation is stable but leaves a conspicuous hole, which is what
+made the spacing look wrong. They are capped (`999+`, `99+`) so the value can
+never outgrow its `min-w-`. On mobile only, the count is absolutely positioned
+on the tab's corner — out of flow, so it costs no width and may be hidden at
+zero for free; four columns in the flow ellipsised every label.
+
+Account-level things (identity, Members, Sign out) belong in the avatar menu,
+not loose in the bar. That is also what bought the space to fit one row.
+
 `scratch/nav-click.mjs` is the regression test: it aims at an entry, waits, then
 clicks the *recorded* coordinates — a person cannot re-aim mid-movement either,
 and a test that re-reads the position right before clicking can never catch this
