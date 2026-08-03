@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   const sites = memberSites(member)
   if (sites.length === 0) return NextResponse.json({ crm: null, lead: null })
 
-  const [crmRes, leadRes] = await Promise.all([
+  const [crmRes, leadRes, leadCount] = await Promise.all([
     // Board-level marker: any CRM write on a site this member can see. Role
     // filtered so ordinary chat traffic does not invalidate the pipeline every
     // few seconds on a busy site.
@@ -51,10 +51,23 @@ export async function GET(req: NextRequest) {
           .order('created_at', { ascending: false })
           .limit(1)
       : Promise.resolve({ data: null }),
+    // A row COUNT alongside the timestamp, for the lead marker only.
+    //
+    // max(created_at) alone assumes nothing is ever written with a timestamp
+    // older than a row already there. That assumption failed once already (the
+    // sweep used to backdate captured replies to the email's send time, so a
+    // new reply could not move the marker and an open record never refreshed).
+    // The count moves on ANY insert or delete regardless of its timestamp, so
+    // the marker no longer depends on that assumption holding forever.
+    // ~100ms on an indexed session scan, and it runs in parallel with the two
+    // above, so the poll is still one round trip.
+    leadId
+      ? supabase.from('chat_logs').select('id', { count: 'exact', head: true }).eq('session_id', leadId)
+      : Promise.resolve({ count: null }),
   ])
 
   return NextResponse.json({
     crm: crmRes.data?.[0]?.created_at ?? null,
-    lead: leadRes.data?.[0]?.created_at ?? null,
+    lead: leadId ? `${leadRes.data?.[0]?.created_at ?? ''}|${leadCount.count ?? 0}` : null,
   })
 }

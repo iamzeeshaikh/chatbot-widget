@@ -350,9 +350,20 @@ export async function runEmailSweep(
           // the same escape hatch the reminder sweep offers, so this can be
           // inspected against a live mailbox without touching a lead.
           if (!dryRun) {
+            // created_at is left to default to NOW — the moment we learned of
+            // the reply — and deliberately NOT backdated to the email's send
+            // time. The timeline orders inbound by `entry.at` (the JSON field),
+            // so display is unaffected, while the row's created_at stays a
+            // truthful "when was this written".
+            //
+            // Backdating broke live updates: /api/crm/version reports
+            // max(created_at) for the lead, so a reply captured after any later
+            // row (a read-mark, a note) landed BELOW the marker, the marker
+            // never moved, and an open record never refetched. The reply only
+            // appeared on a manual refresh.
             const { error } = await writeControlRow({
               sessionId: ref.sessionId, siteId: ref.siteId,
-              role: CRM_EMAIL_IN_ROLE, at: entry.at, message: JSON.stringify(entry),
+              role: CRM_EMAIL_IN_ROLE, message: JSON.stringify(entry),
             })
             if (error) throw new Error(error)
           }
