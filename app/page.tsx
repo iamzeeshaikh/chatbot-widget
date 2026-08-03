@@ -1956,7 +1956,13 @@ export default function Dashboard() {
           </div>
         </button>
         <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <div className="flex gap-0.5 bg-gray-100 p-1 rounded-lg border border-gray-200 overflow-x-auto max-w-full">
+          {/* Wraps rather than scrolls. As a horizontal scroller this strip was
+              678px of tabs in a 364px box on a phone, so Billing, Performance,
+              Pipeline and Tasks sat past the right edge with nothing to suggest
+              they were there — half the nav was unreachable without discovering
+              you could swipe it. Wrapping costs one extra row on a narrow screen
+              and makes every entry visible and tappable. */}
+          <div className="flex flex-wrap gap-0.5 bg-gray-100 p-1 rounded-lg border border-gray-200 max-w-full">
             <button onClick={() => setTab('overview')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'overview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Overview</button>
             <button onClick={() => setTab('conversations')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'conversations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Conversations
