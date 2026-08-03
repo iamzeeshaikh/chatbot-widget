@@ -63,6 +63,16 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
     if (!o || typeof o.gmailId !== 'string' || !o.gmailId) return null
     if (o.direction !== 'inbound') return null
     const str = (v: unknown) => (typeof v === 'string' ? v : '')
+
+    // Repair a row written before the capture-time fix: its `body` holds nothing
+    // but quoted history. Move it where it belongs so the "show history" toggle
+    // still reveals it, rather than leaving it stranded on a field we no longer
+    // render.
+    let body = str(o.body)
+    let quoted = typeof o.quoted === 'string' && o.quoted ? o.quoted : null
+    const textless = o.textless === true || isAllQuote(body)
+    if (textless && body) { quoted = quoted ? `${body}\n${quoted}` : body; body = '' }
+
     return {
       gmailId: o.gmailId,
       threadId: str(o.threadId),
@@ -72,9 +82,9 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
       fromName: typeof o.fromName === 'string' && o.fromName ? o.fromName : null,
       to: str(o.to),
       subject: str(o.subject),
-      body: str(o.body),
-      quoted: typeof o.quoted === 'string' && o.quoted ? o.quoted : null,
-      textless: o.textless === true,
+      body,
+      quoted,
+      textless,
       snippet: str(o.snippet),
       at: str(o.at),
       direction: 'inbound',
@@ -130,6 +140,31 @@ const ATTRIBUTION_RE = [
 ]
 
 const SIGNATURE_RE = /^\s*--\s*$/
+
+// Is this body nothing but quoted history? Asked on READ as well as on capture,
+// because rows written before the capture-time fix already have the quote sitting
+// in `body` — and a stored row is append-only, so the repair has to happen here
+// rather than by rewriting history. An attachment-only reply rendered as prose
+// reads as though the customer sent our own words back at us, which is worse
+// than saying plainly that they wrote nothing.
+//
+// Deliberately strict: ONE line of real prose anywhere and this is false, so a
+// genuine message can never be suppressed by it.
+export function isAllQuote(body: string): boolean {
+  const lines = (body ?? '').replace(/\r\n/g, '\n').split('\n')
+  let sawQuote = false
+  for (const raw of lines) {
+    const t = raw.trim()
+    if (!t) continue
+    if (t.startsWith('>')) { sawQuote = true; continue }
+    if (/^(On|Le|Am)\b.*(wrote|écrit|schrieb)\s*:?\s*$/i.test(t)) { sawQuote = true; continue }
+    if (/^-{2,}\s*(Original Message|Forwarded message)/i.test(t)) { sawQuote = true; continue }
+    if (/^(From|Sent|To|Cc|Subject|Date|Reply-To):/i.test(t)) { sawQuote = true; continue }
+    if (/^[-_=]{3,}$/.test(t)) continue
+    return false   // real prose — they said something
+  }
+  return sawQuote
+}
 
 export function splitQuoted(raw: string): { visible: string; quoted: string | null; textless?: boolean } {
   const text = (raw ?? '').replace(/\r\n/g, '\n')
