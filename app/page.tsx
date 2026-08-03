@@ -2003,7 +2003,7 @@ export default function Dashboard() {
             Pipeline and Tasks are routes, not tabs, so they keep real hrefs and
             can be middle-clicked into their own window. */}
         <nav aria-label="Sections"
-          className="order-last w-full mt-1.5 grid grid-cols-4 gap-1 sm:flex sm:flex-wrap sm:gap-0.5 xl:order-none xl:mt-0 xl:w-auto xl:flex-nowrap bg-gray-100 p-1 rounded-xl border border-gray-200 min-w-0">
+          className="order-last w-full mt-1.5 grid grid-cols-4 gap-1 sm:flex sm:flex-wrap sm:gap-0.5 xl:order-none xl:mt-0 xl:w-auto xl:flex-nowrap bg-gray-100 p-1 pt-2.5 sm:pt-1 rounded-xl border border-gray-200 min-w-0">
           <button onClick={() => setTab('overview')} className={`${NAV_TAB} ${tab === 'overview' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Overview</button>
           <button onClick={() => setTab('conversations')} className={`${NAV_TAB} ${tab === 'conversations' ? NAV_TAB_ON : NAV_TAB_OFF}`}>
             <span className="truncate">Chats</span>
