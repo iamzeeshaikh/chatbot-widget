@@ -44,6 +44,8 @@ export interface CrmEmailInEntry {
   body: string
   /** Everything trimmed off: the quoted chain and signature, for "show more". */
   quoted: string | null
+  /** True when the reply carried no new text — usually an attachment on its own. */
+  textless?: boolean
   snippet: string
   /** When Gmail says the message was sent (ms epoch -> ISO). */
   at: string
@@ -72,6 +74,7 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
       subject: str(o.subject),
       body: str(o.body),
       quoted: typeof o.quoted === 'string' && o.quoted ? o.quoted : null,
+      textless: o.textless === true,
       snippet: str(o.snippet),
       at: str(o.at),
       direction: 'inbound',
@@ -128,18 +131,26 @@ const ATTRIBUTION_RE = [
 
 const SIGNATURE_RE = /^\s*--\s*$/
 
-export function splitQuoted(raw: string): { visible: string; quoted: string | null } {
+export function splitQuoted(raw: string): { visible: string; quoted: string | null; textless?: boolean } {
   const text = (raw ?? '').replace(/\r\n/g, '\n')
   const lines = text.split('\n')
 
   let cut = -1
+  // How sure we are about the boundary. A `--` signature and an
+  // "-----Original Message-----" banner are explicit delimiters the sending
+  // client wrote on purpose; everything below them is quoted body or signature
+  // and is SUPPOSED to read as ordinary unprefixed prose. The "On … wrote:"
+  // attribution and a bare "From:/Sent:" block are heuristics we inferred, and
+  // only those need second-guessing below.
+  let certain = false
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
     // A run of quoted lines starting here.
     if (/^\s*>/.test(line)) { cut = i; break }
 
-    if (SIGNATURE_RE.test(line)) { cut = i; break }
+    if (SIGNATURE_RE.test(line)) { cut = i; certain = true; break }
+    if (/^\s*-{2,}\s*(Original Message|Forwarded message)/i.test(line)) { cut = i; certain = true; break }
 
     // "On … wrote:" — accept the one-line form, or a first line that runs on
     // and ends with "wrote:" within the next couple of lines.
@@ -160,10 +171,35 @@ export function splitQuoted(raw: string): { visible: string; quoted: string | nu
 
   if (cut < 0) return { visible: tidy(text), quoted: null }
   const visible = tidy(lines.slice(0, cut).join('\n'))
-  const quoted = tidy(lines.slice(cut).join('\n'))
-  // Never hand back an empty body: if the split leaves nothing visible the
-  // heuristic was wrong for this message, so show all of it.
-  if (!visible) return { visible: tidy(text), quoted: null }
+  const tail = lines.slice(cut)
+  const quoted = tidy(tail.join('\n'))
+
+  // FAIL-SAFE 1 — bottom-posting. Some people reply UNDER the quote, and some
+  // answer inline between quoted lines. Cutting at an inferred attribution then
+  // buries their actual message inside `quoted`, which is the one outcome worth
+  // avoiding: hiding text a customer wrote. So where the boundary was a guess
+  // rather than an explicit delimiter, and the tail still holds real prose —
+  // lines that are neither quote markers nor mail headers — distrust the
+  // boundary and show the whole message. Being uncertain must cost the agent a
+  // few lines of duplicated history, never a lost sentence.
+  const tailProse = tail.filter((l) => {
+    const t = l.trim()
+    if (!t) return false
+    if (t.startsWith('>')) return false
+    if (/^(On|Le|Am)\b.*(wrote|écrit|schrieb)\s*:?\s*$/i.test(t)) return false
+    if (/^(From|Sent|To|Cc|Subject|Date|Reply-To):/i.test(t)) return false
+    if (/^-{2,}\s*(Original Message|Forwarded message)/i.test(t)) return false
+    if (/^[-_=]{3,}$/.test(t)) return false
+    return t.length > 2
+  })
+  if (!certain && tailProse.length > 0) return { visible: tidy(text), quoted: null }
+
+  // FAIL-SAFE 2 — nothing new at all. An attachment-only reply is entirely
+  // quote. Promoting that quote to the message body (what used to happen) reads
+  // as though the customer wrote our own words back at us. Say plainly that
+  // there was no text and keep the history behind the toggle.
+  if (!visible) return { visible: '', quoted: quoted || null, textless: true }
+
   return { visible, quoted: quoted || null }
 }
 

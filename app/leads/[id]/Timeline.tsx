@@ -18,14 +18,14 @@ import { useMemo, useState } from 'react'
 import {
   Sparkles, MessageSquare, StickyNote, Target, UserCheck, Paperclip,
   Pencil, Banknote, CircleCheck, History, Send, ChevronDown, ChevronRight,
-  Inbox, Quote, Reply, FileText, Image as ImageIcon, TriangleAlert, type LucideIcon,
+  Inbox, Quote, Reply, FileText, Image as ImageIcon, TriangleAlert, RefreshCw, Loader2, type LucideIcon,
 } from 'lucide-react'
 import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
 import { TASK_TYPE_LABEL, TASK_TYPE_STYLE } from '@/lib/tasks'
 import { isImageMime } from '@/lib/attachment'
 import type { TimelineEvent } from '@/lib/leadrecord'
-import { humanSize } from '@/lib/emailattach'
+import { humanSize, isRetryableSkip } from '@/lib/emailattach'
 import { TASK_ICON } from './icons'
 import { EmptyLine } from './ui'
 
@@ -79,7 +79,7 @@ export interface ReplyContext {
   subject: string
 }
 
-export default function Timeline({ events, currency, onEditNote, onDeleteNote, canManageNote, onReply }: {
+export default function Timeline({ events, currency, onEditNote, onDeleteNote, canManageNote, onReply, onRetryFile }: {
   events: TimelineEvent[]
   currency: CrmCurrency
   onEditNote: (noteId: string, body: string) => Promise<void>
@@ -87,6 +87,8 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
   canManageNote: (e: TimelineEvent) => boolean
   /** Opens the composer prefilled to reply into this thread. */
   onReply?: (ctx: ReplyContext) => void
+  /** Re-fetches an inbound attachment the sweep refused. */
+  onRetryFile?: (gmailId: string, name: string) => Promise<void>
 }) {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [editingNote, setEditingNote] = useState<string | null>(null)
@@ -241,7 +243,7 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                     ) : e.kind === 'email' && e.email ? (
                       <><EmailEntry entry={e.email} /><Files files={e.files} /></>
                     ) : e.kind === 'email_in' && e.inbound ? (
-                      <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} /></>
+                      <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} gmailId={e.inbound.gmailId} onRetryFile={onRetryFile} /></>
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
                         {e.body}
@@ -289,8 +291,14 @@ function InboundEntry({ entry, unread, onReply }: {
         from {entry.fromName ? `${entry.fromName} <${entry.from}>` : entry.from}
       </p>
       {/* The new content, always shown in full — this is what they actually
-          wrote, and it is never the thing hidden behind a toggle. */}
-      <p className="mt-1.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{entry.body}</p>
+          wrote, and it is never the thing hidden behind a toggle. When there is
+          none (an attachment on its own) say that, rather than promoting the
+          quoted history into the body and reading as if they wrote it. */}
+      {entry.textless || !entry.body.trim() ? (
+        <p className="mt-1.5 text-xs text-gray-500 italic">No message text — see the attachment below.</p>
+      ) : (
+        <p className="mt-1.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{entry.body}</p>
+      )}
       {onReply && (
         <button
           onClick={() => onReply({
@@ -362,9 +370,11 @@ function describeValue(body: string, fallbackCurrency: CrmCurrency): string {
 
 // Files carried by an email, in either direction. Links are signed and expire,
 // which is why they are minted per page load rather than stored.
-function Files({ files, skipped }: {
+function Files({ files, skipped, gmailId, onRetryFile }: {
   files?: TimelineEvent['files']
   skipped?: { name: string; why: string }[]
+  gmailId?: string
+  onRetryFile?: (gmailId: string, name: string) => Promise<void>
 }) {
   if (!files?.length && !skipped?.length) return null
   return (
@@ -383,13 +393,43 @@ function Files({ files, skipped }: {
         </a>
       ))}
       {(skipped ?? []).map((sk) => (
-        <span key={sk.name} title={sk.why}
-          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border border-amber-300 bg-amber-50 text-amber-800">
-          <TriangleAlert size={9} strokeWidth={2} aria-hidden />
-          <span className="truncate max-w-[140px]">{sk.name}</span>
-          not saved
-        </span>
+        <SkippedFile key={sk.name} skip={sk} gmailId={gmailId} onRetry={onRetryFile} />
       ))}
     </div>
+  )
+}
+
+// A file the sweep refused. States the reason on the chip rather than hiding it
+// in a tooltip, and offers a retry when the refusal was a transient failure or a
+// limit that has since been raised — a dead chip pointing at a lost file is the
+// worst of both worlds.
+function SkippedFile({ skip, gmailId, onRetry }: {
+  skip: { name: string; why: string }
+  gmailId?: string
+  onRetry?: (gmailId: string, name: string) => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState('')
+  const canRetry = !!gmailId && !!onRetry && isRetryableSkip(skip.why)
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border border-amber-300 bg-amber-50 text-amber-900">
+      <TriangleAlert size={9} strokeWidth={2} aria-hidden />
+      <span className="truncate max-w-[150px] font-medium">{skip.name}</span>
+      <span className="text-amber-700">not saved — {failed || skip.why}</span>
+      {canRetry && (
+        <button
+          onClick={async () => {
+            setBusy(true); setFailed('')
+            try { await onRetry!(gmailId!, skip.name) }
+            catch (e) { setFailed(e instanceof Error ? e.message : 'retry failed') }
+            finally { setBusy(false) }
+          }}
+          disabled={busy}
+          className="ml-0.5 inline-flex items-center gap-0.5 font-semibold text-amber-900 underline underline-offset-2 hover:text-amber-950 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+          {busy ? <Loader2 size={9} strokeWidth={2.5} className="animate-spin" aria-hidden /> : <RefreshCw size={9} strokeWidth={2.5} aria-hidden />}
+          Retry
+        </button>
+      )}
+    </span>
   )
 }

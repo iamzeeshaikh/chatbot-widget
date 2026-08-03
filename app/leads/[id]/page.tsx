@@ -594,6 +594,15 @@ export default function LeadRecordPage() {
             )}
             <Timeline events={record.timeline} currency={record.value.currency}
               onReply={(ctx) => { setReplyTo(ctx); setComposing(true) }}
+              onRetryFile={async (gmailId, name) => {
+                const res = await fetch(`/api/leads/${encodeURIComponent(record.id)}/email/attachment`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ gmailId, name }),
+                })
+                const j = await res.json().catch(() => ({}))
+                if (!res.ok) throw new Error(j.error || 'Could not fetch that file.')
+                await load()
+              }}
               onEditNote={editNote} onDeleteNote={deleteNote} canManageNote={canManageNote} />
           </Card>
         </div>

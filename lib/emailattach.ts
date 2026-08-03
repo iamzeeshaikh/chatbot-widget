@@ -31,9 +31,22 @@ export const MAX_EMAIL_ATTACHMENT_BYTES = 10 * 1024 * 1024   // per file
 export const MAX_EMAIL_ATTACHMENTS_TOTAL = 15 * 1024 * 1024  // per message, raw
 export const MAX_EMAIL_ATTACHMENTS = 10                      // per message
 
-/** Inbound: never spend more than this of the sweep's budget on one message. */
-export const MAX_INBOUND_ATTACHMENT_BYTES = 10 * 1024 * 1024
-export const MAX_INBOUND_TOTAL_BYTES = 20 * 1024 * 1024
+// Inbound is a DIFFERENT limit from outbound, and was wrongly set to the same
+// number. Outbound is capped by what Gmail will accept from us; inbound is
+// already through Gmail, so the only question is what we are willing to store
+// and spend sweep time on. 10MB refused an ordinary phone photo — IMG_1542.PNG
+// at 11.3MB — which is not an edge case, it is the common case for artwork
+// approvals. Gmail's own 25MB ceiling is the natural limit.
+export const MAX_INBOUND_ATTACHMENT_BYTES = 25 * 1024 * 1024
+export const MAX_INBOUND_TOTAL_BYTES = 40 * 1024 * 1024
+
+/** Whether a refusal is worth offering a retry for. */
+export function isRetryableSkip(why: string): boolean {
+  // Size and type are decisions, not failures — retrying repeats them. A
+  // download or storage error is transient and worth another go, and so is a
+  // size refusal recorded under an older, lower limit.
+  return /could not be downloaded|could not be stored/i.test(why) || /too large/i.test(why)
+}
 
 // ── what may be carried ──────────────────────────────────────────────────────
 // An ALLOWLIST, not a denylist: anything unrecognised is refused rather than
