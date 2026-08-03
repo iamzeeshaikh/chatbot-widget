@@ -9,7 +9,7 @@ import GlobalSearch from '@/app/components/GlobalSearch'
 import {
   Smartphone, Tablet, Monitor, Circle, UserCheck, UserRound, Mail, ShoppingCart,
   MessageSquare, BarChart3, Lock, Vibrate, Sun, Moon, Bell, BellOff, Users,
-  Trophy, Globe, Bot, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
+  Trophy, Globe, Bot, BotOff, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
   ChevronRight, Repeat, Eye, Contact, UserPlus, Languages, Pin, User, FileText,
   Paperclip, Ban, Flame, AlertTriangle, ChevronUp, ChevronDown, Download,
   CreditCard, Info, Check, X, TrendingDown, LogOut, type LucideIcon,
@@ -285,7 +285,12 @@ const NAV_TAB_OFF = 'text-gray-500 hover:text-gray-900 hover:bg-white/60'
 // it can be hidden at zero on mobile without moving anything, while from `sm`
 // up it goes back in the flow and is always present.
 const NAV_COUNT = 'absolute -top-1 -right-1 sm:static text-[10px] leading-none px-1.5 py-1 rounded-full font-semibold tabular-nums text-center min-w-[1.9rem] shrink-0'
-const ICON_BTN = 'shrink-0 inline-flex items-center justify-center h-8 min-w-8 px-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
+// Shape only — no colour. Each utility button supplies its own, because a
+// state colour appended after a base string that already sets `text-…` is a
+// coin toss on which utility CSS puts last, not an override.
+const ICON_BTN = 'shrink-0 inline-flex items-center justify-center h-8 min-w-8 px-1.5 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
+// The resting look: a switch you set once, not something to be drawn to.
+const ICON_BTN_IDLE = 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
 
 function agentShort(email: string | null | undefined): string {
   if (!email) return ''
@@ -942,9 +947,28 @@ export default function Dashboard() {
 
   // Sound on/off, persisted; default ON. Read lazily so SSR doesn't touch window.
   const [soundOn, setSoundOn] = useState(true)
+  // Whether that read has happened yet. Until it has, `soundOn` is the default
+  // rather than the agent's actual choice, and mirroring it to the service
+  // worker would briefly un-mute a muted dashboard.
+  const [soundHydrated, setSoundHydrated] = useState(false)
   useEffect(() => {
     try { if (localStorage.getItem('zee-dash-sound') === 'off') setSoundOn(false) } catch { /* ignore */ }
+    setSoundHydrated(true)
   }, [])
+
+  // THE SWITCH HAS TO REACH THE SERVICE WORKER, not just this page.
+  // Everything the page itself plays goes through playDashSound, which honours
+  // `soundOn`. Push notifications do not: sw.js draws them and the OS plays the
+  // sound, outside the tab entirely — which is why muting the tab in Chrome
+  // left the dinging untouched. A worker cannot read localStorage, so the value
+  // is posted across on every change (and on load, so a worker that was killed
+  // and respawned is re-told). See public/sw.js.
+  useEffect(() => {
+    if (!soundHydrated || !('serviceWorker' in navigator)) return
+    navigator.serviceWorker.ready
+      .then((reg) => { (reg.active ?? navigator.serviceWorker.controller)?.postMessage({ type: 'zee-sound', on: soundOn }) })
+      .catch(() => { /* no worker (unsupported / blocked) — nothing to mirror */ })
+  }, [soundOn, soundHydrated])
   const toggleSound = useCallback(() => {
     setSoundOn((on) => {
       const next = !on
@@ -1840,7 +1864,10 @@ export default function Dashboard() {
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
-  const dashTitle = 'ZeeOps Desk'
+  // The product's name. Do not change it without asking — it was renamed to
+  // "ZeeOps Desk" in a5f0f8c on the strength of a confirmation the user says
+  // they never gave, and restored here.
+  const dashTitle = 'ZeeOps Chat Widget'
   const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
   // Effective bot state for the open conversation. The packaging schedule can put
@@ -1992,7 +2019,12 @@ export default function Dashboard() {
           <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-md transition-transform group-hover:scale-105" style={{ backgroundColor: accentColor }}>
             <svg viewBox="0 0 24 24" className="w-4.5 h-4.5 fill-white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
           </div>
-          <span className="hidden xl:block text-sm font-bold text-gray-900 whitespace-nowrap group-hover:text-gray-700">{dashTitle}</span>
+          {/* Shown from `sm` up, not just `xl`. Hiding it left the logo alone
+              against a wide empty gap, and a bare mark does not tell someone
+              looking at the screen what they are looking at. Only a phone,
+              where the gap does not exist, falls back to the mark alone. */}
+          <span className="hidden sm:block text-sm font-bold text-gray-900 whitespace-nowrap group-hover:text-gray-700">{dashTitle}</span>
+          <span className="sm:hidden sr-only">{dashTitle}</span>
         </button>
 
         {/* ── 2. Primary navigation ──
@@ -2052,17 +2084,24 @@ export default function Dashboard() {
 
           {/* Whether the AI is answering customers on the live sites. It is a
               standing fact about the product rather than a per-page detail, so
-              it gets a bordered chip with a lit dot instead of an icon — but
-              muted colours, because it should not outshout the navigation.
+              it gets a bordered chip.
               Read-only: there is no global on/off control in this bar today, it
-              follows lib/botflag.ts and the settings fetch. */}
+              follows lib/botflag.ts and the settings fetch.
+
+              It used to be a bare dot with the words gated behind `xl`, which
+              at every width below that was an unlabelled grey circle in a box
+              — and a grey dot reads as "broken", not as "off". So the chip now
+              always carries a Bot / BotOff glyph AND the word, and the two
+              states differ by icon, colour and text at once rather than by the
+              shade of one 8px circle. */}
           <span title={botGlobalOff
               ? 'The AI bot is OFF — every chat goes straight to a human'
               : 'The AI bot is ON and answering visitors on your live sites'}
             className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2 lg:px-2.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap ${botGlobalOff ? 'bg-gray-100 border-gray-300 text-gray-600' : 'bg-green-50 border-green-300 text-green-800'}`}>
-            <span className={`w-2 h-2 rounded-full shrink-0 ${botGlobalOff ? 'bg-gray-400' : 'bg-green-600'}`} aria-hidden />
-            <span className="hidden xl:inline">Bot {botGlobalOff ? 'off' : 'on'}</span>
-            <span className="xl:hidden sr-only">Bot {botGlobalOff ? 'off' : 'on'}</span>
+            {botGlobalOff
+              ? <BotOff size={14} strokeWidth={2} className="shrink-0" aria-hidden />
+              : <Bot size={14} strokeWidth={2} className="shrink-0" aria-hidden />}
+            <span>Bot {botGlobalOff ? 'off' : 'on'}</span>
           </span>
 
           {/* Replies waiting on this agent. Sits up here rather than only on a
@@ -2088,27 +2127,36 @@ export default function Dashboard() {
           {pushState !== 'unsupported' && (
             <button onClick={togglePush}
               title={pushState === 'on' ? 'Push notifications ON for this device — new chats ping you even with the app closed. Click to turn off.' : 'Enable push notifications on this device — get pinged about new chats even when the app is closed'}
-              aria-label="Push notifications" aria-pressed={pushState === 'on'}
-              className={`${ICON_BTN} ${pushState === 'on' ? 'text-green-700' : ''}`}>
+              aria-label={pushState === 'on' ? 'Push notifications on' : 'Push notifications off'}
+              aria-pressed={pushState === 'on'}
+              className={`${ICON_BTN} ${pushState === 'on' ? 'text-green-700 hover:bg-green-50' : ICON_BTN_IDLE}`}>
               <Vibrate size={15} strokeWidth={2} aria-hidden />
             </button>
           )}
-          <button onClick={toggleSound} aria-label="Sound" aria-pressed={soundOn}
-            title={soundOn ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting; click to mute' : 'Sound off — click to unmute'}
-            className={ICON_BTN}>
+          {/* Muted is the state worth shouting about: it is the one that loses
+              a customer, and four grey icons in a row do not distinguish a
+              bell from a struck-through bell at 15px. So OFF gets its own
+              colour and a filled chip, not just a different glyph. */}
+          <button onClick={toggleSound} aria-pressed={soundOn}
+            aria-label={soundOn ? 'Sound on' : 'Sound off — dashboard is muted'}
+            title={soundOn
+              ? 'Sound on — chimes repeat every few seconds while a visitor or chat is waiting, and push notifications ping. Click to mute everything.'
+              : 'Sound OFF — no chimes and no sound on push notifications. Alerts still appear, silently. Click to unmute.'}
+            className={`${ICON_BTN} ${soundOn ? ICON_BTN_IDLE : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>
             {soundOn ? <Bell size={15} strokeWidth={2} aria-hidden /> : <BellOff size={15} strokeWidth={2} aria-hidden />}
           </button>
-          <button onClick={toggleTheme} aria-label="Theme"
+          <button onClick={toggleTheme} aria-pressed={darkMode}
+            aria-label={darkMode ? 'Theme — dark' : 'Theme — light'}
             title={darkMode ? 'Dark mode on — click for light mode' : 'Light mode — click for dark mode'}
-            className={ICON_BTN}>
+            className={`${ICON_BTN} ${ICON_BTN_IDLE}`}>
             {darkMode ? <Sun size={15} strokeWidth={2} aria-hidden /> : <Moon size={15} strokeWidth={2} aria-hidden />}
           </button>
 
           {/* Team presence — who is online right now (any member can see it). */}
           <div className="relative">
             <button onClick={() => setShowTeam((v) => !v)} title="See which teammates are online right now"
-              aria-label="Team presence" aria-expanded={showTeam}
-              className={`${ICON_BTN} gap-1`}>
+              aria-label={`Team presence — ${teamAgents.filter((a) => a.online).length} online`} aria-expanded={showTeam}
+              className={`${ICON_BTN} ${ICON_BTN_IDLE} gap-1`}>
               <span className={`w-2 h-2 rounded-full shrink-0 ${teamAgents.some((a) => a.online) ? 'bg-green-500' : 'bg-gray-300'}`} aria-hidden />
               <span className="text-[11px] font-semibold tabular-nums">{teamAgents.filter((a) => a.online).length}</span>
             </button>

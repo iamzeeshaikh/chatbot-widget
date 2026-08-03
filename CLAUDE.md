@@ -335,6 +335,20 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
   `<meta http-equiv="content-security-policy">`.
 - Any new widget sound must be gated in `playChime` — that is the single mute/dismiss
   chokepoint, and an ungated ding once cost a real sale.
+- **The DASHBOARD's sound switch has two halves, and a new sound must respect both.**
+  `playDashSound` (`app/page.tsx`) covers everything the page plays; `silent` on
+  `showNotification` (`public/sw.js`) covers everything a push plays. The second half
+  exists because a push notification is drawn by the worker and sounded by the OS —
+  outside the tab, where neither the page's AudioContext nor **Chrome's own tab mute**
+  can reach it. That was a real bug: a muted tab kept dinging. A worker cannot read
+  localStorage, so the page posts `{type:'zee-sound'}` to it on every change and on
+  load, and the worker persists it in the Cache API to survive being killed between
+  pushes. Anything that sends a push (`sendPushToWorkspace` on new chats,
+  `sendPushToMember` for Phase 6 reply alerts and task reminders) inherits this by
+  going through that one push handler — do not add a second one.
+  Note `renotify` must track `silent`: it is what makes a repeat push on the same tag
+  alert again instead of quietly updating the banner, and Chrome rejects the two
+  together.
 - **When the widget asks for contact details is tuned in ONE object: `LEAD_PROMPT` in
   `public/widget.js`.** Every threshold (idle delay, minimum messages, active-conversation
   grace, retry/defer, exit intent on/off) lives there — do not scatter new constants.
