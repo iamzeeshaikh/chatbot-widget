@@ -125,6 +125,32 @@ message id, so the sweep is safe run late, twice or after a missed window.
 Failures are never swallowed: every per-agent error lands in a `crm_email_sweep`
 row on the reserved `zeeops-crm` site and is surfaced by the sweep endpoint.
 
+**Inbound attachment limits are NOT the outbound ones.** Outbound is capped
+because Gmail refuses a message over 25MB *after* base64; inbound is already
+through Gmail, so the only question is what we will store. Copying the 10MB
+outbound cap to inbound refused an ordinary 11.3MB phone photo — the common
+case for artwork approval, not an edge case. `MAX_INBOUND_ATTACHMENT_BYTES`
+(25MB) is separate on purpose; the Supabase bucket's own file-size limit must be
+raised to match or the upload fails after the download has already been paid for.
+A refusal is recorded on the row with its reason, shown inline on the timeline,
+and `isRetryableSkip()` decides whether `/api/leads/[id]/email/attachment` offers
+a retry — a size refusal is retryable because the limit that caused it may since
+have been raised. Never leave a dead chip pointing at a file nobody can get.
+
+**Quote stripping fails safe, in both directions.** `splitQuoted` cuts at the
+first quote marker, signature or attribution, but a `--` signature and an
+`-----Original Message-----` banner are explicit delimiters while "On … wrote:"
+and a bare `From:/Sent:` block are inferences. Where the boundary was *inferred*
+and real prose still sits below it, the boundary is abandoned and the whole
+message is shown — bottom-posted and inline replies are common and hiding a
+sentence a customer wrote is the one unacceptable outcome. A reply that is
+entirely quote (an attachment on its own) is flagged `textless` rather than
+having its quote promoted into the body, which used to render as though the
+customer had sent our own words back at us. `parseCrmEmailIn` re-applies that
+test on **read** via `isAllQuote()`, because rows written before the fix already
+have the quote in `body` and control rows are append-only — there is nothing to
+migrate, so the repair belongs at the read edge.
+
 A customer reply deliberately does **not** move `lastContactedAt` — that measures
 OUR outreach and feeds the follow-up cadence, so folding inbound into it would
 make an ignored lead look freshly worked. It sets `lastReplyAt` and increments
