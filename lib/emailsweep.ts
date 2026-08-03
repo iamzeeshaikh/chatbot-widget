@@ -23,7 +23,13 @@
 import { supabase } from './supabase'
 import { chunks } from './bulk'
 import { writeControlRow } from './leadrecord'
-import { REMINDER_SITE } from './reminders'
+import {
+  REMINDER_SITE, LEDGER_SESSION, CRM_PREFS_ROLE, CRM_REMINDER_ROLE, PREFS_SESSION,
+  parsePrefs, prefsFor, quietHoldUntil,
+} from './reminders'
+import { sendPushToMember } from './push'
+import { siteWorkspace } from './workspaces'
+import { currentStateForIds } from './leadstate'
 import { CRM_EMAIL_ROLE, parseCrmEmail } from './crmemail'
 import {
   CRM_EMAIL_IN_ROLE, parseCrmEmailIn, splitQuoted, inboundSnippet, parseFromHeader,
@@ -79,6 +85,8 @@ export interface SweepResult {
   captured: number
   errors: number
   dryRun?: boolean
+  /** One entry per reply we tried to notify someone about. */
+  notices?: ReplyNotice[]
   /** Live threads in the window, vs how many this run checked. */
   totalThreads?: number
   checkedThreads?: number
@@ -270,6 +278,9 @@ export async function runEmailSweep(
   }
 
   const results: SweepAgentResult[] = []
+  // Replies captured THIS run — the only ones worth notifying about. Anything
+  // already on the record was notified when it arrived.
+  const fresh: { entry: CrmEmailInEntry; sessionId: string; siteId: string; agent: string }[] = []
   for (const [agent, refs] of byAgent) {
     const res: SweepAgentResult = { agent, threads: refs.length, captured: 0 }
     const conn = await connectionFor(agent)
@@ -347,15 +358,19 @@ export async function runEmailSweep(
           }
           captured.add(m.gmailId)
           res.captured++
+          if (!dryRun) fresh.push({ entry, sessionId: ref.sessionId, siteId: ref.siteId, agent })
         }
       }
     }
     results.push(res)
   }
 
+  const notices = dryRun ? [] : await notifyReplies(fresh, now)
+
   const out: SweepResult = {
     ranAt,
     agents: results,
+    notices,
     captured: results.reduce((n, r) => n + r.captured, 0),
     errors: results.filter((r) => r.error).length,
     dryRun,
@@ -454,4 +469,120 @@ export async function threadContextFor(sessionId: string, replyToGmailId: string
     inReplyTo: target.messageId,
     references,
   }
+}
+
+// ── notifying the owner of a reply (Phase 6) ─────────────────────────────────
+// Reuses the Phase 3 push stack wholesale — same subscriptions, same
+// preferences, same quiet-hours rule, same claim-before-send ledger — rather
+// than inventing a second notification channel with its own bugs.
+//
+// WHO IS TOLD
+//   1. the lead's owner, when it has one
+//   2. otherwise the agent whose mailbox the reply actually landed in, i.e.
+//      whoever sent the message being answered
+// An unassigned lead is not nobody's problem: the reply is sitting in a real
+// person's inbox, and that person is the one who can act on it. Broadcasting to
+// the whole workspace would make every reply everyone's notification, which is
+// how a team learns to ignore them.
+//
+// EXACTLY ONCE, EVER
+// Claimed on `reply:<gmailId>:<recipient>` before the push is attempted, so a
+// re-run, a double cron fire or a retry cannot notify twice. Quiet hours HOLD
+// (no ledger row, retried later) rather than dropping.
+
+export interface ReplyNotice { to: string; gmailId: string; leadId: string; state: 'sent' | 'held' | 'skipped'; why?: string }
+
+export function replyNotifyKey(gmailId: string, to: string): string {
+  return `reply:${gmailId}:${to.trim().toLowerCase()}`
+}
+
+async function notifiedAlready(): Promise<Set<string>> {
+  const out = new Set<string>()
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from('chat_logs')
+      .select('message')
+      .eq('session_id', LEDGER_SESSION)
+      .eq('role', CRM_REMINDER_ROLE)
+      .range(from, from + 999)
+    for (const r of data ?? []) {
+      try {
+        const o = JSON.parse(r.message)
+        if (typeof o?.k === 'string' && o.k.startsWith('reply:')) out.add(o.k)
+      } catch { /* not ours */ }
+    }
+    if (!data || data.length < 1000) break
+  }
+  return out
+}
+
+/** Push one notification per newly captured reply, to exactly one person. */
+async function notifyReplies(
+  fresh: { entry: CrmEmailInEntry; sessionId: string; siteId: string; agent: string }[],
+  now: Date,
+): Promise<ReplyNotice[]> {
+  const out: ReplyNotice[] = []
+  if (fresh.length === 0) return out
+
+  const [owners, already, prefsRows] = await Promise.all([
+    currentStateForIds([...new Set(fresh.map((f) => f.sessionId))]),
+    notifiedAlready(),
+    supabase.from('chat_logs').select('message')
+      .eq('session_id', PREFS_SESSION).eq('role', CRM_PREFS_ROLE)
+      .order('created_at', { ascending: true }).limit(500),
+  ])
+
+  // Newest prefs row per member wins, the same fold the reminder sweep uses.
+  const prefsByEmail = new Map<string, ReturnType<typeof parsePrefs>>()
+  for (const r of prefsRows.data ?? []) {
+    const p = parsePrefs(r.message)
+    if (p?.email) prefsByEmail.set(p.email.toLowerCase(), p)
+  }
+
+  for (const f of fresh) {
+    // Owner first; otherwise whoever's mailbox it landed in.
+    const to = (owners.get(f.sessionId)?.owner || f.agent || '').trim().toLowerCase()
+    if (!to) { out.push({ to: '', gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'nobody-to-notify' }); continue }
+
+    const k = replyNotifyKey(f.entry.gmailId, to)
+    if (already.has(k)) { out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'already-notified' }); continue }
+
+    const prefs = prefsFor(to, prefsByEmail.get(to) ?? undefined)
+    // `enabled` is the member's master switch for push; respected here so one
+    // toggle silences task reminders and reply alerts alike.
+    if (!prefs.enabled) { out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'notifications-off' }); continue }
+
+    // Quiet hours HOLD rather than drop: no ledger row is written, so the next
+    // run after the window opens picks it up and it is still delivered once.
+    const hold = quietHoldUntil(now, prefs)
+    if (hold) { out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'held', why: `quiet until ${hold.toISOString()}` }); continue }
+
+    const ws = siteWorkspace(f.siteId)
+    if (!ws) { out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'unknown-workspace' }); continue }
+
+    // Claim BEFORE sending — a push that succeeds after a crash must not be
+    // repeatable, and a duplicate notification is worse than a missed retry.
+    const { error } = await supabase.from('chat_logs').insert({
+      site_id: REMINDER_SITE, session_id: LEDGER_SESSION, role: CRM_REMINDER_ROLE,
+      message: JSON.stringify({ k, kind: 'reply', to, at: now.toISOString(), state: 'sent', gmailId: f.entry.gmailId }),
+    })
+    if (error) { out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'ledger-write-failed' }); continue }
+    already.add(k)
+
+    try {
+      const who = f.entry.fromName || f.entry.from
+      await sendPushToMember(to, ws, {
+        title: `${who} replied`,
+        body: f.entry.snippet || f.entry.subject || 'New email reply',
+        url: `/leads/${encodeURIComponent(f.sessionId)}`,
+        tag: `reply-${f.entry.gmailId}`,
+      })
+      out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'sent' })
+    } catch (e) {
+      // The claim stands: retrying would risk a double notification, and the
+      // reply is on the record either way.
+      out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: `push failed: ${e instanceof Error ? e.message : 'error'}` })
+    }
+  }
+  return out
 }

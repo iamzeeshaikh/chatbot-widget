@@ -35,6 +35,7 @@ import Tasks, { type TaskDraft } from './Tasks'
 import EmailComposer, { type ReplyTo } from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
+import { useLiveVersion } from '@/app/components/useLiveVersion'
 
 export default function LeadRecordPage() {
   const params = useParams<{ id: string }>()
@@ -131,6 +132,25 @@ export default function LeadRecordPage() {
   }, [id])
 
   useEffect(() => { load() }, [load])
+
+  // ── live updates ──────────────────────────────────────────────────────────
+  // 20s matches the detail-poll cadence the dashboard already uses, and each
+  // tick is one index-backed row — the record itself is only refetched when
+  // something actually changed.
+  //
+  // Refreshing is DEFERRED, never cancelled, while the agent is mid-edit: an
+  // open composer, a half-typed note or an open note editor would all be
+  // clobbered by a re-render, and losing typed text to a background poll is far
+  // worse than seeing a reply twenty seconds later. The deferred refresh lands
+  // the moment they finish.
+  // Timeline's own note editor keeps its draft in local state, which survives a
+  // re-render, so it does not need guarding here. These two do: the composer is
+  // a modal the agent is working inside, and the note box is uncommitted text.
+  const busyEditing = composing || !!noteDraft.trim()
+  useLiveVersion({
+    leadId: id, watch: 'lead', intervalMs: 20_000, paused: busyEditing,
+    onChange: () => { load() },
+  })
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const post = useCallback(async (path: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') => {

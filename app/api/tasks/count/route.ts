@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { loadMemberTasks } from '@/lib/taskquery'
 import { needsAttentionCount } from '@/lib/tasks'
+import { unreadRepliesFor } from '@/lib/unread'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,10 +18,14 @@ export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const mine = (await loadMemberTasks(member)).filter((t) => t.assignee === member.email)
+  // Unread replies ride on this same 60s poll rather than adding a second one.
+  const [tasks, unread] = await Promise.all([loadMemberTasks(member), unreadRepliesFor(member)])
+  const mine = tasks.filter((t) => t.assignee === member.email)
   return NextResponse.json({
     count: needsAttentionCount(mine),
     overdue: mine.filter((t) => t.status === 'open' && t.bucket === 'overdue').length,
     today: mine.filter((t) => t.status === 'open' && t.bucket === 'today').length,
+    unreadReplies: unread.reduce((n, u) => n + u.count, 0),
+    unreadLeads: unread.slice(0, 10),
   })
 }

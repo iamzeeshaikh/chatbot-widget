@@ -574,6 +574,8 @@ export default function Dashboard() {
   // Navigation badge for /tasks — overdue + due today for this member.
   const [taskBadge, setTaskBadge] = useState(0)
   const [taskBadgeOverdue, setTaskBadgeOverdue] = useState(0)
+  // Customer replies nobody has opened, on leads this agent owns.
+  const [unreadReplies, setUnreadReplies] = useState(0)
   // Identity comes from the server (validated session), never the readable
   // cookie — so a stale cookie can't show the wrong workspace/role.
   useEffect(() => {
@@ -1179,6 +1181,7 @@ export default function Dashboard() {
         if (!d) return
         setTaskBadge(typeof d.count === 'number' ? d.count : 0)
         setTaskBadgeOverdue(typeof d.overdue === 'number' ? d.overdue : 0)
+        setUnreadReplies(typeof d.unreadReplies === 'number' ? d.unreadReplies : 0)
       })
       .catch(() => {})
     pull()
@@ -1979,6 +1982,17 @@ export default function Dashboard() {
               )}
             </a>
           </div>
+          {/* Replies waiting on this agent. Sits in the nav rather than only on
+              a record, because the whole problem was that the signal lived on a
+              page you had to already be looking at. */}
+          {unreadReplies > 0 && (
+            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/tasks') } }}
+              title={`${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened`}
+              className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+              <Inbox size={12} strokeWidth={2.5} aria-hidden />
+              {unreadReplies}
+            </a>
+          )}
           {/* Global lead search — the same palette the CRM pages carry, so ⌘K
               works wherever an agent happens to be when the phone rings. */}
           <GlobalSearch />

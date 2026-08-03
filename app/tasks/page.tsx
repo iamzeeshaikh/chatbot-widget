@@ -20,14 +20,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft, Bell, TriangleAlert, CheckCircle2, AlertTriangle, Check,
-  ExternalLink, CalendarClock, UserRound, Filter as FilterIcon, X,
+  ExternalLink, CalendarClock, UserRound, Filter as FilterIcon, X, Inbox,
 } from 'lucide-react'
-import { formatDueLabel, formatDateTime, formatShortDate, pktPartsOf, pktDayKey, dateDividerLabel } from '@/lib/datetime'
+import { formatDueLabel, formatDateTime, formatShortDate, pktPartsOf, pktDayKey, dateDividerLabel, timeAgo } from '@/lib/datetime'
 import { TASK_TYPES, TASK_TYPE_LABEL, TASK_TYPE_STYLE, type TaskType } from '@/lib/tasks'
 import { TASK_ICON } from '@/app/leads/[id]/icons'
 import type { TaskWithLead, TaskGroups } from '@/lib/taskquery'
 import ReminderSettings from './ReminderSettings'
 import GlobalSearch from '@/app/components/GlobalSearch'
+import { useLiveVersion } from '@/app/components/useLiveVersion'
 
 interface TasksResponse {
   groups: TaskGroups
@@ -52,6 +53,8 @@ export default function TasksPage() {
   const [error, setError] = useState('')
   const [showDone, setShowDone] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  // Leads whose customer has written back and nobody has opened it.
+  const [unread, setUnread] = useState<{ leadId: string; count: number; from: string; snippet: string; at: string }[]>([])
 
   useEffect(() => {
     try {
@@ -75,6 +78,20 @@ export default function TasksPage() {
   }, [assignee, site, type])
 
   useEffect(() => { load() }, [load])
+
+  // Rides on the endpoint the nav badge already polls — no extra query.
+  const loadUnread = useCallback(() => fetch('/api/tasks/count')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => { if (d) setUnread(d.unreadLeads ?? []) })
+    .catch(() => { /* the queue below is this page's real job */ }), [])
+  useEffect(() => { loadUnread() }, [loadUnread])
+
+  // Two agents on the same queue could not see each other's work. 45s rather
+  // than the record's 20s: a shared board is less urgent than the lead you are
+  // actively reading, and each tick is still one index-backed row.
+  // Paused while the reminder settings modal is open so it cannot re-render
+  // underneath a control someone is changing.
+  useLiveVersion({ watch: 'crm', intervalMs: 45_000, paused: showSettings, onChange: () => { load() } })
 
   const groups = data?.groups ?? EMPTY_GROUPS
   const openCount = groups.overdue.length + groups.today.length + groups.upcoming.length
@@ -208,6 +225,32 @@ export default function TasksPage() {
       </header>
 
       <main className="max-w-[1500px] mx-auto px-3 sm:px-5 py-3 space-y-2 animate-in">
+        {/* Above the queue on purpose: a customer waiting on an answer outranks
+            a task you set yourself. */}
+        {unread.length > 0 && (
+          <section className="bg-white border border-violet-300 rounded-xl shadow-sm overflow-hidden">
+            <h2 className="px-2.5 py-1.5 bg-violet-50 border-b border-violet-200 text-[10px] font-bold uppercase tracking-wider text-violet-800 flex items-center gap-1.5">
+              <Inbox size={11} strokeWidth={2.5} aria-hidden />
+              Awaiting your reply
+              <span className="text-[10px] font-semibold px-1.5 rounded-full bg-violet-600 text-white tabular-nums">
+                {unread.reduce((n, u) => n + u.count, 0)}
+              </span>
+            </h2>
+            {unread.map((u) => (
+              <Link key={u.leadId} href={`/leads/${encodeURIComponent(u.leadId)}`}
+                className="flex items-baseline gap-2 px-2.5 py-1.5 border-b border-gray-100 last:border-b-0 hover:bg-violet-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <span className="text-xs font-semibold text-gray-900 truncate max-w-[180px]">{u.from}</span>
+                <span className="text-[11px] text-gray-600 truncate flex-1 min-w-0">{u.snippet}</span>
+                {u.count > 1 && (
+                  <span className="shrink-0 text-[9px] font-bold px-1.5 rounded-full bg-violet-100 text-violet-700 border border-violet-300 tabular-nums">
+                    {u.count}
+                  </span>
+                )}
+                <span className="shrink-0 text-[10px] text-gray-500 tabular-nums">{timeAgo(u.at)}</span>
+              </Link>
+            ))}
+          </section>
+        )}
         {error && (
           <p role="alert" className="flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">
             <TriangleAlert size={12} strokeWidth={2} aria-hidden />{error}

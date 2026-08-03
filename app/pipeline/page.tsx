@@ -24,6 +24,7 @@ import Board from './Board'
 import ListView from './ListView'
 import BulkBar, { type BulkResult } from './BulkBar'
 import GlobalSearch from '@/app/components/GlobalSearch'
+import { useLiveVersion } from '@/app/components/useLiveVersion'
 
 type Mode = 'board' | 'list'
 const PREFS_KEY = 'zee-pipeline-prefs'
@@ -134,6 +135,7 @@ export default function PipelinePage() {
   }, [query, prefsReady])
 
   useEffect(() => { load() }, [load])
+
 
   const loadMore = useCallback(async (stage: CrmStage) => {
     const col = columns.find((c) => c.stage === stage)
@@ -305,6 +307,15 @@ export default function PipelinePage() {
 
   // Undo is a compensating write, not a rollback: it posts the per-lead
   // previous values the server handed back.
+  // Same 45s as /tasks. Paused while a bulk action is armed or in flight, and
+  // while a selection is open — a refresh underneath a half-made selection
+  // would silently change what "47 selected" refers to.
+  useLiveVersion({
+    watch: 'crm', intervalMs: 45_000,
+    paused: bulkBusy || selected.size > 0 || !!bulkResult,
+    onChange: () => { load() },
+  })
+
   const undoBulk = useCallback(async () => {
     if (!bulkResult?.undo) return
     setBulkBusy(true)
