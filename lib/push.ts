@@ -30,16 +30,50 @@ interface SubRow {
   email: string
   ws: string
   endpoint: string
+  /**
+   * Stable per-browser-profile id, minted client-side and kept in
+   * localStorage. See savePushSubscription for why it exists. Absent on rows
+   * written before it was introduced.
+   */
+  did?: string
   sub?: webpush.PushSubscription
   gone?: boolean
 }
 
-export async function savePushSubscription(email: string, ws: Workspace, sub: webpush.PushSubscription): Promise<void> {
+/**
+ * Register this device, retiring whatever this same device had before.
+ *
+ * The fold below is keyed on ENDPOINT, which dedupes a repeat save of the same
+ * subscription but not a *new* endpoint from a browser that already had one —
+ * and a browser can mint several. Real case: three distinct live endpoints
+ * appeared for one member inside one second, and two live endpoints sat on one
+ * account for three weeks, each getting its own copy of every notification.
+ * Nothing retired them, because an orphan is only ever cleaned up when a send
+ * comes back 404/410, and an orphan that is still LIVE never does.
+ *
+ * So dedupe on the device instead: one member on one browser profile holds at
+ * most one active subscription, and re-subscribing replaces rather than adds.
+ * `did` is the only thing that can carry that — endpoints rotate, user agents
+ * are not unique, and there is no DDL to add a real device table.
+ *
+ * Rows written before `did` existed are deliberately NOT swept up here: they
+ * are unattributable, and a member legitimately running a laptop and a phone
+ * would lose one. They retire on their own when they die.
+ */
+export async function savePushSubscription(email: string, ws: Workspace, sub: webpush.PushSubscription, did?: string): Promise<void> {
+  if (did) {
+    for (const prev of await safeSubs(ws)) {
+      if (prev.did !== did) continue
+      if ((prev.email ?? '').trim().toLowerCase() !== email.trim().toLowerCase()) continue
+      if (prev.endpoint === sub.endpoint) continue
+      await removePushSubscription(email, ws, prev.endpoint).catch(() => {})
+    }
+  }
   await supabase.from('chat_logs').insert({
     site_id: PUSH_SITE,
     session_id: PUSH_SITE,
     role: PUSH_SUB_ROLE,
-    message: JSON.stringify({ email, ws, endpoint: sub.endpoint, sub } satisfies SubRow),
+    message: JSON.stringify({ email, ws, endpoint: sub.endpoint, did, sub } satisfies SubRow),
   })
 }
 

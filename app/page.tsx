@@ -285,6 +285,21 @@ const NAV_TAB_OFF = 'text-gray-500 hover:text-gray-900 hover:bg-white/60'
 // it can be hidden at zero on mobile without moving anything, while from `sm`
 // up it goes back in the flow and is always present.
 const NAV_COUNT = 'absolute -top-1 -right-1 sm:static text-[10px] leading-none px-1.5 py-1 rounded-full font-semibold tabular-nums text-center min-w-[1.9rem] shrink-0'
+// A stable id for THIS browser profile, minted once and kept forever.
+// The server uses it to retire whatever subscription this profile held before,
+// so re-subscribing replaces rather than adds. Without it a profile could hold
+// several live endpoints at once and get a duplicate of every notification —
+// which is exactly what happened. Deliberately not an identifier of the person:
+// it says "same browser as last time" and nothing else.
+function pushDeviceId(): string {
+  try {
+    const k = 'zee-push-did'
+    let v = localStorage.getItem(k)
+    if (!v) { v = crypto.randomUUID(); localStorage.setItem(k, v) }
+    return v
+  } catch { return '' }
+}
+
 // Shape only — no colour. Each utility button supplies its own, because a
 // state colour appended after a base string that already sets `text-…` is a
 // coin toss on which utility CSS puts last, not an override.
@@ -936,7 +951,7 @@ export default function Dashboard() {
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: publicKey })
       await fetch('/api/admin/push-subscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription: sub.toJSON() }),
+        body: JSON.stringify({ subscription: sub.toJSON(), deviceId: pushDeviceId() }),
       })
       setPushState('on')
     } catch (err) {

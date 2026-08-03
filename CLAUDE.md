@@ -157,6 +157,22 @@ make an ignored lead look freshly worked. It sets `lastReplyAt` and increments
 `unreadReplies` instead, which is what drives the "waiting on you" badge on the
 record, the board card and the list.
 
+### Push subscriptions dedupe on the DEVICE, not the endpoint
+`push_sub` rows fold by endpoint, which catches a repeat save of the same
+subscription but not a *new* endpoint from a browser that already had one — and a
+browser can mint several. Three live endpoints once appeared for one member inside
+one second, and two sat on another account for three weeks, each getting its own
+copy of every notification. Nothing retired them: an orphan is only cleaned up when
+a send returns 404/410, and a **live** orphan never does.
+
+So `savePushSubscription` takes a `did` — a stable per-browser-profile id minted in
+localStorage (`zee-push-did`, `pushDeviceId()` in `app/page.tsx`) — and retires any
+other active row with the same email + `did` before inserting. One member on one
+profile therefore holds at most one subscription, and re-subscribing replaces.
+Rows predating `did` are deliberately left alone: they are unattributable, and a
+member genuinely running a laptop and a phone would lose one. They retire when they
+die. `scratch/test-push-dedupe.mjs` asserts all four cases against the real module.
+
 ### Member-scoped rows go on a reserved site, not a lead
 `crm_prefs` and `crm_reminder` belong to a *member*, not a conversation, so they live on
 the reserved `zeeops-crm` site (`lib/reminders.ts`) — the same trick `push_sub` uses with
