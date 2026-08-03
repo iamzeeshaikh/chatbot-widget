@@ -22,20 +22,44 @@ import { Check, Copy, Pencil, type LucideIcon } from 'lucide-react'
 // ── Card ─────────────────────────────────────────────────────────────────────
 // Tighter than before: 10px header padding rather than 12–16, and the body
 // controls its own spacing so cards can sit flush against dense lists.
-export function Card({ title, icon: Icon, action, children, className = '', bodyClass = '' }: {
+/**
+ * Card weight.
+ *
+ * Every card used to carry the same border, radius and header, so Activity —
+ * where agents actually live — competed on equal terms with Attachments. Three
+ * tones instead:
+ *   primary   the section being worked in; strongest border and header
+ *   default   supporting content
+ *   muted     reference material, deliberately recessive
+ */
+export type CardTone = 'primary' | 'default' | 'muted'
+
+const CARD_SHELL: Record<CardTone, string> = {
+  primary: 'bg-white border-gray-300 shadow-sm',
+  default: 'bg-white border-gray-200 shadow-sm',
+  muted: 'bg-white/70 border-gray-200 shadow-none',
+}
+const CARD_HEAD: Record<CardTone, string> = {
+  primary: 'text-[11px] font-bold uppercase tracking-wider text-gray-700',
+  default: 'text-[11px] font-semibold uppercase tracking-wider text-gray-600',
+  muted: 'text-[10px] font-semibold uppercase tracking-wider text-gray-500',
+}
+
+export function Card({ title, icon: Icon, action, children, className = '', bodyClass = '', tone = 'default' }: {
   title?: string
   icon?: LucideIcon
   action?: React.ReactNode
   children: React.ReactNode
   className?: string
   bodyClass?: string
+  tone?: CardTone
 }) {
   return (
-    <section className={`bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden ${className}`}>
+    <section className={`border rounded-xl overflow-hidden ${CARD_SHELL[tone]} ${className}`}>
       {title && (
-        <header className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
-          {Icon && <Icon size={13} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />}
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{title}</h2>
+        <header className={`flex items-center gap-2 px-3 border-b border-gray-100 ${tone === 'muted' ? 'py-1.5' : 'py-2'}`}>
+          {Icon && <Icon size={tone === 'muted' ? 11 : 13} strokeWidth={2} className="text-gray-500 shrink-0" aria-hidden />}
+          <h2 className={CARD_HEAD[tone]}>{title}</h2>
           {action && <div className="ml-auto flex items-center gap-1.5">{action}</div>}
         </header>
       )}
@@ -249,15 +273,16 @@ export function QuickAction({ icon: Icon, label, onClick, disabled, hint }: {
 // ── Empty states ─────────────────────────────────────────────────────────────
 // One compact line, not a hero block. An action can sit beside it on the same
 // row — "No open tasks   [+ Task]" — which is what keeps the page dense.
+// Compact on purpose: an empty state should take a line, not a panel.
 export function EmptyLine({ icon: Icon, text, action }: {
   icon: LucideIcon
   text: string
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2.5">
-      <Icon size={14} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
-      <p className="text-xs text-gray-500 min-w-0">{text}</p>
+    <div className="flex items-center gap-1.5 px-3 py-1.5">
+      <Icon size={11} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
+      <p className="text-[11px] text-gray-500 min-w-0">{text}</p>
       {action && <div className="ml-auto shrink-0">{action}</div>}
     </div>
   )

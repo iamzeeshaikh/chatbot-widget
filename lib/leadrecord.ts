@@ -35,6 +35,7 @@ import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry,
 } from './emailreply'
+import { signAttachments, type EmailAttachment } from './emailattach'
 
 export type LeadKind = 'chat' | 'quote' | 'checkout'
 
@@ -59,6 +60,8 @@ export interface TimelineEvent {
   inbound?: CrmEmailInEntry
   /** True while nobody has opened this reply. */
   unread?: boolean
+  /** Signed, short-lived links for files on an email event. */
+  files?: { name: string; mime: string; size: number; url: string | null }[]
 }
 
 export interface RelatedLead {
@@ -514,6 +517,34 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       actor: e.fromName || e.from, title: 'Replied by email',
       body: e.subject, inbound: e, unread: !readIds.has(e.gmailId),
     })
+  }
+
+  // ── email attachments ─────────────────────────────────────────────────────
+  // Stored as bucket PATHS, never URLs, so a link cannot outlive the session it
+  // was shown in. Every path on the record is signed in one batched call here,
+  // and the resulting hour-long URLs are what the timeline and the Attachments
+  // panel render. They also join the panel that already lists chat files, so an
+  // agent has one place to look for "what has been exchanged".
+  const emailFiles: { att: EmailAttachment; at: string; by: string }[] = []
+  for (const e of emailsSent) {
+    for (const a of e.attachments ?? []) emailFiles.push({ att: a, at: asUtcIso(e.at) ?? '', by: AGENT_LABEL(e.sentBy) })
+  }
+  for (const e of emailsIn.values()) {
+    for (const a of e.attachments ?? []) emailFiles.push({ att: a, at: asUtcIso(e.at) ?? '', by: e.fromName || e.from })
+  }
+  const signed = await signAttachments(emailFiles.map((f) => f.att))
+  const signedByPath = new Map(signed.map((s) => [s.path, s.url]))
+  emailFiles.forEach((f, i) => {
+    const url = signed[i]?.url
+    if (!url) return
+    attachments.push({ url, name: f.att.name, mime: f.att.mime, size: f.att.size, at: f.at, by: f.by })
+  })
+  // Hand the signed URLs to the timeline entries too, so a file can be opened
+  // straight from the message it arrived with.
+  for (const ev of timeline) {
+    const list = ev.kind === 'email' ? ev.email?.attachments : ev.kind === 'email_in' ? ev.inbound?.attachments : null
+    if (!list?.length) continue
+    ev.files = list.map((a) => ({ name: a.name, mime: a.mime, size: a.size, url: signedByPath.get(a.path) ?? null }))
   }
 
   timeline.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())

@@ -349,11 +349,19 @@ export interface OutgoingEmail {
   inReplyTo?: string
   /** The full chain, oldest first — In-Reply-To is appended to it. */
   references?: string[]
+  /** Files already fetched into memory, ready to be encoded into the MIME. */
+  attachments?: { name: string; mime: string; bytes: Uint8Array }[]
 }
 
 export interface SentResult { id: string; threadId: string; messageId: string }
 
 /** RFC 5322 with a UTF-8 body. Headers are encoded so non-ASCII names survive. */
+// RFC 2047 for a filename that is not plain ASCII, so "devis-été.pdf" arrives
+// with its name intact rather than as mojibake.
+function encWord(s: string): string {
+  return /^[\x20-\x7E]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s, 'utf8').toString('base64')}?=`
+}
+
 function buildMime(m: OutgoingEmail, messageId: string): string {
   const enc = (s: string) => (/^[\x20-\x7E]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s, 'utf8').toString('base64')}?=`)
   // Strip CR/LF from header values — an unescaped newline in a subject is a
@@ -378,12 +386,46 @@ function buildMime(m: OutgoingEmail, messageId: string): string {
       return uniq.length ? [`References: ${uniq.join(' ')}`] : []
     })(),
     'MIME-Version: 1.0',
+  ]
+
+  const b64 = (buf: Buffer) => buf.toString('base64').replace(/(.{76})/g, '$1\r\n')
+  const bodyPart = [
     'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: base64',
     '',
-    Buffer.from(m.body, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n'),
+    b64(Buffer.from(m.body, 'utf8')),
   ]
-  return lines.join('\r\n')
+
+  // No attachments: keep the simple single-part message exactly as before, so
+  // the common case gains no MIME machinery it does not need.
+  if (!m.attachments?.length) {
+    return [...lines, ...bodyPart].join('\r\n')
+  }
+
+  // multipart/mixed: the text first, then one part per file. The boundary is
+  // random so it cannot collide with anything inside the content.
+  const boundary = `zee_${Date.now().toString(36)}_${randomBytes(12).toString('hex')}`
+  const out = [
+    ...lines,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    ...bodyPart,
+  ]
+  for (const a of m.attachments) {
+    const filename = encWord(h(a.name))
+    out.push(
+      '',
+      `--${boundary}`,
+      `Content-Type: ${h(a.mime) || 'application/octet-stream'}; name="${filename}"`,
+      `Content-Disposition: attachment; filename="${filename}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      b64(Buffer.from(a.bytes)),
+    )
+  }
+  out.push('', `--${boundary}--`, '')
+  return out.join('\r\n')
 }
 
 export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: OutgoingEmail): Promise<SentResult> {
@@ -428,6 +470,13 @@ export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: Outgoi
 // already know the thread we started, so an agent's wider mailbox is
 // unreachable by construction rather than by policy.
 
+export interface InboundAttachmentRef {
+  attachmentId: string
+  name: string
+  mime: string
+  size: number
+}
+
 export interface InboundMessage {
   gmailId: string
   threadId: string
@@ -440,6 +489,8 @@ export interface InboundMessage {
   at: string
   /** Gmail labels — used only to skip our own copy in SENT. */
   labelIds: string[]
+  /** Declared attachments — metadata only; bytes are fetched separately. */
+  attachments: InboundAttachmentRef[]
 }
 
 function headerOf(headers: { name: string; value: string }[], name: string): string {
@@ -468,6 +519,44 @@ function findPart(node: unknown, mime: string): string | null {
     if (found) return found
   }
   return null
+}
+
+// Walk the MIME tree for real attachments. Anything with an attachmentId and a
+// filename counts; inline parts without a filename (signature images, the HTML
+// alternative) are skipped, which is what keeps a footer logo out of the
+// Attachments panel on every single reply.
+function findAttachments(node: unknown, out: InboundAttachmentRef[] = []): InboundAttachmentRef[] {
+  if (!node || typeof node !== 'object') return out
+  const p = node as {
+    filename?: string; mimeType?: string
+    body?: { attachmentId?: string; size?: number }
+    parts?: unknown[]
+  }
+  if (p.filename && p.body?.attachmentId) {
+    out.push({
+      attachmentId: p.body.attachmentId,
+      name: p.filename,
+      mime: p.mimeType ?? 'application/octet-stream',
+      size: p.body.size ?? 0,
+    })
+  }
+  for (const child of p.parts ?? []) findAttachments(child, out)
+  return out
+}
+
+/** The bytes of one attachment. Called only after the caller has vetted it. */
+export async function fetchAttachment(
+  agentEmail: string, cfg: GoogleConfig, gmailId: string, attachmentId: string,
+): Promise<Uint8Array | null> {
+  const token = await accessTokenFor(agentEmail, cfg)
+  const res = await fetch(
+    `${API}/messages/${encodeURIComponent(gmailId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) return null
+  const j = await res.json()
+  if (typeof j.data !== 'string') return null
+  return new Uint8Array(Buffer.from(j.data, 'base64url'))
 }
 
 function htmlToText(html: string): string {
@@ -519,6 +608,7 @@ export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadI
       bodyText: extractBody(m.payload),
       at: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : '',
       labelIds: m.labelIds ?? [],
+      attachments: findAttachments(m.payload),
     }
   })
 }

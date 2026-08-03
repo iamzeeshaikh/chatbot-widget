@@ -341,11 +341,11 @@ export default function LeadRecordPage() {
 
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-wrap">
-              <h1 className="text-lg font-bold text-gray-900 leading-tight break-words">{displayName}</h1>
+              <h1 className="text-xl font-bold text-gray-900 leading-tight break-words tracking-tight">{displayName}</h1>
               <StagePill stage={record.stage} />
             </div>
-            <p className="text-[11px] text-gray-500 flex items-center gap-1.5 flex-wrap leading-tight mt-0.5">
-              <Building2 size={11} strokeWidth={2} aria-hidden />{record.siteName}
+            <p className="text-[10px] text-gray-500 flex items-center gap-1.5 flex-wrap leading-tight mt-0.5">
+              <Building2 size={10} strokeWidth={2} aria-hidden />{record.siteName}
               <span className="text-gray-300" aria-hidden>·</span>
               {record.sourceLabel}
               <span className="text-gray-300" aria-hidden>·</span>
@@ -368,7 +368,7 @@ export default function LeadRecordPage() {
               </button>
             )}
             <GlobalSearch compact />
-            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-1"
+            <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-medium text-gray-500 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5"
               title="Counted automatically from agent replies — a burst of replies in one sitting counts as one follow-up">
               <Repeat size={11} strokeWidth={2} aria-hidden />{followUpLabel}
             </span>
@@ -522,7 +522,7 @@ export default function LeadRecordPage() {
           />
 
           <Card title="Deal" icon={Target}>
-            <div className="p-3 space-y-3">
+            <div className="px-3 py-2.5 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <label htmlFor="stage-select" className="sr-only">Stage</label>
                 <select id="stage-select" value={record.stage} onChange={(e) => changeStage(e.target.value as CrmStage)}
@@ -544,6 +544,7 @@ export default function LeadRecordPage() {
               </div>
 
               <StageRail stage={record.stage} />
+              <div className="border-t border-gray-100 pt-2" />
 
               {stageError && (
                 <p role="alert" className="flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1">
@@ -559,7 +560,7 @@ export default function LeadRecordPage() {
             </div>
           </Card>
 
-          <Card title="Activity" icon={Activity}
+          <Card title="Activity" icon={Activity} tone="primary"
             action={<span className="text-[10px] text-gray-500 tabular-nums">{record.messageCount} message{record.messageCount === 1 ? '' : 's'}</span>}>
             <div className="px-3 pt-2.5">
               <label htmlFor="note-composer" className="sr-only">Add an internal note</label>
@@ -602,7 +603,7 @@ export default function LeadRecordPage() {
             column on any real lead, so pinning it keeps the right-hand side
             useful instead of leaving a tall empty gutter while you scroll. */}
         <div className="space-y-3 min-w-0 lg:sticky lg:top-[60px] lg:max-h-[calc(100vh-72px)] lg:overflow-y-auto">
-          <Card title="Attachments" icon={Paperclip}
+          <Card title="Attachments" icon={Paperclip} tone="muted"
             action={<span className="text-[10px] text-gray-500 tabular-nums">{record.attachments.length}</span>}>
             {record.attachments.length === 0 ? (
               <EmptyLine icon={Paperclip} text="No files shared" />
@@ -631,7 +632,7 @@ export default function LeadRecordPage() {
             )}
           </Card>
 
-          <Card title="Related leads" icon={Link2}
+          <Card title="Related leads" icon={Link2} tone="muted"
             action={<span className="text-[10px] text-gray-500 tabular-nums">{record.related.length}</span>}>
             {record.related.length === 0 ? (
               <EmptyLine icon={Link2} text="No other leads from this person" />

@@ -18,13 +18,14 @@ import { useMemo, useState } from 'react'
 import {
   Sparkles, MessageSquare, StickyNote, Target, UserCheck, Paperclip,
   Pencil, Banknote, CircleCheck, History, Send, ChevronDown, ChevronRight,
-  Inbox, Quote, Reply, type LucideIcon,
+  Inbox, Quote, Reply, FileText, Image as ImageIcon, TriangleAlert, type LucideIcon,
 } from 'lucide-react'
 import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
 import { TASK_TYPE_LABEL, TASK_TYPE_STYLE } from '@/lib/tasks'
 import { isImageMime } from '@/lib/attachment'
 import type { TimelineEvent } from '@/lib/leadrecord'
+import { humanSize } from '@/lib/emailattach'
 import { TASK_ICON } from './icons'
 import { EmptyLine } from './ui'
 
@@ -154,20 +155,24 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                     <div className="flex-1 h-px bg-gray-100" />
                   </div>
                 )}
-                <div className="flex gap-2.5">
-                  {/* rail */}
+                <div className="flex gap-3">
+                  {/* rail — a continuous line rather than a dashed gap, so the
+                      eye follows one thread down the page */}
                   <div className="flex flex-col items-center shrink-0">
                     <span className="w-5 h-5 rounded-full border flex items-center justify-center shrink-0"
                       style={{ borderColor: `${color}55`, backgroundColor: `${color}14`, color }} aria-hidden>
                       <Icon size={11} strokeWidth={2.25} />
                     </span>
-                    <span className="flex-1 w-px bg-gray-100 my-1 min-h-[8px]" />
+                    <span className="flex-1 w-px bg-gray-200 mt-1 min-h-[10px]" />
                   </div>
 
-                  <div className="flex-1 min-w-0 pb-3">
+                  <div className="flex-1 min-w-0 pb-4">
+                    {/* Metadata, not content: the sender and time support the
+                        message rather than competing with it, so they sit a
+                        step down in weight and colour. */}
                     <div className="flex items-baseline gap-1.5 flex-wrap">
-                      <span className="text-xs font-semibold text-gray-900">{e.actor}</span>
-                      {showTitle && <span className="text-xs text-gray-600">{e.title}</span>}
+                      <span className="text-[11px] font-semibold text-gray-700">{e.actor}</span>
+                      {showTitle && <span className="text-[11px] text-gray-500">{e.title}</span>}
                       {e.kind === 'stage' && e.stage && (
                         <span className={`text-[10px] font-semibold px-1.5 rounded-full border ${CRM_STAGE_STYLE[e.stage]}`}>
                           {CRM_STAGE_LABEL[e.stage]}
@@ -182,7 +187,7 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                           </span>
                         )
                       })()}
-                      <span className="text-[10px] text-gray-400 ml-auto whitespace-nowrap tabular-nums"
+                      <span className="text-[10px] text-gray-500 ml-auto whitespace-nowrap tabular-nums"
                         title={`${formatTime(e.at)} · ${timeAgo(e.at)}`}>
                         {formatTime(e.at)}
                       </span>
@@ -234,9 +239,9 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                     ) : e.kind === 'value' && e.body ? (
                       <p className="mt-0.5 text-xs text-gray-600 tabular-nums">{describeValue(e.body, currency)}</p>
                     ) : e.kind === 'email' && e.email ? (
-                      <EmailEntry entry={e.email} />
+                      <><EmailEntry entry={e.email} /><Files files={e.files} /></>
                     ) : e.kind === 'email_in' && e.inbound ? (
-                      <InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} />
+                      <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} /></>
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
                         {e.body}
@@ -353,4 +358,38 @@ function describeValue(body: string, fallbackCurrency: CrmCurrency): string {
   } catch {
     return body
   }
+}
+
+// Files carried by an email, in either direction. Links are signed and expire,
+// which is why they are minted per page load rather than stored.
+function Files({ files, skipped }: {
+  files?: TimelineEvent['files']
+  skipped?: { name: string; why: string }[]
+}) {
+  if (!files?.length && !skipped?.length) return null
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {(files ?? []).map((f) => (
+        <a key={f.name + f.size} href={f.url ?? undefined} target="_blank" rel="noopener noreferrer"
+          title={f.url ? `${f.name} · ${humanSize(f.size)}` : 'This link has expired — reload the page'}
+          className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md border transition-colors ${
+            f.url ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100' : 'border-gray-200 bg-gray-100 text-gray-400 cursor-default'
+          }`}>
+          {f.mime.startsWith('image/')
+            ? <ImageIcon size={9} strokeWidth={2} aria-hidden />
+            : <FileText size={9} strokeWidth={2} aria-hidden />}
+          <span className="truncate max-w-[160px]">{f.name}</span>
+          <span className="text-gray-500 tabular-nums">{humanSize(f.size)}</span>
+        </a>
+      ))}
+      {(skipped ?? []).map((sk) => (
+        <span key={sk.name} title={sk.why}
+          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border border-amber-300 bg-amber-50 text-amber-800">
+          <TriangleAlert size={9} strokeWidth={2} aria-hidden />
+          <span className="truncate max-w-[140px]">{sk.name}</span>
+          not saved
+        </span>
+      ))}
+    </div>
+  )
 }

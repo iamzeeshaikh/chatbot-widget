@@ -16,6 +16,8 @@
 // Keyed on Gmail's own immutable message id. The sweep is therefore idempotent:
 // running late, twice, or after a missed window can never duplicate a reply.
 
+import { parseEmailAttachments, type EmailAttachment } from './emailattach'
+
 export const CRM_EMAIL_IN_ROLE = 'crm_email_in'
 /** Marks an inbound message as read by an agent. Also a crm_* control row. */
 export const CRM_EMAIL_READ_ROLE = 'crm_email_read'
@@ -46,6 +48,10 @@ export interface CrmEmailInEntry {
   /** When Gmail says the message was sent (ms epoch -> ISO). */
   at: string
   direction: 'inbound'
+  /** Files the customer sent, copied into the private bucket. */
+  attachments?: EmailAttachment[]
+  /** Anything refused, so a dropped file is visible rather than silent. */
+  skippedAttachments?: { name: string; why: string }[]
 }
 
 export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInEntry | null {
@@ -69,6 +75,12 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
       snippet: str(o.snippet),
       at: str(o.at),
       direction: 'inbound',
+      attachments: parseEmailAttachments(o.attachments),
+      skippedAttachments: Array.isArray(o.skippedAttachments)
+        ? o.skippedAttachments
+            .filter((x: unknown) => x && typeof (x as { name?: unknown }).name === 'string')
+            .map((x: { name: string; why?: string }) => ({ name: x.name, why: String(x.why ?? 'not allowed') }))
+        : undefined,
     }
   } catch {
     return null

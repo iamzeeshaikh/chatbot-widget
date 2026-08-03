@@ -36,9 +36,14 @@ import {
   MAX_INBOUND_BODY, CRM_EMAIL_SWEEP_ROLE, type CrmEmailInEntry,
 } from './emailreply'
 import {
-  googleConfig, fetchThread, connectionFor, GmailAuthError, GmailScopeError,
-  type GoogleConfig,
+  googleConfig, fetchThread, fetchAttachment, connectionFor, GmailAuthError, GmailScopeError,
+  type GoogleConfig, type InboundMessage,
 } from './gmail'
+import {
+  EMAIL_ATTACHMENT_BUCKET, MAX_INBOUND_ATTACHMENT_BYTES, MAX_INBOUND_TOTAL_BYTES,
+  MAX_EMAIL_ATTACHMENTS, isAllowedEmailAttachment, attachmentPath, humanSize,
+  type EmailAttachment,
+} from './emailattach'
 
 export const SWEEP_STATUS_SESSION = 'zeeops-crm-email-sweep'
 
@@ -330,6 +335,7 @@ export async function runEmailSweep(
           // Belt and braces: never record something we sent as an inbound reply.
           if (from.email === agent.toLowerCase()) continue
 
+          const grabbed = await grabAttachments(agent, cfg, m, ref.siteId, ref.sessionId)
           const split = splitQuoted(m.bodyText)
           const entry: CrmEmailInEntry = {
             gmailId: m.gmailId,
@@ -345,6 +351,8 @@ export async function runEmailSweep(
             snippet: inboundSnippet(split.visible),
             at: m.at || ranAt,
             direction: 'inbound',
+            attachments: grabbed.saved,
+            skippedAttachments: grabbed.skipped.length ? grabbed.skipped : undefined,
           }
           // dryRun reports exactly what WOULD be captured and writes nothing —
           // the same escape hatch the reminder sweep offers, so this can be
@@ -596,4 +604,67 @@ async function notifyReplies(
     }
   }
   return out
+}
+
+/**
+ * Copy a customer's attachments into the private bucket.
+ *
+ * Three guards, because this runs unattended against files a stranger chose:
+ *  • an ALLOWLIST of types, plus an extension check, so an .exe announced as a
+ *    PDF is still refused — nothing executable is ever fetched, let alone stored
+ *  • a per-file and a per-message byte ceiling, checked against Gmail's declared
+ *    size BEFORE downloading, so one 200MB attachment cannot eat the sweep's
+ *    60-second budget
+ *  • a count cap
+ *
+ * Anything refused is RECORDED rather than dropped silently: the timeline says
+ * "2 attachments were not saved" and why, so nobody assumes a file arrived.
+ */
+async function grabAttachments(
+  agent: string, cfg: GoogleConfig, m: InboundMessage, siteId: string, sessionId: string,
+): Promise<{ saved: EmailAttachment[]; skipped: { name: string; why: string }[] }> {
+  const saved: EmailAttachment[] = []
+  const skipped: { name: string; why: string }[] = []
+  let total = 0
+
+  for (const a of m.attachments ?? []) {
+    if (saved.length >= MAX_EMAIL_ATTACHMENTS) {
+      skipped.push({ name: a.name, why: 'too many attachments on one message' })
+      continue
+    }
+    if (!isAllowedEmailAttachment(a.mime, a.name)) {
+      skipped.push({ name: a.name, why: 'file type not allowed' })
+      continue
+    }
+    // Checked from the declared size first — refusing before the download is
+    // the whole point of the budget.
+    if (a.size > MAX_INBOUND_ATTACHMENT_BYTES) {
+      skipped.push({ name: a.name, why: `too large (${humanSize(a.size)})` })
+      continue
+    }
+    if (total + a.size > MAX_INBOUND_TOTAL_BYTES) {
+      skipped.push({ name: a.name, why: 'message attachment total too large' })
+      continue
+    }
+
+    try {
+      const bytes = await fetchAttachment(agent, cfg, m.gmailId, a.attachmentId)
+      if (!bytes) { skipped.push({ name: a.name, why: 'could not be downloaded' }); continue }
+      // Gmail's declared size can differ from what arrives; re-check the truth.
+      if (bytes.byteLength > MAX_INBOUND_ATTACHMENT_BYTES) {
+        skipped.push({ name: a.name, why: `too large (${humanSize(bytes.byteLength)})` })
+        continue
+      }
+      const path = attachmentPath(siteId, sessionId, 'in', a.name)
+      const { error } = await supabase.storage
+        .from(EMAIL_ATTACHMENT_BUCKET)
+        .upload(path, bytes, { contentType: a.mime, upsert: false })
+      if (error) { skipped.push({ name: a.name, why: 'could not be stored' }); continue }
+      total += bytes.byteLength
+      saved.push({ path, name: a.name, mime: a.mime, size: bytes.byteLength })
+    } catch {
+      skipped.push({ name: a.name, why: 'could not be downloaded' })
+    }
+  }
+  return { saved, skipped }
 }

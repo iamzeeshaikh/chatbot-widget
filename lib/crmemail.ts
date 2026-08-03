@@ -15,6 +15,8 @@
 // Message-ID, so a later inbound sync can match on it without guesswork and
 // without a migration.
 
+import { parseEmailAttachments, type EmailAttachment } from './emailattach'
+
 export const CRM_EMAIL_ROLE = 'crm_email'
 
 export const MAX_SUBJECT = 300
@@ -43,6 +45,8 @@ export interface CrmEmailEntry {
   messageId: string
   /** Room for inbound replies to be recorded against this send later. */
   direction: 'outbound'
+  /** Files sent with it. Paths into the private bucket, signed on read. */
+  attachments?: EmailAttachment[]
 }
 
 export function parseCrmEmail(message: string | null | undefined): CrmEmailEntry | null {
@@ -66,6 +70,7 @@ export function parseCrmEmail(message: string | null | undefined): CrmEmailEntry
       threadId: str(o.threadId),
       messageId: str(o.messageId),
       direction: 'outbound',
+      attachments: parseEmailAttachments(o.attachments),
     }
   } catch {
     return null

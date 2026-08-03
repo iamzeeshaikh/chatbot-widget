@@ -10,7 +10,14 @@
 // lead, cleared only once the send actually succeeds.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { X, Send, TriangleAlert, Link2, Loader2, Plus, CornerUpLeft } from 'lucide-react'
+import {
+  X, Send, TriangleAlert, Link2, Loader2, Plus, CornerUpLeft, Paperclip, FileText, Image as ImageIcon,
+} from 'lucide-react'
+import {
+  MAX_EMAIL_ATTACHMENT_BYTES, MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENTS_TOTAL, humanSize,
+} from '@/lib/emailattach'
+
+interface Attached { key: string; name: string; size: number; mime: string; path: string | null; progress: boolean }
 
 export interface Alias { email: string; displayName: string; isPrimary: boolean; isDefault: boolean }
 
@@ -64,6 +71,9 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   // before mount and cleared on close — so the restore effect below reads it
   // from a ref rather than taking it as a dependency and re-running.
   const isReply = useRef(!!replyTo)
+  const [files, setFiles] = useState<Attached[]>([])
+  const [dragging, setDragging] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
 
   // ── restore any half-written draft, then load the connection ──────────────
   useEffect(() => {
@@ -134,6 +144,37 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
 
   const set = (patch: Partial<Draft>) => save({ ...draft, ...patch })
 
+  const totalBytes = files.reduce((n, f) => n + f.size, 0)
+
+  // Uploads go straight from the browser to storage on a one-shot signed URL —
+  // Vercel would refuse a 10MB body through our own route.
+  const addFiles = useCallback(async (picked: File[]) => {
+    setError('')
+    for (const file of picked) {
+      if (files.length >= MAX_EMAIL_ATTACHMENTS) { setError(`You can attach up to ${MAX_EMAIL_ATTACHMENTS} files.`); break }
+      if (file.size > MAX_EMAIL_ATTACHMENT_BYTES) {
+        setError(`"${file.name}" is ${humanSize(file.size)}. The limit is ${humanSize(MAX_EMAIL_ATTACHMENT_BYTES)} per file — send a download link instead.`)
+        continue
+      }
+      const key = `${file.name}:${file.size}:${Math.random().toString(36).slice(2, 7)}`
+      setFiles((cur) => [...cur, { key, name: file.name, size: file.size, mime: file.type || 'application/octet-stream', path: null, progress: true }])
+      try {
+        const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/email/upload`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: file.name, mime: file.type, size: file.size }),
+        })
+        const j = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(j.error || 'Upload was refused.')
+        const put = await fetch(j.uploadUrl, { method: 'PUT', body: file, headers: { 'content-type': file.type || 'application/octet-stream' } })
+        if (!put.ok) throw new Error('Upload failed.')
+        setFiles((cur) => cur.map((f) => (f.key === key ? { ...f, path: j.path, progress: false } : f)))
+      } catch (e) {
+        setFiles((cur) => cur.filter((f) => f.key !== key))
+        setError(e instanceof Error ? e.message : 'That file could not be attached.')
+      }
+    }
+  }, [files.length, leadId])
+
   async function send() {
     if (sending) return
     setError('')
@@ -142,7 +183,11 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
       const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...draft, replyToGmailId: replyTo?.replyToGmailId }),
+        body: JSON.stringify({
+          ...draft,
+          replyToGmailId: replyTo?.replyToGmailId,
+          attachments: files.filter((f) => f.path).map((f) => ({ path: f.path, name: f.name, mime: f.mime, size: f.size })),
+        }),
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -183,6 +228,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   if (!draft.to.trim()) missing.push('a recipient')
   if (!draft.subject.trim()) missing.push('a subject')
   if (!draft.body.trim()) missing.push('a message')
+  if (files.some((f) => f.progress)) missing.push('the uploads to finish')
   const canSend = missing.length === 0 && !sending
 
   return (
@@ -191,20 +237,29 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       {/* max-h caps it; the content decides the actual height, so a three-line
           reply is a small dialog rather than a full screen of empty textarea. */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-lg w-full max-w-xl animate-in flex flex-col max-h-[85vh]"
+      <div className="bg-white border border-gray-300 rounded-2xl shadow-2xl ring-1 ring-black/5 w-full max-w-xl animate-in flex flex-col max-h-[85vh]"
         onKeyDown={(e) => {
           // Cmd/Ctrl+Enter sends from anywhere in the form; Esc closes and the
           // draft is already in localStorage, so nothing typed is lost.
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (canSend) send() }
           if (e.key === 'Escape') { e.preventDefault(); onClose() }
         }}>
-        <header className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-200 shrink-0">
-          {replyTo
-            ? <CornerUpLeft size={13} strokeWidth={2} className="text-violet-600" aria-hidden />
-            : <Send size={13} strokeWidth={2} className="text-gray-500" aria-hidden />}
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 truncate">
-            {replyTo ? 'Reply to' : 'Email'} {leadName || leadEmail}
-          </h2>
+        {/* A title, not a label: this is the dialog's identity, so it reads at
+            body size in the strongest weight rather than as grey small caps. */}
+        <header className="flex items-center gap-2.5 px-4 py-3 border-b border-gray-200 shrink-0">
+          <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${
+            replyTo ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'
+          }`}>
+            {replyTo
+              ? <CornerUpLeft size={14} strokeWidth={2.25} aria-hidden />
+              : <Send size={14} strokeWidth={2.25} aria-hidden />}
+          </span>
+          <span className="min-w-0">
+            <h2 className="text-sm font-bold text-gray-900 leading-tight truncate">
+              {replyTo ? 'Reply' : 'New email'}
+            </h2>
+            <p className="text-[11px] text-gray-500 leading-tight truncate">to {leadName || leadEmail}</p>
+          </span>
           <button onClick={onClose} aria-label="Close"
             className="ml-auto p-1 rounded-md text-gray-400 hover:text-gray-800 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             <X size={13} strokeWidth={2} aria-hidden />
@@ -252,13 +307,17 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                 </a>
               </div>
             )}
-            <div className="px-3.5 py-3 overflow-y-auto">
+            <div className="px-4 py-3 overflow-y-auto">
+              {/* One bordered block so the fields and the body read as a single
+                  composer rather than a stack of separate inputs. Individual
+                  fields carry hairline dividers, not their own boxes. */}
+              <div className="rounded-xl border border-gray-300 overflow-hidden focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-colors">
               {/* FROM is a real decision — which of your addresses the customer
                   sees — so it reads as a control. */}
               <Row label="From">
                 <select value={draft.from} onChange={(e) => set({ from: e.target.value })}
                   aria-label="Send from"
-                  className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs font-medium text-gray-900 cursor-pointer focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                  className="w-full bg-transparent border-0 px-0 py-0 text-xs font-medium text-gray-900 cursor-pointer focus:outline-none">
                   {status.aliases.map((a) => (
                     <option key={a.email} value={a.email} className="bg-white text-gray-800">
                       {a.displayName ? `${a.displayName} <${a.email}>` : a.email}
@@ -273,10 +332,10 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
               <Row label="To">
                 <div className="flex items-center gap-1.5 w-full">
                   <input value={draft.to} onChange={(e) => set({ to: e.target.value })} aria-label="To"
-                    className="flex-1 min-w-0 bg-transparent border border-transparent hover:border-gray-300 rounded-md px-2 py-1 text-xs text-gray-700 focus:outline-none focus:bg-white focus:border-blue-500 focus:text-gray-900 transition-colors" />
+                    className="flex-1 min-w-0 bg-transparent border-0 px-0 py-0 text-xs text-gray-700 focus:outline-none focus:text-gray-900" />
                   {!showCc && (
                     <button type="button" onClick={() => setShowCc(true)}
-                      className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-medium text-gray-500 hover:text-gray-900 px-1.5 py-1 rounded-md hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                      className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-medium text-gray-500 hover:text-gray-900 px-1.5 py-0.5 rounded-md hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                       <Plus size={9} strokeWidth={2.5} aria-hidden /> Cc
                     </button>
                   )}
@@ -287,23 +346,55 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                 <Row label="Cc">
                   <input value={draft.cc} onChange={(e) => set({ cc: e.target.value })} autoFocus
                     placeholder="name@example.com" aria-label="Cc"
-                    className="w-full bg-transparent border border-transparent hover:border-gray-300 rounded-md px-2 py-1 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-blue-500 transition-colors" />
+                    className="w-full bg-transparent border-0 px-0 py-0 text-xs text-gray-700 placeholder-gray-400 focus:outline-none" />
                 </Row>
               )}
 
-              {/* SUBJECT is the most important field after the body — it is what
-                  the customer sees in their inbox — so it gets the weight. */}
-              <div className="mt-1.5 mb-2">
+              {/* Subject: the TYPED value carries the weight; the placeholder is
+                  quiet. "Required" is signalled by the footer hint, not by an
+                  amber border — strong colour is reserved for a real error. */}
+              <Row label="Subject">
                 <input value={draft.subject} onChange={(e) => set({ subject: e.target.value })} aria-label="Subject"
-                  required aria-required="true" placeholder="Subject"
-                  className={`w-full bg-white border rounded-md px-2.5 py-2 text-sm font-semibold text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors ${
-                    draft.subject.trim() ? 'border-gray-300 focus:border-blue-500' : 'border-amber-300 focus:border-blue-500'
-                  }`} />
-              </div>
+                  required aria-required="true" placeholder="What is this about?"
+                  className="w-full bg-transparent border-0 px-0 py-0 text-sm font-semibold text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:outline-none" />
+              </Row>
 
               <textarea ref={bodyRef} value={draft.body} onChange={(e) => set({ body: e.target.value })} rows={5}
                 aria-label="Message" placeholder="Write your message…"
-                className="w-full min-h-[112px] bg-white border border-gray-300 rounded-md px-2.5 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none leading-relaxed transition-colors" />
+                onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles([...e.dataTransfer.files]) }}
+                className={`w-full min-h-[128px] bg-transparent border-0 border-t px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none resize-none leading-relaxed transition-colors ${
+                  dragging ? 'border-t-blue-400 bg-blue-50' : 'border-t-gray-200'
+                }`} />
+
+              {/* Attachments live inside the same block, below the body. */}
+              {files.length > 0 && (
+                <div className="border-t border-gray-200 px-3 py-2 space-y-1">
+                  {files.map((f) => (
+                    <div key={f.key} className="flex items-center gap-2 text-[11px]">
+                      <span className="shrink-0 text-gray-500">
+                        {f.progress
+                          ? <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden />
+                          : f.mime.startsWith('image/')
+                            ? <ImageIcon size={12} strokeWidth={2} aria-hidden />
+                            : <FileText size={12} strokeWidth={2} aria-hidden />}
+                      </span>
+                      <span className="truncate text-gray-800 font-medium">{f.name}</span>
+                      <span className="shrink-0 text-gray-500 tabular-nums">{humanSize(f.size)}</span>
+                      <button onClick={() => setFiles((cur) => cur.filter((x) => x.key !== f.key))}
+                        aria-label={`Remove ${f.name}`}
+                        className="ml-auto shrink-0 p-0.5 rounded text-gray-500 hover:text-red-600 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                        <X size={11} strokeWidth={2} aria-hidden />
+                      </button>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-gray-500 tabular-nums pt-0.5">
+                    {humanSize(totalBytes)} of {humanSize(MAX_EMAIL_ATTACHMENTS_TOTAL)}
+                  </p>
+                </div>
+              )}
+              </div>
 
               {error && (
                 <p role="alert" className="flex items-start gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
@@ -328,15 +419,24 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                   sending
                     ? 'bg-blue-500 text-white cursor-wait'
                     : canSend
-                      ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
-                      : 'bg-gray-200 text-gray-500 border border-gray-300 cursor-not-allowed'
+                      ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm ring-1 ring-blue-700/20'
+                      : 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
                 }`}>
                 {sending ? <Loader2 size={12} strokeWidth={2.5} className="animate-spin" aria-hidden /> : <Send size={12} strokeWidth={2} aria-hidden />}
                 {sending ? 'Sending…' : 'Send'}
               </button>
               <button onClick={onClose} disabled={sending}
-                className="text-[11px] text-gray-600 hover:text-gray-900 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded px-1">
+                className="text-[11px] font-medium text-gray-500 hover:text-gray-800 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded px-1.5 py-1">
                 Cancel
+              </button>
+
+              <input ref={fileInput} type="file" multiple className="hidden"
+                onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
+              <button onClick={() => fileInput.current?.click()} disabled={sending}
+                title={`Attach a file (up to ${humanSize(MAX_EMAIL_ATTACHMENT_BYTES)} each) — or drop one on the message`}
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <Paperclip size={11} strokeWidth={2} aria-hidden />
+                Attach
               </button>
 
               {/* Says what is still missing instead of leaving a dead button. */}
@@ -357,11 +457,14 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   )
 }
 
+// One rhythm for every field: same label column width, same padding, hairline
+// divider between rows. Previously From/To/Subject each had their own box and
+// indent, so nothing lined up.
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex items-center gap-2">
+    <label className="flex items-baseline gap-2 px-3 py-2 border-b border-gray-200 last:border-b-0">
       <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 w-[52px] shrink-0">{label}</span>
-      {children}
+      <span className="flex-1 min-w-0">{children}</span>
     </label>
   )
 }

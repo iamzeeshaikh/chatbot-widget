@@ -3,6 +3,11 @@ import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
 import { googleConfig, sendEmail, GmailAuthError, configProblem } from '@/lib/gmail'
 import { threadContextFor } from '@/lib/emailsweep'
+import { supabase } from '@/lib/supabase'
+import {
+  EMAIL_ATTACHMENT_BUCKET, MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENTS_TOTAL,
+  parseEmailAttachments, humanSize,
+} from '@/lib/emailattach'
 import {
   CRM_EMAIL_ROLE, MAX_SUBJECT, MAX_BODY, makeSnippet, newEmailId,
   parseAddressList, type CrmEmailEntry,
@@ -46,6 +51,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // be able to post an arbitrary threadId and drop a message into a
   // conversation on someone else's lead.
   const replyToGmailId = String(body.replyToGmailId ?? '').trim()
+  // Only the storage PATHS come from the client; the bytes are read here, from
+  // a bucket only this server can reach.
+  const attachments = parseEmailAttachments(body.attachments).slice(0, MAX_EMAIL_ATTACHMENTS)
 
   if (!from) return NextResponse.json({ error: 'Choose which address to send from.' }, { status: 400 })
   if (!subject) return NextResponse.json({ error: 'A subject is required.' }, { status: 400 })
@@ -64,6 +72,27 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const cfg = googleConfig(req.nextUrl.origin)
   if (!cfg) return NextResponse.json({ error: 'Google OAuth is not configured.', needsSetup: true }, { status: 503 })
 
+  // ── 0a. pull the attachments back out of storage ──────────────────────────
+  // Re-checked server-side rather than trusting the sizes the browser reported:
+  // the composer's limit is a courtesy to the agent, this is the one that stops
+  // Gmail rejecting a message they have already written.
+  const files: { name: string; mime: string; bytes: Uint8Array }[] = []
+  let totalBytes = 0
+  for (const a of attachments) {
+    const { data: blob, error: dlErr } = await supabase.storage.from(EMAIL_ATTACHMENT_BUCKET).download(a.path)
+    if (dlErr || !blob) {
+      return NextResponse.json({ error: `"${a.name}" could not be read back — remove it and attach it again.` }, { status: 400 })
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    totalBytes += bytes.byteLength
+    if (totalBytes > MAX_EMAIL_ATTACHMENTS_TOTAL) {
+      return NextResponse.json({
+        error: `Those attachments come to more than ${humanSize(MAX_EMAIL_ATTACHMENTS_TOTAL)}, which Gmail will refuse. Remove one or send a download link.`,
+      }, { status: 413 })
+    }
+    files.push({ name: a.name, mime: a.mime, bytes })
+  }
+
   // ── 0. resolve the thread from OUR rows, not from the request ─────────────
   const thread = replyToGmailId ? await threadContextFor(id, replyToGmailId) : null
 
@@ -75,6 +104,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       threadId: thread?.threadId,
       inReplyTo: thread?.inReplyTo,
       references: thread?.references,
+      attachments: files,
     })
   } catch (e) {
     if (e instanceof GmailAuthError) {
@@ -100,6 +130,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     threadId: sent.threadId,
     messageId: sent.messageId,
     direction: 'outbound',
+    attachments,
   }
   const { error } = await writeControlRow({
     sessionId: id, siteId: access.siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry),
