@@ -35,14 +35,24 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
   if (sites.length === 0) return []
   const since = new Date(now.getTime() - UNREAD_WINDOW_DAYS * 86_400_000).toISOString()
 
-  const { data } = await supabase
-    .from('chat_logs')
-    .select('session_id, site_id, role, message, created_at')
-    .in('site_id', sites)
-    .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, ASSIGNMENT_ROLE, CRM_EMAIL_ROLE])
-    .gte('created_at', since)
-    .order('created_at', { ascending: true })
-    .limit(4000)
+  // Paged with range(), NOT .limit(): PostgREST caps a single response at 1000
+  // rows whatever limit is asked for, and because these are read oldest-first
+  // (the assignment fold needs ascending order) that cap silently returned the
+  // OLDEST 1000 and dropped everything recent — the badge read zero on any
+  // workspace with more than 1000 CRM rows in the window.
+  const data: { session_id: string; site_id: string; role: string; message: string; created_at: string }[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data: page } = await supabase
+      .from('chat_logs')
+      .select('session_id, site_id, role, message, created_at')
+      .in('site_id', sites)
+      .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, ASSIGNMENT_ROLE, CRM_EMAIL_ROLE])
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999)
+    data.push(...(page ?? []))
+    if (!page || page.length < 1000) break
+  }
 
   const inbound = new Map<string, Map<string, { from: string; snippet: string; at: string }>>()
   const read = new Set<string>()
@@ -51,7 +61,7 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
   const sender = new Map<string, string>()
   const siteOf = new Map<string, string>()
 
-  for (const r of data ?? []) {
+  for (const r of data) {
     if (r.role === CRM_EMAIL_IN_ROLE) {
       const e = parseCrmEmailIn(r.message)
       if (!e) continue
