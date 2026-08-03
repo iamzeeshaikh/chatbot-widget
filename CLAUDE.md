@@ -184,6 +184,30 @@ browser's own zone never enters into it. `scratch/pkt-real-impl.test.mjs` assert
 buckets against the real modules and passes under `TZ=America/Los_Angeles`,
 `TZ=Pacific/Kiritimati` and `TZ=UTC` — re-run it after touching any of this.
 
+### The dashboard header must not move after first paint
+Every count in the nav (Conversations, Visitors live, the Tasks badge, unread
+replies) arrives from its own fetch a second or two after paint. When those
+badges were rendered conditionally, each one that appeared widened the tab strip
+and pushed Pipeline and Tasks sideways — and once the strip was wide enough the
+whole header wrapped to a second row and moved them 45px down as well. A click
+already aimed at Pipeline then landed on the logo button, which quietly switches
+to Overview, so the first click looked like it did nothing and the second
+worked. **This was reported as a router bug and was not one.** Badges are now
+rendered from first paint and merely `invisible` until they have a value, with
+`tabular-nums` and a `min-w-` so a count going 9 → 10 → 100 does not move
+anything either. Keep any new header chrome to that pattern.
+
+The tab strip **wraps, it does not scroll**. As a horizontal scroller it was
+678px of tabs in a 364px box on a phone, so Billing, Performance, Pipeline and
+Tasks sat past the right edge with nothing to suggest they existed.
+
+`scratch/nav-click.mjs` is the regression test: it aims at an entry, waits, then
+clicks the *recorded* coordinates — a person cannot re-aim mid-movement either,
+and a test that re-reads the position right before clicking can never catch this
+class of bug. Run it against **production** (`BASE=…`), with `CLICK_AT` sweeping
+1500–4500ms, since the shift is driven by real API latency and does not
+reproduce against a fast local server.
+
 ### Do not restructure `app/page.tsx`
 It is one ~3,400-line client component and it works. Edit it **surgically** — add to it,
 never reorganise, re-split or "clean it up". Keep list sorts stable (sort by
