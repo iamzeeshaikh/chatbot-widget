@@ -1626,6 +1626,19 @@ export default function Dashboard() {
   // record or shows its own error. The record page is a separate heavy route,
   // so there is nothing to gain from a soft transition here anyway.
   const openLeadRecord = (recordId: string) => { window.location.assign(leadRecordHref(recordId)) }
+  // Nav links keep the soft transition — Pipeline and Tasks are lighter routes
+  // and router.push() is measurably quicker — but they get the same guarantee
+  // as openLeadRecord: a link must never silently do nothing. If the URL has
+  // not moved shortly after the push, the soft navigation did not happen (the
+  // stale-bundle failure above) and we fall back to a full load, which cannot
+  // fail quietly. The check is deliberately late and only fires while we are
+  // still on the dashboard, so a merely slow RSC fetch is never double-handled.
+  const navigateTo = (href: string) => {
+    router.push(href)
+    window.setTimeout(() => {
+      if (window.location.pathname === '/') window.location.assign(href)
+    }, 1500)
+  }
   // A record is keyed by the conversation id where there is one; leads that
   // arrived by email use the same synthetic `quote-<leadId>` id the Billing
   // tab already gives them.
@@ -1947,11 +1960,20 @@ export default function Dashboard() {
             <button onClick={() => setTab('overview')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'overview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Overview</button>
             <button onClick={() => setTab('conversations')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'conversations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Conversations
-              {roleSessions.length > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleSessions.length}</span>}
+              {/* Rendered from first paint and merely hidden while the count is
+                  zero or still loading. A badge that appears a second later
+                  widens this strip, which pushes Pipeline and Tasks sideways —
+                  and once the strip is wide enough the whole header wraps to a
+                  second row, moving them 45px down as well. A click already
+                  aimed at Pipeline then lands on the logo instead, which quietly
+                  goes to Overview: the "first click does nothing" report.
+                  tabular-nums plus a min-width keeps 1, 2 and 3 digits the same
+                  width, so a count ticking over never moves anything either. */}
+              <span className={`bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold tabular-nums text-center min-w-[1.75rem] ${roleSessions.length > 0 ? '' : 'invisible'}`}>{roleSessions.length}</span>
             </button>
             <button onClick={() => setTab('visitors')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === 'visitors' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Visitors
-              {roleVisitors.length > 0 && <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">{roleVisitors.length} live</span>}
+              <span className={`bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold tabular-nums text-center min-w-[3rem] ${roleVisitors.length > 0 ? '' : 'invisible'}`}>{roleVisitors.length} live</span>
             </button>
             {hasTrackedSite && (
               <button onClick={() => setTab('billing')} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'billing' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -1965,34 +1987,31 @@ export default function Dashboard() {
             )}
             {/* Pipeline and Tasks are routes, not tabs — real hrefs so they can
                 be middle-clicked into their own tab. */}
-            <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/pipeline') } }}
+            <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/pipeline') } }}
               className="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all text-gray-500 hover:text-gray-700">
               Pipeline
             </a>
             {/* The badge counts this member's overdue + due-today tasks in
                 Pakistan time. */}
-            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/tasks') } }}
+            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
               className="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 text-gray-500 hover:text-gray-700">
               Tasks
-              {taskBadge > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold text-white ${taskBadgeOverdue > 0 ? 'bg-red-600' : 'bg-amber-500'}`}
-                  title={`${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today`}>
-                  {taskBadge}
-                </span>
-              )}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold text-white tabular-nums text-center min-w-[1.75rem] ${taskBadge > 0 ? (taskBadgeOverdue > 0 ? 'bg-red-600' : 'bg-amber-500') : 'invisible bg-amber-500'}`}
+                title={taskBadge > 0 ? `${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today` : undefined}>
+                {taskBadge}
+              </span>
             </a>
           </div>
           {/* Replies waiting on this agent. Sits in the nav rather than only on
               a record, because the whole problem was that the signal lived on a
               page you had to already be looking at. */}
-          {unreadReplies > 0 && (
-            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/tasks') } }}
-              title={`${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened`}
-              className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors">
-              <Inbox size={12} strokeWidth={2.5} aria-hidden />
-              {unreadReplies}
-            </a>
-          )}
+          <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
+            aria-hidden={unreadReplies === 0} tabIndex={unreadReplies === 0 ? -1 : undefined}
+            title={unreadReplies > 0 ? `${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened` : undefined}
+            className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors tabular-nums ${unreadReplies > 0 ? '' : 'invisible pointer-events-none'}`}>
+            <Inbox size={12} strokeWidth={2.5} aria-hidden />
+            {unreadReplies}
+          </a>
           {/* Global lead search — the same palette the CRM pages carry, so ⌘K
               works wherever an agent happens to be when the phone rings. */}
           <GlobalSearch />
