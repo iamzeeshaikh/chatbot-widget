@@ -23,6 +23,8 @@ export const PACKAGING_SITES = [
   'theburgersleeves', 'thecandlesleeves', 'cardboardcups', 'thecoffeesleeves',
   'shopbubblemailers', 'insertshub', 'thediecutstickers', 'customperfumeboxes',
   'shopdisplayboxes', 'peptidesboxes',
+  // 2026-08-04: lipboxes.com got the widget.
+  'lipboxes',
 ]
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
