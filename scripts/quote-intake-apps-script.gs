@@ -869,6 +869,24 @@ function parseLeadBody_(body) {
       }
     }
 
+    // The Wax Papers form emits colon-LESS labeled fields ("Name Jose
+    // Rodriguez", "Email x@y.com", "Product custom-deli-papers"). Only exact
+    // capitalized field words are matched so ordinary sentences never trigger.
+    var bm = line.match(/^(Name|Email|Phone|Product|Company)\s+(\S.*)$/);
+    if (bm) {
+      var bv = bm[2].trim();
+      if (bm[1] === 'Name' && !name && bv) { name = bv; continue; }
+      if (bm[1] === 'Email' && !email) {
+        var be = bv.match(emailRe);
+        if (be && !isOwnAddress_(be[0])) { email = be[0]; continue; }
+      }
+      if (bm[1] === 'Phone' && !phone) {
+        var bd = bv.replace(/\D/g, '');
+        if (bd.length >= 7 && bd.length <= 15) { phone = bv; continue; }
+      }
+      if (bm[1] === 'Product' && !product && bv) { product = bv; continue; }
+    }
+
     var emailMatch = line.match(emailRe);
     if (emailMatch && !email) {
       var candidate = emailMatch[0];
