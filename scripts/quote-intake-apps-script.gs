@@ -797,6 +797,19 @@ function fieldForLabel_(label) {
   return null;
 }
 
+// Is this rest-line plausible as a person's name? Guards the positional
+// fallback: without it a greeting ("Hello,") or a subject line pasted into
+// the body ("New Quote Request — The Wax Papers") becomes the lead's name.
+function looksLikeName_(line) {
+  if (!line || line.indexOf('@') !== -1) return false;
+  if (/^(hi|hello|hey|dear|greetings|good (morning|afternoon|evening))\b/i.test(line)) return false;
+  if (/(quote request|enquiry|inquiry|form submission|new message|thank you|submitted|website)/i.test(line)) return false;
+  if (/[:—–]/.test(line)) return false;
+  var words = line.split(/\s+/);
+  if (words.length > 5) return false;
+  return /[A-Za-z]/.test(line);
+}
+
 function parseLeadBody_(body) {
   var lines = body.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
   var emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
@@ -814,6 +827,7 @@ function parseLeadBody_(body) {
   // "Box and foam insert interest", "Shipping boxes", "Plain Corrugated
   // Catering Boxes Inquiry", etc.) Used only when the body yields no address.
   var fromEmail = '', fromName = '';
+  var firstName = '', lastName = '';
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
     if (headerRe.test(line) || fwdMarkerRe.test(line)) {
@@ -831,6 +845,13 @@ function parseLeadBody_(body) {
 
     var lm = line.match(labelRe);
     if (lm) {
+      // Split-field forms ("First Name: Katie" / "Last Name: Armstrong")
+      // carry the name across two labeled lines; collect both halves and
+      // merge after the loop. Without this they fell through to the
+      // positional fallback and became name + product respectively.
+      var half = lm[1].toLowerCase().trim();
+      if (half === 'first name' && lm[2].trim()) { firstName = firstName || lm[2].trim(); continue; }
+      if (half === 'last name' && lm[2].trim()) { lastName = lastName || lm[2].trim(); continue; }
       var field = fieldForLabel_(lm[1]);
       var value = lm[2].trim();
       if (field && value) {
@@ -857,8 +878,16 @@ function parseLeadBody_(body) {
     if (!phone && phoneRe.test(line) && digits.length >= 7 && digits.length <= 15) { phone = line; continue; }
     rest.push(line);
   }
+  if (!name && (firstName || lastName)) name = (firstName + ' ' + lastName).trim();
+  // Positional name fallback only accepts a line that plausibly IS a name;
+  // junk (greetings, subject lines) leaves the field empty rather than wrong —
+  // the dashboard falls back to showing the email, which is more useful.
+  var restName = '';
+  for (var r = 0; r < rest.length; r++) {
+    if (looksLikeName_(rest[r])) { restName = rest[r]; break; }
+  }
   return {
-    name: name || fromName || rest[0] || '',
+    name: name || fromName || restName || '',
     product: product || rest[1] || '',
     email: email || fromEmail,
     phone: phone,
