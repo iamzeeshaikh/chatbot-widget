@@ -29,7 +29,13 @@ export async function GET(req: NextRequest) {
     .single()
 
   if (error || !data) {
-    return NextResponse.json({ error: 'Site not found' }, { status: 404, headers: corsHeaders })
+    // Unregistered site: tell the widget to render nothing at all. The widget's
+    // fetch fallback builds itself with default branding on any error, so a
+    // plain 404 here does NOT stop it — `blocked: true` is the one response it
+    // honours by bailing before any UI exists. Deleting a site's row is
+    // therefore the server-side kill switch for stray installs (pages whose
+    // hosting we can't edit, e.g. WordPress footers).
+    return NextResponse.json({ blocked: true }, { headers: corsHeaders })
   }
 
   // Geo-gate: hide the widget for blocked South Asian countries on packaging
