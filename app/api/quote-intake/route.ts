@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody } from '@/lib/quoteintake'
+import { isRetiredLeadSite } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +22,13 @@ export async function POST(req: NextRequest) {
   const { siteCode, name, email, phone, product, message, receivedAt } = body
   const siteId = typeof siteCode === 'string' ? siteIdFromQuoteCode(siteCode) : null
   if (!siteId) return NextResponse.json({ error: `Unknown siteCode: ${siteCode}` }, { status: 400 })
+
+  // Partnership ended for this site: accept silently without inserting, same
+  // as the spam path — the Apps Script has already labeled the thread
+  // Processed and must not retry. Existing leads are untouched.
+  if (isRetiredLeadSite(siteId)) {
+    return NextResponse.json({ success: true, retired: true })
+  }
 
   const cleanEmail = typeof email === 'string' ? email.trim() : ''
   const cleanPhone = typeof phone === 'string' ? phone.trim() : ''

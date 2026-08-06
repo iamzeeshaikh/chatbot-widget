@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { maybeCaptureLead } from '@/lib/leadtracking'
+import { isRetiredLeadSite } from '@/lib/workspaces'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,6 +19,12 @@ export async function POST(req: NextRequest) {
 
     if (!siteId) {
       return NextResponse.json({ error: 'siteId required' }, { status: 400, headers: corsHeaders })
+    }
+
+    // Partnership ended for this site: tell the widget it succeeded (the
+    // visitor did nothing wrong) but record nothing. Existing leads stay.
+    if (isRetiredLeadSite(siteId)) {
+      return NextResponse.json({ success: true }, { headers: corsHeaders })
     }
 
     const { error } = await supabase.from('leads').insert([{ site_id: siteId, name, email, phone, message }])

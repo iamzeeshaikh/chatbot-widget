@@ -7,7 +7,7 @@
 
 import { supabase } from './supabase'
 import { TAGS_ROLE, parseTags, normalizeTags } from './visitor'
-import { isLeadTracked } from './workspaces'
+import { isLeadTracked, isRetiredLeadSite } from './workspaces'
 
 // The tracked-site list lives in lib/workspaces.ts (a server+client-safe module)
 // so the dashboard can import it without pulling in server-only code.
@@ -101,7 +101,7 @@ async function applyLeadTag(sessionId: string, siteId: string): Promise<void> {
 // clicking it twice on the same conversation is a no-op, not a double count.
 export async function markLeadManually(opts: { sessionId: string; siteId: string }): Promise<{ ok: boolean; alreadyMarked: boolean }> {
   const { sessionId, siteId } = opts
-  if (!sessionId || !siteId || !isLeadTracked(siteId)) return { ok: false, alreadyMarked: false }
+  if (!sessionId || !siteId || !isLeadTracked(siteId) || isRetiredLeadSite(siteId)) return { ok: false, alreadyMarked: false }
 
   const { data: existingRows } = await supabase
     .from('chat_logs')
@@ -135,7 +135,7 @@ export async function maybeCaptureLead(opts: {
 }): Promise<void> {
   try {
     const { sessionId, siteId } = opts
-    if (!sessionId || !siteId || !isLeadTracked(siteId)) return
+    if (!sessionId || !siteId || !isLeadTracked(siteId) || isRetiredLeadSite(siteId)) return
 
     const explicit = opts.email && isValidEmail(opts.email) ? opts.email.trim().toLowerCase() : null
     const email = explicit || extractEmail(opts.text)

@@ -37,6 +37,18 @@ export function isLeadTracked(siteId: string): boolean {
   return LEAD_TRACKED_SITES.includes(siteId)
 }
 
+// Sites we no longer source NEW leads for (2026-08-06: both partnerships ended).
+// They stay in PACKAGING_SITES and LEAD_TRACKED_SITES on purpose — every
+// existing lead, conversation and Billing row must remain visible. Only new
+// intake is refused, at every write path: /api/quote-intake (Gmail quote
+// forms), /api/lead (widget form), the chat bot's lead extraction, and manual
+// mark-as-lead. Remove a site from this set to resume intake.
+export const RETIRED_LEAD_SITES = new Set(['thetubepackaging', 'zeecustomboxes'])
+
+export function isRetiredLeadSite(siteId: string): boolean {
+  return RETIRED_LEAD_SITES.has(siteId)
+}
+
 export function workspaceSites(ws: Workspace): string[] {
   return ws === 'sports' ? SPORTS_SITES : PACKAGING_SITES
 }

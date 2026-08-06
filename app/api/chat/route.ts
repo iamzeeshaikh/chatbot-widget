@@ -7,7 +7,7 @@ import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled, BOT_OFF_ACK_MESSAGE } from '@/lib/botflag'
 import { getBlockedIps, requestIp } from '@/lib/blocklist'
 import { sendPushToWorkspace } from '@/lib/push'
-import { siteWorkspace } from '@/lib/workspaces'
+import { siteWorkspace, isRetiredLeadSite } from '@/lib/workspaces'
 
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
       })
       // Skip lead capture on API errors — don't extract from error messages
       const userMsgCount = (messages as { role: string }[]).filter((m) => m.role === 'user').length
-      if (!replyError && userMsgCount >= 3) {
+      if (!replyError && userMsgCount >= 3 && !isRetiredLeadSite(siteId)) {
         try {
           const allMessages = [...messages, { role: 'assistant', content: reply }]
           const fields = await extractLeadFields(allMessages)
