@@ -2527,7 +2527,9 @@ export default function Dashboard() {
                                         popup now, so the jump to the full CRM
                                         record lives on this button (a real link,
                                         so middle-click works too). */}
-                                    <a href={leadRecordHref(leadRecordId(lead))} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors inline-flex" title="Open the lead record"><Contact size={13} strokeWidth={2} aria-hidden /></a>
+                                    <a href={leadRecordHref(leadRecordId(lead))}
+                                      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openLeadRecord(leadRecordId(lead)) }}
+                                      className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors inline-flex" title="Open the lead record"><Contact size={13} strokeWidth={2} aria-hidden /></a>
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                       {!isEmailLead && (
                                         <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation"><MessageSquare size={13} strokeWidth={2} aria-hidden /></button>
@@ -3675,7 +3677,7 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ) : chatLeadsShown.map((l) => (
-                          <tr key={l.session_id} onClick={() => openLeadRecord(l.session_id)} title="Open this lead's record"
+                          <tr key={l.session_id} onClick={() => setViewQuote(l)} title="View this lead's details"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap">
                               <a href={leadRecordHref(l.session_id)} className="text-blue-700 hover:underline"
@@ -3729,7 +3731,7 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ) : emailLeadsShown.map((l) => (
-                          <tr key={l.session_id} onClick={() => openLeadRecord(l.session_id)} title="Open this lead's record"
+                          <tr key={l.session_id} onClick={() => setViewQuote(l)} title="View this lead's details"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
@@ -3779,8 +3781,15 @@ export default function Dashboard() {
 
       {/* Recent Leads (Overview tab): clicking any row opens this details
           popup; from here the agent can jump to the chat (chat leads), the
-          full CRM record, or reply by email. */}
-      {viewOverviewLead && (
+          full CRM record, or reply by email. Prev/Next walk the same
+          filtered list currently on screen, so browsing several leads
+          doesn't mean closing and reopening the modal each time. */}
+      {viewOverviewLead && (() => {
+        const navList = overviewFilteredLeads
+        const idx = navList.findIndex((l) => l.id === viewOverviewLead.id)
+        const hasPrev = idx > 0
+        const hasNext = idx !== -1 && idx < navList.length - 1
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewOverviewLead(null)}>
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
@@ -3793,7 +3802,14 @@ export default function Dashboard() {
                   {viewOverviewLead.created_at ? ` · ${formatDateTime(viewOverviewLead.created_at)}` : ''}
                 </p>
               </div>
-              <button onClick={() => setViewOverviewLead(null)} className="text-gray-400 hover:text-gray-700 leading-none flex-shrink-0" title="Close"><X size={15} strokeWidth={2} aria-hidden /></button>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {idx !== -1 && <span className="text-[11px] text-gray-400 tabular-nums mr-1">{idx + 1}/{navList.length}</span>}
+                <button onClick={() => hasPrev && setViewOverviewLead(navList[idx - 1])} disabled={!hasPrev}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors" title="Previous lead">‹</button>
+                <button onClick={() => hasNext && setViewOverviewLead(navList[idx + 1])} disabled={!hasNext}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors" title="Next lead">›</button>
+                <button onClick={() => setViewOverviewLead(null)} className="text-gray-400 hover:text-gray-700 leading-none ml-1.5 px-1" title="Close"><X size={15} strokeWidth={2} aria-hidden /></button>
+              </div>
             </div>
             <div className="px-5 py-4 overflow-y-auto">
               <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{stripQuoteTag(viewOverviewLead.message) || 'No message text.'}</p>
@@ -3811,7 +3827,8 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* Daily performance table: click a day's Chats count to see exactly
           those sessions instead of just a number. Each row jumps straight
@@ -3878,7 +3895,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Full quote-email text — the table only shows a truncated preview.
+      {/* Billing lead details — any billing row (chat, quote or checkout)
+          opens here. Quote/checkout show the full email text; chat leads
+          show their capture details instead, with a jump into the chat.
           Prev/Next walk the same filtered list currently on screen (site
           filter included), so browsing several leads doesn't mean closing
           and reopening the modal each time. */}
@@ -3894,11 +3913,13 @@ export default function Dashboard() {
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
               <div className="min-w-0">
-                <p className={`text-[11px] font-semibold rounded-full px-2 py-0.5 inline-block mb-1.5 border ${viewQuote.source === 'checkout' ? 'text-purple-700 bg-purple-100 border-purple-200' : 'text-amber-700 bg-amber-100 border-amber-200'}`}><span className="inline-flex items-center gap-1.5">{viewQuote.source === 'checkout'
+                <p className={`text-[11px] font-semibold rounded-full px-2 py-0.5 inline-block mb-1.5 border ${viewQuote.source === 'checkout' ? 'text-purple-700 bg-purple-100 border-purple-200' : viewQuote.source === 'chat' ? 'text-blue-700 bg-blue-100 border-blue-200' : 'text-amber-700 bg-amber-100 border-amber-200'}`}><span className="inline-flex items-center gap-1.5">{viewQuote.source === 'checkout'
                   ? <><ShoppingCart size={11} strokeWidth={2} aria-hidden /> Checkout</>
-                  : <><Mail size={11} strokeWidth={2} aria-hidden /> Quote</>}</span></p>
-                <p className="text-sm font-semibold text-gray-900 truncate">{viewQuote.name || viewQuote.email}</p>
-                <p className="text-xs text-gray-500 truncate">{viewQuote.email} · {viewQuote.site_name} · {formatDateTime(viewQuote.captured_at)}</p>
+                  : viewQuote.source === 'chat'
+                    ? <><MessageSquare size={11} strokeWidth={2} aria-hidden /> Chat</>
+                    : <><Mail size={11} strokeWidth={2} aria-hidden /> Quote</>}</span></p>
+                <p className="text-sm font-semibold text-gray-900 truncate">{viewQuote.name || viewQuote.email || 'Marked as lead'}</p>
+                <p className="text-xs text-gray-500 truncate">{viewQuote.email ?? '—'}{viewQuote.phone ? ` · ${viewQuote.phone}` : ''} · {viewQuote.site_name} · {formatDateTime(viewQuote.captured_at)}</p>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 {idx !== -1 && <span className="text-[11px] text-gray-400 tabular-nums mr-1">{idx + 1}/{navList.length}</span>}
@@ -3910,10 +3931,28 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="px-5 py-4 overflow-y-auto">
-              <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{viewQuote.quote_message || 'No message text.'}</p>
+              {viewQuote.quote_message ? (
+                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{viewQuote.quote_message}</p>
+              ) : (
+                <div className="text-sm text-gray-800 space-y-1.5">
+                  <p><span className="text-gray-500">Phone:</span> {viewQuote.phone || '—'}</p>
+                  <p><span className="text-gray-500">Country:</span> {viewQuote.country || '—'}</p>
+                  <p><span className="text-gray-500">Source:</span> {cleanReferrer(viewQuote.referrer)}</p>
+                  <p><span className="text-gray-500">Agent:</span> {viewQuote.agent ? viewQuote.agent.split('@')[0] : '—'}</p>
+                  <p><span className="text-gray-500">Status:</span> <span className="capitalize">{viewQuote.status}</span></p>
+                </div>
+              )}
             </div>
             <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
-              <a href={`mailto:${viewQuote.email}`} className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors" style={{ backgroundColor: accentColor }}>Reply by email</a>
+              {viewQuote.source === 'chat' && (
+                <button onClick={() => { const l = viewQuote; setViewQuote(null); openConversation(l) }}
+                  className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open chat</button>
+              )}
+              <a href={leadRecordHref(viewQuote.session_id)}
+                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open record</a>
+              {viewQuote.email && (
+                <a href={`mailto:${viewQuote.email}`} className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors" style={{ backgroundColor: accentColor }}>Reply by email</a>
+              )}
             </div>
           </div>
         </div>
