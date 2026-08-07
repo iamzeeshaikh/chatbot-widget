@@ -2483,10 +2483,14 @@ export default function Dashboard() {
                           )
 
                           return (
-                            <tr key={lead.id} onClick={() => openLeadRecord(leadRecordId(lead))}
-                              title="Open this lead's record"
+                            <tr key={lead.id} onClick={() => setViewOverviewLead(lead)}
+                              title="View this lead's details"
                               className="group border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
-                              <td className="px-3 py-3 whitespace-nowrap">
+                              {/* Chat rows: the type badge is the shortcut straight
+                                  into the conversation; everywhere else on the row
+                                  opens the details popup. */}
+                              <td onClick={(e) => { if (!isEmailLead) { e.stopPropagation(); openLeadConversation(lead) } }}
+                                className="px-3 py-3 whitespace-nowrap" title={!isEmailLead ? 'Open the chat conversation' : undefined}>
                                 <LeadSourceBadge message={lead.message} />
                               </td>
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
@@ -2498,11 +2502,9 @@ export default function Dashboard() {
                               </td>
                               <td className="px-3 py-3 text-blue-600 whitespace-nowrap">{lead.email || '-'}</td>
                               <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{lead.phone || '-'}</td>
-                              {/* Email leads keep their full-message popup here —
-                                  the record page shows it too, but this is the
-                                  one-click peek the table has always had. */}
-                              <td onClick={(e) => { if (isEmailLead) { e.stopPropagation(); setViewOverviewLead(lead) } }}
-                                className="px-3 py-3 text-gray-500 max-w-[150px] truncate" title={isEmailLead ? 'View the full message' : (cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined)}>{cleanLeadMessage(lead.message)}</td>
+                              {/* The row itself opens the details popup now, so a
+                                  click here just bubbles up to it. */}
+                              <td className="px-3 py-3 text-gray-500 max-w-[150px] truncate" title={cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined}>{cleanLeadMessage(lead.message)}</td>
                               <td className="px-3 py-3 text-gray-700 max-w-[120px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
                               <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{quantity}</td>
                               <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{budget}</td>
@@ -2520,15 +2522,19 @@ export default function Dashboard() {
                                     <button onClick={() => setConfirmLeadDeleteId(null)} className="text-xs text-gray-500 hover:text-gray-600">No</button>
                                   </div>
                                 ) : (
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    {/* The row now opens the CRM record, so the
-                                        old "row opens the chat" behaviour lives
-                                        on as its own button. */}
-                                    {!isEmailLead && (
-                                      <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation"><MessageSquare size={13} strokeWidth={2} aria-hidden /></button>
-                                    )}
-                                    <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit"><Pencil size={13} strokeWidth={2} aria-hidden /></button>
-                                    <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete"><Trash2 size={13} strokeWidth={2} aria-hidden /></button>
+                                  <div className="flex items-center gap-1">
+                                    {/* Always visible: the row opens the details
+                                        popup now, so the jump to the full CRM
+                                        record lives on this button (a real link,
+                                        so middle-click works too). */}
+                                    <a href={leadRecordHref(leadRecordId(lead))} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors inline-flex" title="Open the lead record"><Contact size={13} strokeWidth={2} aria-hidden /></a>
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {!isEmailLead && (
+                                        <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation"><MessageSquare size={13} strokeWidth={2} aria-hidden /></button>
+                                      )}
+                                      <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit"><Pencil size={13} strokeWidth={2} aria-hidden /></button>
+                                      <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete"><Trash2 size={13} strokeWidth={2} aria-hidden /></button>
+                                    </div>
                                   </div>
                                 )}
                               </td>
@@ -3771,8 +3777,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Recent Leads (Overview tab): a Quote-type row has no chat session,
-          so clicking it shows its full details here instead. */}
+      {/* Recent Leads (Overview tab): clicking any row opens this details
+          popup; from here the agent can jump to the chat (chat leads), the
+          full CRM record, or reply by email. */}
       {viewOverviewLead && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewOverviewLead(null)}>
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
@@ -3781,7 +3788,8 @@ export default function Dashboard() {
                 <LeadSourceBadge message={viewOverviewLead.message} className="inline-block mb-1.5" />
                 <p className="text-sm font-semibold text-gray-900 truncate">{viewOverviewLead.name || viewOverviewLead.email}</p>
                 <p className="text-xs text-gray-500 truncate">
-                  {viewOverviewLead.email} · {(roleSites.find((s) => s.site_id === viewOverviewLead.site_id)?.name) ?? viewOverviewLead.site_id}
+                  {viewOverviewLead.email}
+                  {viewOverviewLead.phone ? ` · ${viewOverviewLead.phone}` : ''} · {(roleSites.find((s) => s.site_id === viewOverviewLead.site_id)?.name) ?? viewOverviewLead.site_id}
                   {viewOverviewLead.created_at ? ` · ${formatDateTime(viewOverviewLead.created_at)}` : ''}
                 </p>
               </div>
@@ -3791,6 +3799,12 @@ export default function Dashboard() {
               <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{stripQuoteTag(viewOverviewLead.message) || 'No message text.'}</p>
             </div>
             <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
+              {leadSource(viewOverviewLead.message) === 'chat' && viewOverviewLead.session_id && (
+                <button onClick={() => { const l = viewOverviewLead; setViewOverviewLead(null); openLeadConversation(l) }}
+                  className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open chat</button>
+              )}
+              <a href={leadRecordHref(leadRecordId(viewOverviewLead))}
+                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open record</a>
               {viewOverviewLead.email && (
                 <a href={`mailto:${viewOverviewLead.email}`} className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors" style={{ backgroundColor: accentColor }}>Reply by email</a>
               )}
