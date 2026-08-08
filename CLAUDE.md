@@ -200,6 +200,35 @@ browser's own zone never enters into it. `scratch/pkt-real-impl.test.mjs` assert
 buckets against the real modules and passes under `TZ=America/Los_Angeles`,
 `TZ=Pacific/Kiritimati` and `TZ=UTC` — re-run it after touching any of this.
 
+### Deployment skew: agents' tabs stay open for DAYS across deploys
+A tab loaded before a deploy holds a bundle whose lazily-loaded route chunks no
+longer exist on the server. Clicking Pipeline/Tasks then fails: the URL changes
+but the route chunk 404s. This was misdiagnosed once as a pointer-target bug —
+`scratch/nav-click.mjs` passes (cold load = fresh bundle) while a stale tab
+reproduces it. Four nets now cover it, all needed:
+- **Vercel Skew Protection is ON** (12h, set via the project API — not in any
+  file here; check with `vercel project inspect` / the dashboard if in doubt).
+  Old tabs get their own deployment's assets via the `?dpl=` param for 12 hours.
+- **`app/error.tsx` auto-reloads on chunk-load errors.** Next 16 renders the
+  error boundary when a route chunk 404s (it does NOT keep the old page — the
+  old `pathname === '/'` fallback guard could never fire for this). A
+  sessionStorage stamp limits it to one attempt/minute so a truly broken server
+  shows the card, not a reload loop.
+- **`navigateTo` (app/page.tsx) hard-navigates if the dashboard is still
+  mounted 1.5s after `router.push`** — the net for a push that dies without
+  reaching an error boundary.
+- **`DeployRefresh` (root layout) polls `/api/version` every 5 min** and on a
+  new deployment id reloads hidden tabs immediately, shows a reload pill on
+  visible ones, and reloads when the tab next goes hidden — but NEVER while any
+  textarea holds text (composer/note/task draft). `/api/version` is env-var
+  only, no DB, no auth — the deployment id is already public in every asset URL.
+`scratch/deploy-skew.test.mjs` verifies all of it end to end: it loads the
+dashboard, runs a real `vercel --prod --yes --force` deploy UNDER the open tab,
+then asserts one click still lands a rendered /pipeline, the pill appears, a
+draft blocks the hidden reload, and a chunk-404 tab self-heals. It costs a real
+production deploy per run — run it when touching any of the four nets, not
+routinely.
+
 ### The dashboard header must not move after first paint
 Every count in the nav (Conversations, Visitors live, the Tasks badge, unread
 replies) arrives from its own fetch a second or two after paint. When those
