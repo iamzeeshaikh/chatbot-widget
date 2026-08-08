@@ -1697,10 +1697,21 @@ export default function Dashboard() {
   // stale-bundle failure above) and we fall back to a full load, which cannot
   // fail quietly. The check is deliberately late and only fires while we are
   // still on the dashboard, so a merely slow RSC fetch is never double-handled.
+  // A successful client-side navigation to /pipeline or /tasks unmounts this
+  // component, so a timer that fires while it is still mounted means the push
+  // silently failed. That happens on a stale bundle after a deploy: the route
+  // chunk 404s, the transition never commits, and the URL has already changed
+  // — which is exactly why the old `pathname === '/'` guard could not catch
+  // it. The effect body must re-set true for StrictMode's mount-unmount-mount.
+  const dashMounted = useRef(true)
+  useEffect(() => {
+    dashMounted.current = true
+    return () => { dashMounted.current = false }
+  }, [])
   const navigateTo = (href: string) => {
     router.push(href)
     window.setTimeout(() => {
-      if (window.location.pathname === '/') window.location.assign(href)
+      if (dashMounted.current) window.location.assign(href)
     }, 1500)
   }
   // A record is keyed by the conversation id where there is one; leads that
