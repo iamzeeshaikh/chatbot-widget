@@ -2534,8 +2534,14 @@ export default function Dashboard() {
                                       {!isEmailLead && (
                                         <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation"><MessageSquare size={13} strokeWidth={2} aria-hidden /></button>
                                       )}
+                                      {/* Chat-captured rows (id `cap-<session>`) are synthetic — their
+                                          contact lives in chat_logs, not the leads table, so the
+                                          edit/delete endpoints have no row to touch. Edit on the CRM
+                                          record page instead. */}
+                                      {!lead.id.startsWith('cap-') && (<>
                                       <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit"><Pencil size={13} strokeWidth={2} aria-hidden /></button>
                                       <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete"><Trash2 size={13} strokeWidth={2} aria-hidden /></button>
+                                      </>)}
                                     </div>
                                   </div>
                                 )}

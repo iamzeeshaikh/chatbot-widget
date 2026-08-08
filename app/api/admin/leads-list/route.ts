@@ -69,5 +69,60 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ leads })
+  // Chat-captured leads (lead_capture control rows) that never produced a
+  // `leads` table row — a visitor typing their email into the chat, or a
+  // manual mark-as-lead. They count in the Overview tiles and in Billing, so
+  // leaving them out of Recent Leads made the tile say "2" while the table
+  // showed 1. Merged here as synthetic rows (id `cap-<session>`, no message /
+  // score) — a capture whose site+email already has a real leads row is the
+  // same lead and is skipped, not listed twice.
+  const captureRows = await fetchAllPages(
+    () => {
+      let q = supabase
+        .from('chat_logs')
+        .select('session_id, site_id, message, created_at')
+        .eq('role', LEAD_CAPTURE_ROLE)
+        .gte('created_at', TRACKING_START)
+        .order('created_at', { ascending: false })
+      if (scope) q = q.in('site_id', allowed)
+      return q
+    },
+    20000
+  )
+
+  const leadKeys = new Set(
+    leads
+      .filter((l) => (l.email || '').trim())
+      .map((l) => `${l.site_id}|${(l.email || '').trim().toLowerCase()}`)
+  )
+  const seenSessions = new Set<string>()
+  const captureLeads = []
+  for (const r of captureRows) {
+    if (seenSessions.has(r.session_id)) continue
+    seenSessions.add(r.session_id)
+    const cap = parseLeadCapture(r.message)
+    if (!cap) continue
+    if (cap.email && leadKeys.has(`${r.site_id}|${cap.email.toLowerCase()}`)) continue
+    captureLeads.push({
+      id: `cap-${r.session_id}`,
+      site_id: r.site_id,
+      name: cap.name,
+      email: cap.email,
+      phone: cap.phone,
+      message: null,
+      created_at: r.created_at,
+      product: null,
+      quantity: null,
+      budget: null,
+      timeline: null,
+      qualification_score: null,
+      session_id: r.session_id,
+    })
+  }
+
+  const merged = [...leads, ...captureLeads].sort((a, b) =>
+    String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
+  )
+
+  return NextResponse.json({ leads: merged })
 }
