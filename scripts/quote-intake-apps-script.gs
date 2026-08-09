@@ -113,7 +113,20 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // haven't been seen yet, and guessing one that means something else in this
 // mailbox would file leads under the wrong site. Run listSiteLabels to see
 // which labels exist and add them as they're confirmed.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB'];
+var SITE_CODES = ['SCB', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB'];
+
+// Labels we deliberately do NOT ingest. TTP (The Tube Packaging) is a retired
+// lead site — the server already drops its leads with retired:true, so sweeping
+// its label only burned Gmail quota and webhook calls for a guaranteed no-op.
+// Kept in a list rather than just deleted from SITE_CODES, because an unlisted
+// label is now reported as "unrecognised" on every run and this one is known.
+// (ZCB is retired on the server too but is still swept — say the word and it
+// moves here as well.)
+var IGNORED_LEAF_CODES = ['TTP'];
+
+function isIgnoredLeaf_(leaf) {
+  return IGNORED_LEAF_CODES.indexOf(String(leaf || '').trim().toUpperCase()) !== -1;
+}
 
 // Labels whose leaf is a HUMAN-READABLE NAME rather than a short code. This
 // mailbox turned out to use both conventions — "Extra Outsource Projects/tcs"
@@ -127,6 +140,12 @@ var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 
 // leads under the wrong site, which is worse than not ingesting them.
 var LABEL_ALIASES = {
   'zee pack': 'ZP',
+  // CPB was in SITE_CODES all along, but this mailbox files its mail under
+  // "Extra Outsource Projects/Perfume" — a name, not the code — so it matched
+  // nothing. Only NEW mail is affected: the label's existing threads are from
+  // Feb 2026 and sit far outside the watermark window, so a normal run will not
+  // touch them. Run processQuoteLeadsBackfill if you do want those 7 messages.
+  'perfume': 'CPB',
 };
 
 // The one place a label leaf becomes a site code. Returns the code, or null.
@@ -298,7 +317,7 @@ function listSiteLabels() {
     var full = everyLabel[u].getName();
     if (full.indexOf('ZeeOps/') === 0) continue;            // our own bookkeeping
     var leafName = full.split('/').pop().trim();
-    if (codeFromLeaf_(leafName)) continue;
+    if (codeFromLeaf_(leafName) || isIgnoredLeaf_(leafName)) continue;
     if (leafName.toLowerCase() === CHECKOUT_LABEL) continue;
     unknown.push(full);   // no length filter — see matchSiteCode_ for why
   }
@@ -727,7 +746,7 @@ function matchSiteCode_(thread) {
     // assumption that an unmapped label would look like a code — so "Mylar" (5)
     // and "CS" (2) were reported while "ZEE Pack" (8) was not. The alarm built
     // to catch a missing label was itself blind to the label that went missing.
-    else if (name.indexOf('ZeeOps/') !== 0) unknown = name;
+    else if (name.indexOf('ZeeOps/') !== 0 && !isIgnoredLeaf_(leaf)) unknown = name;
   }
   if (unknown) UNKNOWN_SITE_LABELS[unknown] = (UNKNOWN_SITE_LABELS[unknown] || 0) + 1;
   // No site label, but it is a checkout thread — read the store name out of the
