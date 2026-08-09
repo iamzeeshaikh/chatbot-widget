@@ -718,7 +718,12 @@ function codeFromBodyUrl_(body) {
   if (!m) return null;
   var host = m[1].replace(/^https?:\/\//i, '').split('/')[0].toLowerCase().replace(/^www\./, '');
   for (var code in SITE_DOMAINS) {
-    if (SITE_DOMAINS[code].toLowerCase() === host) return code;
+    // The off switch has to be honoured HERE too. Turning TTP/ZCB off in
+    // codeFromLeaf_ only closed the label path: an unlabelled thread then fell
+    // through to this fallback, which resolved the same site from its "Page
+    // URL:" host and posted it anyway. The first run after the switch went in
+    // proved it — 24 no-label-fallback ingests, every one of them TTP or ZCB.
+    if (SITE_DOMAINS[code].toLowerCase() === host) return isIgnoredLeaf_(code) ? null : code;
   }
   return null;
 }
