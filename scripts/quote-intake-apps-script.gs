@@ -115,6 +115,27 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // which labels exist and add them as they're confirmed.
 var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB'];
 
+// Labels whose leaf is a HUMAN-READABLE NAME rather than a short code. This
+// mailbox turned out to use both conventions — "Extra Outsource Projects/tcs"
+// is a code, "Extra Outsource Projects/ZEE Pack" is a name — and the matcher
+// only ever compared the leaf against SITE_CODES, so every name-style label was
+// dropped in silence however it was nested. (ZP was in SITE_DOMAINS and in the
+// server's QUOTE_SITE_CODES the whole time; nothing but this lookup was missing.)
+//
+// Keys are lower-cased leaf names. Add one ONLY when the label has been
+// confirmed to carry that site's form notifications — a wrong entry files real
+// leads under the wrong site, which is worse than not ingesting them.
+var LABEL_ALIASES = {
+  'zee pack': 'ZP',
+};
+
+// The one place a label leaf becomes a site code. Returns the code, or null.
+function codeFromLeaf_(leaf) {
+  var trimmed = String(leaf || '').trim();
+  if (SITE_CODES.indexOf(trimmed.toUpperCase()) !== -1) return trimmed.toUpperCase();
+  return LABEL_ALIASES[trimmed.toLowerCase()] || null;
+}
+
 // ── Checkout (cart order) emails ────────────────────────────────────────────
 // WooCommerce "New order #6449" notifications live under ONE flat label rather
 // than a per-site one, so the site has to come from somewhere else. These mails
@@ -277,11 +298,11 @@ function listSiteLabels() {
     var full = everyLabel[u].getName();
     if (full.indexOf('ZeeOps/') === 0) continue;            // our own bookkeeping
     var leafName = full.split('/').pop().trim();
-    if (SITE_CODES.indexOf(leafName.toUpperCase()) !== -1) continue;
+    if (codeFromLeaf_(leafName)) continue;
     if (leafName.toLowerCase() === CHECKOUT_LABEL) continue;
-    if (leafName.length <= 5) unknown.push(full);           // short = looks like a code
+    unknown.push(full);   // no length filter — see matchSiteCode_ for why
   }
-  Logger.log('Short labels NOT recognised as site codes (add the real ones to SITE_CODES): ' +
+  Logger.log('Labels NOT recognised as site codes (add real ones to SITE_CODES or LABEL_ALIASES): ' +
     (unknown.join('   |   ') || 'none'));
 
   var found = findSiteLabels_();
@@ -673,8 +694,8 @@ function findSiteLabels_() {
   for (var i = 0; i < all.length; i++) {
     var name = all[i].getName();
     var parts = name.split('/');
-    var leaf = parts[parts.length - 1].trim().toUpperCase();
-    if (SITE_CODES.indexOf(leaf) !== -1 && !found[leaf]) found[leaf] = all[i];
+    var leaf = codeFromLeaf_(parts[parts.length - 1]);
+    if (leaf && !found[leaf]) found[leaf] = all[i];
   }
   return found;
 }
@@ -694,16 +715,21 @@ var UNKNOWN_SITE_LABELS = {};
 function matchSiteCode_(thread) {
   var labels = thread.getLabels();
   var hasCheckout = false;
-  var shortUnknown = null;
+  var unknown = null;
   for (var i = 0; i < labels.length; i++) {
     var name = labels[i].getName();
     var parts = name.split('/');
     var leaf = parts[parts.length - 1].trim();
-    if (SITE_CODES.indexOf(leaf.toUpperCase()) !== -1) return leaf.toUpperCase();
+    var code = codeFromLeaf_(leaf);
+    if (code) return code;
     if (leaf.toLowerCase() === CHECKOUT_LABEL) hasCheckout = true;
-    else if (leaf.length <= 5 && name.indexOf('ZeeOps/') !== 0) shortUnknown = name;
+    // NO length filter. There used to be a `leaf.length <= 5` test here, on the
+    // assumption that an unmapped label would look like a code — so "Mylar" (5)
+    // and "CS" (2) were reported while "ZEE Pack" (8) was not. The alarm built
+    // to catch a missing label was itself blind to the label that went missing.
+    else if (name.indexOf('ZeeOps/') !== 0) unknown = name;
   }
-  if (shortUnknown) UNKNOWN_SITE_LABELS[shortUnknown] = (UNKNOWN_SITE_LABELS[shortUnknown] || 0) + 1;
+  if (unknown) UNKNOWN_SITE_LABELS[unknown] = (UNKNOWN_SITE_LABELS[unknown] || 0) + 1;
   // No site label, but it is a checkout thread — read the store name out of the
   // subject instead (see STORE_NAME_CODES).
   if (hasCheckout) return codeFromSubject_(thread.getFirstMessageSubject());
