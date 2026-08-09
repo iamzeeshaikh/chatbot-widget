@@ -401,6 +401,10 @@ function processQuoteLeads() {
 
   var sent = 0, skipped = 0, notOurs = 0, stoppedEarly = false;
   var noLabel = 0, siteLabeled = 0; // for the summary line
+  // Which threads came in via the no-label fallback, so the summary can NAME
+  // them. A bare count says work is being rescued but not what to go and fix;
+  // one site repeating here means that site's Gmail filter isn't labelling.
+  var noLabelHits = [];
 
   // Checkout FIRST, before the general search spends the time budget — order
   // mail must never be starved by a mailbox full of unrelated threads.
@@ -474,7 +478,12 @@ function processQuoteLeads() {
         if (!ucode) continue;
         var uparsed = parseLeadBody_(ubody);
         if (!uparsed.email && !uparsed.phone) continue;
-        if (postLead_(ucode, uparsed, umsgs[um].getDate())) { sent++; noLabel++; fbAny = true; }
+        if (postLead_(ucode, uparsed, umsgs[um].getDate())) {
+          sent++; noLabel++; fbAny = true;
+          noLabelHits.push(ucode + '  ' +
+            Utilities.formatDate(umsgs[um].getDate(), 'UTC', 'yyyy-MM-dd') + '  ' +
+            String(thread.getFirstMessageSubject() || '').slice(0, 70));
+        }
       }
       if (fbAny) { thread.addLabel(processedLabel); continue; }
 
@@ -516,7 +525,10 @@ function processQuoteLeads() {
   // accepts a host that is already one of ours in SITE_DOMAINS. Spam can't
   // manufacture that without genuinely being a submission on that site, and
   // the server's own spam rules still apply on top.
-  if (noLabel > 0) Logger.log('no-label fallback: ingested ' + noLabel + ' form submission(s) whose thread carried NO site label — worth labelling those threads.');
+  if (noLabel > 0) {
+    Logger.log('no-label fallback: ingested ' + noLabel + ' form submission(s) whose thread carried NO site label — worth labelling those threads:');
+    for (var nl = 0; nl < noLabelHits.length; nl++) Logger.log('    ' + noLabelHits[nl]);
+  }
 
   var unknownNames = Object.keys(UNKNOWN_SITE_LABELS);
   if (unknownNames.length > 0) {
