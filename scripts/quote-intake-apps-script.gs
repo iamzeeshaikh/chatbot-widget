@@ -113,16 +113,24 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // haven't been seen yet, and guessing one that means something else in this
 // mailbox would file leads under the wrong site. Run listSiteLabels to see
 // which labels exist and add them as they're confirmed.
-var SITE_CODES = ['SCB', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB'];
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB'];
 
-// Labels we deliberately do NOT ingest. TTP (The Tube Packaging) is a retired
-// lead site — the server already drops its leads with retired:true, so sweeping
-// its label only burned Gmail quota and webhook calls for a guaranteed no-op.
-// Kept in a list rather than just deleted from SITE_CODES, because an unlisted
-// label is now reported as "unrecognised" on every run and this one is known.
-// (ZCB is retired on the server too but is still swept — say the word and it
-// moves here as well.)
-var IGNORED_LEAF_CODES = ['TTP'];
+// The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
+// not swept, not ingested and not counted — codeFromLeaf_ checks this list
+// FIRST and returns null, so it wins over everything.
+//
+// Both entries are retired lead sites whose leads the server already drops with
+// retired:true, so sweeping them burned Gmail quota and webhook calls for a
+// guaranteed no-op. They are switched off here rather than deleted from
+// SITE_CODES so that turning one back on is deleting one string from this line
+// — nothing to remember, nothing to re-derive.
+//
+// NOTE: this switch is only HALF of it. The server has its own
+// RETIRED_LEAD_SITES in lib/workspaces.ts holding 'thetubepackaging' and
+// 'zeecustomboxes'. Bringing a site back needs BOTH: remove it here AND remove
+// it there, then redeploy. Flipping only this one means the script forwards
+// happily and the server silently drops every lead.
+var IGNORED_LEAF_CODES = ['TTP', 'ZCB'];
 
 function isIgnoredLeaf_(leaf) {
   return IGNORED_LEAF_CODES.indexOf(String(leaf || '').trim().toUpperCase()) !== -1;
@@ -151,8 +159,13 @@ var LABEL_ALIASES = {
 // The one place a label leaf becomes a site code. Returns the code, or null.
 function codeFromLeaf_(leaf) {
   var trimmed = String(leaf || '').trim();
-  if (SITE_CODES.indexOf(trimmed.toUpperCase()) !== -1) return trimmed.toUpperCase();
-  return LABEL_ALIASES[trimmed.toLowerCase()] || null;
+  var code = SITE_CODES.indexOf(trimmed.toUpperCase()) !== -1
+    ? trimmed.toUpperCase()
+    : (LABEL_ALIASES[trimmed.toLowerCase()] || null);
+  // Tested on the RESOLVED code, not the raw leaf, so switching a site off also
+  // switches off any alias pointing at it.
+  if (code && isIgnoredLeaf_(code)) return null;
+  return code;
 }
 
 // ── Checkout (cart order) emails ────────────────────────────────────────────
