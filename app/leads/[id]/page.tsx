@@ -25,7 +25,7 @@ import {
 import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
 import {
   CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES,
-  CURRENCY_SYMBOL, type CrmStage, type CrmCurrency,
+  CURRENCY_SYMBOL, isDeadStage, type CrmStage, type CrmCurrency,
 } from '@/lib/crm'
 import { isImageMime } from '@/lib/attachment'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
@@ -740,21 +740,21 @@ function StagePill({ stage }: { stage: CrmStage }) {
 
 // Progress rail. Completed segments are filled with THEIR OWN stage colour, so
 // the bar reads as a journey rather than a single-colour meter; the current
-// segment is brighter and ringed. `lost` sits outside the funnel and greys the
-// whole rail, which is the honest picture of a dead deal.
+// segment is brighter and ringed. The dead-end stages sit outside the funnel and
+// grey the whole rail, which is the honest picture of a dead deal.
 function StageRail({ stage }: { stage: CrmStage }) {
-  // findIndex rather than indexOf: `funnel` is narrowed to exclude 'lost', and
-  // `stage` may BE 'lost' — which is exactly the case handled below.
-  const funnel = CRM_STAGES.filter((s) => s !== 'lost')
+  // findIndex rather than indexOf: `funnel` is narrowed to exclude the dead-end
+  // stages, and `stage` may BE one — which is exactly the case handled below.
+  const funnel = CRM_STAGES.filter((s) => !isDeadStage(s))
   const currentIdx = funnel.findIndex((s) => s === stage)
-  const isLost = stage === 'lost'
+  const isDead = isDeadStage(stage)
 
   return (
     <div className="flex items-center gap-1" role="img"
-      aria-label={`Stage ${isLost ? 'Lost' : `${currentIdx + 1} of ${funnel.length}`}: ${CRM_STAGE_LABEL[stage]}`}>
+      aria-label={`Stage ${isDead ? CRM_STAGE_LABEL[stage] : `${currentIdx + 1} of ${funnel.length}`}: ${CRM_STAGE_LABEL[stage]}`}>
       {funnel.map((s, i) => {
-        const done = !isLost && i <= currentIdx
-        const current = !isLost && i === currentIdx
+        const done = !isDead && i <= currentIdx
+        const current = !isDead && i === currentIdx
         return (
           <span key={s} title={CRM_STAGE_LABEL[s]}
             className={`flex-1 rounded-full transition-all ${current ? 'h-2' : 'h-1.5'}`}
@@ -764,8 +764,10 @@ function StageRail({ stage }: { stage: CrmStage }) {
             }} />
         )
       })}
-      {isLost && (
-        <span className="text-[10px] font-semibold text-red-700 ml-1 shrink-0">Lost</span>
+      {isDead && (
+        <span className="text-[10px] font-semibold text-red-700 ml-1 shrink-0 whitespace-nowrap">
+          {CRM_STAGE_LABEL[stage]}
+        </span>
       )}
     </div>
   )

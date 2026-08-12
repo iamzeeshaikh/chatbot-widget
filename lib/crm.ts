@@ -47,8 +47,12 @@ export const CRM_ROLES = [
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────
+// Order matters: it is the board's column order, the dropdown's option order and
+// the rank the list view sorts on. The three dead-end outcomes sit between Won
+// and Lost so every way a deal can die is grouped at the end of the funnel.
 export const CRM_STAGES = [
-  'new', 'contacted', 'quote_sent', 'follow_up', 'pending_design', 'won', 'lost',
+  'new', 'contacted', 'quote_sent', 'follow_up', 'pending_design', 'won',
+  'contact_not_successful', 'no_response', 'not_interested', 'lost',
 ] as const
 export type CrmStage = (typeof CRM_STAGES)[number]
 
@@ -63,6 +67,9 @@ export const CRM_STAGE_LABEL: Record<CrmStage, string> = {
   follow_up: 'Follow-Up',
   pending_design: 'Pending Design',
   won: 'Won',
+  contact_not_successful: 'Contact Not Successful',
+  no_response: 'No Response',
+  not_interested: 'Not Interested',
   lost: 'Lost',
 }
 
@@ -77,6 +84,12 @@ export const CRM_STAGE_STYLE: Record<CrmStage, string> = {
   follow_up: 'bg-amber-100 text-amber-700 border-amber-300',
   pending_design: 'bg-orange-100 text-orange-700 border-orange-300',
   won: 'bg-green-100 text-green-700 border-green-300',
+  // The dead ends are deliberately quiet: a dead deal should not shout louder
+  // than a live one. `not_interested` shares Lost's red because it IS a stated
+  // loss — the dot below is what separates the two at a glance.
+  contact_not_successful: 'bg-gray-100 text-gray-700 border-gray-300',
+  no_response: 'bg-yellow-100 text-yellow-700 border-yellow-300',
+  not_interested: 'bg-red-100 text-red-700 border-red-300',
   lost: 'bg-red-100 text-red-700 border-red-300',
 }
 
@@ -89,12 +102,27 @@ export const CRM_STAGE_DOT: Record<CrmStage, string> = {
   follow_up: '#f59e0b',
   pending_design: '#f97316',
   won: '#22c55e',
+  contact_not_successful: '#64748b',
+  no_response: '#eab308',
+  not_interested: '#fb7185',
   lost: '#ef4444',
+}
+
+// Stages a deal dies in. They are NOT funnel steps — a lead that stopped
+// answering has not advanced past wherever it stalled — so the record page's
+// progress rail excludes them and greys out, exactly as it always did for the
+// single `lost` case.
+export const CRM_DEAD_STAGES: readonly CrmStage[] = [
+  'contact_not_successful', 'no_response', 'not_interested', 'lost',
+]
+
+export function isDeadStage(stage: CrmStage): boolean {
+  return CRM_DEAD_STAGES.includes(stage)
 }
 
 // Stages that end the deal — used to decide whether to show "won revenue" and
 // to stop counting a lead as needing follow-up.
-export const CRM_CLOSED_STAGES: readonly CrmStage[] = ['won', 'lost']
+export const CRM_CLOSED_STAGES: readonly CrmStage[] = ['won', ...CRM_DEAD_STAGES]
 
 // ── Legacy lead_status ↔ stage ───────────────────────────────────────────────
 // The Billing tab's 5-value lead_status came first and is still what the
@@ -111,10 +139,12 @@ export function stageFromLeadStatus(status: LeadStatus | string | null | undefin
   }
 }
 
-// The reverse, for keeping Billing in sync when a stage is set here. The three
-// stages with no legacy equivalent collapse onto their nearest one (a lead that
-// is awaiting design or being chased has, in billing terms, been quoted /
-// contacted) — the exact stage stays in the crm_stage row either way.
+// The reverse, for keeping Billing in sync when a stage is set here. The stages
+// with no legacy equivalent collapse onto their nearest one (a lead that is
+// awaiting design or being chased has, in billing terms, been quoted /
+// contacted; one that never answered or said no is, in billing terms, lost) —
+// the exact stage stays in the crm_stage row either way, and the `stagePairAt`
+// guard in loadPipeline stops this coarser value ever reading back over it.
 export function leadStatusForStage(stage: CrmStage): LeadStatus {
   switch (stage) {
     case 'new': return 'new'
@@ -123,6 +153,9 @@ export function leadStatusForStage(stage: CrmStage): LeadStatus {
     case 'quote_sent': return 'quoted'
     case 'pending_design': return 'quoted'
     case 'won': return 'won'
+    case 'contact_not_successful': return 'lost'
+    case 'no_response': return 'lost'
+    case 'not_interested': return 'lost'
     case 'lost': return 'lost'
   }
 }

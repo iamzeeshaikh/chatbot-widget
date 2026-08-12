@@ -1,10 +1,10 @@
 'use client'
 
-// Kanban board — seven stage columns in funnel order.
+// Kanban board — one column per CRM stage, in funnel order.
 //
 // ── Shape ────────────────────────────────────────────────────────────────────
 // The BOARD owns the viewport height, not the page: the page never scrolls
-// vertically, each column scrolls its own list. All seven columns flex to share
+// vertically, each column scrolls its own list. The columns flex to share
 // the width so nothing is hidden behind a horizontal scrollbar on a normal
 // desktop, and every column — empty or not — is a full-height drop target, so an
 // empty stage looks like somewhere a card can go rather than a stub.
@@ -44,9 +44,11 @@ export default function Board({
 
   return (
     // min-w keeps the columns readable on a smaller laptop by allowing a
-    // horizontal scroll there; from ~1020px up all seven simply fit.
+    // horizontal scroll there; from that width up they simply fit. It is derived
+    // from the column COUNT rather than hardcoded — a stage added to CRM_STAGES
+    // widens the board instead of shaving 40px off every existing column.
     <div className="h-full overflow-x-auto">
-      <div className="flex gap-1.5 h-full min-w-[980px]">
+      <div className="flex gap-1.5 h-full" style={{ minWidth: columns.length * 140 }}>
         {columns.map((col) => (
           <Column key={col.stage} col={col} loading={loading} movingId={movingId}
             loadingMore={loadingMore} onMove={onMove} onLoadMore={onLoadMore}
@@ -99,7 +101,7 @@ function Column({
         if (dragging && dragging.stage !== col.stage) onMove(dragging, col.stage)
         setDragging(null)
       }}
-      // flex-1 basis-0 is what makes all seven share the width evenly.
+      // flex-1 basis-0 is what makes the columns share the width evenly.
       className={`flex-1 basis-0 min-w-0 flex flex-col rounded-lg border transition-colors ${
         isOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-100/60'
       }`}>
