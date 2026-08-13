@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     supabase.from('sites').select('site_id, name, primary_color'),
   ])
 
-  const blockedIps = await getBlockedIps()
+  const blockedIps = await getBlockedIps(member.workspace)
   const stamped = visRows.map((v) => ({ v, ms: new Date(asUtcIso(v.created_at) ?? v.created_at).getTime() }))
   const bursts = findBurstKeys(stamped.map((s) => ({ userAgent: s.v.user_agent, tsMs: s.ms })))
   // Per-session chat state for agent accountability. chatRows are newest-first,

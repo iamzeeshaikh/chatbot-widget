@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { googleConfig, connectionFor, verifiedAliases, configProblem, GmailAuthError } from '@/lib/gmail'
 
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,8 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Not an error: a workspace without the email feature simply has no Gmail to report.
+  if (!hasFeature(member.workspace, 'email')) return NextResponse.json({ connected: false, available: false })
 
   const problem = configProblem()
   if (problem) return NextResponse.json({ connected: false, configured: false, reason: problem, aliases: [] })

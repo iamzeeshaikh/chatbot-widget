@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { googleConfig, exchangeCode, saveConnection, verifyState, GMAIL_SCOPES } from '@/lib/gmail'
 
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
 
   const member = await getMember(req)
   if (!member) return NextResponse.redirect(new URL('/login', origin))
+  if (!hasFeature(member.workspace, 'email')) return NextResponse.redirect(new URL('/?gmail=unavailable', origin))
 
   // The agent declined, or Google refused.
   const err = sp.get('error')

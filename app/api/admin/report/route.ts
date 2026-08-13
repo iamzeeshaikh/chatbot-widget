@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { buildReport } from '@/lib/report'
 import { agentsCsv, sitesCsv, dailyCsv, buildPdf } from '@/lib/reportexport'
 import { buildLeadsPdf } from '@/lib/leadspdf'
@@ -57,6 +58,10 @@ export async function GET(req: NextRequest) {
   if (!member) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   // Same gate as /api/admin/performance: only admins see other agents' numbers.
   if (member.role !== 'admin') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  // Reports are a packaging deliverable; see WORKSPACE_FEATURES in lib/workspaces.ts.
+  if (!hasFeature(member.workspace, 'reports')) {
+    return NextResponse.json({ error: 'Reports are not enabled for this workspace' }, { status: 403 })
+  }
 
   const sp = req.nextUrl.searchParams
   const range = resolveRange(sp)

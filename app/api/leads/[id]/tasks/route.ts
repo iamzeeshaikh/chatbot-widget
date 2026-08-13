@@ -47,7 +47,7 @@ function assigneeAllowed(email: string, siteId: string, membersRows: { email: st
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'tasks')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const body = await req.json().catch(() => ({}))
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'tasks')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const body = await req.json().catch(() => ({}))
@@ -153,7 +153,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'tasks')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const { taskId } = await req.json().catch(() => ({}))

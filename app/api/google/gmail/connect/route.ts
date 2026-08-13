@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { googleConfig, consentUrl, configProblem, signState } from '@/lib/gmail'
 
 export const dynamic = 'force-dynamic'
@@ -12,6 +13,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.redirect(new URL('/login', req.nextUrl.origin))
+  if (!hasFeature(member.workspace, 'email')) {
+    return NextResponse.redirect(new URL('/?gmail=unavailable', req.nextUrl.origin))
+  }
 
   const back = req.nextUrl.searchParams.get('back') || '/'
   const problem = configProblem()

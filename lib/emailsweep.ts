@@ -28,7 +28,7 @@ import {
   parsePrefs, prefsFor, quietHoldUntil,
 } from './reminders'
 import { sendPushToMember } from './push'
-import { siteWorkspace } from './workspaces'
+import { siteWorkspace, hasFeature } from './workspaces'
 import { currentStateForIds } from './leadstate'
 import { CRM_EMAIL_ROLE, parseCrmEmail } from './crmemail'
 import {
@@ -578,6 +578,7 @@ async function notifyReplies(
 
     const ws = siteWorkspace(f.siteId)
     if (!ws) { out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'unknown-workspace' }); continue }
+    if (!hasFeature(ws, 'email')) { out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'workspace-has-no-email' }); continue }
 
     // Claim BEFORE sending — a push that succeeds after a crash must not be
     // repeatable, and a duplicate notification is worse than a missed retry.

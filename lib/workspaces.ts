@@ -53,6 +53,36 @@ export function workspaceSites(ws: Workspace): string[] {
   return ws === 'sports' ? SPORTS_SITES : PACKAGING_SITES
 }
 
+// ── Per-workspace feature gate ───────────────────────────────────────────────
+// Everything built for the packaging CRM used to reach the sports dashboard for
+// free. The UI has no workspace branching beyond a title, a favicon and an
+// accent colour, so sports inherited Pipeline, Tasks, Reports, Gmail and
+// reminders on the day each shipped — every one of them empty, none of them
+// designed or tested against it.
+//
+// This list is the single place that decides. A feature a workspace does not
+// carry is hidden in its nav AND refused by its API routes: the UI is never the
+// only gate, exactly as CLAUDE.md §3 requires.
+//
+// Packaging carries everything, so this changes nothing that works today. The
+// point is the DEFAULT for what comes next: a new feature reaches sports only
+// when someone adds it here deliberately.
+export type WorkspaceFeature = 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders'
+
+const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
+  packaging: new Set<WorkspaceFeature>(['pipeline', 'tasks', 'reports', 'email', 'reminders']),
+  // Sports is dormant, and was never the audience for any of this: no widget has
+  // run on its five sites since 2026-08-05, it has produced one lead ever, and
+  // its only member is a consumer Gmail account that cannot consent to our
+  // Internal OAuth app. It keeps chat, visitors, conversations and its own
+  // history — the things it actually had.
+  sports: new Set<WorkspaceFeature>([]),
+}
+
+export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {
+  return WORKSPACE_FEATURES[ws]?.has(feature) ?? false
+}
+
 export function siteWorkspace(siteId: string): Workspace | null {
   if (SPORTS_SITES.includes(siteId)) return 'sports'
   if (PACKAGING_SITES.includes(siteId)) return 'packaging'

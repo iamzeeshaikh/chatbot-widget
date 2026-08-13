@@ -20,7 +20,7 @@
 
 import { supabase, fetchAllPages } from './supabase'
 import { HARDCODED_ACCOUNTS } from './auth'
-import { workspaceSites, siteWorkspace, type Workspace } from './workspaces'
+import { workspaceSites, siteWorkspace, hasFeature, type Workspace } from './workspaces'
 import { formatDueLabel, pktDayKey } from './datetime'
 import { CRM_TASK_ROLE, parseCrmTask, taskBucket, type CrmTaskEntry } from './tasks'
 import { isQuoteSessionId, quoteSessionId } from './quoteintake'
@@ -243,6 +243,12 @@ export async function runReminderSweep(
     }
     const ws = access.get(email.toLowerCase())?.workspace ?? siteWorkspace(siteId)
     if (!ws) continue
+    // A workspace that does not carry reminders is never notified, even if a
+    // task somehow exists on one of its sites.
+    if (!hasFeature(ws, 'reminders')) {
+      result.suppressed.push({ kind: 'due', to: email, taskId: task.id, why: 'workspace-has-no-reminders' })
+      continue
+    }
 
     for (const d of decideForTask(task, prefs, now, sent)) {
       const k = reminderKey(task.id, d.kind)
@@ -304,6 +310,10 @@ export async function runReminderSweep(
   }
 
   for (const [email, list] of byAssignee) {
+    // Resolved BEFORE the claim below — skipping after a ledger write would
+    // burn the day's digest key without sending anything.
+    const ws = access.get(email)?.workspace
+    if (!ws || !hasFeature(ws, 'reminders')) continue
     const prefs = prefsFor(email, prefsByEmail.get(email))
     const overdue = list.filter((t) => taskBucket(t.task.due_at, now) === 'overdue').length
     const dueToday = list.filter((t) => taskBucket(t.task.due_at, now) === 'today').length
@@ -326,8 +336,6 @@ export async function runReminderSweep(
       continue
     }
     sent.add(k)
-    const ws = access.get(email)?.workspace
-    if (!ws) continue
     try {
       await sendPushToMember(email, ws, { title: copy.title, body: copy.body, url: '/tasks', tag: `digest-${decision.dayKey}` })
       result.sent.push({ kind: 'digest', to: email, title: copy.title })

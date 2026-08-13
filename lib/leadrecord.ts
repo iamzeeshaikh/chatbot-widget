@@ -20,7 +20,7 @@ import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from './replyauthor'
 import { parseAttachment, type AttachmentInfo } from './attachment'
 import { isQuoteSessionId, quoteSessionId, stripQuoteTag, isQuoteLeadMessage, isCheckoutLeadMessage } from './quoteintake'
 import { digitsOnly, samePhone } from './identity'
-import { workspaceSites } from './workspaces'
+import { workspaceSites, hasFeature, type WorkspaceFeature } from './workspaces'
 import {
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE,
   parseCrmStage, parseCrmNote, parseCrmField, parseCrmValue,
@@ -168,8 +168,15 @@ export type LeadAccess =
   | { ok: true; member: Member; siteId: string }
   | { ok: false; status: 401 | 403 | 404 }
 
-export async function guardLeadAccess(member: Member | null, id: string): Promise<LeadAccess> {
+// `feature` is the workspace gate (lib/workspaces.ts). Passing it here rather
+// than repeating the check in each handler is what keeps a multi-verb route
+// (tasks has POST/PATCH/DELETE, email has its own set) from gating three of
+// four by accident. Packaging carries every feature, so this is a no-op there.
+export async function guardLeadAccess(
+  member: Member | null, id: string, feature?: WorkspaceFeature,
+): Promise<LeadAccess> {
   if (!member) return { ok: false, status: 401 }
+  if (feature && !hasFeature(member.workspace, feature)) return { ok: false, status: 403 }
   if (!id) return { ok: false, status: 404 }
   const resolved = await resolveLeadSite(id)
   if (!resolved) return { ok: false, status: 404 }

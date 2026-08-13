@@ -55,7 +55,7 @@ export default function PipelinePage() {
   const [me, setMe] = useState('')   // the signed-in member, for "assign to me"
   const [total, setTotal] = useState(0)
   const [truncated, setTruncated] = useState(false)
-  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error' | 'unavailable'>('loading')
   const [movingId, setMovingId] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState<CrmStage | null>(null)
   const [error, setError] = useState('')
@@ -122,6 +122,8 @@ export default function PipelinePage() {
     return fetch(`/api/pipeline?${query}`)
       .then(async (res) => {
         if (res.status === 401) { window.location.href = '/login'; return }
+        // The workspace does not carry this feature (lib/workspaces.ts).
+        if (res.status === 403) { setStatus('unavailable'); return }
         if (!res.ok) { setStatus('error'); return }
         const d = await res.json()
         setColumns(d.columns ?? EMPTY_COLUMNS)
@@ -423,7 +425,12 @@ export default function PipelinePage() {
             This range holds more leads than the page will scan. Totals cover what was scanned — narrow the date range for exact figures.
           </p>
         )}
-        {status === 'error' ? (
+        {status === 'unavailable' ? (
+          <section className="bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-6 text-center">
+            <p className="text-sm font-semibold text-gray-800">Not available for this workspace</p>
+            <p className="text-xs text-gray-500 mt-0.5">The pipeline is part of the packaging CRM.</p>
+          </section>
+        ) : status === 'error' ? (
           <section className="bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-6 text-center">
             <p className="text-sm font-semibold text-gray-800">Could not load the pipeline</p>
             <p className="text-xs text-gray-500 mt-0.5">Something went wrong on our side. Try again in a moment.</p>

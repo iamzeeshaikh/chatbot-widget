@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { unpackVisitor, packVisitor, appendHistory, LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { resolveCountryCode } from '@/lib/geo'
-import { isWidgetBlocked } from '@/lib/workspaces'
+import { isWidgetBlocked, siteWorkspace } from '@/lib/workspaces'
 import { getBlockedIps, requestIp } from '@/lib/blocklist'
 
 const corsHeaders = {
@@ -87,7 +87,9 @@ export async function POST(req: NextRequest) {
 
     // Admin IP blocklist: a blocked visitor never records presence.
     const reqIp = requestIp(req.headers)
-    if (reqIp && (await getBlockedIps()).has(reqIp)) {
+    // Scoped to this site's workspace; an unregistered site falls back to the
+    // union, so a block can never lapse just because the site is unknown.
+    if (reqIp && (await getBlockedIps(siteWorkspace(siteId) ?? undefined)).has(reqIp)) {
       return NextResponse.json({ ok: true, blocked: true }, { headers: corsHeaders })
     }
 

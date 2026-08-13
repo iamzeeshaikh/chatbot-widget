@@ -55,7 +55,9 @@ export async function GET(req: NextRequest) {
   // Admin IP blocklist: a blocked visitor never even sees the widget.
   if (!blocked) {
     const ip = requestIp(req.headers)
-    if (ip && (await getBlockedIps()).has(ip)) blocked = true
+    // Only this site's own workspace can have blocked the visitor.
+    const ws = siteWorkspace(siteId)
+    if (ip && ws && (await getBlockedIps(ws)).has(ip)) blocked = true
   }
 
   // bot_enabled lets the widget swap the bot-persona greeting for a neutral

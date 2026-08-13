@@ -7,7 +7,9 @@ import { setIpBlocked, getBlockedIps } from '@/lib/blocklist'
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member || member.role !== 'admin') return NextResponse.json({ ips: [] }, { status: member ? 403 : 401 })
-  return NextResponse.json({ ips: Array.from(await getBlockedIps()).sort() })
+  // This workspace's own blocks only — a sports admin never sees or manages a
+  // packaging block, and vice versa.
+  return NextResponse.json({ ips: Array.from(await getBlockedIps(member.workspace)).sort() })
 }
 
 export async function POST(req: NextRequest) {
@@ -21,6 +23,6 @@ export async function POST(req: NextRequest) {
   if (!cleanIp || cleanIp.length > 45 || !/^[0-9a-fA-F.:]+$/.test(cleanIp)) {
     return NextResponse.json({ error: 'Invalid IP' }, { status: 400 })
   }
-  await setIpBlocked(cleanIp, block !== false, member.email)
+  await setIpBlocked(cleanIp, block !== false, member.email, member.workspace)
   return NextResponse.json({ success: true })
 }

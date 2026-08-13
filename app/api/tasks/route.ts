@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, memberSites } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { supabase } from '@/lib/supabase'
 import { loadMemberTasks, groupTasks, applyFilters } from '@/lib/taskquery'
 import { isTaskType, type TaskType } from '@/lib/tasks'
@@ -15,6 +16,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!hasFeature(member.workspace, 'tasks')) {
+    return NextResponse.json({ error: 'Tasks are not enabled for this workspace' }, { status: 403 })
+  }
 
   const sp = req.nextUrl.searchParams
   const rawAssignee = sp.get('assignee') ?? 'me'

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { supabase } from '@/lib/supabase'
 import {
   CRM_PREFS_ROLE, REMINDER_SITE, PREFS_SESSION, DEFAULT_PREFS,
@@ -34,12 +35,18 @@ async function currentPrefs(email: string): Promise<ReminderPrefs> {
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!hasFeature(member.workspace, 'tasks')) {
+    return NextResponse.json({ error: 'Tasks are not enabled for this workspace' }, { status: 403 })
+  }
   return NextResponse.json({ prefs: await currentPrefs(member.email), defaults: DEFAULT_PREFS })
 }
 
 export async function POST(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!hasFeature(member.workspace, 'tasks')) {
+    return NextResponse.json({ error: 'Tasks are not enabled for this workspace' }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => ({}))
   const existing = await currentPrefs(member.email)

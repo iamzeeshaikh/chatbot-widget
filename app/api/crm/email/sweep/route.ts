@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { runEmailSweep, lastSweepStatus } from '@/lib/emailsweep'
 
 export const dynamic = 'force-dynamic'
@@ -24,8 +25,16 @@ async function authorise(req: NextRequest): Promise<{ ok: boolean; by: string; w
     if (req.headers.get('authorization') === `Bearer ${secret}`) return { ok: true, by: 'cron' }
     if (req.headers.get('x-cron-secret') === secret) return { ok: true, by: 'trigger' }
   }
+  // The sweep is global infrastructure: one run walks every workspace's threads,
+  // and its result names the agents, lead ids and recipients involved. So the
+  // manual trigger — and `?status=1`, which returns that same result — is
+  // limited to an admin of a workspace that actually carries the email feature.
+  // Before this, a sports admin polling ?status=1 was handed packaging agents'
+  // addresses. The CRON_SECRET path above is untouched.
   const member = await getMember(req)
-  if (member?.role === 'admin') return { ok: true, by: `admin:${member.email}` }
+  if (member?.role === 'admin' && hasFeature(member.workspace, 'email')) {
+    return { ok: true, by: `admin:${member.email}` }
+  }
   return {
     ok: false,
     by: '',

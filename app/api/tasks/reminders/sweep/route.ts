@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { runReminderSweep } from '@/lib/reminderssweep'
 
 export const dynamic = 'force-dynamic'
@@ -30,8 +31,13 @@ async function authorise(req: NextRequest): Promise<{ ok: boolean; by: string; w
     if (bearer === `Bearer ${secret}`) return { ok: true, by: 'cron' }
     if (req.headers.get('x-cron-secret') === secret) return { ok: true, by: 'trigger' }
   }
+  // One run covers every workspace and the response names each assignee it
+  // reminded, so the manual trigger is limited to an admin of a workspace that
+  // actually carries reminders. The CRON_SECRET path above is untouched.
   const member = await getMember(req)
-  if (member?.role === 'admin') return { ok: true, by: `admin:${member.email}` }
+  if (member?.role === 'admin' && hasFeature(member.workspace, 'reminders')) {
+    return { ok: true, by: `admin:${member.email}` }
+  }
 
   // Being explicit here matters: without CRON_SECRET set in the environment,
   // Vercel Cron sends no Authorization header, every scheduled run 401s, and

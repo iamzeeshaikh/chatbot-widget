@@ -15,7 +15,7 @@ import {
   CreditCard, Info, Check, X, TrendingDown, LogOut, type LucideIcon,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
-import { LEAD_TRACKED_SITES, WORKSPACE_LABEL } from '@/lib/workspaces'
+import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
 import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadstatus'
@@ -1239,6 +1239,9 @@ export default function Dashboard() {
   // index on `role`, so this query must stay cheap (CLAUDE.md §6).
   useEffect(() => {
     if (!authReady) return
+    // A workspace without tasks has no badge to poll for — and the endpoint
+    // would 403 on every tick.
+    if (!hasFeature(workspace, 'tasks')) return
     const pull = () => fetch('/api/tasks/count')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -1251,7 +1254,7 @@ export default function Dashboard() {
     pull()
     const iv = setInterval(whenVisible(pull), 60000)
     return () => clearInterval(iv)
-  }, [authReady, visibleTick])
+  }, [authReady, visibleTick, workspace])
 
   // Load the IP blocklist once for admins, so the "Ban / Unban" state is correct
   // on the conversation panel too (not just the Visitors tab).
@@ -1888,6 +1891,11 @@ export default function Dashboard() {
   })
   // Show the Billing tab only when the member can access a lead-tracked site.
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
+  // The CRM surfaces are per-workspace (WORKSPACE_FEATURES in lib/workspaces.ts).
+  // Hiding them here is the courtesy half; their API routes refuse independently.
+  const canPipeline = hasFeature(workspace, 'pipeline')
+  const canTasks = hasFeature(workspace, 'tasks')
+  const canReports = hasFeature(workspace, 'reports')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
   // The product's name. Do not change it without asking — it was renamed to
@@ -2092,17 +2100,21 @@ export default function Dashboard() {
           {userRole === 'admin' && (
             <button onClick={() => setTab('performance')} className={`${NAV_TAB} ${tab === 'performance' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Reports</button>
           )}
-          <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/pipeline') } }}
-            className={`${NAV_TAB} ${NAV_TAB_OFF}`}>Pipeline</a>
-          <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
-            className={`${NAV_TAB} ${NAV_TAB_OFF}`}>
-            <span className="truncate">Tasks</span>
-            {/* Overdue + due today for this member, in Pakistan time. */}
-            <span className={`${NAV_COUNT} ${taskBadge > 0 ? (taskBadgeOverdue > 0 ? 'bg-red-600 text-white' : 'bg-amber-500 text-white') : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}
-              title={taskBadge > 0 ? `${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today` : 'Nothing due'}>
-              {taskBadge > 99 ? '99+' : taskBadge}
-            </span>
-          </a>
+          {canPipeline && (
+            <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/pipeline') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`}>Pipeline</a>
+          )}
+          {canTasks && (
+            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`}>
+              <span className="truncate">Tasks</span>
+              {/* Overdue + due today for this member, in Pakistan time. */}
+              <span className={`${NAV_COUNT} ${taskBadge > 0 ? (taskBadgeOverdue > 0 ? 'bg-red-600 text-white' : 'bg-amber-500 text-white') : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}
+                title={taskBadge > 0 ? `${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today` : 'Nothing due'}>
+                {taskBadge > 99 ? '99+' : taskBadge}
+              </span>
+            </a>
+          )}
         </nav>
 
         {/* ── 3. Controls ── */}
@@ -2135,12 +2147,14 @@ export default function Dashboard() {
               page you had to already be looking at. Always in the bar and lit
               only when it has something to say — same reasoning as the tab
               counts: an element that appears later moves its neighbours. */}
-          <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
-            title={unreadReplies > 0 ? `${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened` : 'No unread customer replies'}
-            className={`shrink-0 inline-flex items-center justify-center gap-1 h-8 px-2 rounded-lg text-[11px] font-bold tabular-nums transition-colors ${unreadReplies > 0 ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}>
-            <Inbox size={15} strokeWidth={2} aria-hidden />
-            {unreadReplies > 99 ? '99+' : unreadReplies}
-          </a>
+          {canTasks && (
+            <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
+              title={unreadReplies > 0 ? `${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened` : 'No unread customer replies'}
+              className={`shrink-0 inline-flex items-center justify-center gap-1 h-8 px-2 rounded-lg text-[11px] font-bold tabular-nums transition-colors ${unreadReplies > 0 ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}>
+              <Inbox size={15} strokeWidth={2} aria-hidden />
+              {unreadReplies > 99 ? '99+' : unreadReplies}
+            </a>
+          )}
 
           {/* The same palette the CRM pages carry, so ⌘K works wherever an agent
               happens to be when the phone rings. */}
@@ -3986,11 +4000,13 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               {/* The full month-end report (all three breakdowns, CSV + PDF)
                   lives on its own route so this tab stays a quick daily view. */}
-              <a href="/reports" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/reports') } }}
-                title="Full month-end report with per-agent, per-site and daily breakdowns, plus CSV and PDF export"
-                className="px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-                Month-end report
-              </a>
+              {canReports && (
+                <a href="/reports" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/reports') } }}
+                  title="Full month-end report with per-agent, per-site and daily breakdowns, plus CSV and PDF export"
+                  className="px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                  Month-end report
+                </a>
+              )}
               <button onClick={() => setPerfMonth(shiftMonth(perfMonth, -1))}
                 className="px-2.5 py-1.5 text-xs text-gray-700 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors" title="Previous month"><ChevronLeft size={13} strokeWidth={2} aria-hidden /></button>
               <input type="month" value={perfMonth} max={currentMonth()} onChange={(e) => e.target.value && setPerfMonth(e.target.value)}

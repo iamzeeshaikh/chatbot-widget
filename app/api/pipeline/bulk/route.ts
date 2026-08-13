@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, HARDCODED_ACCOUNTS } from '@/lib/auth'
+import { hasFeature } from '@/lib/workspaces'
 import { supabase } from '@/lib/supabase'
 import { writeControlRow } from '@/lib/leadrecord'
 import { applyStageChange } from '@/lib/stagechange'
@@ -45,6 +46,9 @@ function respond(outcome: BulkOutcome, extra: Record<string, unknown> = {}) {
 export async function POST(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!hasFeature(member.workspace, 'pipeline')) {
+    return NextResponse.json({ error: 'The pipeline is not enabled for this workspace' }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => ({}))
   const action = String(body.action ?? '')

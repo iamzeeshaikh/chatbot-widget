@@ -45,7 +45,7 @@ const EMPTY_GROUPS: TaskGroups = { overdue: [], today: [], upcoming: [], complet
 
 export default function TasksPage() {
   const [data, setData] = useState<TasksResponse | null>(null)
-  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error' | 'unavailable'>('loading')
   const [assignee, setAssignee] = useState('me')
   const [site, setSite] = useState('')
   const [type, setType] = useState<TaskType | 'all'>('all')
@@ -70,6 +70,8 @@ export default function TasksPage() {
     return fetch(`/api/tasks?${qs.toString()}`)
       .then(async (res) => {
         if (res.status === 401) { window.location.href = '/login'; return }
+        // The workspace does not carry this feature (lib/workspaces.ts).
+        if (res.status === 403) { setStatus('unavailable'); return }
         if (!res.ok) { setStatus('error'); return }
         setData(await res.json())
         setStatus('ok')
@@ -259,6 +261,13 @@ export default function TasksPage() {
 
         {status === 'loading' ? (
           <LoadingSkeleton />
+        ) : status === 'unavailable' ? (
+          <Panel>
+            <div className="flex items-center gap-2 px-3 py-3">
+              <TriangleAlert size={14} strokeWidth={2} className="text-gray-400 shrink-0" aria-hidden />
+              <p className="text-xs text-gray-600">Tasks are part of the packaging CRM and are not available for this workspace.</p>
+            </div>
+          </Panel>
         ) : status === 'error' ? (
           <Panel>
             <div className="flex items-center gap-2 px-3 py-3">

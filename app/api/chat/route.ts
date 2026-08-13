@@ -33,7 +33,9 @@ export async function POST(req: NextRequest) {
     // Admin IP blocklist: drop silently (same shape as the bot-silent response,
     // so the widget renders nothing and the message is never stored).
     const reqIp = requestIp(req.headers)
-    if (reqIp && (await getBlockedIps()).has(reqIp)) {
+    // Scoped to this site's workspace; an unregistered site falls back to the
+    // union, so a block can never lapse just because the site is unknown.
+    if (reqIp && (await getBlockedIps(siteWorkspace(siteId) ?? undefined)).has(reqIp)) {
       return new Response(null, {
         status: 200,
         headers: { ...corsHeaders, 'X-Bot-Silent': '1', 'Access-Control-Expose-Headers': 'X-Bot-Silent' },
