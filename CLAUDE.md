@@ -284,6 +284,34 @@ API route — never only by hiding UI. A member without access to a lead's site 
 `siteScope` / `memberSites` from `lib/auth.ts`; see `guardLeadAccess` in
 `lib/leadrecord.ts` for the reference implementation.
 
+### A feature belongs to a workspace on purpose, or not at all
+`WORKSPACE_FEATURES` in `lib/workspaces.ts` — `hasFeature(ws, feature)` — is the single
+list that decides which workspace carries Pipeline, Tasks, Reports, Gmail and reminders.
+
+It exists because this dashboard has **no workspace branching in the UI** beyond a title,
+a favicon and an accent colour. Everything built for the packaging CRM therefore reached
+the sports dashboard the day it shipped: five surfaces it never asked for, all empty, none
+designed or tested against it, plus a month-end report whose numbers came from a widget
+that has not run since 2026-08-05. Nobody decided that; it was the default.
+
+So when you add a feature, **decide where it belongs** — the default is now packaging only.
+
+- Gate it in the **API route**, not just the nav. Hiding a link is a courtesy; the route
+  refusing is the rule (see the section above).
+- For a lead sub-route, pass the feature as the third argument to
+  `guardLeadAccess(member, id, 'tasks')`. A route with POST/PATCH/DELETE is exactly where
+  a hand-written check gets applied to three verbs out of four.
+- **Do not gate the `CRON_SECRET` path** of a sweep. Cron is not a member and has no
+  workspace; only the manual-admin path is narrowed.
+- A client page should show its own "not available for this workspace" state on a 403
+  rather than its generic error — `app/pipeline/page.tsx` and `app/tasks/page.tsx` carry
+  a `'unavailable'` status for this.
+
+Isolation itself was audited end-to-end on 2026-08-13 and holds. The way to re-verify is
+to mint a `sports@zeeops.dev` session locally (the recipe is in §"Verifying an
+auth-protected production page") and diff every endpoint against `packaging@zeeops.dev` —
+reading the code is what missed the three gaps that audit found.
+
 ## 4. Conventions
 
 - **Timestamps: Asia/Karachi, 12-hour format, always via `lib/datetime.ts`.** Never
