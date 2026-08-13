@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, fetchAllPages } from '@/lib/supabase'
+import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { asUtcIso, unpackVisitor } from '@/lib/visitor'
 import { PKT_OFFSET_HOURS } from '@/lib/botschedule'
@@ -67,6 +67,16 @@ function bucketIndex(buckets: Bucket[], ts: number): number {
   return -1
 }
 
+// Row caps. Sized against the widest range this endpoint serves — 12 months —
+// measured on 2026-08-13 across the 24 packaging sites: 30.8k visitor rows,
+// 25.1k agent messages, 1.3k visitor messages. Roughly 2x headroom each.
+// They are a backstop, not a budget: the role filters below are what keep the
+// real numbers small. Raise one only together with the reason it was hit.
+const VISITOR_ROW_CAP = 60000
+const AGENT_ROW_CAP = 60000
+const CHAT_ROW_CAP = 20000
+
+
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ points: [] }, { status: 401 })
@@ -85,16 +95,39 @@ export async function GET(req: NextRequest) {
 
   // Paginated (fetchAllPages): a plain query silently tops out at 1000 rows,
   // which starved the chart of every day after the first ~1000 visitors.
-  const [visRows, logRows] = await Promise.all([
+  //
+  // ── Fetch ONLY the roles this chart reads ────────────────────────────────
+  // `logRows` used to be every chat_logs row in the window, of which the chart
+  // reads exactly two kinds: 'admin' (did an agent engage?) and 'user'/'visitor'
+  // (when did this chat start?). Everything else — assignment, reply_author,
+  // mode, tags, lead_capture, the crm_* rows — was fetched and thrown away.
+  //
+  // On 2026-08-13 that was 39,000 of the 61,700 rows in a 30-day packaging
+  // window: 63% waste, and enough to push the fetch past its 50,000-row cap.
+  // Because the query is ordered OLDEST FIRST, the cap dropped the NEWEST rows,
+  // so Picked and Chats read 0 for the last four days while Visits — a separate,
+  // smaller query — stayed correct. A chart that is right until it silently
+  // isn't is worse than one that fails loudly, hence warnIfCapped below.
+  //
+  // Splitting the two also drops `message` from the agent query, which is the
+  // bulky column and was never read for those rows.
+  const [visRows, agentRows, chatRows] = await Promise.all([
     fetchAllPages<{ created_at: string; user_agent: string | null; session_id: string; page_url: string | null }>(
       () => supabase.from('active_visitors').select('created_at, user_agent, session_id, page_url').in('site_id', allowed)
         .gte('created_at', startISO).order('created_at', { ascending: true }),
-      50000),
-    fetchAllPages<{ created_at: string; session_id: string; role: string; message: string }>(
-      () => supabase.from('chat_logs').select('created_at, session_id, role, message').in('site_id', allowed)
-        .gte('created_at', startISO).order('created_at', { ascending: true }),
-      50000),
+      VISITOR_ROW_CAP),
+    fetchAllPages<{ session_id: string }>(
+      () => supabase.from('chat_logs').select('session_id').in('site_id', allowed)
+        .eq('role', 'admin').gte('created_at', startISO).order('created_at', { ascending: true }),
+      AGENT_ROW_CAP),
+    fetchAllPages<{ created_at: string; session_id: string; message: string }>(
+      () => supabase.from('chat_logs').select('created_at, session_id, message').in('site_id', allowed)
+        .in('role', ['user', 'visitor']).gte('created_at', startISO).order('created_at', { ascending: true }),
+      CHAT_ROW_CAP),
   ])
+  warnIfCapped('analytics: active_visitors', visRows.length, VISITOR_ROW_CAP)
+  warnIfCapped('analytics: agent messages', agentRows.length, AGENT_ROW_CAP)
+  warnIfCapped('analytics: visitor messages', chatRows.length, CHAT_ROW_CAP)
 
   // Visitors = widget sessions started in the bucket (the ping route upserts
   // exactly one active_visitors row per session, created_at = session start).
@@ -105,7 +138,7 @@ export async function GET(req: NextRequest) {
   // reply. This mirrors the Performance tab's "picked up": of the visitors that
   // came, how many the team served vs ignored (picked + notPicked === visitors).
   const agentSessions = new Set<string>()
-  for (const l of logRows) if (String(l.role || '').toLowerCase() === 'admin') agentSessions.add(l.session_id)
+  for (const l of agentRows) agentSessions.add(l.session_id)
 
   const visStamped = visRows.map((v) => ({ v, userAgent: v.user_agent, tsMs: toPktMs(v.created_at) }))
   const bursts = findBurstKeys(visStamped)
@@ -136,12 +169,10 @@ export async function GET(req: NextRequest) {
   // New chats = a session's FIRST genuine visitor message. Counting any
   // message here (the old logic) made an agent's follow-up on a weeks-old
   // conversation register as a brand-new chat that day — which is how a day
-  // with 1 visitor could show 19 "chats". Restricting to visitor-role rows
-  // also inherently skips every control row (mode, reply_author, …).
+  // with 1 visitor could show 19 "chats". The visitor-role filter is now in the
+  // query itself, which also skips every control row (mode, reply_author, …).
   const firstSeen: Record<string, number> = {}
-  for (const l of logRows) {
-    const role = String(l.role || '').toLowerCase()
-    if (role !== 'user' && role !== 'visitor') continue
+  for (const l of chatRows) {
     if (l.message === '(session started)') continue
     const ts = toPktMs(l.created_at)
     if (firstSeen[l.session_id] === undefined || ts < firstSeen[l.session_id]) firstSeen[l.session_id] = ts

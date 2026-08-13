@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, fetchAllPages } from '@/lib/supabase'
+import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope, HARDCODED_ACCOUNTS } from '@/lib/auth'
 import { MODE_ROLE } from '@/lib/mode'
 import { asUtcIso } from '@/lib/visitor'
@@ -12,6 +12,12 @@ import { findBurstKeys, burstKey } from '@/lib/botfilter'
 import { isClosingMessage } from '@/lib/closing'
 
 export const dynamic = 'force-dynamic'
+
+// Row cap for the month's fetch. July 2026 was 36.7k chat_logs rows across the
+// 24 packaging sites and volume is growing ~2.5k/day, so this is deliberately
+// well clear of a busy month rather than snug against one — and warnIfCapped
+// below says so out loud if it is ever reached.
+const PERF_ROW_CAP = 80000
 
 // Agent performance / accountability report for a date range (default: this
 // calendar month). Admin-only and strictly workspace-isolated: an admin only
@@ -73,7 +79,7 @@ export async function GET(req: NextRequest) {
         .gte('created_at', from)
         .lt('created_at', to)
         .order('created_at', { ascending: true }),
-      50000),
+      PERF_ROW_CAP),
     // Every widget session of the period (for the ignored-visitors count),
     // with user_agent so bot bursts can be excluded like everywhere else.
     // site_id rides along so the Daily performance table can link each day's
@@ -86,8 +92,16 @@ export async function GET(req: NextRequest) {
         .gte('created_at', from)
         .lt('created_at', to)
         .order('created_at', { ascending: true }),
-      50000),
+      PERF_ROW_CAP),
   ])
+  // No silent truncation. This fetch is all roles, and control rows are the
+  // bulk of them — a full month across the 24 packaging sites was 36.7k rows in
+  // July 2026 and is growing ~2.5k/day, so this cap is roughly one busy month
+  // away. When it is hit the query is ordered oldest first, meaning the END of
+  // the month goes missing from the numbers agents are judged on. Same failure
+  // the Overview chart actually shipped with (see lib/supabase.warnIfCapped).
+  warnIfCapped('performance: chat_logs', rows.length, PERF_ROW_CAP)
+  warnIfCapped('performance: active_visitors', visitorRows.length, PERF_ROW_CAP)
   const t = (ts: string) => new Date(asUtcIso(ts) as string).getTime()
   const nowMs = Date.now()
   // Global bot kill switch: while the bot is disabled, EVERY waiting visitor

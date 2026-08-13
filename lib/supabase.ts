@@ -49,6 +49,25 @@ interface PageQuery<T> {
 // slow tab loads). A short/empty page anywhere in a wave marks the end.
 const PAGE_CONCURRENCY = 6
 
+/**
+ * Shout when a `fetchAllPages` cap was actually reached.
+ *
+ * A cap that is hit has silently changed the answer, and every caller here
+ * orders OLDEST FIRST — so what gets dropped is the most recent data, which is
+ * the part anyone is looking at. That is not theoretical: on 2026-08-13 the
+ * Overview chart read Picked 0 / Chats 0 for the four most recent days because
+ * its 50,000-row fetch was 63% control rows it then threw away, and the
+ * genuinely useful rows fell off the end.
+ *
+ * A truncated result that says so is recoverable. One that doesn't is a chart
+ * people trust while it quietly lies.
+ */
+export function warnIfCapped(what: string, got: number, cap: number): boolean {
+  if (got < cap) return false
+  console.error(`[${what}] hit its ${cap}-row cap (got ${got}) — the newest rows were dropped, so recent figures are undercounted. Narrow the query (filter by role) or raise the cap.`)
+  return true
+}
+
 export async function fetchAllPages<T>(makeQuery: () => PageQuery<T>, maxRows: number): Promise<T[]> {
   const all: T[] = []
   for (let base = 0; base < maxRows; base += SUPA_PAGE_ROWS * PAGE_CONCURRENCY) {
