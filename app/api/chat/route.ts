@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
     const role = String(lastUserMessage.role || '').toLowerCase()
     const isVisitorMessage = role === 'user' || role === 'visitor'
 
-    const botDisabled = !isBotEnabled()
+    const botDisabled = !isBotEnabled(siteId)
     const scheduleOff = isBotOffBySchedule(siteId)
     if (!isVisitorMessage || botDisabled || mode === 'human' || scheduleOff) {
       const silentHeaders = {

@@ -264,7 +264,11 @@
   function markLandingDing() { landingSoundPlayed = true; lsSet(DING_KEY, sessionId); }
 
   // ─── CSS ──────────────────────────────────────────────────────────────────
-  function injectCSS(primaryColor) {
+  // `widgetOpts` comes from /api/site-config (see that route). Anything it
+  // changes is appended as an OVERRIDE block after the base stylesheet rather
+  // than branching inside it, so a site on the default size receives byte-for-
+  // byte the CSS it received before this existed.
+  function injectCSS(primaryColor, widgetOpts) {
     var existing = document.getElementById('zee-chat-widget-css');
     if (existing) existing.remove();
 
@@ -358,6 +362,24 @@
 #zee-lead-form { display: none; }\
 #zee-chat-avatar { color: ' + primaryColor + '; }\
 @media (max-width: 767px) { #zee-chat-widget { bottom: 0; right: 0; width: 100%; height: 100%; border-radius: 0; } #zee-chat-widget-btn { bottom: 16px; right: 16px; } }';
+
+    // ── Optional "large" presentation ────────────────────────────────────────
+    // Appended last so it wins, and the PANEL half is wrapped in a min-width
+    // query: below 768px the base stylesheet makes the panel fullscreen, and an
+    // unguarded width/height here would come after that rule and undo it.
+    // The bubble keeps a plain background-color underneath — the sheen is a
+    // background-IMAGE layer, so it needs no colour arithmetic on primaryColor.
+    if (widgetOpts && widgetOpts.size === 'large') {
+      css += '\
+#zee-chat-widget-btn { width: 68px; height: 68px; background-image: linear-gradient(145deg, rgba(255,255,255,0.26), rgba(255,255,255,0) 62%); box-shadow: 0 6px 24px rgba(0,0,0,0.28); }\
+#zee-chat-widget-btn:hover { transform: scale(1.06) translateY(-2px); box-shadow: 0 12px 34px rgba(0,0,0,0.34); }\
+#zee-chat-widget-btn svg { width: 32px; height: 32px; }\
+#zee-chat-header { padding: 16px 18px; background-image: linear-gradient(160deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 70%); }\
+#zee-chat-avatar { width: 40px; height: 40px; font-size: 16px; }\
+#zee-chat-title { font-size: 16px; }\
+#zee-chat-subtitle { font-size: 12px; }\
+@media (min-width: 768px) { #zee-chat-widget { width: 420px; height: 580px; bottom: 104px; border-radius: 20px; box-shadow: 0 16px 60px rgba(0,0,0,0.22); } }';
+    }
 
     var style = document.createElement('style');
     style.id = 'zee-chat-widget-css';
@@ -1425,7 +1447,17 @@
         if (data && data.bot_name) {
           config = data;
         }
-        injectCSS(config.primary_color);
+        // Per-site overrides for when the contact form is offered. Merged, not
+        // replaced, so a key the server does not send keeps its default and the
+        // never-nag rules in leadPromptAllowed() are untouched either way.
+        if (data && data.widget && data.widget.leadPrompt) {
+          for (var k in data.widget.leadPrompt) {
+            if (Object.prototype.hasOwnProperty.call(LEAD_PROMPT, k)) {
+              LEAD_PROMPT[k] = data.widget.leadPrompt[k];
+            }
+          }
+        }
+        injectCSS(config.primary_color, data && data.widget);
         buildWidget();
         startSounds();
         startPresence();

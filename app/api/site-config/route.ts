@@ -60,7 +60,29 @@ export async function GET(req: NextRequest) {
     if (ip && ws && (await getBlockedIps(ws)).has(ip)) blocked = true
   }
 
+  // ── Per-site widget behaviour ──────────────────────────────────────────────
+  // widget.js is ONE file served to every site, so anything that differs per
+  // site has to arrive here rather than being branched inside the script.
+  //
+  // Sports is bot-first and has no human agents, so it asks for contact details
+  // as soon as the visitor has said one thing, instead of waiting out the
+  // 30-second "nobody is there" silence that only makes sense when a human
+  // might still pick up. `activeConvoMs: 0` is required with it — the bot's own
+  // reply counts as an agent reply, and the default would defer the form for a
+  // minute every time the bot answered.
+  //
+  // `size: 'large'` is a sports-only presentation change; packaging keeps the
+  // dimensions its Core Web Vitals work was tuned against.
+  const ws = siteWorkspace(siteId)
+  const widget = ws === 'sports'
+    // 2s, not instant: the widget re-arms this timer when the bot's reply
+    // finishes streaming (maybeShowLeadForm at the end of the stream), so a
+    // prompt bot answers first and the form lands just after it. Any lower and
+    // a slow LLM turn lets the form beat its own answer onto the screen.
+    ? { size: 'large', leadPrompt: { idleMs: 2000, minMessages: 1, activeConvoMs: 0 } }
+    : { size: 'default' }
+
   // bot_enabled lets the widget swap the bot-persona greeting for a neutral
-  // "our team" one while the bot is globally off (lib/botflag.ts).
-  return NextResponse.json({ ...data, blocked, bot_enabled: isBotEnabled() }, { headers: corsHeaders })
+  // "our team" one where the bot is off (lib/botflag.ts — per workspace now).
+  return NextResponse.json({ ...data, blocked, bot_enabled: isBotEnabled(siteId), widget }, { headers: corsHeaders })
 }

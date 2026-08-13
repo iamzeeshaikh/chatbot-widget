@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import type { Workspace } from '@/lib/workspaces'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
 import { deriveAssignments, ASSIGNMENT_ROLE } from '@/lib/assignment'
 import { CONTACT_ROLE, TAGS_ROLE, parseTags, parseContact, asUtcIso } from '@/lib/visitor'
@@ -8,7 +9,7 @@ import { parseAttachment } from '@/lib/attachment'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
 import { isControlRole } from '@/lib/controlroles'
 import { CRM_ROLES } from '@/lib/crm'
-import { isBotEnabled } from '@/lib/botflag'
+import { isBotEnabledForWorkspace } from '@/lib/botflag'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,10 +46,10 @@ export async function GET(req: NextRequest) {
   const summaryRes = await supabase.rpc('session_message_summaries', { since: SINCE })
     .order('last_at', { ascending: false })
   if (!summaryRes.error && Array.isArray(summaryRes.data)) {
-    return NextResponse.json(await fastPath(summaryRes.data, scope, SINCE))
+    return NextResponse.json(await fastPath(summaryRes.data, scope, SINCE, member.workspace))
   }
   console.warn('[conversations] session_message_summaries RPC unavailable, using legacy scan:', summaryRes.error?.message)
-  return NextResponse.json(await legacyPath(scope, SINCE))
+  return NextResponse.json(await legacyPath(scope, SINCE, member.workspace))
 }
 
 // ── Control-row guard for the DB-side summary ────────────────────────────────
@@ -134,6 +135,7 @@ async function fastPath(
   rawSummaries: { session_id: string; site_id: string; preview: string | null; last_at: string; last_role: string; message_count: number | string }[],
   scope: Set<string> | null,
   since: string,
+  ws: Workspace,
 ) {
   const { summaries, repaired } = await withoutControlRows(rawSummaries, since)
   const [controls, leadsRes, sitesRes] = await Promise.all([
@@ -208,13 +210,13 @@ async function fastPath(
     .map((s) => ({ ...s, last_at: asUtcIso(s.last_at) }))
     .sort((a, b) => new Date(b.last_at!).getTime() - new Date(a.last_at!).getTime())
 
-  return { sessions, bot_enabled: isBotEnabled() }
+  return { sessions, bot_enabled: isBotEnabledForWorkspace(ws) }
 }
 
 // ── Legacy path (fallback) ───────────────────────────────────────────────────
 // The original full-row scan, kept verbatim so the dashboard keeps working
 // before the aggregation function is installed.
-async function legacyPath(scope: Set<string> | null, since: string) {
+async function legacyPath(scope: Set<string> | null, since: string, ws: Workspace) {
   const [logRows, leadsRes, sitesRes] = await Promise.all([
     fetchAllPages<{ session_id: string; site_id: string; role: string; message: string; created_at: string }>(
       () => supabase.from('chat_logs')
@@ -284,5 +286,5 @@ async function legacyPath(scope: Set<string> | null, since: string) {
     .map((s) => ({ ...s, last_at: asUtcIso(s.last_at) }))
     .sort((a, b) => new Date(b.last_at!).getTime() - new Date(a.last_at!).getTime())
 
-  return { sessions, bot_enabled: isBotEnabled() }
+  return { sessions, bot_enabled: isBotEnabledForWorkspace(ws) }
 }
