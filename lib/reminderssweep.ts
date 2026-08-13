@@ -18,7 +18,7 @@
 // the daily digest still covers anything outstanding. Two runs that overlap are
 // additionally kept apart by a short lease row.
 
-import { supabase, fetchAllPages } from './supabase'
+import { supabase, fetchAllPages, warnIfCapped } from './supabase'
 import { HARDCODED_ACCOUNTS } from './auth'
 import { workspaceSites, siteWorkspace, hasFeature, type Workspace } from './workspaces'
 import { formatDueLabel, pktDayKey } from './datetime'
@@ -28,7 +28,7 @@ import { LEAD_CAPTURE_ROLE } from './leadtracking'
 import { CONTACT_ROLE } from './visitor'
 import { sendPushToMember } from './push'
 import {
-  CRM_PREFS_ROLE, CRM_REMINDER_ROLE, REMINDER_SITE, PREFS_SESSION, LEDGER_SESSION,
+  CRM_PREFS_ROLE, CRM_REMINDER_ROLE, REMINDER_SITE, PREFS_SESSION, LEDGER_SESSION, LEASE_SESSION,
   parsePrefs, parseLedger, prefsFor, decideForTask, decideDigest,
   reminderKey, digestKey, reminderCopy, digestCopy,
   type ReminderPrefs, type LedgerEntry, type ReminderKind,
@@ -137,9 +137,14 @@ async function loadLedger(): Promise<Set<string>> {
       .gte('created_at', since)
       .order('created_at', { ascending: true }),
     LEDGER_ROW_CAP)
+  // Hitting this cap would drop the NEWEST claims (the fetch is oldest-first),
+  // and a claim we cannot see reads as "never sent" — i.e. a duplicate reminder.
+  warnIfCapped('reminders: ledger', rows.length, LEDGER_ROW_CAP)
   const out = new Set<string>()
   for (const r of rows) {
     const e = parseLedger(r.message)
+    // Leases live on their own session now; this still skips the ones written
+    // before that split, which are append-only and cannot be migrated away.
     if (e && e.k !== LEASE_KEY) out.add(e.k)
   }
   return out
@@ -179,10 +184,12 @@ async function loadLeadNames(ids: string[]): Promise<Record<string, string>> {
 }
 
 // ── Ledger writes ────────────────────────────────────────────────────────────
-async function claim(entry: LedgerEntry): Promise<boolean> {
+// `session` defaults to the ledger; the lease passes its own so the two never
+// share a row set — see LEASE_SESSION in lib/reminders.ts for why.
+async function claim(entry: LedgerEntry, session: string = LEDGER_SESSION): Promise<boolean> {
   const { error } = await supabase.from('chat_logs').insert({
     site_id: REMINDER_SITE,
-    session_id: LEDGER_SESSION,
+    session_id: session,
     role: CRM_REMINDER_ROLE,
     message: JSON.stringify(entry),
   })
@@ -195,7 +202,7 @@ async function takeLease(now: Date): Promise<boolean> {
     .from('chat_logs')
     .select('message, created_at')
     .eq('role', CRM_REMINDER_ROLE)
-    .eq('session_id', LEDGER_SESSION)
+    .eq('session_id', LEASE_SESSION)
     .gte('created_at', new Date(now.getTime() - LEASE_MS).toISOString())
     .order('created_at', { ascending: false })
     .limit(50)
@@ -203,7 +210,7 @@ async function takeLease(now: Date): Promise<boolean> {
     const e = parseLedger(r.message)
     if (e?.k === LEASE_KEY) return false // someone else is mid-run
   }
-  await claim({ k: LEASE_KEY, kind: 'digest', to: '', at: now.toISOString(), state: 'sent', why: 'lease' })
+  await claim({ k: LEASE_KEY, kind: 'digest', to: '', at: now.toISOString(), state: 'sent', why: 'lease' }, LEASE_SESSION)
   return true
 }
 

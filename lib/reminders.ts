@@ -29,6 +29,17 @@ export const CRM_REMINDER_ROLE = 'crm_reminder'
 export const REMINDER_SITE = 'zeeops-crm'
 export const PREFS_SESSION = 'zeeops-crm-prefs'
 export const LEDGER_SESSION = 'zeeops-crm-reminders'
+// The overlap lease lives on its OWN session, not the ledger.
+//
+// It used to share LEDGER_SESSION, and the sweep writes one lease row every run
+// — 286 a day at */5. Measured 2026-08-13: 3,391 of the ledger's 3,406 rows
+// (99.6%) were lease bookkeeping and just 15 were real claims. loadLedger reads
+// a 60-day window capped at 20,000 rows and ordered OLDEST FIRST, so a full
+// window (~17,000 lease rows) would have crowded out the claims and then
+// dropped the NEWEST ones — making an already-sent reminder look unsent and
+// firing it again, which is the exact duplicate the claim-then-send design
+// exists to prevent.
+export const LEASE_SESSION = 'zeeops-crm-sweep-lease'
 
 // ── Preferences ──────────────────────────────────────────────────────────────
 export interface ReminderPrefs {
