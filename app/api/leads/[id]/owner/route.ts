@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const { email } = await req.json().catch(() => ({}))

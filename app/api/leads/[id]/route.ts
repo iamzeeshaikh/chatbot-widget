@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) {
     return NextResponse.json(
       { error: access.status === 401 ? 'Unauthorized' : access.status === 403 ? 'Forbidden' : 'Not found' },

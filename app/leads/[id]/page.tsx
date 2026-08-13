@@ -886,7 +886,10 @@ function LoadingSkeleton() {
 
 function NotAvailable({ status }: { status: 'forbidden' | 'missing' | 'error' | 'loading' }) {
   const copy = status === 'forbidden'
-    ? { icon: Lock, title: 'You don’t have access to this lead', hint: 'It belongs to a site outside your assigned sites. Ask an admin if you need it.' }
+    // 403 covers two different refusals — a site outside this member's scope,
+    // and a workspace that does not carry lead records at all (see
+    // WORKSPACE_FEATURES). The hint names both rather than asserting the wrong one.
+    ? { icon: Lock, title: 'You don’t have access to this lead', hint: 'Either it belongs to a site outside your assigned sites, or lead records are not enabled for your workspace. Ask an admin if you need it.' }
     : status === 'missing'
       ? { icon: Search, title: 'Lead not found', hint: 'The record may have been deleted, or the link is wrong.' }
       : { icon: TriangleAlert, title: 'Could not load this lead', hint: 'Something went wrong on our side. Try again in a moment.' }

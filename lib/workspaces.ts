@@ -67,10 +67,14 @@ export function workspaceSites(ws: Workspace): string[] {
 // Packaging carries everything, so this changes nothing that works today. The
 // point is the DEFAULT for what comes next: a new feature reaches sports only
 // when someone adds it here deliberately.
-export type WorkspaceFeature = 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders'
+// `records` is the /leads/[id] page — stage, deal value, notes, owner, custom
+// fields. It is the CRM itself, not a detail of it: gating pipeline and tasks
+// while leaving this open let the sports dashboard open a lead and change its
+// deal stage, which is exactly what "no CRM for sports" was meant to prevent.
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
-  packaging: new Set<WorkspaceFeature>(['pipeline', 'tasks', 'reports', 'email', 'reminders']),
+  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders']),
   // Sports is dormant, and was never the audience for any of this: no widget has
   // run on its five sites since 2026-08-05, it has produced one lead ever, and
   // its only member is a consumer Gmail account that cannot consent to our

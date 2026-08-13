@@ -31,7 +31,7 @@ async function latestRevision(sessionId: string, noteId: string): Promise<CrmNot
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const { body } = await req.json().catch(() => ({}))
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const { noteId, body } = await req.json().catch(() => ({}))
@@ -80,7 +80,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id)
+  const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const { noteId } = await req.json().catch(() => ({}))

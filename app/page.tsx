@@ -1893,6 +1893,7 @@ export default function Dashboard() {
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
   // The CRM surfaces are per-workspace (WORKSPACE_FEATURES in lib/workspaces.ts).
   // Hiding them here is the courtesy half; their API routes refuse independently.
+  const canRecords = hasFeature(workspace, 'records')
   const canPipeline = hasFeature(workspace, 'pipeline')
   const canTasks = hasFeature(workspace, 'tasks')
   const canReports = hasFeature(workspace, 'reports')
@@ -2522,8 +2523,10 @@ export default function Dashboard() {
               {/* A plain anchor: normal click, middle-click and cmd-click all
                   behave the way the browser intends, with nothing intercepted. */}
                               <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">
-                                <a href={leadRecordHref(leadRecordId(lead))} onClick={(e) => e.stopPropagation()}
-                                  className="hover:underline">{lead.name || '-'}</a>
+                                {canRecords ? (
+                                  <a href={leadRecordHref(leadRecordId(lead))} onClick={(e) => e.stopPropagation()}
+                                    className="hover:underline">{lead.name || '-'}</a>
+                                ) : (lead.name || '-')}
                               </td>
                               <td className="px-3 py-3 text-blue-600 whitespace-nowrap">{lead.email || '-'}</td>
                               <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{lead.phone || '-'}</td>
@@ -2552,9 +2555,11 @@ export default function Dashboard() {
                                         popup now, so the jump to the full CRM
                                         record lives on this button (a real link,
                                         so middle-click works too). */}
-                                    <a href={leadRecordHref(leadRecordId(lead))}
-                                      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openLeadRecord(leadRecordId(lead)) }}
-                                      className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors inline-flex" title="Open the lead record"><Contact size={13} strokeWidth={2} aria-hidden /></a>
+                                    {canRecords && (
+                                      <a href={leadRecordHref(leadRecordId(lead))}
+                                        onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openLeadRecord(leadRecordId(lead)) }}
+                                        className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors inline-flex" title="Open the lead record"><Contact size={13} strokeWidth={2} aria-hidden /></a>
+                                    )}
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                       {!isEmailLead && (
                                         <button onClick={() => openLeadConversation(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Open the chat conversation"><MessageSquare size={13} strokeWidth={2} aria-hidden /></button>
@@ -2727,11 +2732,11 @@ export default function Dashboard() {
                     </div>
                     {/* Additive: opening the CRM record is a separate link —
                         clicking the conversation itself behaves exactly as before. */}
-                    <a href={leadRecordHref(selectedSession.session_id)}
+                    {canRecords && <a href={leadRecordHref(selectedSession.session_id)}
                       title="Open the full lead record — stage, notes, deal value, activity"
                       className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5"><Contact size={12} strokeWidth={2} aria-hidden /> Open record</span>
-                    </a>
+                    </a>}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     {/* Assignment control — pick up / release / take over a chat
@@ -3711,10 +3716,12 @@ export default function Dashboard() {
                           <tr key={l.session_id} onClick={() => setViewQuote(l)} title="View this lead's details"
                             className="border-b border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer">
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <a href={leadRecordHref(l.session_id)} className="text-blue-700 hover:underline"
-                                onClick={(e) => e.stopPropagation()}>
-                                {l.email ?? <span className="text-gray-500 italic">Marked as lead</span>}
-                              </a>
+                              {canRecords ? (
+                                <a href={leadRecordHref(l.session_id)} className="text-blue-700 hover:underline"
+                                  onClick={(e) => e.stopPropagation()}>
+                                  {l.email ?? <span className="text-gray-500 italic">Marked as lead</span>}
+                                </a>
+                              ) : (l.email ?? <span className="text-gray-500 italic">Marked as lead</span>)}
                             </td>
                             <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
                             <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
@@ -3850,8 +3857,8 @@ export default function Dashboard() {
                 <button onClick={() => { const l = viewOverviewLead; setViewOverviewLead(null); openLeadConversation(l) }}
                   className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open chat</button>
               )}
-              <a href={leadRecordHref(leadRecordId(viewOverviewLead))}
-                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open record</a>
+              {canRecords && <a href={leadRecordHref(leadRecordId(viewOverviewLead))}
+                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open record</a>}
               {viewOverviewLead.email && (
                 <a href={`mailto:${viewOverviewLead.email}`} className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors" style={{ backgroundColor: accentColor }}>Reply by email</a>
               )}
@@ -3979,8 +3986,8 @@ export default function Dashboard() {
                 <button onClick={() => { const l = viewQuote; setViewQuote(null); openConversation(l) }}
                   className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open chat</button>
               )}
-              <a href={leadRecordHref(viewQuote.session_id)}
-                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open record</a>
+              {canRecords && <a href={leadRecordHref(viewQuote.session_id)}
+                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open record</a>}
               {viewQuote.email && (
                 <a href={`mailto:${viewQuote.email}`} className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors" style={{ backgroundColor: accentColor }}>Reply by email</a>
               )}
