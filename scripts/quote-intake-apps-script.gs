@@ -922,8 +922,26 @@ function parseLeadBody_(body) {
     // though every field was right there. Rewriting the line to the canonical
     // "Label: value" shape here fixes every matcher below at once.
     // A bullet ("* Item") can't match: the closing asterisk is required.
-    var em = line.match(/^\*{1,2}\s*([A-Za-z][A-Za-z \-]{0,30}?)\s*:?\s*\*{1,2}\s*(.*)$/);
-    if (em) line = em[1] + ': ' + em[2].trim();
+    var em = line.match(/^\*{1,2}\s*([A-Za-z][A-Za-z \-&]{0,30}?)\s*:?\s*\*{1,2}\s*(.*)$/);
+    if (em) {
+      var emValue = em[2].trim();
+      // The other half of the same table rendering: a wider table wraps, so
+      // the bold label sits ALONE on its line and its value is the next one
+      // ("*Name*\nEric"). Zee Custom Boxes' and The Candle Packaging's "Get A
+      // Free Quote" forms are all like this, which is why every one of their
+      // leads was named "New submission from Get A Free Quote" — the real name
+      // was one line further down and nothing ever looked there.
+      // Only consumed when the label's own line is empty and the next line is
+      // not itself a label, so "*Length*\n*Width*" can't eat the next field.
+      if (!emValue && i + 1 < lines.length) {
+        var next = lines[i + 1];
+        if (next && !/^\*{1,2}\s*[A-Za-z]/.test(next) && !headerRe.test(next) && !fwdMarkerRe.test(next)) {
+          emValue = next;
+          i++;
+        }
+      }
+      line = em[1] + ': ' + emValue;
+    }
 
     if (headerRe.test(line) || fwdMarkerRe.test(line)) {
       if (/^From:/i.test(line) && !fromEmail) {
