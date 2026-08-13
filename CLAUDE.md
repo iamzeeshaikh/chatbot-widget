@@ -391,6 +391,20 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
   1.1k rows beats maintaining a trigram index.
 - Queries are windowed (7–30 days) and row-capped on purpose. **Do not widen a window or
   remove a cap** without accounting for the load.
+- **A row cap plus `order('created_at', ascending: true)` silently deletes your NEWEST
+  data.** This shipped: the Overview chart read Picked 0 / Chats 0 for the four most
+  recent days while Visits stayed correct. It fetched every `chat_logs` row in the window
+  and used two kinds — `admin`, and `user`/`visitor` — throwing away 39,000 of 61,700 rows
+  (63%: assignment, reply_author, mode, tags, crm_*). That waste alone pushed it past
+  50,000, and oldest-first ordering meant the cap ate the last four days. Visits survived
+  because they come from a separate, smaller query.
+  Three rules follow: **filter roles in the query**, never in Node, when the query has a
+  cap; **call `warnIfCapped()`** (`lib/supabase.ts`) on every `fetchAllPages` result, so a
+  cap that is reached says so in the logs instead of quietly changing the answer; and
+  **size a cap against the widest range the endpoint serves** (monthly = 12 months here,
+  not 30 days) with real measured numbers, not a round guess.
+  `lib/report.ts` already had this right — it sets `truncated` when the cap is hit. Copy
+  that, not the pattern that failed.
 - Poll intervals: visitors 5s, conversations 10s, messages 3s, detail 20s. Don't tighten
   them.
 - Any new per-poll query must select only the columns it needs and be bounded.
