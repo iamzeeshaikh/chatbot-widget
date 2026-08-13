@@ -912,6 +912,19 @@ function parseLeadBody_(body) {
   var firstName = '', lastName = '';
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
+
+    // A form that mails an HTML TABLE with bold labels reaches us as Gmail's
+    // plain-text rendering of it: "*Name* Amanda Mead", "*Phone* 8609893221",
+    // "*Message:*". There is no colon after the label at all, so neither the
+    // labelled matcher nor the colon-less Wax Papers one below could see a
+    // field — the first Candle Sleeves lead landed with the literal string
+    // "*Name* Amanda Mead" as its name AND its product, and no phone, even
+    // though every field was right there. Rewriting the line to the canonical
+    // "Label: value" shape here fixes every matcher below at once.
+    // A bullet ("* Item") can't match: the closing asterisk is required.
+    var em = line.match(/^\*{1,2}\s*([A-Za-z][A-Za-z \-]{0,30}?)\s*:?\s*\*{1,2}\s*(.*)$/);
+    if (em) line = em[1] + ': ' + em[2].trim();
+
     if (headerRe.test(line) || fwdMarkerRe.test(line)) {
       if (/^From:/i.test(line) && !fromEmail) {
         var fm = line.match(emailRe);
