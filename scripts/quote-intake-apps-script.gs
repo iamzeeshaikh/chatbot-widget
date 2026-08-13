@@ -113,7 +113,7 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // haven't been seen yet, and guessing one that means something else in this
 // mailbox would file leads under the wrong site. Run listSiteLabels to see
 // which labels exist and add them as they're confirmed.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB'];
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -154,6 +154,13 @@ var LABEL_ALIASES = {
   // Feb 2026 and sit far outside the watermark window, so a normal run will not
   // touch them. Run processQuoteLeadsBackfill if you do want those 7 messages.
   'perfume': 'CPB',
+  // The Candle Sleeves files under "Extra Outsource Projects/Candle Sleeves".
+  // TCSL was in SITE_DOMAINS and in the server's QUOTE_SITE_CODES from the
+  // start, so the site resolved fine everywhere EXCEPT this lookup — its very
+  // first lead (13 Aug 2026) was labeled correctly and still never ingested.
+  // Note this is NOT "candle": that name belongs to The Candle Packaging (TCP),
+  // a different site, so the alias has to carry the word "sleeves".
+  'candle sleeves': 'TCSL',
 };
 
 // The one place a label leaf becomes a site code. Returns the code, or null.
