@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, fetchAllPages } from '@/lib/supabase'
+import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
 import { deriveAssignments, ASSIGNMENT_ROLE } from '@/lib/assignment'
@@ -101,6 +101,31 @@ async function withoutControlRows<T extends { session_id: string; preview: strin
   return { summaries: out, repaired: new Set(fixed.keys()) }
 }
 
+// ── The lead badge ───────────────────────────────────────────────────────────
+// Leads are read here for ONE purpose: putting the lead badge on a conversation
+// whose `lead_capture` control row didn't already flag it. The match is by
+// site + lowercased email, so only three columns are ever touched.
+//
+// It used to be `.from('leads').select('*')` with no limit or pagination, which
+// PostgREST silently truncates at 1000 rows. With 1,259 leads that returned the
+// oldest 1000 and dropped everything from 2026-08-09 on — four days of leads
+// showing no badge — and it shipped ~967KB on EVERY conversations poll (every
+// 10s, per agent, against the Micro Postgres that has fallen over once).
+// Selecting the three real columns takes the same data to ~86KB.
+//
+// Deliberately NOT windowed by date: a customer who became a lead in 2024 and
+// chats again today must still show the badge.
+const LEADS_ROW_CAP = 20000
+type LeadBadgeRow = { site_id: string; name: string | null; email: string | null }
+
+async function fetchLeadsForBadge(): Promise<LeadBadgeRow[]> {
+  const rows = await fetchAllPages<LeadBadgeRow>(
+    () => supabase.from('leads').select('site_id, name, email').order('created_at', { ascending: true }),
+    LEADS_ROW_CAP)
+  warnIfCapped('conversations: leads', rows.length, LEADS_ROW_CAP)
+  return rows
+}
+
 // ── Fast path ────────────────────────────────────────────────────────────────
 // Message summaries come pre-aggregated from the DB. We still fetch the (few)
 // control rows — mode / assignment / tags / lead_capture / contact — and derive
@@ -123,10 +148,10 @@ async function fastPath(
         .in('role', [MODE_ROLE, ASSIGNMENT_ROLE, TAGS_ROLE, LEAD_CAPTURE_ROLE, CONTACT_ROLE, ...CRM_ROLES])
         .order('created_at', { ascending: true }),
       20000),
-    supabase.from('leads').select('*'),
+    fetchLeadsForBadge(),
     supabase.from('sites').select('site_id, name, bot_name, primary_color'),
   ])
-  const leads = leadsRes.data ?? []
+  const leads = leadsRes
   const sites = sitesRes.data ?? []
 
   const sessionMap: Record<string, SessionSummary> = {}
@@ -197,12 +222,12 @@ async function legacyPath(scope: Set<string> | null, since: string) {
         .gte('created_at', since)
         .order('created_at', { ascending: false }),
       2500),
-    supabase.from('leads').select('*'),
+    fetchLeadsForBadge(),
     supabase.from('sites').select('site_id, name, bot_name, primary_color'),
   ])
 
   const logs = logRows.reverse()
-  const leads = leadsRes.data ?? []
+  const leads = leadsRes
   const modes = deriveModes(logs)
   const assignments = deriveAssignments(logs)
   const sites = sitesRes.data ?? []
