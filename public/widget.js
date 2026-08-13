@@ -186,6 +186,11 @@
     // 42% of these conversations are mobile, where there is no exit intent).
     exitIntent: true,
   };
+  // Per-site widget options from /api/site-config. Read through this helper so
+  // a call before the config lands gets an empty object rather than throwing.
+  function widgetOptions() {
+    return (config && config.widget) || {};
+  }
   var leadPromptTimer = null;
   var leadPromptDefers = 0;
   var lastAgentReplyMs = 0;
@@ -378,6 +383,7 @@
 #zee-chat-avatar { width: 40px; height: 40px; font-size: 16px; }\
 #zee-chat-title { font-size: 16px; }\
 #zee-chat-subtitle { font-size: 12px; }\
+#zee-lead-message { resize: none; min-height: 54px; font-family: inherit; line-height: 1.4; }\
 @media (min-width: 768px) { #zee-chat-widget { width: 420px; height: 580px; bottom: 104px; border-radius: 20px; box-shadow: 0 16px 60px rgba(0,0,0,0.22); } }';
     }
 
@@ -441,6 +447,9 @@
   <input class="zee-lead-input" id="zee-lead-name" placeholder="Your Name *" type="text" autocomplete="name" />\
   <input class="zee-lead-input" id="zee-lead-email" placeholder="Email Address *" type="email" autocomplete="email" inputmode="email" />\
   <input class="zee-lead-input" id="zee-lead-phone" placeholder="Phone (optional)" type="tel" autocomplete="tel" inputmode="tel" />\
+' + (widgetOptions().leadMessage ? '\
+  <textarea class="zee-lead-input" id="zee-lead-message" placeholder="What do you need? (optional)" rows="2"></textarea>\
+' : '') + '\
   <button id="zee-lead-submit">Submit & Continue Chat</button>\
 </div>\
 <div id="zee-lead-done" role="status" aria-live="polite">\
@@ -561,7 +570,7 @@
     // key is far more reachable than the button once it scrolls under the
     // keyboard. Clearing the error on input stops a stale message sitting there
     // while the visitor is already fixing the field it refers to.
-    ['zee-lead-name', 'zee-lead-email', 'zee-lead-phone'].forEach(function (id) {
+    ['zee-lead-name', 'zee-lead-email', 'zee-lead-phone', 'zee-lead-message'].forEach(function (id) {
       var el = document.getElementById(id);
       if (!el) return;
       el.addEventListener('keydown', function (e) {
@@ -1336,6 +1345,12 @@
     var name = (nameEl.value || '').trim();
     var email = (emailEl.value || '').trim();
     var phone = ((phoneEl && phoneEl.value) || '').trim();
+    // Optional free-text note (sports only — see widget.leadMessage in
+    // /api/site-config). It is PREPENDED to the transcript rather than
+    // replacing it, so what the visitor typed leads the record and the
+    // conversation that produced it is still there underneath.
+    var msgEl = document.getElementById('zee-lead-message');
+    var typedMessage = ((msgEl && msgEl.value) || '').trim();
 
     clearLeadError();
     if (!name) { showLeadError('Please enter your name.'); markInvalid('zee-lead-name'); return; }
@@ -1354,7 +1369,7 @@
     fetch(baseUrl + '/api/lead', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: siteId, sessionId: sessionId, name: name, email: email, phone: phone, message: messages.map(function(m){return m.role+': '+m.content;}).join('\n') }),
+      body: JSON.stringify({ siteId: siteId, sessionId: sessionId, name: name, email: email, phone: phone, message: (typedMessage ? typedMessage + '\n\n--- chat transcript ---\n' : '') + messages.map(function(m){return m.role+': '+m.content;}).join('\n') }),
     })
       // The confirmation is gated on the response ACTUALLY succeeding. This
       // used to be `.then(function () { ...show thanks... })`, which ignored the

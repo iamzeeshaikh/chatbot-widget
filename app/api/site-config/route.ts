@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
     // finishes streaming (maybeShowLeadForm at the end of the stream), so a
     // prompt bot answers first and the form lands just after it. Any lower and
     // a slow LLM turn lets the form beat its own answer onto the screen.
-    ? { size: 'large', leadPrompt: { idleMs: 2000, minMessages: 1, activeConvoMs: 0 } }
+    ? { size: 'large', leadMessage: true, leadPrompt: { idleMs: 2000, minMessages: 1, activeConvoMs: 0 } }
     : { size: 'default' }
 
   // bot_enabled lets the widget swap the bot-persona greeting for a neutral
