@@ -25,6 +25,8 @@ export const PACKAGING_SITES = [
   'shopdisplayboxes', 'peptidesboxes',
   // 2026-08-04: lipboxes.com got the widget.
   'lipboxes',
+  // 2026-08-16: thepolymailers.com got the widget.
+  'thepolymailers',
 ]
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
