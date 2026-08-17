@@ -2780,6 +2780,13 @@ export default function Dashboard() {
                       }`}>
                       <Languages size={12} strokeWidth={2} aria-hidden /> Translate{translateOn ? ' on' : ''}
                     </button>
+                    {/* Download the transcript as one self-contained HTML file
+                        (images embedded) — a real link so it saves like any file. */}
+                    <a href={`/api/admin/chat-download?sessionId=${encodeURIComponent(selectedSession.session_id)}`} download
+                      title="Download this chat as an HTML file, images included"
+                      className="text-xs font-medium px-2.5 py-1 rounded-lg border border-gray-300 bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors flex items-center gap-1.5">
+                      <Download size={12} strokeWidth={2} aria-hidden /> Download
+                    </a>
                     {/* Global kill switch on: there is no bot to toggle and no
                         bot/AI wording should appear anywhere — show nothing. */}
                     {!botGlobalOff && (
