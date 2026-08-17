@@ -7,13 +7,16 @@ import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from '@/lib/leadtracking'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { formatTime, dateDividerLabel, pktDayKey, formatDateTime } from '@/lib/datetime'
+import { hasFeature } from '@/lib/workspaces'
 import { buildChatPdf, type ChatItem } from '@/lib/chatpdf'
 
 export const dynamic = 'force-dynamic'
 
-// Download a conversation. Default is a PDF (what gets forwarded to a client
-// or kept on file); `?format=html` keeps the original single-file HTML export,
-// which renders emoji and non-Latin scripts the PDF fonts cannot.
+// Download a conversation. For a workspace carrying the `chatpdf` feature
+// (sports only, by request) the default is a PDF, with `?format=html` for the
+// original single-file HTML export, which renders emoji and non-Latin scripts
+// the PDF fonts cannot. Every other workspace gets the HTML file exactly as
+// before — the feature gate lives HERE, not just in the UI (CLAUDE.md §3).
 // In both, images are embedded; non-image attachments (PDFs) stay as links to
 // the public bucket — inlining them would balloon the file without being
 // viewable in-page anyway.
@@ -48,7 +51,9 @@ export async function GET(req: NextRequest) {
   if (!(await canAccessSession(member, sessionId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
-  const format = req.nextUrl.searchParams.get('format') === 'html' ? 'html' : 'pdf'
+  const format = hasFeature(member.workspace, 'chatpdf') && req.nextUrl.searchParams.get('format') !== 'html'
+    ? 'pdf'
+    : 'html'
 
   const [{ data: rows, error }, authorRes] = await Promise.all([
     supabase

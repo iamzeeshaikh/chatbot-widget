@@ -78,7 +78,10 @@ export function workspaceSites(ws: Workspace): string[] {
 // fields. It is the CRM itself, not a detail of it: gating pipeline and tasks
 // while leaving this open let the sports dashboard open a lead and change its
 // deal stage, which is exactly what "no CRM for sports" was meant to prevent.
-export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders'
+// `chatpdf` is the PDF variant of the conversation download. Requested for the
+// sports workspace only — packaging keeps its original single-file HTML
+// download, and the route falls back to HTML for any workspace without this.
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders']),
@@ -86,8 +89,9 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   // run on its five sites since 2026-08-05, it has produced one lead ever, and
   // its only member is a consumer Gmail account that cannot consent to our
   // Internal OAuth app. It keeps chat, visitors, conversations and its own
-  // history — the things it actually had.
-  sports: new Set<WorkspaceFeature>([]),
+  // history — the things it actually had. (Chat is back on since 2026-08-13,
+  // which is what the PDF transcript download was asked for.)
+  sports: new Set<WorkspaceFeature>(['chatpdf']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {
