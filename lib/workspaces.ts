@@ -30,10 +30,15 @@ export const PACKAGING_SITES = [
 ]
 export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
 
-// Sites whose leads are counted/billed (auto lead detection + the Billing tab).
+// Sites whose leads are counted (auto lead detection + the Billing tab and the
+// Overview tiles, which are computed from the same lead_capture dataset).
 // Data-driven: add a site_id here to start tracking it — no other code changes.
-// Every packaging site is currently billed, so this mirrors PACKAGING_SITES.
-export const LEAD_TRACKED_SITES = [...PACKAGING_SITES]
+// 2026-08-17: sports sites added — the widget lead form was writing `leads`
+// rows for them, but with no lead_capture control row the Overview tiles read
+// 0 while Recent Leads showed the leads, and no session link could be
+// resolved. Sports leads stay out of packaging billing automatically: the
+// billing endpoint is scoped to the member's workspace sites.
+export const LEAD_TRACKED_SITES = [...PACKAGING_SITES, ...SPORTS_SITES]
 
 export function isLeadTracked(siteId: string): boolean {
   return LEAD_TRACKED_SITES.includes(siteId)
