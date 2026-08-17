@@ -7,13 +7,16 @@ import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from '@/lib/leadtracking'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { formatTime, dateDividerLabel, pktDayKey, formatDateTime } from '@/lib/datetime'
+import { buildChatPdf, type ChatItem } from '@/lib/chatpdf'
 
 export const dynamic = 'force-dynamic'
 
-// Download a conversation as a single self-contained HTML file, images
-// embedded as data URIs so the file keeps working offline / forwarded.
-// Non-image attachments (PDFs) stay as links to the public bucket — inlining
-// them would balloon the file without being viewable in-page anyway.
+// Download a conversation. Default is a PDF (what gets forwarded to a client
+// or kept on file); `?format=html` keeps the original single-file HTML export,
+// which renders emoji and non-Latin scripts the PDF fonts cannot.
+// In both, images are embedded; non-image attachments (PDFs) stay as links to
+// the public bucket — inlining them would balloon the file without being
+// viewable in-page anyway.
 
 // An image over this size is linked instead of embedded, so one huge upload
 // can't produce a file too big for mail/WhatsApp. (Uploads are capped at 10MB;
@@ -45,6 +48,7 @@ export async function GET(req: NextRequest) {
   if (!(await canAccessSession(member, sessionId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
+  const format = req.nextUrl.searchParams.get('format') === 'html' ? 'html' : 'pdf'
 
   const [{ data: rows, error }, authorRes] = await Promise.all([
     supabase
@@ -75,7 +79,9 @@ export async function GET(req: NextRequest) {
     : { data: null }
   const siteName = siteRow?.name || siteId || 'Chat'
 
-  const parts: string[] = []
+  // One neutral item list feeds both renderers, so the PDF and the HTML can
+  // never disagree about what a row means.
+  const items: ChatItem[] = []
   let lastDay = ''
   for (const m of rows ?? []) {
     if (m.message === '(session started)') continue
@@ -84,47 +90,73 @@ export async function GET(req: NextRequest) {
     const day = pktDayKey(at)
     if (day !== lastDay) {
       lastDay = day
-      parts.push(`<div class="day"><span>${esc(dateDividerLabel(at))}</span></div>`)
+      items.push({ kind: 'day', label: dateDividerLabel(at) })
     }
 
     if (m.role === LEAD_CAPTURE_ROLE) {
       const cap = parseLeadCapture(m.message)
       if (cap) {
-        const bits = [cap.name, cap.email, cap.phone].filter(Boolean).map((b) => esc(String(b)))
-        parts.push(`<div class="marker">Lead captured${bits.length ? ' — ' + bits.join(' · ') : ''}</div>`)
+        const bits = [cap.name, cap.email, cap.phone].filter(Boolean).map(String)
+        items.push({ kind: 'marker', text: `Lead captured${bits.length ? ' — ' + bits.join(' · ') : ''}` })
       }
       continue
     }
 
     const isVisitor = m.role === 'user' || m.role === 'visitor'
     const who = isVisitor ? 'Visitor' : m.role === 'assistant' ? 'Bot' : (authorByAt[m.created_at] ?? 'Agent')
-    const side = isVisitor ? 'left' : 'right'
+    const side = isVisitor ? ('left' as const) : ('right' as const)
+    const time = formatTime(at)
 
-    let body: string
     const file = parseAttachment(m.message)
-    if (file) {
-      const safeName = esc(file.name)
-      if (isImageMime(file.mime)) {
-        const dataUri = await fetchAsDataUri(file.url, file.mime)
-        body = dataUri
-          ? `<img src="${dataUri}" alt="${safeName}" />`
-          : `<a href="${esc(file.url)}">📎 ${safeName}</a>`
-      } else {
-        body = `<a href="${esc(file.url)}">📎 ${safeName}</a>`
-      }
-    } else {
-      body = esc(m.message ?? '')
-    }
-
-    parts.push(
-      `<div class="row ${side}"><div class="bubble ${side}">` +
-      `<div class="meta">${esc(who)} · ${esc(formatTime(at))}</div>` +
-      `<div class="body">${body}</div>` +
-      `</div></div>`
-    )
+    if (file) items.push({ kind: 'file', side, who, time, name: file.name, url: file.url, mime: file.mime })
+    else items.push({ kind: 'msg', side, who, time, text: m.message ?? '' })
   }
 
   const exportedAt = formatDateTime(new Date().toISOString())
+  const fileLabel = (siteId || 'chat').replace(/[^a-zA-Z0-9_-]/g, '')
+
+  if (format === 'pdf') {
+    const bytes = await buildChatPdf({ siteName, sessionId, exportedAt, items })
+    return new NextResponse(Buffer.from(bytes), {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="chat-${fileLabel}-${sessionId.slice(0, 8)}.pdf"`,
+        'Cache-Control': 'no-store',
+      },
+    })
+  }
+
+  const parts: string[] = []
+  for (const item of items) {
+    if (item.kind === 'day') {
+      parts.push(`<div class="day"><span>${esc(item.label)}</span></div>`)
+    } else if (item.kind === 'marker') {
+      parts.push(`<div class="marker">${esc(item.text)}</div>`)
+    } else if (item.kind === 'msg' || item.kind === 'file') {
+      let body: string
+      if (item.kind === 'file') {
+        const safeName = esc(item.name)
+        if (isImageMime(item.mime)) {
+          const dataUri = await fetchAsDataUri(item.url, item.mime)
+          body = dataUri
+            ? `<img src="${dataUri}" alt="${safeName}" />`
+            : `<a href="${esc(item.url)}">📎 ${safeName}</a>`
+        } else {
+          body = `<a href="${esc(item.url)}">📎 ${safeName}</a>`
+        }
+      } else {
+        body = esc(item.text)
+      }
+
+      parts.push(
+        `<div class="row ${item.side}"><div class="bubble ${item.side}">` +
+        `<div class="meta">${esc(item.who)} · ${esc(item.time)}</div>` +
+        `<div class="body">${body}</div>` +
+        `</div></div>`
+      )
+    }
+  }
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -166,7 +198,6 @@ ${parts.join('\n')}
 </body>
 </html>`
 
-  const fileLabel = (siteId || 'chat').replace(/[^a-zA-Z0-9_-]/g, '')
   return new NextResponse(html, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
