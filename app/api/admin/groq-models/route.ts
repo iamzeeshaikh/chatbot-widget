@@ -46,7 +46,9 @@ export async function GET(req: NextRequest) {
   if (!row) return NextResponse.json({ error: `no sites row for ${site}` }, { status: 404 })
 
   const started = Date.now()
-  const sample = await sampleReply(tryModel, siteIdentityPrompt(site, row.name ?? '') + row.system_prompt, question)
+  const maxTokens = Number(req.nextUrl.searchParams.get('max')) || undefined
+  const effort = req.nextUrl.searchParams.get('effort') || undefined
+  const sample = await sampleReply(tryModel, siteIdentityPrompt(site, row.name ?? '') + row.system_prompt, question, { maxTokens, effort })
   return NextResponse.json({
     model: tryModel,
     siteId: site,

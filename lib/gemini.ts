@@ -119,7 +119,12 @@ export async function generateReply(
 // One-off sample completion against an arbitrary model id, used by the
 // admin-only /api/admin/groq-models?try= check. Same style block and same
 // ceiling as the live bot, so what it prints is what a visitor would get.
-export async function sampleReply(model: string, systemPrompt: string, question: string): Promise<{ text: string; finish?: string; error?: string }> {
+export async function sampleReply(
+  model: string,
+  systemPrompt: string,
+  question: string,
+  opts: { maxTokens?: number; effort?: string } = {}
+): Promise<{ text: string; finish?: string; error?: string; usage?: unknown }> {
   try {
     const completion = await getGroq().chat.completions.create({
       model,
@@ -128,11 +133,20 @@ export async function sampleReply(model: string, systemPrompt: string, question:
         { role: 'user', content: question },
       ],
       temperature: 0.7,
-      max_tokens: REPLY_MAX_TOKENS,
+      max_tokens: opts.maxTokens ?? REPLY_MAX_TOKENS,
+      // Reasoning models (gpt-oss) spend part of the token budget thinking, and
+      // those tokens count against max_tokens — which is why a 20-word answer
+      // can still come back finish_reason=length. 'low' keeps that overhead
+      // small; the API ignores the field for models that don't reason.
+      ...(opts.effort ? { reasoning_effort: opts.effort as 'low' | 'medium' | 'high' } : {}),
     })
     const choice = completion.choices[0]
     const raw = choice?.message?.content ?? ''
-    return { text: choice?.finish_reason === 'length' ? trimToLastSentence(raw) : raw, finish: choice?.finish_reason }
+    return {
+      text: choice?.finish_reason === 'length' ? trimToLastSentence(raw) : raw,
+      finish: choice?.finish_reason,
+      usage: completion.usage,
+    }
   } catch (err) {
     return { text: '', error: err instanceof Error ? err.message : String(err) }
   }
