@@ -1,4 +1,4 @@
-// Unit test for the packaging bot schedule (weekend-only window).
+// Unit test for the packaging bot schedule (Sat 10:00 → Mon 16:00 PKT window).
 // Run: node scripts/botschedule.test.ts
 //
 // All boundary times are expressed in UTC and chosen to map to the PKT (UTC+5)
@@ -24,9 +24,13 @@ const cases: Case[] = [
   { label: 'Sun 00:00 PKT (Sat 19:00 UTC) packaging → ON', utc: '2026-06-20T19:00:00', site: PACK, expectOff: false },
   { label: 'Sun 12:00 PKT (Sun 07:00 UTC) packaging → ON', utc: '2026-06-21T07:00:00', site: PACK, expectOff: false },
   { label: 'Sun 23:59 PKT (Sun 18:59 UTC) packaging → ON', utc: '2026-06-21T18:59:00', site: PACK, expectOff: false },
-  // ── Sunday end → Monday: OFF ──
-  { label: 'Mon 00:00 PKT (Sun 19:00 UTC) packaging → OFF', utc: '2026-06-21T19:00:00', site: PACK, expectOff: true },
-  { label: 'Mon 12:00 PKT (Mon 07:00 UTC) packaging → OFF', utc: '2026-06-22T07:00:00', site: PACK, expectOff: true },
+  // ── Monday: ON until 16:00 PKT, OFF from 16:00 ──
+  { label: 'Mon 00:00 PKT (Sun 19:00 UTC) packaging → ON', utc: '2026-06-21T19:00:00', site: PACK, expectOff: false },
+  { label: 'Mon 12:00 PKT (Mon 07:00 UTC) packaging → ON', utc: '2026-06-22T07:00:00', site: PACK, expectOff: false },
+  { label: 'Mon 15:59 PKT (Mon 10:59 UTC) packaging → ON', utc: '2026-06-22T10:59:00', site: PACK, expectOff: false },
+  { label: 'Mon 16:00 PKT (Mon 11:00 UTC) packaging → OFF', utc: '2026-06-22T11:00:00', site: PACK, expectOff: true },
+  { label: 'Mon 23:59 PKT (Mon 18:59 UTC) packaging → OFF', utc: '2026-06-22T18:59:00', site: PACK, expectOff: true },
+  { label: 'Tue 00:00 PKT (Mon 19:00 UTC) packaging → OFF', utc: '2026-06-22T19:00:00', site: PACK, expectOff: true },
   // ── Mid-week: OFF ──
   { label: 'Wed 14:00 PKT (Wed 09:00 UTC) packaging → OFF', utc: '2026-06-17T09:00:00', site: PACK, expectOff: true },
   { label: 'Fri 23:00 PKT (Fri 18:00 UTC) packaging → OFF', utc: '2026-06-19T18:00:00', site: PACK, expectOff: true },
@@ -53,8 +57,11 @@ onAssert(6, 9, false)  // Sat 09:00 off
 onAssert(6, 10, true)  // Sat 10:00 on
 onAssert(0, 0, true)   // Sun 00:00 on
 onAssert(0, 23, true)  // Sun 23:00 on
-onAssert(1, 12, false) // Mon off
+onAssert(1, 15, true)  // Mon 15:00 on (window tail)
+onAssert(1, 16, false) // Mon 16:00 off (end hour is exclusive)
+onAssert(1, 23, false) // Mon night off
+onAssert(2, 12, false) // Tue off
 onAssert(5, 23, false) // Fri off
 
-console.log(failures === 0 ? `\nALL ${cases.length + 6} ASSERTIONS PASS` : `\n${failures} FAILURE(S)`)
+console.log(failures === 0 ? `\nALL ${cases.length + 9} ASSERTIONS PASS` : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

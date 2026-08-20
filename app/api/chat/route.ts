@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
         'Access-Control-Expose-Headers': 'X-Bot-Silent, X-Bot-Ack',
       }
       // One-time ack whenever the bot is not going to answer at all — the flag
-      // being off, or the weekend window being closed — and only on the
+      // being off, or the scheduled window being closed — and only on the
       // conversation's FIRST genuine visitor message (the one saved above
       // counts as 1). Human takeover is deliberately excluded: by then the
       // visitor has already been answered, so "our team will respond" would be

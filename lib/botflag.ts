@@ -21,8 +21,8 @@ export const BOT_ENABLED_DEFAULT = true
 
 // ── Sports is bot-first, packaging is weekend-bot (2026-08-20) ───────────────
 // The switch above is no longer global. Packaging has human agents on shift on
-// weekdays, so its bot answers ONLY inside the weekend window in
-// lib/botschedule.ts (Sat 10:00 PKT through the end of Sunday) — this flag being
+// weekdays, so its bot answers ONLY inside the window in
+// lib/botschedule.ts (Sat 10:00 PKT through Mon 16:00 PKT) — this flag being
 // true does NOT mean "answering right now", it means "the schedule decides".
 // Outside that window every visitor message waits for a person, exactly as it
 // did while this flag was false. Sports has NO human agents at all — a visitor
@@ -50,7 +50,7 @@ export function isBotEnabled(siteId?: string): boolean {
 
 // One-time acknowledgement shown to the visitor after their FIRST message of a
 // conversation whenever the bot will not answer — this flag being off, OR the
-// weekend window being closed (never repeated on later messages). Without the
+// scheduled window being closed (never repeated on later messages). Without the
 // second case, turning this flag on would have left every weekday visitor
 // staring at their own message with no response of any kind.
 // Rendered by the widget only — it is NOT stored in chat_logs, so it can't show
