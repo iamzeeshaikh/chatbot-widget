@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { supabase } from '@/lib/supabase'
+import { siteIdentityPrompt } from '@/lib/sitedomains'
+import { sampleReply } from '@/lib/gemini'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,5 +34,25 @@ export async function GET(req: NextRequest) {
   const models = (data.data ?? [])
     .map((m) => ({ id: m.id, owned_by: m.owned_by, context_window: m.context_window, active: m.active }))
     .sort((a, b) => a.id.localeCompare(b.id))
-  return NextResponse.json({ count: models.length, models })
+  // ?try=<model id> also runs one sample completion through the SAME prompt the
+  // live bot uses, so a replacement model can be judged on its real answer
+  // (length, tone, whether it leaks reasoning) before anything is pinned to it.
+  const tryModel = req.nextUrl.searchParams.get('try')
+  if (!tryModel) return NextResponse.json({ count: models.length, models })
+
+  const question = req.nextUrl.searchParams.get('q') || 'what website is this and what do you sell?'
+  const site = req.nextUrl.searchParams.get('siteId') || 'theretailpackaging'
+  const { data: row } = await supabase.from('sites').select('system_prompt, name').eq('site_id', site).single()
+  if (!row) return NextResponse.json({ error: `no sites row for ${site}` }, { status: 404 })
+
+  const started = Date.now()
+  const sample = await sampleReply(tryModel, siteIdentityPrompt(site, row.name ?? '') + row.system_prompt, question)
+  return NextResponse.json({
+    model: tryModel,
+    siteId: site,
+    question,
+    ms: Date.now() - started,
+    ...sample,
+    words: sample.text ? sample.text.trim().split(/\s+/).length : 0,
+  })
 }

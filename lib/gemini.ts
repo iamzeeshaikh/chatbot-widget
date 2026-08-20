@@ -116,6 +116,28 @@ export async function generateReply(
   }
 }
 
+// One-off sample completion against an arbitrary model id, used by the
+// admin-only /api/admin/groq-models?try= check. Same style block and same
+// ceiling as the live bot, so what it prints is what a visitor would get.
+export async function sampleReply(model: string, systemPrompt: string, question: string): Promise<{ text: string; finish?: string; error?: string }> {
+  try {
+    const completion = await getGroq().chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt + CONSULTATIVE_STYLE },
+        { role: 'user', content: question },
+      ],
+      temperature: 0.7,
+      max_tokens: REPLY_MAX_TOKENS,
+    })
+    const choice = completion.choices[0]
+    const raw = choice?.message?.content ?? ''
+    return { text: choice?.finish_reason === 'length' ? trimToLastSentence(raw) : raw, finish: choice?.finish_reason }
+  } catch (err) {
+    return { text: '', error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 // ── Translation (agent dashboard) ───────────────────────────────────────────
 // All translation runs server-side through the already-integrated Groq LLM, so
 // no new API/key/cost is introduced. analyzeMessages does detection AND
