@@ -121,9 +121,13 @@ export async function POST(req: NextRequest) {
         'X-Bot-Silent': '1',
         'Access-Control-Expose-Headers': 'X-Bot-Silent, X-Bot-Ack',
       }
-      // One-time ack, only in global bot-off mode and only on the conversation's
-      // FIRST genuine visitor message (the one saved above counts as 1).
-      if (botDisabled && isVisitorMessage) {
+      // One-time ack whenever the bot is not going to answer at all — the flag
+      // being off, or the weekend window being closed — and only on the
+      // conversation's FIRST genuine visitor message (the one saved above
+      // counts as 1). Human takeover is deliberately excluded: by then the
+      // visitor has already been answered, so "our team will respond" would be
+      // a second, redundant promise.
+      if ((botDisabled || scheduleOff) && mode !== 'human' && isVisitorMessage) {
         const { count } = await supabase
           .from('chat_logs')
           .select('id', { count: 'exact', head: true })

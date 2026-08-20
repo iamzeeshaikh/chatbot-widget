@@ -17,15 +17,18 @@
 
 import { siteWorkspace, type Workspace } from './workspaces'
 
-export const BOT_ENABLED_DEFAULT = false
+export const BOT_ENABLED_DEFAULT = true
 
-// ── Sports is bot-first, packaging is human-first (2026-08-13) ───────────────
-// The switch above is no longer global. Packaging has a full team of human
-// agents on shift, so its bot stays off and every visitor message waits for a
-// person. Sports has NO human agents at all — a visitor there who is not
-// answered by the bot is not answered by anyone — so its bot is always on and
-// is deliberately not subject to the BOT_ENABLED env var or the packaging
-// weekday schedule (lib/botschedule.ts already exempts non-packaging sites).
+// ── Sports is bot-first, packaging is weekend-bot (2026-08-20) ───────────────
+// The switch above is no longer global. Packaging has human agents on shift on
+// weekdays, so its bot answers ONLY inside the weekend window in
+// lib/botschedule.ts (Sat 10:00 PKT through the end of Sunday) — this flag being
+// true does NOT mean "answering right now", it means "the schedule decides".
+// Outside that window every visitor message waits for a person, exactly as it
+// did while this flag was false. Sports has NO human agents at all — a visitor
+// there who is not answered by the bot is not answered by anyone — so its bot is
+// always on and is deliberately not subject to the BOT_ENABLED env var or the
+// packaging schedule (lib/botschedule.ts already exempts non-packaging sites).
 const ALWAYS_ON_WORKSPACES: ReadonlySet<Workspace> = new Set<Workspace>(['sports'])
 
 export function isBotEnabledForWorkspace(ws: Workspace): boolean {
@@ -46,7 +49,10 @@ export function isBotEnabled(siteId?: string): boolean {
 }
 
 // One-time acknowledgement shown to the visitor after their FIRST message of a
-// conversation while the bot is disabled (never repeated on later messages).
+// conversation whenever the bot will not answer — this flag being off, OR the
+// weekend window being closed (never repeated on later messages). Without the
+// second case, turning this flag on would have left every weekday visitor
+// staring at their own message with no response of any kind.
 // Rendered by the widget only — it is NOT stored in chat_logs, so it can't show
 // up as a bot reply in the dashboard or pollute agent response-time stats.
 export const BOT_OFF_ACK_MESSAGE = 'Thanks for your message! Our team will respond shortly.'

@@ -43,12 +43,20 @@ export function isScheduledOn(day: number, hour: number): boolean {
   return false
 }
 
+// Is the bot currently OFF (human-only) for this WORKSPACE because of the
+// schedule? Returns false for any non-scheduled workspace (e.g. sports) —
+// they're never affected. Used where there is no single site in hand, e.g. the
+// dashboard's workspace-wide "Bot on/off" chip.
+export function isBotOffByScheduleForWorkspace(ws: Workspace | null, now: Date = new Date()): boolean {
+  if (ws !== SCHEDULED_WORKSPACE) return false
+  const { day, hour } = pktParts(now)
+  return !isScheduledOn(day, hour)
+}
+
 // Is the bot currently OFF (human-only) for this site because of the schedule?
 // Returns false for any non-scheduled workspace (e.g. sports) — they're never
 // affected. This does NOT consider manual human takeover; the caller combines
 // the two (manual human always wins).
 export function isBotOffBySchedule(siteId: string, now: Date = new Date()): boolean {
-  if (siteWorkspace(siteId) !== SCHEDULED_WORKSPACE) return false
-  const { day, hour } = pktParts(now)
-  return !isScheduledOn(day, hour)
+  return isBotOffByScheduleForWorkspace(siteWorkspace(siteId), now)
 }

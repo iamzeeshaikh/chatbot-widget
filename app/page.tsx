@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
-import { isBotOffBySchedule } from '@/lib/botschedule'
+import { isBotOffBySchedule, isBotOffByScheduleForWorkspace } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
 import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadstatus'
 import { isClosingMessage } from '@/lib/closing'
@@ -1911,6 +1911,10 @@ export default function Dashboard() {
   // matching /api/chat. Sports is never schedule-gated. (Recomputed each render,
   // which happens on every poll, so it flips within seconds of a window boundary.)
   const scheduledBotOff = !!selectedSession && isBotOffBySchedule(selectedSession.site_id)
+  // Same question for the whole workspace, with no conversation open: what the
+  // header chip reports. The kill switch is on for packaging now, so the chip
+  // read "Bot on" all week while the schedule kept it silent Mon–Fri.
+  const botOffNow = botGlobalOff || isBotOffByScheduleForWorkspace(workspace)
   const botEffectivelyActive = !botGlobalOff && !!selectedSession && selectedSession.mode === 'bot' && !scheduledBotOff
   // Hard lock: this chat belongs to ANOTHER agent — this agent may view it but
   // not message (reply + file are blocked) until they "Take over" or the owner
@@ -2135,12 +2139,14 @@ export default function Dashboard() {
               shade of one 8px circle. */}
           <span title={botGlobalOff
               ? 'The AI bot is OFF — every chat goes straight to a human'
-              : 'The AI bot is ON and answering visitors on your live sites'}
-            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2 lg:px-2.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap ${botGlobalOff ? 'bg-gray-100 border-gray-300 text-gray-600' : 'bg-green-50 border-green-300 text-green-800'}`}>
-            {botGlobalOff
+              : botOffNow
+                ? 'The AI bot is off right now — it answers Saturday 10am to Sunday midnight (PKT). Until then every chat goes straight to a human.'
+                : 'The AI bot is ON and answering visitors on your live sites'}
+            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2 lg:px-2.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap ${botOffNow ? 'bg-gray-100 border-gray-300 text-gray-600' : 'bg-green-50 border-green-300 text-green-800'}`}>
+            {botOffNow
               ? <BotOff size={14} strokeWidth={2} className="shrink-0" aria-hidden />
               : <Bot size={14} strokeWidth={2} className="shrink-0" aria-hidden />}
-            <span>Bot {botGlobalOff ? 'off' : 'on'}</span>
+            <span>Bot {botOffNow ? 'off' : 'on'}</span>
           </span>
 
           {/* Replies waiting on this agent. Sits up here rather than only on a
@@ -2272,7 +2278,7 @@ export default function Dashboard() {
                 {[
                   { label: 'Total Sites', value: roleSites.length, icon: Trophy, color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
                   { label: 'Total Leads', value: overviewSummaryLeads.length, icon: Users, color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
-                  { label: botGlobalOff ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botGlobalOff ? Globe : Bot, color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
+                  { label: botOffNow ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botOffNow ? Globe : Bot, color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
                   { label: "Today's Leads", value: todayLeads, icon: Sun, color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
                   { label: "This Week", value: thisWeekLeads, icon: TrendingUp, color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20', dateFilter: 'week' as const },
                 ].map((s) => {

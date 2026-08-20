@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { siteWorkspace, isWidgetBlocked } from '@/lib/workspaces'
+import { isBotOffBySchedule } from '@/lib/botschedule'
 import { resolveCountryCode } from '@/lib/geo'
 import { isBotEnabled } from '@/lib/botflag'
 import { getBlockedIps, requestIp } from '@/lib/blocklist'
@@ -84,5 +85,9 @@ export async function GET(req: NextRequest) {
 
   // bot_enabled lets the widget swap the bot-persona greeting for a neutral
   // "our team" one where the bot is off (lib/botflag.ts — per workspace now).
-  return NextResponse.json({ ...data, blocked, bot_enabled: isBotEnabled(siteId), widget }, { headers: corsHeaders })
+  // The weekend schedule counts as off: outside its window no bot answers, so
+  // greeting a Tuesday visitor as the bot would promise a reply that no code
+  // path can send. This is the greeting's view of "on", not the flag's.
+  const botOn = isBotEnabled(siteId) && !isBotOffBySchedule(siteId)
+  return NextResponse.json({ ...data, blocked, bot_enabled: botOn, widget }, { headers: corsHeaders })
 }
