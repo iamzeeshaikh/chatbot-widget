@@ -4,6 +4,23 @@ const MODEL = 'llama-3.1-8b-instant'
 
 const ERROR_REPLY = "I'm having trouble responding right now, please try again in a moment."
 
+// Ceiling for a visitor-facing reply. ~45 words is the target set in the prompt
+// below; this leaves headroom for a longer-but-legitimate answer while making a
+// runaway essay impossible.
+const REPLY_MAX_TOKENS = 220
+
+// Cut a truncated reply back to its last complete sentence. Returns the input
+// unchanged when there is no sentence end to cut back to (a single long
+// fragment), because a fragment still reads better than an empty bubble.
+export function trimToLastSentence(text: string): string {
+  const t = (text ?? '').trim()
+  if (!t) return t
+  const lastEnd = Math.max(t.lastIndexOf('. '), t.lastIndexOf('! '), t.lastIndexOf('? '), t.lastIndexOf('.'), t.lastIndexOf('!'), t.lastIndexOf('?'))
+  if (lastEnd < 0) return t
+  const cut = t.slice(0, lastEnd + 1).trim()
+  return cut.length >= 20 ? cut : t
+}
+
 let _groq: Groq | null = null
 
 function getGroq(): Groq {
@@ -20,12 +37,21 @@ const CONSULTATIVE_STYLE = `
 
 — HOW TO ASSIST —
 You are a friendly, knowledgeable sales consultant having a natural conversation. You are NOT a form.
-- Answer the customer's questions thoroughly using the product knowledge above. If you genuinely don't know a detail, say a specialist will confirm — never make up facts.
+- Answer the customer's question using the product knowledge above. If you genuinely don't know a detail, say a specialist will confirm — never make up facts.
 - Recommend the best product(s) for what the customer describes, and ask relevant follow-up questions to understand their needs.
-- Be consultative and genuinely helpful, never pushy. Keep replies concise (usually 1-3 short sentences) and keep the conversation flowing.
+- Be consultative and genuinely helpful, never pushy.
 - Understand details (what they need, quantity, colors/branding or specs, timeline) gradually through the chat — one thing at a time, only when it fits naturally. Never interrogate or send a numbered list of questions.
 - Help the customer first; do NOT demand contact details before being useful.
-- When there is genuine buying interest, ask for contact details conversationally, e.g. "I'd love to put together a quote for you — what's the best email to send it to?" Ask for name, email and phone one at a time, not all at once.`
+- When there is genuine buying interest, ask for contact details conversationally, e.g. "I'd love to put together a quote for you — what's the best email to send it to?" Ask for name, email and phone one at a time, not all at once.
+
+— HOW LONG (this is a rule, not a preference) —
+This is a chat bubble on a phone, not an email. A long reply gets skimmed and abandoned; a short one gets answered.
+- HARD LIMIT: at most 45 words and at most 3 short sentences per reply. Shorter is better — one sentence is often the best answer.
+- Never write a paragraph, an essay, a summary of what the customer said, or a recap of what you already told them.
+- No bullet lists, no numbered lists and no headings, unless the customer explicitly asks to compare options — then at most 3 bullets of 6 words each.
+- Say ONE thing, then ask at most ONE short question. Never ask two questions in the same reply.
+- Do not repeat the company name, the greeting, or an offer to help in every message. Do not pad with filler like "Great question!" or "I'd be happy to help with that!" — answer instead.
+- If a full answer genuinely needs more room, give the one-line version and offer the detail: "Want me to break that down?"`
 
 function buildGroqMessages(
   systemPrompt: string,
@@ -70,10 +96,17 @@ export async function generateReply(
       model: MODEL,
       messages: groqMessages,
       temperature: 0.7,
-      max_tokens: 1024,
+      // A ceiling, not the target: the prompt asks for <=45 words (~60 tokens),
+      // so this only catches a runaway. 1024 used to let an 8B model deliver a
+      // six-paragraph essay into a phone-sized chat bubble.
+      max_tokens: REPLY_MAX_TOKENS,
     })
-    const text = completion.choices[0]?.message?.content ?? ''
-    console.log(`[Groq] reply: "${text.slice(0, 120)}"`)
+    const choice = completion.choices[0]
+    const raw = choice?.message?.content ?? ''
+    // Hitting the ceiling means the model was cut off mid-word. Never show that
+    // — fall back to the last complete sentence instead of a dangling fragment.
+    const text = choice?.finish_reason === 'length' ? trimToLastSentence(raw) : raw
+    console.log(`[Groq] reply: finish=${choice?.finish_reason} words=${raw.trim().split(/\s+/).length} "${text.slice(0, 120)}"`)
     return { text, error: false }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

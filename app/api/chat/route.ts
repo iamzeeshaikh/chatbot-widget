@@ -4,6 +4,7 @@ import { generateReply, extractLeadFields } from '@/lib/gemini'
 import { getMode } from '@/lib/mode'
 import { maybeCaptureLead } from '@/lib/leadtracking'
 import { isBotOffBySchedule } from '@/lib/botschedule'
+import { siteIdentityPrompt } from '@/lib/sitedomains'
 import { isBotEnabled, BOT_OFF_ACK_MESSAGE } from '@/lib/botflag'
 import { getBlockedIps, requestIp } from '@/lib/blocklist'
 import { sendPushToWorkspace } from '@/lib/push'
@@ -53,7 +54,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Site not found' }, { status: 404, headers: corsHeaders })
     }
 
-    const systemPrompt: string = siteRes.data.system_prompt
+    // Who the bot is comes from code, not from the site's own prose: the row's
+    // system_prompt is edited by hand per site and several older ones never
+    // stated the company's website at all, so the model was free to invent one.
+    // lib/sitedomains.ts is the single verified mapping.
+    const systemPrompt: string =
+      siteIdentityPrompt(siteId, siteRes.data.name ?? '') + siteRes.data.system_prompt
 
     // Save user message
     const lastUserMessage = messages[messages.length - 1]
