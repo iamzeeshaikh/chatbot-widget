@@ -420,6 +420,19 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
 - The widget is blocked by a host site's CSP unless `chat.zeeops.dev` is in `script-src`,
   `connect-src` and `img-src` — check both the HTTP header and any
   `<meta http-equiv="content-security-policy">`.
+- **Groq retires model ids, and this app fails SILENTLY when it happens.** On
+  2026-08-20 `llama-3.1-8b-instant` — pinned in `lib/gemini.ts` since day one —
+  returned 404 `model_not_found` for every call, so every bot reply on every site
+  was the caught-error string "I'm having trouble responding right now", and
+  translation and lead extraction were dead too. Nothing in the product reports
+  this. `GET /api/admin/groq-models` (admin only) lists what the key can actually
+  call, and `?try=<id>&effort=low&q=…` runs one real answer through the live
+  prompt so a replacement can be judged before it is pinned. Check it first if
+  the bot ever apologises to everyone. Current pin: `openai/gpt-oss-120b`.
+  It is a **reasoning** model — its thinking tokens are billed against
+  `max_tokens` and never reach the visitor, so any cap must leave room for them
+  (a 25-word answer hit `finish_reason=length` at 220) and `reasoning_effort`
+  stays `'low'`.
 - Any new widget sound must be gated in `playChime` — that is the single mute/dismiss
   chokepoint, and an ungated ding once cost a real sale.
 - **The DASHBOARD's sound switch has two halves, and a new sound must respect both.**
