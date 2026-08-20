@@ -1,13 +1,27 @@
 import Groq from 'groq-sdk'
 
-const MODEL = 'llama-3.1-8b-instant'
+// Groq retires model ids without warning, and the app fails SILENTLY when that
+// happens: the 404 is caught and every visitor gets "I'm having trouble
+// responding right now" instead. `llama-3.1-8b-instant`, pinned here since the
+// beginning, had been dead for some unknown time when it was found on
+// 2026-08-20 — every bot reply on every site was that error string.
+// /api/admin/groq-models (admin only) lists what this key can actually call and
+// will run a sample answer through a candidate; check it FIRST if the bot ever
+// starts apologising to everyone.
+const MODEL = 'openai/gpt-oss-120b'
+
+// gpt-oss is a reasoning model: its thinking tokens are billed against
+// max_tokens even though they never reach the visitor, which is why a 25-word
+// answer came back finish_reason=length at a 220-token ceiling. 'low' keeps
+// that overhead to a few dozen tokens and answers land in ~250-500ms.
+const REASONING_EFFORT = 'low' as const
 
 const ERROR_REPLY = "I'm having trouble responding right now, please try again in a moment."
 
-// Ceiling for a visitor-facing reply. ~45 words is the target set in the prompt
-// below; this leaves headroom for a longer-but-legitimate answer while making a
-// runaway essay impossible.
-const REPLY_MAX_TOKENS = 220
+// Ceiling for a visitor-facing reply, thinking tokens included. ~45 words is the
+// target set in the prompt below; this leaves headroom for the model's reasoning
+// plus a longer-but-legitimate answer, while making a runaway essay impossible.
+const REPLY_MAX_TOKENS = 600
 
 // Cut a truncated reply back to its last complete sentence. Returns the input
 // unchanged when there is no sentence end to cut back to (a single long
@@ -97,9 +111,10 @@ export async function generateReply(
       messages: groqMessages,
       temperature: 0.7,
       // A ceiling, not the target: the prompt asks for <=45 words (~60 tokens),
-      // so this only catches a runaway. 1024 used to let an 8B model deliver a
+      // so this only catches a runaway. 1024 used to let the model deliver a
       // six-paragraph essay into a phone-sized chat bubble.
       max_tokens: REPLY_MAX_TOKENS,
+      reasoning_effort: REASONING_EFFORT,
     })
     const choice = completion.choices[0]
     const raw = choice?.message?.content ?? ''
@@ -184,6 +199,7 @@ export async function analyzeMessages(texts: string[]): Promise<MsgAnalysis[]> {
       ],
       temperature: 0,
       max_tokens: 2048,
+      reasoning_effort: REASONING_EFFORT,
     })
     const text = (completion.choices[0]?.message?.content ?? '').trim()
     const match = text.match(/\[[\s\S]*\]/)
@@ -219,6 +235,7 @@ export async function translateText(text: string, targetLang: string): Promise<s
       ],
       temperature: 0.2,
       max_tokens: 1024,
+      reasoning_effort: REASONING_EFFORT,
     })
     return (completion.choices[0]?.message?.content ?? '').trim() || input
   } catch (err) {
@@ -260,7 +277,10 @@ export async function extractLeadFields(
         },
       ],
       temperature: 0,
-      max_tokens: 256,
+      // 256 was sized before the model reasoned: thinking tokens come out of the
+      // same budget and would truncate the JSON, losing the lead's fields.
+      max_tokens: 768,
+      reasoning_effort: REASONING_EFFORT,
     })
     const text = (completion.choices[0]?.message?.content ?? '').trim()
     const jsonMatch = text.match(/\{[\s\S]*?\}/)
