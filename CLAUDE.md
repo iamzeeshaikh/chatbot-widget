@@ -284,6 +284,38 @@ API route — never only by hiding UI. A member without access to a lead's site 
 `siteScope` / `memberSites` from `lib/auth.ts`; see `guardLeadAccess` in
 `lib/leadrecord.ts` for the reference implementation.
 
+### A domain belongs to ONE dashboard
+`HOST_WORKSPACES` (`lib/workspaces.ts`) maps hostname → workspace:
+`sports.zeeops.dev` → sports, `chat.zeeops.dev` / `crm.zeeops.dev` → packaging.
+A bound host accepts **only** its own workspace's accounts — refused at
+`/api/auth/login` with the other dashboard's address, and again in `getMember`
+so a session minted before the rule (or on the other domain) is nothing here.
+
+It exists because workspace has always come from the *account*, never the URL, so
+`packaging@zeeops.dev` signed in at sports.zeeops.dev and got the packaging
+dashboard on the sports domain. No data crossed — every query is scoped to the
+member's workspace — but that is not what "separate dashboards" means to the people
+using them.
+
+**Add any new dashboard domain to that map.** An unlisted host binds nothing and
+accepts both sides; that is deliberate, so localhost and `*.vercel.app` previews
+still reach either dashboard. `scratch/host-binding.test.mjs` and
+`scratch/builtin-host.test.mjs` assert all of it (built-in accounts included)
+against the real module.
+
+### A password change must end the sessions it replaces
+`zee-session` is our own week-long signed cookie, so changing a member's Supabase
+password used to leave every already-signed-in browser working. `signSession` now
+stamps `iat` on every token and `revokeSessions(uid)` (`lib/auth.ts`) writes a
+`sessions_valid_from` cutoff into the **Supabase auth user's `user_metadata`** —
+no DDL, so `members` cannot grow a column for it — which `getMember` checks. Tokens
+older than the cutoff, and every pre-`iat` token, are dead.
+
+`/api/admin/members` PATCH calls it after a password update. **Anything else that
+changes a password must call it too**, or the new password is only a second way in.
+The lookup is cached per process for 60s, so a revocation can take that long to
+bite on a warm instance. `scratch/revoke.test.mjs` covers it.
+
 ### A feature belongs to a workspace on purpose, or not at all
 `WORKSPACE_FEATURES` in `lib/workspaces.ts` — `hasFeature(ws, feature)` — is the single
 list that decides which workspace carries Pipeline, Tasks, Reports, Gmail and reminders.
