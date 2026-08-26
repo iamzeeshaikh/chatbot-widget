@@ -165,8 +165,17 @@ const BOT_PHONE_RE = /^8\d{10}$/
 // "New Order: #6449".
 const WOOCOMMERCE_ORDER_RE = /New order:?\s*#|Built with WooCommerce|You[’']ve received the following order/i
 
+// The Astro storefronts' own COD cart (site/src/lib/email.ts) sends a different
+// shape entirely — no WooCommerce wording anywhere:
+//   Order: SCB-1787700487431
+//   Payment: Cash on delivery
+// Without this it read as an ordinary quote enquiry and would have been tagged
+// [Custom Quote], i.e. counted as a BILLABLE sourced lead. A cart order is not
+// one, which is the whole reason CHECKOUT_TAG exists.
+const COD_ORDER_RE = /^\s*Order:\s*[A-Za-z]{2,5}-\d{6,}\s*$|Payment:\s*Cash on delivery/im
+
 export function isCheckoutOrder(bodyText: string): boolean {
-  return WOOCOMMERCE_ORDER_RE.test(bodyText)
+  return WOOCOMMERCE_ORDER_RE.test(bodyText) || COD_ORDER_RE.test(bodyText)
 }
 
 // WooCommerce's order number, which is the only stable identity a checkout mail
@@ -178,8 +187,13 @@ export function isCheckoutOrder(bodyText: string): boolean {
 // Matching on the order number instead makes a re-send — forwarded, re-labeled,
 // or re-processed — collapse onto the original every time.
 const ORDER_NUMBER_RE = /New Order:?\s*#(\d+)/i
+// The COD cart's own id — "Order: SCB-1787700487431" — which serves the same
+// purpose for those mails as the Woo number does for Woo's.
+const COD_ORDER_NUMBER_RE = /^\s*Order:\s*([A-Za-z]{2,5}-\d{6,})\s*$/im
 
 export function checkoutOrderNumber(bodyText: string): string | null {
+  const cod = bodyText.match(COD_ORDER_NUMBER_RE)
+  if (cod) return cod[1].toUpperCase()
   const m = bodyText.match(ORDER_NUMBER_RE)
   return m ? m[1] : null
 }

@@ -573,6 +573,35 @@ function processQuoteLeads() {
 // back as `deduped` from the server.
 var REWIND_DAYS = 7;
 
+// ── Daily catch-up (label-it-later insurance) ────────────────────────────────
+// The watermark asks "is this MESSAGE newer than the last run?". That is the
+// right question for mail that is already labelled when it lands, and the wrong
+// one for mail labelled BY HAND hours later: by then the message date is behind
+// the watermark and no ordinary 30-minute run will ever look at it again.
+//
+// Three real leads were lost that way on 26 Aug 2026 (SFB 24 Aug, and SCB's
+// 12:29am/4:01am/7:19am enquiries), all recovered only by a manual rewind.
+//
+// So once a day, re-cover the last CATCHUP_DAYS days: pull the watermark back
+// and run the normal pass. Everything already ingested comes straight back as
+// `deduped` from the server, so the cost is only the extra Gmail reads — and it
+// is bounded, because the window is a couple of days rather than the whole
+// label history (that is what processQuoteLeadsBackfill is for, and why that
+// one stays manual).
+//
+// TRIGGER: Triggers → Add Trigger → function `dailyCatchUp`, Time-driven, Day
+// timer, e.g. 2am–3am. KEEP the 30-minute processQuoteLeads trigger as well —
+// this is a safety net under it, not a replacement.
+var CATCHUP_DAYS = 2;
+
+function dailyCatchUp() {
+  var target = Date.now() - CATCHUP_DAYS * 24 * 60 * 60 * 1000;
+  saveWatermark_(target + WATERMARK_OVERLAP_MS); // readWatermark_ subtracts the overlap again
+  Logger.log('dailyCatchUp: watermark pulled back to ' + new Date(target) +
+    ' — re-covering ' + CATCHUP_DAYS + ' day(s), then running the normal pass.');
+  processQuoteLeads();
+}
+
 function rewindWatermark() {
   var target = Date.now() - REWIND_DAYS * 24 * 60 * 60 * 1000;
   saveWatermark_(target + WATERMARK_OVERLAP_MS); // readWatermark_ subtracts the overlap again
@@ -805,10 +834,25 @@ function hasCheckoutLabel_(thread) {
 // subject has no bracketed store name, or the name isn't one we know — the
 // caller then sends the thread to ZeeOps/Unmatched rather than guessing.
 function codeFromSubject_(subject) {
-  var m = String(subject || '').match(/\[([^\]]+)\]/);
-  if (!m) return null;
-  var store = m[1].trim().toLowerCase();
-  return STORE_NAME_CODES[store] || null;
+  var subj = String(subject || '');
+  var m = subj.match(/\[([^\]]+)\]/);
+  if (m) {
+    var store = m[1].trim().toLowerCase();
+    if (STORE_NAME_CODES[store]) return STORE_NAME_CODES[store];
+  }
+  // The Astro storefronts (COD cart) don't put the store name anywhere in the
+  // subject — theirs reads "New COD order — SCB-1787700487431", where the site
+  // code is the order id's own prefix. Read it from there.
+  // Found live: SCB-1787700487431 (26 Aug) sat in ZeeOps/Unmatched because the
+  // bracketed-store-name match above was the only way in, and a COD order has
+  // no brackets. Validated through codeFromLeaf_, so it can only ever resolve
+  // to a code we already own and the off switch still applies.
+  var order = subj.match(/\b([A-Za-z]{2,5})-\d{6,}\b/);
+  if (order) {
+    var code = codeFromLeaf_(order[1]);
+    if (code) return code;
+  }
+  return null;
 }
 
 // Lead-form emails list field VALUES one per line with no labels (e.g.

@@ -69,12 +69,17 @@ export async function POST(req: NextRequest) {
   // copy of the same order.
   const orderNo = tag === CHECKOUT_TAG ? checkoutOrderNumber(bodyText) : null
   if (orderNo) {
+    // What to look for in a stored message. A Woo number is bare digits and
+    // needs its "#" back or "6467" would also match a price or a phone; a COD
+    // id ("SCB-1787700487431") is already unique enough to search as it stands,
+    // and never appears with a "#" in front of it.
+    const needle = /^\d+$/.test(orderNo) ? `#${orderNo}` : orderNo
     const { data: sameOrder } = await supabase
       .from('leads')
       .select('id')
       .eq('site_id', siteId)
       .ilike('message', `${CHECKOUT_TAG}%`)
-      .ilike('message', `%#${orderNo}%`)
+      .ilike('message', `%${needle}%`)
       .limit(1)
     if (sameOrder && sameOrder.length > 0) {
       return NextResponse.json({ success: true, deduped: true })
