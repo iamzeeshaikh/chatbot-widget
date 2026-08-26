@@ -1,89 +1,21 @@
-'use client'
+import type { Metadata } from 'next'
+import { headers } from 'next/headers'
+import { WORKSPACE_LABEL, workspaceForHost } from '@/lib/workspaces'
+import LoginForm from './LoginForm'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { Download } from 'lucide-react'
+// Server component purely so the hostname is known before first paint: which
+// dashboard this is must not flash or be decided by the browser. The form
+// itself is the client half.
+async function hostWorkspace() {
+  const h = await headers()
+  return workspaceForHost(h.get('x-forwarded-host') || h.get('host'))
+}
 
-export default function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-  const router = useRouter()
+export async function generateMetadata(): Promise<Metadata> {
+  const ws = await hostWorkspace()
+  return { title: ws ? `Sign in · ${WORKSPACE_LABEL[ws]} Dashboard | ZeeOps` : 'Sign in | ZeeOps' }
+}
 
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error || 'Invalid credentials')
-        setLoading(false)
-        return
-      }
-      router.push('/')
-    } catch {
-      setError('Something went wrong. Please try again.')
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-      <div className="bg-gray-100 border border-gray-200 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
-        <div className="mb-8 text-center">
-          <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-            <svg viewBox="0 0 24 24" className="w-7 h-7 fill-white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome back</h1>
-          <p className="text-gray-500 text-sm mt-1">Sign in to your dashboard</p>
-        </div>
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="block text-xs text-gray-500 font-medium mb-1">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              className="w-full bg-gray-200 border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="you@zeeops.dev"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 font-medium mb-1">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              className="w-full bg-gray-200 border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="••••••••"
-            />
-          </div>
-          {error && (
-            <p className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-        <p className="text-center mt-4">
-          <a href="/install" className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1.5"><Download size={12} strokeWidth={2} aria-hidden /> Install this dashboard as an app</a>
-        </p>
-      </div>
-    </div>
-  )
+export default async function LoginPage() {
+  return <LoginForm workspace={await hostWorkspace()} />
 }

@@ -111,6 +111,35 @@ export const WORKSPACE_LABEL: Record<Workspace, string> = {
   packaging: 'Packaging',
 }
 
+// ── Which dashboard a hostname serves ────────────────────────────────────────
+// Both dashboards are ONE deployment behind two domains, and the workspace has
+// always come from the account, never the URL. So a packaging login typed into
+// sports.zeeops.dev signed in fine and dropped the packaging dashboard onto the
+// sports domain. No data crossed over — every query is scoped to the member's
+// own workspace — but a domain that answers to the other side's staff is not an
+// isolated dashboard in any sense that matters to the people using it.
+//
+// A listed host now accepts ONLY its own workspace's accounts, at login and on
+// every request after it. Hosts that are NOT listed (localhost, *.vercel.app
+// previews) bind nothing and still reach either dashboard, so local work and
+// preview deployments keep working.
+export const HOST_WORKSPACES: Record<string, Workspace> = {
+  'sports.zeeops.dev': 'sports',
+  'chat.zeeops.dev': 'packaging',
+  'crm.zeeops.dev': 'packaging',
+}
+
+// Where to send someone who turned up at the wrong dashboard.
+export const WORKSPACE_HOME: Record<Workspace, string> = {
+  sports: 'https://sports.zeeops.dev',
+  packaging: 'https://chat.zeeops.dev',
+}
+
+export function workspaceForHost(host: string | null | undefined): Workspace | null {
+  if (!host) return null
+  return HOST_WORKSPACES[host.toLowerCase().split(':')[0].trim()] ?? null
+}
+
 // ── Widget geo-blocking ──────────────────────────────────────────────────────
 // The chat widget is hidden from visitors in these South Asian countries, but
 // ONLY on packaging sites. Sports sites are never affected. Because the decision

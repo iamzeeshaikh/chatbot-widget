@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 // `type` on Workspace so the import erases cleanly — it is a type, and marking
 // it lets these modules load under Node's native TypeScript stripping (which is
 // how the scratch tests exercise the real code).
-import { type Workspace, workspaceSites } from './workspaces'
+import { type Workspace, workspaceSites, workspaceForHost } from './workspaces'
 
 // ── Cookie names ─────────────────────────────────────────────────────────────
 // zee-session : httpOnly, HMAC-signed — the source of truth for authz (server)
@@ -106,6 +106,13 @@ export async function revokeSessions(uid: string): Promise<void> {
   revokeCache.set(uid, { readAt: Date.now(), validFrom })
 }
 
+// The dashboard this request was addressed to, when the hostname binds one
+// (HOST_WORKSPACES in lib/workspaces.ts). Vercel puts the real hostname in
+// x-forwarded-host; `host` is the fallback for local runs.
+export function requestWorkspace(req: NextRequest): Workspace | null {
+  return workspaceForHost(req.headers.get('x-forwarded-host') || req.headers.get('host'))
+}
+
 // Resolve the authenticated member. Built-in accounts are synthesised; real
 // members are read fresh from the DB so role/site changes (and deletion) take
 // effect immediately.
@@ -113,9 +120,14 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
   const session = verifySession(req.cookies.get(SESSION_COOKIE)?.value)
   if (!session) return null
 
+  // The account must belong to the dashboard whose domain was asked for — a
+  // session minted elsewhere (or before this rule) is nothing here.
+  const bound = requestWorkspace(req)
+
   if (session.t === 'h') {
     const acct = HARDCODED_ACCOUNTS.find((a) => a.email === session.e)
     if (!acct) return null
+    if (bound && acct.workspace !== bound) return null
     return { id: `builtin:${acct.email}`, email: acct.email, workspace: acct.workspace, role: 'admin', assigned_sites: [] }
   }
 
@@ -128,6 +140,7 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
     sessionsValidFrom(session.uid),
   ])
   if (!data) return null
+  if (bound && data.workspace !== bound) return null
   if ((session.iat ?? 0) < validFrom) return null
   return {
     id: data.id,
