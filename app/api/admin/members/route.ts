@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { getMember, Member } from '@/lib/auth'
+import { getMember, revokeSessions, Member } from '@/lib/auth'
 import { workspaceSites } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
@@ -112,6 +112,9 @@ export async function PATCH(req: NextRequest) {
     }
     const { error: pwErr } = await supabase.auth.admin.updateUserById(id, { password })
     if (pwErr) return NextResponse.json({ error: pwErr.message }, { status: 500 })
+    // A new password only means something if the old one stops granting access:
+    // signed-in browsers keep their week-long cookie otherwise.
+    await revokeSessions(id)
   }
 
   return NextResponse.json({ ok: true })

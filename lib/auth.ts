@@ -1,4 +1,6 @@
-import { NextRequest } from 'next/server'
+// `type` here for the same reason as Workspace below — it is only ever a type,
+// and erasing the import keeps this module loadable under Node's type stripping.
+import type { NextRequest } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { supabase } from './supabase'
 // `type` on Workspace so the import erases cleanly — it is a type, and marking
@@ -35,7 +37,9 @@ export const HARDCODED_ACCOUNTS: { email: string; password: string; workspace: W
 
 // ── Signed session token: `<payload>.<hmac>` ─────────────────────────────────
 // Two shapes: built-in account (by email) or a Supabase-auth member (by uid).
-type SessionPayload = { t: 'h'; e: string } | { t: 'm'; uid: string }
+// `iat` (issued-at, unix seconds) is stamped on every token by signSession and
+// is what makes a password change able to kill sessions that already exist.
+type SessionPayload = ({ t: 'h'; e: string } | { t: 'm'; uid: string }) & { iat?: number }
 
 function secret(): string {
   return process.env.AUTH_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'dev-secret'
@@ -46,7 +50,7 @@ function b64url(input: Buffer | string): string {
 }
 
 export function signSession(payload: SessionPayload): string {
-  const data = b64url(JSON.stringify(payload))
+  const data = b64url(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000) }))
   const sig = createHmac('sha256', secret()).update(data).digest('base64url')
   return `${data}.${sig}`
 }
@@ -66,6 +70,42 @@ function verifySession(token: string | undefined): SessionPayload | null {
   }
 }
 
+// ── Session revocation ───────────────────────────────────────────────────────
+// Changing a member's password must log that member out everywhere: our own
+// `zee-session` cookie is signed by us and lives a week, so it keeps working
+// long after the Supabase password behind it has changed.
+//
+// The cutoff is stored per user in the Supabase auth user's `user_metadata` —
+// there is no DDL here, so `members` cannot grow a column for it. Any token
+// issued before the cutoff (including every token from before this existed,
+// which carries no `iat` at all) is dead.
+//
+// The lookup is an extra admin round trip, so it is cached per process for a
+// minute; a revocation therefore takes at most that long to bite on an already
+// warm serverless instance.
+const REVOKE_KEY = 'sessions_valid_from'
+const REVOKE_TTL_MS = 60_000
+const revokeCache = new Map<string, { readAt: number; validFrom: number }>()
+
+async function sessionsValidFrom(uid: string): Promise<number> {
+  const hit = revokeCache.get(uid)
+  if (hit && Date.now() - hit.readAt < REVOKE_TTL_MS) return hit.validFrom
+  const { data } = await supabase.auth.admin.getUserById(uid)
+  const raw = (data?.user?.user_metadata as Record<string, unknown> | undefined)?.[REVOKE_KEY]
+  const validFrom = typeof raw === 'number' ? raw : 0
+  revokeCache.set(uid, { readAt: Date.now(), validFrom })
+  return validFrom
+}
+
+/** Kill every session this member currently holds. Call after a password change. */
+export async function revokeSessions(uid: string): Promise<void> {
+  const { data } = await supabase.auth.admin.getUserById(uid)
+  const existing = (data?.user?.user_metadata as Record<string, unknown> | undefined) ?? {}
+  const validFrom = Math.floor(Date.now() / 1000)
+  await supabase.auth.admin.updateUserById(uid, { user_metadata: { ...existing, [REVOKE_KEY]: validFrom } })
+  revokeCache.set(uid, { readAt: Date.now(), validFrom })
+}
+
 // Resolve the authenticated member. Built-in accounts are synthesised; real
 // members are read fresh from the DB so role/site changes (and deletion) take
 // effect immediately.
@@ -79,12 +119,16 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
     return { id: `builtin:${acct.email}`, email: acct.email, workspace: acct.workspace, role: 'admin', assigned_sites: [] }
   }
 
-  const { data } = await supabase
-    .from('members')
-    .select('id, email, workspace, role, assigned_sites')
-    .eq('id', session.uid)
-    .maybeSingle()
+  const [{ data }, validFrom] = await Promise.all([
+    supabase
+      .from('members')
+      .select('id, email, workspace, role, assigned_sites')
+      .eq('id', session.uid)
+      .maybeSingle(),
+    sessionsValidFrom(session.uid),
+  ])
   if (!data) return null
+  if ((session.iat ?? 0) < validFrom) return null
   return {
     id: data.id,
     email: data.email,
