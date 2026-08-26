@@ -2140,7 +2140,7 @@ export default function Dashboard() {
           <span title={botGlobalOff
               ? 'The AI bot is OFF — every chat goes straight to a human'
               : botOffNow
-                ? 'The AI bot is off right now — it answers Saturday 10am through Monday 4pm, and Tue–Fri 11am–5pm (PKT). Outside those hours every chat goes straight to a human.'
+                ? 'The AI bot is off right now — it answers Saturday 10am through Monday 4pm, and Tue–Fri 11am–4pm (PKT). Outside those hours every chat goes straight to a human.'
                 : 'The AI bot is ON and answering visitors on your live sites'}
             className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2 lg:px-2.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap ${botOffNow ? 'bg-gray-100 border-gray-300 text-gray-600' : 'bg-green-50 border-green-300 text-green-800'}`}>
             {botOffNow

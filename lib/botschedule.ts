@@ -6,11 +6,11 @@
 //   • Weekend window: Saturday 10:00 AM PKT through Monday 4:00 PM PKT — one
 //              continuous stretch (Sunday is on for its full 24h; Monday is on
 //              up to, but not including, 16:00).
-//   • Weekday window: Tuesday–Friday, 11:00 AM to 5:00 PM PKT (17:00 exclusive,
-//              so the last bot-ON minute is 16:59). These are the hours with no
+//   • Weekday window: Tuesday–Friday, 11:00 AM to 4:00 PM PKT (16:00 exclusive,
+//              so the last bot-ON minute is 15:59). These are the hours with no
 //              human agent on shift; the rest of the weekday is human-only.
 //   • Bot OFF (human-only): everything else — Monday from 4:00 PM, Tue–Fri
-//              outside 11:00–17:00, and Saturday 00:00–10:00.
+//              outside 11:00–16:00, and Saturday 00:00–10:00.
 //
 // During bot-OFF the bot stays completely silent (no reply/ack); a human agent
 // initiates. Manual human takeover always wins, and the bot auto-resumes when
@@ -46,7 +46,7 @@ export const BOT_ON_END_HOUR = 16 // 4:00 PM PKT
 // the tail of the weekend window, and 16:00 is where its human shift starts.
 export const WEEKDAY_BOT_DAYS = [2, 3, 4, 5] // Tuesday, Wednesday, Thursday, Friday
 export const WEEKDAY_BOT_START_HOUR = 11 // 11:00 AM PKT (inclusive)
-export const WEEKDAY_BOT_END_HOUR = 17 // 5:00 PM PKT (EXCLUSIVE — last ON minute is 16:59)
+export const WEEKDAY_BOT_END_HOUR = 16 // 4:00 PM PKT (EXCLUSIVE — last ON minute is 15:59)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Current PKT day-of-week (0=Sun..6=Sat) and hour/minute, computed from UTC so
