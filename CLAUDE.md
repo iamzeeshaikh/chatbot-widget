@@ -449,6 +449,17 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
   re-run `pbcopy` rather than assuming the clipboard survived.
 - After changing how mail is found, `rewindWatermark()` must be run, or the fix only
   applies to mail that hasn't arrived yet.
+- **A site whose form mail this script cannot place is lost in silence, and that is the
+  single bug that keeps recurring here.** It has come back as: a label leaf that is a
+  name not a code (`ZP`, `CPB`, `TCSL`), a thread labelled hours late so its message
+  sits behind the watermark (26 Aug), and a mail template whose footer is not the
+  literal `Page URL:` line (`peptidesboxes`, `thecoffeesleeves` — reaching ZeeOps only
+  as manual forwards for a month). Three guards now exist and all three matter:
+  `codeFromMessageText_` reads every footer these forms actually write, an unhandled
+  thread ignores the watermark, and anything that reads like a lead but names no site
+  gets the Gmail label `ZeeOps/Needs a site label`. **When adding a lead site, check its
+  real form email against `codeFromMessageText_` before assuming it will be ingested** —
+  a Gmail label is no longer required, but a recognisable footer is.
 - The widget is blocked by a host site's CSP unless `chat.zeeops.dev` is in `script-src`,
   `connect-src` and `img-src` — check both the HTTP header and any
   `<meta http-equiv="content-security-policy">`.
