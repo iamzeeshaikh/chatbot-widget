@@ -130,6 +130,26 @@ var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no emai
 // adding its marker here) — the thread is never marked handled, so the very
 // next run picks it up on its own.
 var NEEDS_SITE_LABEL = 'ZeeOps/Needs a site label';
+// Put this on any thread by hand to silence it for good — the script then
+// treats it as dealt with and never reads, ingests or flags it again. The
+// escape hatch for anything the rules below get wrong.
+var IGNORE_LABEL = 'ZeeOps/Ignore';
+
+// Sites that ARE ours but whose quote-form mail is deliberately NOT ingested
+// here. Decision 2026-08-28, the user's: this intake stays packaging-only.
+// The five sports sites are lead-tracked in ZeeOps, but only through the chat
+// widget — every sports lead on record carries a chat transcript. Their website
+// quote forms stay out, so mail naming one of these is passed over the same way
+// another company's mail is: no label, no log line, nothing to fix.
+// Listing them (rather than letting them fall through as "unknown") is what
+// keeps that a decision instead of an accident.
+var NOT_INTAKE_DOMAINS = [
+  'thevolleyballuniforms.com',
+  'texasfootballuniforms.com',
+  'californiasoccerjerseys.com',
+  'floridabasketballjerseys.com',
+  'thebaseballjerseys.com',
+];
 
 // Your Gmail label names that mean "this is a real lead for this site" —
 // matches lib/quoteintake.ts QUOTE_SITE_CODES on the server exactly. Matched
@@ -551,7 +571,7 @@ function processQuoteLeads() {
         // fix and nothing to file — say nothing about it.
         notOurs++;
       }
-      else if (looksLikeUnfiledLead_(umsgs)) {
+      else if (!isHandled_(thread) && looksLikeUnfiledLead_(umsgs)) {
         thread.addLabel(needsLabel);
         needsAttention++;
         needsAttentionHits.push(Utilities.formatDate(thread.getLastMessageDate(), 'UTC', 'yyyy-MM-dd') +
@@ -597,7 +617,8 @@ function processQuoteLeads() {
 
   if (needsAttention > 0) {
     Logger.log('ACTION NEEDED — ' + needsAttention + ' thread(s) read like a lead but name no site of ours; ' +
-      'they are now labelled "' + NEEDS_SITE_LABEL + '" in Gmail. Label each with its site, and the next run ingests it:');
+      'they are now labelled "' + NEEDS_SITE_LABEL + '" in Gmail. Label each with its site and the next run ingests it; ' +
+      'or put "' + IGNORE_LABEL + '" on it to silence it for good:');
     for (var na = 0; na < needsAttentionHits.length; na++) Logger.log('    ' + needsAttentionHits[na]);
   }
 
@@ -827,7 +848,7 @@ function isHandled_(thread) {
   var labels = thread.getLabels();
   for (var i = 0; i < labels.length; i++) {
     var n = labels[i].getName();
-    if (n === PROCESSED_LABEL || n === SKIPPED_LABEL) return true;
+    if (n === PROCESSED_LABEL || n === SKIPPED_LABEL || n === IGNORE_LABEL) return true;
   }
   return false;
 }
@@ -1013,6 +1034,20 @@ function namesAForeignSite_(messages, subject) {
   var hosts = claimedHosts_(subject);
   for (var i = 0; i < messages.length; i++) {
     hosts = hosts.concat(claimedHosts_(messages[i].getPlainBody()));
+    // The sender's domain is read ONLY to test against the two lists we
+    // already know — a site of ours, or a site of ours we do not ingest here.
+    // An unrecognised sender domain is not evidence of anything (a customer
+    // writing in from their own company address is the common case), so it is
+    // never allowed to declare a thread foreign on its own.
+    var from = String(messages[i].getFrom() || '').match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
+    if (from) {
+      var fh = from[1].toLowerCase().replace(/^www\./, '');
+      if (NOT_INTAKE_DOMAINS.indexOf(fh) !== -1) return true;
+      if (codeFromHost_(fh) || SITE_DOMAIN_HOSTS.indexOf(fh) !== -1) return false;
+    }
+  }
+  for (var n = 0; n < hosts.length; n++) {
+    if (NOT_INTAKE_DOMAINS.indexOf(hosts[n]) !== -1) return true;
   }
   var foreign = false;
   for (var h = 0; h < hosts.length; h++) {
