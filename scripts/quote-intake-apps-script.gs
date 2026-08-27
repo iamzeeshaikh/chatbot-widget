@@ -4,12 +4,21 @@
  * Runs entirely inside your own Gmail account (script.google.com), completely
  * free, no third-party service, no cost regardless of volume.
  *
- * LABEL-ONLY: this only ever touches emails that already carry one of YOUR
- * OWN site labels (SCB, TTP, SFB, KBP, TBB, ZCB, TCP, TPC — see SITE_CODES
- * below). It never guesses from sender/subject text, so it can never pick up
- * spam — if you haven't labeled it, it's invisible here. Delete spam as you
- * already do; label the real ones and they'll be picked up on a later run,
- * no matter how deeply nested.
+ * WHAT IT WILL TOUCH: an email that carries one of YOUR OWN site labels (SCB,
+ * TTP, SFB, KBP, TBB, ZCB, TCP, TPC — see SITE_CODES below), or one whose own
+ * machine-written footer names one of your domains ("Page URL: https://…",
+ * "Submitted from: https://…", "New quote request from peptidesboxes.com").
+ * That footer is written by the SITE, never typed by a sender, so it is
+ * evidence in the same way a label is — and it is what lets a lead arrive
+ * without waiting for anyone to file it by hand. It still never guesses from
+ * sender or subject prose, so it cannot pick up spam.
+ *
+ * A thread it cannot place at all — reads like a lead, names no site of ours —
+ * is labelled "ZeeOps/Needs a site label" rather than dropped in silence. That
+ * silence is what let the same bug come back over and over: a site whose mail
+ * template nobody had taught this script simply went unread for weeks. Label
+ * such a thread with its site and the next run ingests it; nothing has to be
+ * re-run by hand.
  *
  * HOW IT FINDS MAIL: the automatic run (processQuoteLeads, on your 30-min
  * trigger) searches your WHOLE mailbox for mail from the last RECENT_DAYS
@@ -76,6 +85,12 @@
  * (auto-created) so it's never sent twice. One that's labeled with a site
  * code but has no readable email/phone gets "ZeeOps/Unmatched" instead, so
  * it doesn't retry forever — check those by hand occasionally.
+ *
+ * A thread carrying NEITHER of those two labels has never been handled, and is
+ * therefore read in full (its newest LOOKBACK_MESSAGES messages) regardless of
+ * the watermark. That is what makes late labelling safe: file a thread hours or
+ * days after the mail landed and the next 30-minute run still ingests it,
+ * instead of the message's own date being behind the watermark forever.
  */
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -100,6 +115,17 @@ function webhookSecret_() {
 }
 var PROCESSED_LABEL = 'ZeeOps/Processed';
 var SKIPPED_LABEL = 'ZeeOps/Unmatched'; // labeled with a site code, but no email/phone found in the body
+// Reads like a lead — a form's own field lines and a contactable customer —
+// but nothing in it says WHICH of our sites it belongs to: no site label, no
+// "Page URL:"/"Submitted from:" line, no domain we recognise. That combination
+// used to end the run in silence (counted as `notOurs` and forgotten), which is
+// why the same bug kept coming back: every site added with a new mail template
+// went quietly unread until someone noticed a lead missing weeks later. It now
+// gets a label instead, so the failure is sitting in the mailbox where it can
+// be seen. Fix it by labelling the thread with that site's Gmail label (or
+// adding its marker here) — the thread is never marked handled, so the very
+// next run picks it up on its own.
+var NEEDS_SITE_LABEL = 'ZeeOps/Needs a site label';
 
 // Your Gmail label names that mean "this is a real lead for this site" —
 // matches lib/quoteintake.ts QUOTE_SITE_CODES on the server exactly. Matched
@@ -226,7 +252,7 @@ var SITE_DOMAINS = {
   TPC: 'thepapercups.com',
   PB: 'peptidesboxes.com',
   // Full 2026-07 roster. Two jobs here, both independent of Gmail labels:
-  // codeFromBodyUrl_ resolves a form's "Page URL:" host to one of these, and
+  // codeFromMessageText_ resolves a form's own footer host to one of these, and
   // isOwnAddress_ uses them to make sure a site's own noreply@ address is never
   // recorded as the customer's (this mail is literally from
   // noreply@thecoffeesleeves.com).
@@ -419,8 +445,12 @@ function processQuoteLeads() {
   var processedLabel = getOrCreateLabel_(PROCESSED_LABEL);
   var skippedLabel = getOrCreateLabel_(SKIPPED_LABEL);
 
+  var needsLabel = getOrCreateLabel_(NEEDS_SITE_LABEL);
+
   var sent = 0, skipped = 0, notOurs = 0, stoppedEarly = false;
   var noLabel = 0, siteLabeled = 0; // for the summary line
+  // Threads that read like a lead but name no site — see NEEDS_SITE_LABEL.
+  var needsAttention = 0, needsAttentionHits = [];
   // Which threads came in via the no-label fallback, so the summary can NAME
   // them. A bare count says work is being rescued but not what to go and fix;
   // one site repeating here means that site's Gmail filter isn't labelling.
@@ -478,11 +508,12 @@ function processQuoteLeads() {
     var thread = threads[t];
     var code = matchSiteCode_(thread); // null if it doesn't carry one of our site labels
     if (!code) {
-      // Last line of defence: a genuine form notification nobody labelled.
-      // Decided from the form's own machine-generated footer ("Page URL:
-      // https://<site>/…", written by the site itself), never from sender or
-      // subject text — so the label-only guarantee against spam still holds,
-      // and only hosts already in SITE_DOMAINS can match.
+      // Not a last line of defence any more — for several sites it is the ONLY
+      // line, because their mail is never auto-labelled at all. Decided from the
+      // form's own machine-generated footer (see codeFromMessageText_), written
+      // by the site itself, never from sender or subject prose — so the
+      // guarantee against spam still holds, and only hosts already in
+      // SITE_DOMAINS can match.
       //
       // Read here rather than via a separate `"Page URL:"` search: Gmail's
       // quoted-phrase search containing a colon is unreliable, and this is
@@ -490,11 +521,10 @@ function processQuoteLeads() {
       // unlabelled thread WITH NEW MESSAGES, which the watermark keeps to a
       // handful on a normal run.
       var fbAny = false;
-      var umsgs = thread.getMessages();
+      var umsgs = lookbackMessages_(thread, cutoff);
       for (var um = 0; um < umsgs.length; um++) {
-        if (umsgs[um].getDate().getTime() <= cutoff) continue;
         var ubody = umsgs[um].getPlainBody();
-        var ucode = codeFromBodyUrl_(ubody);
+        var ucode = codeFromMessageText_(ubody, umsgs[um].getFrom());
         if (!ucode) continue;
         var uparsed = parseLeadBody_(ubody);
         if (!uparsed.email && !uparsed.phone) continue;
@@ -511,16 +541,21 @@ function processQuoteLeads() {
       // otherwise be re-scanned forever. Park it in Unmatched so it shows up as
       // something to fix (add the store name) rather than silently vanishing.
       if (hasCheckoutLabel_(thread) && !isHandled_(thread)) { thread.addLabel(skippedLabel); skipped++; }
+      else if (looksLikeUnfiledLead_(umsgs)) {
+        thread.addLabel(needsLabel);
+        needsAttention++;
+        needsAttentionHits.push(Utilities.formatDate(thread.getLastMessageDate(), 'UTC', 'yyyy-MM-dd') +
+          '  ' + String(thread.getFirstMessageSubject() || '').slice(0, 70));
+      }
       else notOurs++;
       continue;
     }
     siteLabeled++;
 
-    var messages = thread.getMessages();
+    var messages = lookbackMessages_(thread, cutoff);
     var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
       var msg = messages[m];
-      if (msg.getDate().getTime() <= cutoff) continue; // already covered by an earlier run
       considered++;
       var parsed = parseLeadBody_(msg.getPlainBody());
       if (!parsed.email && !parsed.phone) continue;
@@ -548,6 +583,12 @@ function processQuoteLeads() {
   if (noLabel > 0) {
     Logger.log('no-label fallback: ingested ' + noLabel + ' form submission(s) whose thread carried NO site label — worth labelling those threads:');
     for (var nl = 0; nl < noLabelHits.length; nl++) Logger.log('    ' + noLabelHits[nl]);
+  }
+
+  if (needsAttention > 0) {
+    Logger.log('ACTION NEEDED — ' + needsAttention + ' thread(s) read like a lead but name no site of ours; ' +
+      'they are now labelled "' + NEEDS_SITE_LABEL + '" in Gmail. Label each with its site, and the next run ingests it:');
+    for (var na = 0; na < needsAttentionHits.length; na++) Logger.log('    ' + needsAttentionHits[na]);
   }
 
   var unknownNames = Object.keys(UNKNOWN_SITE_LABELS);
@@ -616,7 +657,7 @@ function rewindWatermark() {
 // codes, and for each message whether it is newer than the watermark and what
 // the parser can read out of it. Between those four facts, exactly one will be
 // the reason.
-var DIAGNOSE_QUERY = 'lyonslevi298@gmail.com';
+var DIAGNOSE_QUERY = 'peptidesboxes.com';
 
 function diagnoseThread() {
   var threads = GmailApp.search(DIAGNOSE_QUERY, 0, 5);
@@ -627,17 +668,29 @@ function diagnoseThread() {
     var th = threads[i];
     var names = th.getLabels().map(function (l) { return l.getName(); });
     var code = matchSiteCode_(th);
+    var handled = isHandled_(th);
     Logger.log('--- thread ' + (i + 1) + ': ' + th.getFirstMessageSubject());
     Logger.log('    labels    : ' + (names.join('  |  ') || '(none)'));
-    Logger.log('    site code : ' + (code || 'NONE — this is why it is skipped'));
+    Logger.log('    site code : ' + (code || 'none from a label'));
+    Logger.log('    handled   : ' + handled +
+      (handled ? ' (so only messages newer than the watermark are read)'
+               : ' (so every recent message is read, watermark or not)'));
     var msgs = th.getMessages();
     for (var j = 0; j < msgs.length; j++) {
       var m = msgs[j];
       var p = parseLeadBody_(m.getPlainBody());
+      // What the message says about itself, which is what decides an
+      // unlabelled thread — printed per message because a forward and its
+      // original can disagree.
+      var bodyCode = codeFromMessageText_(m.getPlainBody(), m.getFrom());
       Logger.log('    msg ' + (j + 1) + '  ' + m.getDate() +
         '  | newer than watermark: ' + (m.getDate().getTime() > cutoff) +
+        '  | site from body: ' + (bodyCode || 'NONE') +
         '  | email: ' + (p.email || 'NONE') +
         '  | phone: ' + (p.phone || 'NONE'));
+    }
+    if (!code && !handled) {
+      Logger.log('    verdict   : ' + (msgs.length ? 'ingested only if "site from body" above is not NONE' : 'no messages'));
     }
   }
 }
@@ -694,6 +747,51 @@ function getOrCreateLabel_(name) {
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
 }
 
+/**
+ * The messages on this thread a run should actually look at.
+ *
+ * The watermark asks "is this MESSAGE newer than the last run?". That is the
+ * right question for a thread we have already dealt with — a form-notification
+ * thread keeps receiving submissions, and re-reading its whole history every 30
+ * minutes would be pure waste.
+ *
+ * It is the WRONG question for a thread that has never been handled at all. A
+ * thread reaches that state whenever the site label arrived after the mail did
+ * — someone filed it by hand hours later, or the code that could recognise it
+ * only shipped today — and by then the message's own date is behind the
+ * watermark, so no ordinary run will ever look at it again. Three real leads
+ * were lost that way on 26 Aug 2026, and peptidesboxes/thecoffeesleeves mail
+ * had been reaching the dashboard ONLY as manual forwards for a month for the
+ * same reason: the forward was a new message, so it cleared the watermark that
+ * the original no longer could.
+ *
+ * So: handled thread -> watermark. Never-handled thread -> its whole recent
+ * history, newest LOOKBACK_MESSAGES of it. Re-posting is free (the server
+ * dedupes), the cost is bounded, and the loop still converges — a thread that
+ * posts anything becomes Processed, one that cannot becomes Unmatched, and
+ * either way it is "handled" from the next run on.
+ */
+var LOOKBACK_MESSAGES = 10;
+
+function lookbackMessages_(thread, cutoff) {
+  var messages = thread.getMessages();
+  var i, out = [];
+  if (isHandled_(thread)) {
+    for (i = 0; i < messages.length; i++) {
+      if (messages[i].getDate().getTime() > cutoff) out.push(messages[i]);
+    }
+    return out;
+  }
+  // Never handled: the watermark does not apply, but two ceilings still do, so
+  // one long-running unread thread can't eat the run's Gmail budget. Both are
+  // cheap where it matters — genuinely new mail is one message inside both.
+  var floor = Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
+  for (i = 0; i < messages.length; i++) {
+    if (messages[i].getDate().getTime() > floor) out.push(messages[i]);
+  }
+  return out.length > LOOKBACK_MESSAGES ? out.slice(out.length - LOOKBACK_MESSAGES) : out;
+}
+
 function isHandled_(thread) {
   var labels = thread.getLabels();
   for (var i = 0; i < labels.length; i++) {
@@ -729,10 +827,9 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max) {
     var thread = threads[t];
     // A site-code label on the thread still wins over the subject's store name.
     var code = matchSiteCode_(thread);
-    var messages = thread.getMessages();
+    var messages = lookbackMessages_(thread, cutoff);
     var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
-      if (messages[m].getDate().getTime() <= cutoff) continue;
       considered++;
       if (!code) continue;
       var parsed = parseLeadBody_(messages[m].getPlainBody());
@@ -746,22 +843,135 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max) {
   return out;
 }
 
-// "Page URL: https://zeecustomboxes.com/product/..." -> "ZCB". Returns null for
-// any host that isn't one of ours, so this can only ever resolve to a site we
-// already own.
-function codeFromBodyUrl_(body) {
-  var m = String(body || '').match(/Page URL:\s*<?\s*(https?:\/\/[^\s>]+)/i);
-  if (!m) return null;
-  var host = m[1].replace(/^https?:\/\//i, '').split('/')[0].toLowerCase().replace(/^www\./, '');
+// A hostname -> our site code, or null for any host that isn't one of ours.
+// The off switch has to be honoured HERE too. Turning TTP/ZCB off in
+// codeFromLeaf_ only closed the label path: an unlabelled thread then fell
+// through to this fallback, which resolved the same site from its "Page URL:"
+// host and posted it anyway. The first run after the switch went in proved it
+// — 24 no-label-fallback ingests, every one of them TTP or ZCB.
+function codeFromHost_(host) {
+  var h = String(host || '').toLowerCase().replace(/^www\./, '').replace(/[.,;:)\]}>'"]+$/, '');
+  if (!h) return null;
   for (var code in SITE_DOMAINS) {
-    // The off switch has to be honoured HERE too. Turning TTP/ZCB off in
-    // codeFromLeaf_ only closed the label path: an unlabelled thread then fell
-    // through to this fallback, which resolved the same site from its "Page
-    // URL:" host and posted it anyway. The first run after the switch went in
-    // proved it — 24 no-label-fallback ingests, every one of them TTP or ZCB.
-    if (SITE_DOMAINS[code].toLowerCase() === host) return isIgnoredLeaf_(code) ? null : code;
+    if (SITE_DOMAINS[code].toLowerCase() === h) return isIgnoredLeaf_(code) ? null : code;
   }
   return null;
+}
+
+function hostOfUrl_(url) {
+  return String(url || '').replace(/^https?:\/\//i, '').split(/[\/?#]/)[0];
+}
+
+// Every machine-generated line a site's own form mailer writes to say which
+// site it came from. One entry per real template seen in this mailbox — these
+// are written BY THE SITE, never typed by a sender, which is what keeps the
+// spam guarantee: nothing here can be manufactured by someone emailing in.
+//
+// "Page URL:" alone was the whole list until 27 Aug 2026, and that is the hole
+// this recurring bug kept falling through: the check is only as wide as the
+// templates it knows, and every site added since has mailed a different line.
+// Measured against 600 stored leads at the time: peptidesboxes writes "New
+// quote request from peptidesboxes.com" and never a Page URL at all, and
+// thecoffeesleeves writes "Submitted from: https://...". Both were invisible
+// here, so an unlabelled thread from either site could only ever be rescued by
+// hand — which is exactly what was happening, one manual forward at a time.
+// The colon is optional throughout: several of these forms mail the label
+// bare ("Submitted from https://theburgersleeves.com/"), which is the same
+// line without its punctuation.
+var SITE_URL_MARKERS = [
+  /Page URL:?\s*<?\s*(https?:\/\/[^\s>]+)/i,
+  /Submitted from:?\s*<?\s*(https?:\/\/[^\s>]+)/i,
+  /Sent from:?\s*<?\s*(https?:\/\/[^\s>]+)/i,
+  /(?:Form|Source|Referring)\s*(?:URL|page|Page):?\s*<?\s*(https?:\/\/[^\s>]+)/i,
+];
+
+// "New quote request from peptidesboxes.com", "New enquiry from ..." — a bare
+// domain rather than a URL, so it needs its own pattern.
+var SITE_NAMED_MARKERS = [
+  /New (?:quote request|enquiry|inquiry|message|submission)\s+from\s+([A-Za-z0-9.-]+\.[A-Za-z]{2,})/i,
+  /(?:Submitted|Sent) from:?\s+([A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/im,
+];
+
+/**
+ * Which of OUR sites did this message come from, judged from the message
+ * itself rather than from a Gmail label?
+ *
+ * Every step resolves through SITE_DOMAINS, so it can only ever name a site we
+ * already own — an unknown host is null, never a guess.
+ *
+ * Ordered most-trustworthy first:
+ *   1. a form's own "this is the page it was submitted from" line
+ *   2. a form's own "new quote request from <domain>" line
+ *   3. the sending address's domain (noreply@thecoffeesleeves.com)
+ *   4. LAST RESORT: any URL in the body pointing at one of our domains — and
+ *      only when the whole body points at exactly ONE of them. Two different
+ *      sites in one body is ambiguous, and filing a lead under the wrong site
+ *      is worse than not filing it, so ambiguity returns null.
+ */
+function codeFromMessageText_(body, fromHeader) {
+  var text = String(body || '');
+  var i, m, code;
+
+  for (i = 0; i < SITE_URL_MARKERS.length; i++) {
+    m = text.match(SITE_URL_MARKERS[i]);
+    if (m) { code = codeFromHost_(hostOfUrl_(m[1])); if (code) return code; }
+  }
+
+  for (i = 0; i < SITE_NAMED_MARKERS.length; i++) {
+    m = text.match(SITE_NAMED_MARKERS[i]);
+    if (m) { code = codeFromHost_(m[1]); if (code) return code; }
+  }
+
+  var sender = String(fromHeader || '').match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
+  if (sender) { code = codeFromHost_(sender[1]); if (code) return code; }
+
+  // Guarded, because "a link to one of our sites" on its own is not evidence
+  // of a lead — a deploy notification, an invoice or our own newsletter all
+  // carry one. The body has to have the SHAPE of a submitted form as well.
+  if (!looksLikeFormSubmission_(text)) return null;
+  var urls = text.match(/https?:\/\/[^\s>)\]"']+/g) || [];
+  var found = null;
+  for (i = 0; i < urls.length; i++) {
+    code = codeFromHost_(hostOfUrl_(urls[i]));
+    if (!code) continue;
+    if (found && found !== code) return null; // ambiguous — do not guess
+    found = code;
+  }
+  return found;
+}
+
+// Does this thread hold a message that reads like a real, contactable lead?
+// Deliberately the same two tests the ingest itself applies — the form shape
+// and a parseable email or phone — so the label only ever appears on mail the
+// script WOULD have ingested if it knew which site it belonged to.
+function looksLikeUnfiledLead_(messages) {
+  for (var i = 0; i < messages.length; i++) {
+    var body = messages[i].getPlainBody();
+    if (!looksLikeFormSubmission_(body)) continue;
+    var p = parseLeadBody_(body);
+    if (p.email || p.phone) return true;
+  }
+  return false;
+}
+
+// Two or more of a form's own field labels, at the start of their own lines.
+// Every real template in this mailbox clears this easily (Name / Email / Phone
+// / Product / Message), and machine mail that merely links to one of our sites
+// does not.
+var FORM_FIELD_LINE_RE = /^\s*(full name|first name|last name|name|business email|email address|e-?mail|phone number|phone|mobile|telephone|company( name)?|product( name)?|message|quantity|required quantity|enquiry from page)\b\s*:?\s*\S/i;
+
+function looksLikeFormSubmission_(text) {
+  var lines = String(text || '').split('\n');
+  var hits = 0;
+  for (var i = 0; i < lines.length; i++) {
+    if (FORM_FIELD_LINE_RE.test(lines[i]) && ++hits >= 2) return true;
+  }
+  return false;
+}
+
+// Kept as the old name so nothing that only has a body has to change.
+function codeFromBodyUrl_(body) {
+  return codeFromMessageText_(body, '');
 }
 
 function findCheckoutLabel_() {
