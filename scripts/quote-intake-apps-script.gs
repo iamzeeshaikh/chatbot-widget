@@ -13,12 +13,16 @@
  * without waiting for anyone to file it by hand. It still never guesses from
  * sender or subject prose, so it cannot pick up spam.
  *
- * A thread it cannot place at all — reads like a lead, names no site of ours —
- * is labelled "ZeeOps/Needs a site label" rather than dropped in silence. That
- * silence is what let the same bug come back over and over: a site whose mail
- * template nobody had taught this script simply went unread for weeks. Label
- * such a thread with its site and the next run ingests it; nothing has to be
- * re-run by hand.
+ * A thread it cannot place at all — reads like a lead, and names NO site
+ * whatsoever — is labelled "ZeeOps/Needs a site label" rather than dropped in
+ * silence. That silence is what let the same bug come back over and over: a
+ * site whose mail template nobody had taught this script simply went unread for
+ * weeks. Label such a thread with its site and the next run ingests it.
+ *
+ * Mail that names a site which is NOT ours (other packaging companies mail into
+ * this inbox too) gets no label and no mention — it is not a lead of yours and
+ * there is nothing to fix. Nothing from those was ever ingested; only hosts
+ * listed in SITE_DOMAINS can resolve at all.
  *
  * HOW IT FINDS MAIL: the automatic run (processQuoteLeads, on your 30-min
  * trigger) searches your WHOLE mailbox for mail from the last RECENT_DAYS
@@ -541,6 +545,12 @@ function processQuoteLeads() {
       // otherwise be re-scanned forever. Park it in Unmatched so it shows up as
       // something to fix (add the store name) rather than silently vanishing.
       if (hasCheckoutLabel_(thread) && !isHandled_(thread)) { thread.addLabel(skippedLabel); skipped++; }
+      else if (namesAForeignSite_(umsgs, thread.getFirstMessageSubject())) {
+        // Somebody else's site, mailing into this inbox. It names its own
+        // domain and that domain is not one of ours, so there is nothing to
+        // fix and nothing to file — say nothing about it.
+        notOurs++;
+      }
       else if (looksLikeUnfiledLead_(umsgs)) {
         thread.addLabel(needsLabel);
         needsAttention++;
@@ -693,6 +703,27 @@ function diagnoseThread() {
       Logger.log('    verdict   : ' + (msgs.length ? 'ingested only if "site from body" above is not NONE' : 'no messages'));
     }
   }
+}
+
+// Strip "ZeeOps/Needs a site label" off every thread carrying it.
+//
+// Manual-only. Run it once after any change to what earns that label — the
+// first version of the rule put it on other companies' mail (packagingbee,
+// theproductboxes), and a warning label nobody trusts is worse than no label.
+// Clearing is free of consequence: the label is a note to a human, never an
+// input to ingestion, and any thread that still deserves it gets it back on the
+// next run.
+function clearNeedsSiteLabel() {
+  var label = GmailApp.getUserLabelByName(NEEDS_SITE_LABEL);
+  if (!label) { Logger.log('No "' + NEEDS_SITE_LABEL + '" label in this mailbox — nothing to clear.'); return; }
+  var start = Date.now(), cleared = 0;
+  while (Date.now() - start < TIME_BUDGET_MS) {
+    var threads = label.getThreads(0, 100);
+    if (!threads.length) break;
+    for (var i = 0; i < threads.length; i++) { threads[i].removeLabel(label); cleared++; }
+  }
+  Logger.log('clearNeedsSiteLabel: removed the label from ' + cleared + ' thread(s)' +
+    (Date.now() - start >= TIME_BUDGET_MS ? ' — stopped on the time budget, run again to finish.' : '.'));
 }
 
 // Re-try everything sitting in ZeeOps/Unmatched. That label means "carried one
@@ -939,6 +970,69 @@ function codeFromMessageText_(body, fromHeader) {
   }
   return found;
 }
+
+// Free mailbox providers, whose domain says nothing about which site a mail
+// belongs to — these sites all send through a Gmail account.
+var FREE_MAIL_HOSTS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com',
+  'yahoo.com', 'live.com', 'aol.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com'];
+
+// Domains a message claims as ITS OWN — the host of any link it contains, and
+// the domain in a "New Enquiry From <domain>" style subject or heading. A
+// customer's own email domain is deliberately NOT counted: that is who wrote
+// in, not which site they wrote to.
+var SITE_CLAIM_RE = /\b(?:enquiry|inquiry|quote|request|message|order|submission)\s+from\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/ig;
+
+function claimedHosts_(text) {
+  var out = [], m;
+  var urls = String(text || '').match(/https?:\/\/[^\s>)\]"']+/g) || [];
+  for (var i = 0; i < urls.length; i++) out.push(hostOfUrl_(urls[i]).toLowerCase().replace(/^www\./, ''));
+  SITE_CLAIM_RE.lastIndex = 0;
+  while ((m = SITE_CLAIM_RE.exec(String(text || '')))) {
+    out.push(m[1].toLowerCase().replace(/^www\./, '').replace(/[.,;:]+$/, ''));
+  }
+  return out;
+}
+
+/**
+ * Is this plainly ANOTHER company's mail?
+ *
+ * Other packaging businesses' form notifications land in this mailbox too
+ * (packagingbee.com.au, theproductboxes.co.uk). They read exactly like a lead,
+ * because they are one — just not one of ours. Labelling those
+ * "ZeeOps/Needs a site label" was wrong: it put a ZeeOps sticker on mail that
+ * has nothing to do with ZeeOps and made it look like the site had been added.
+ * Nothing was ever ingested from them (codeFromMessageText_ only resolves hosts
+ * in SITE_DOMAINS), but the label alone was noise, and noise in the one place
+ * the alarm has to stay trustworthy.
+ *
+ * So: a message that names its own site, where that site is not ours, is
+ * someone else's and is passed over in silence. Only mail that names NO site
+ * at all is genuinely ambiguous, and only that gets the label.
+ */
+function namesAForeignSite_(messages, subject) {
+  var hosts = claimedHosts_(subject);
+  for (var i = 0; i < messages.length; i++) {
+    hosts = hosts.concat(claimedHosts_(messages[i].getPlainBody()));
+  }
+  var foreign = false;
+  for (var h = 0; h < hosts.length; h++) {
+    var host = hosts[h];
+    if (!host || FREE_MAIL_HOSTS.indexOf(host) !== -1) continue;
+    if (codeFromHost_(host)) return false;   // one of ours after all
+    // A retired site of ours is still ours — do not call it foreign, or
+    // turning it back on would need this to be re-reasoned.
+    if (SITE_DOMAIN_HOSTS.indexOf(host) !== -1) return false;
+    foreign = true;
+  }
+  return foreign;
+}
+
+// Every host in SITE_DOMAINS, including the switched-off ones.
+var SITE_DOMAIN_HOSTS = (function () {
+  var out = [];
+  for (var code in SITE_DOMAINS) out.push(SITE_DOMAINS[code].toLowerCase());
+  return out;
+})();
 
 // Does this thread hold a message that reads like a real, contactable lead?
 // Deliberately the same two tests the ingest itself applies — the form shape
