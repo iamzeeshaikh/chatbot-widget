@@ -103,7 +103,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = '2026-08-28d';
+var SCRIPT_VERSION = '2026-08-28e';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -744,8 +744,16 @@ function clearNeedsSiteLabel() {
     if (!threads.length) break;
     for (var i = 0; i < threads.length; i++) { threads[i].removeLabel(label); cleared++; }
   }
-  Logger.log('clearNeedsSiteLabel: removed the label from ' + cleared + ' thread(s)' +
-    (Date.now() - start >= TIME_BUDGET_MS ? ' — stopped on the time budget, run again to finish.' : '.'));
+  if (Date.now() - start >= TIME_BUDGET_MS) {
+    Logger.log('clearNeedsSiteLabel: removed the label from ' + cleared +
+      ' thread(s) — stopped on the time budget, run again to finish.');
+    return;
+  }
+  // Off the threads is not enough: the label itself stays in the sidebar,
+  // empty, as a leftover of a feature that no longer exists. Delete it.
+  label.deleteLabel();
+  Logger.log('clearNeedsSiteLabel: removed the label from ' + cleared +
+    ' thread(s), then deleted the label itself. Nothing left of it.');
 }
 
 // Re-try everything sitting in ZeeOps/Unmatched. That label means "carried one
