@@ -93,8 +93,17 @@
  * A thread carrying NEITHER of those two labels has never been handled, and is
  * therefore read in full (its newest LOOKBACK_MESSAGES messages) regardless of
  * the watermark. That is what makes late labelling safe: file a thread hours or
- * days after the mail landed and the next 30-minute run still ingests it,
- * instead of the message's own date being behind the watermark forever.
+ * days after the mail landed and it still gets ingested, instead of the
+ * message's own date being behind the watermark forever.
+ *
+ * WHAT A RUN IS ALLOWED TO COST: a thread with no new mail is not opened at
+ * all — not its labels, not its messages, not a body. Every 30-minute run
+ * reading every thread in a two-day window is what ran the account out of
+ * Gmail quota on 27 Aug 2026 and stopped ingest dead for 14 hours. So the
+ * cheap routine run only looks at mail that has arrived since the last one,
+ * and every DEEP_EVERY_N_RUNS-th run (plus dailyCatchUp) re-reads a wider
+ * window to catch anything labelled by hand after it landed. See the "Gmail
+ * call budget" section for the numbers.
  */
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -103,7 +112,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = '2026-08-28e';
+var SCRIPT_VERSION = '2026-08-28f';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -303,15 +312,9 @@ var MAX_THREADS_PER_LABEL = 150;
 // new mail is always recent, so this window doesn't lose anything — the
 // bigger the number, the more quota a run spends re-checking old mail.
 //
-// SIZED FOR THE GMAIL QUOTA, not for "as much as possible". Checking a
-// thread's labels costs one Gmail call, so a run costs roughly one call per
-// candidate thread. At 30 days / 500 threads with the recommended 30-minute
-// trigger that is ~500 × 48 = ~24,000 calls a day — over a personal account's
-// daily allowance, which is exactly how this hit "Service invoked too many
-// times for one day: gmail" on 2026-07-28. Seven days at this mailbox's
-// volume is ~120 threads per run (~6,000/day), with plenty of headroom.
-// Raising either number multiplies daily quota use — don't, unless the
-// trigger interval is widened by the same factor.
+// SIZED FOR THE GMAIL QUOTA, not for "as much as possible" — see the "Gmail
+// call budget" section further down for the per-run cost model and for the
+// 27 Aug 2026 outage that made it necessary.
 //
 // The trade-off is deliberate: labelling an email OLDER than RECENT_DAYS no
 // longer gets picked up automatically. Run processQuoteLeadsBackfill by hand
@@ -343,8 +346,61 @@ var MAX_CANDIDATE_THREADS = 1500;
 var SEARCH_PAGE_SIZE = 500; // Gmail's hard per-call limit
 // How many threads the dedicated checkout sweep walks per run (see
 // sweepCheckoutLabel_ for why checkout can't rely on the search above).
-// Same quota maths: every thread here costs a call on every run.
+// Listing them is one call; only the ones with new mail are then read.
 var CHECKOUT_SWEEP_MAX = 150;
+
+// ── Gmail call budget ────────────────────────────────────────────────────
+// WHAT WENT WRONG ON 27 AUG 2026, so it isn't reintroduced: every run read
+// every candidate thread in full — its labels (up to three separate reads of
+// the same labels), its messages, and every message body — purely to discover
+// that the thread was somebody else's mail. `after:` has DAY granularity, so
+// the search hands back one to two days of the WHOLE mailbox on every run:
+// hundreds of threads, ~99% of them unrelated. At four-plus Gmail calls each,
+// 48 runs a day, that is tens of thousands of calls against a personal
+// account's ~20,000/day allowance. One run failed with "Limit Exceeded:
+// Gmail" at 20:27, and every run for the next 14 hours died with "Service
+// invoked too many times for one day: gmail" — 19 consecutive runs, no leads
+// ingested at all, and no error visible anywhere except Apps Script's own
+// failure email.
+//
+// THE RULE THIS ESTABLISHES: a thread that cannot produce a lead this run must
+// cost approximately nothing. Three mechanisms enforce it, all below:
+//   1. a date gate on thread metadata BEFORE any thread is opened
+//      (getLastMessageDate, already carried by the search result),
+//   2. one labels read and one messages read per thread per run, cached
+//      (labelNamesOf_ / messagesOf_ / prefetchMessages_),
+//   3. messages fetched for the whole surviving batch in one call
+//      (GmailApp.getMessagesForThreads) rather than one call per thread.
+// A routine run now costs on the order of ten Gmail calls instead of a
+// thousand.
+//
+// THE ONE THING THE DATE GATE COSTS, and how it is paid back: a thread
+// labelled BY HAND hours after its mail arrived has an old last-message date,
+// so a routine run skips it — and that is precisely the failure that lost
+// three leads on 26 Aug. So every DEEP_EVERY_N_RUNS-th run widens the gate to
+// DEEP_LOOKBACK_MS and re-reads everything in that window regardless of the
+// watermark, and dailyCatchUp runs a deep pass over CATCHUP_DAYS once a day.
+// Late labelling is therefore picked up within a few hours, not never.
+// How many consecutive too-old threads end a routine run's walk through the
+// search results. Only ever reached on a routine run; a deep run reads the
+// whole window.
+var STALE_RUN_LIMIT = 25;
+var DEEP_EVERY_N_RUNS = 6;                        // 30-min trigger → a deep pass every ~3 hours
+var DEEP_LOOKBACK_MS = 12 * 60 * 60 * 1000;       // how far back a deep pass re-reads
+var RUN_COUNT_KEY = 'ZEEOPS_RUN_COUNT';
+// Set by dailyCatchUp so its pass is always a deep one.
+var FORCE_DEEP_SCAN = false;
+
+// Every Nth run, counted in Script Properties because each run is a fresh
+// execution with no memory of the last one.
+function isDeepRun_() {
+  if (FORCE_DEEP_SCAN) return true;
+  var props = PropertiesService.getScriptProperties();
+  var n = (parseInt(props.getProperty(RUN_COUNT_KEY), 10) || 0) + 1;
+  if (n >= DEEP_EVERY_N_RUNS) { props.setProperty(RUN_COUNT_KEY, '0'); return true; }
+  props.setProperty(RUN_COUNT_KEY, String(n));
+  return false;
+}
 
 // ── Entry points ─────────────────────────────────────────────────────────
 
@@ -419,7 +475,7 @@ function processQuoteLeadsBackfill() {
   // `checkout` isn't a site-code label, so the loop below never reaches it.
   // Sweep it here with no date window — that's what pulls in an existing
   // backlog of order mail.
-  var co = sweepCheckoutLabel_(start, processedLabel, skippedLabel, BACKFILL_MAX_THREADS_PER_LABEL);
+  var co = sweepCheckoutLabel_(start, processedLabel, skippedLabel, BACKFILL_MAX_THREADS_PER_LABEL, true);
   sent += co.sent; skipped += co.skipped;
   if (co.stoppedEarly) stoppedEarly = true;
 
@@ -458,6 +514,9 @@ function processQuoteLeadsBackfill() {
 
 function processQuoteLeads() {
   var start = Date.now();
+  // Cheap routine run, or the periodic deep one that re-reads the last
+  // DEEP_LOOKBACK_MS regardless of the watermark? See "Gmail call budget".
+  var deep = isDeepRun_();
   var processedLabel = getOrCreateLabel_(PROCESSED_LABEL);
   var skippedLabel = getOrCreateLabel_(SKIPPED_LABEL);
 
@@ -472,12 +531,21 @@ function processQuoteLeads() {
 
   // Checkout FIRST, before the general search spends the time budget — order
   // mail must never be starved by a mailbox full of unrelated threads.
-  var co = sweepCheckoutLabel_(start, processedLabel, skippedLabel, CHECKOUT_SWEEP_MAX);
-  sent += co.sent; skipped += co.skipped;
-  if (co.stoppedEarly) {
-    Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped +
-      ' (checkout sweep only) — stopped early (time budget); rest will be picked up on the next run.');
-    return;
+  //
+  // ON DEEP RUNS ONLY. A NEW order is not what this sweep finds: its mail is
+  // recent, so the search below returns it and matchSiteCode_ reads the store
+  // name out of the subject exactly as the sweep would. What the sweep alone
+  // can reach is the OLD backlog, which by definition no date window ever
+  // covers — and re-walking that backlog on all 48 runs a day was a fixed ~450
+  // Gmail calls every 30 minutes spent re-reading orders handled last week.
+  if (deep) {
+    var co = sweepCheckoutLabel_(start, processedLabel, skippedLabel, CHECKOUT_SWEEP_MAX, true);
+    sent += co.sent; skipped += co.skipped;
+    if (co.stoppedEarly) {
+      Logger.log('processQuoteLeads: sent=' + sent + ' skipped=' + skipped +
+        ' (checkout sweep only) — stopped early (time budget); rest will be picked up on the next run.');
+      return;
+    }
   }
 
   // ONE search across the whole mailbox for recent mail — not scoped to any
@@ -516,10 +584,44 @@ function processQuoteLeads() {
     Logger.log('WARNING: hit the ' + MAX_CANDIDATE_THREADS + '-thread ceiling — the oldest threads in this window went unread. Run again to continue.');
   }
 
-  for (var t = 0; t < threads.length; t++) {
+  // ── The date gate (see "Gmail call budget") ────────────────────────────
+  // `after:` is day-granular, so the search above always returns one to two
+  // days of the WHOLE mailbox — hundreds of threads on a run that has perhaps
+  // two new messages to find. Opening each one to discover it is somebody
+  // else's mail is what exhausted the daily Gmail allowance on 27 Aug 2026 and
+  // stopped ingest completely for 14 hours.
+  //
+  // getLastMessageDate() is answered from the thread metadata the search
+  // already returned. A thread whose newest message is older than the cutoff
+  // holds nothing this run could post, so it is dropped here — before its
+  // labels, its messages or any body are ever read.
+  //
+  // On a deep run the gate widens to DEEP_LOOKBACK_MS, which is what keeps the
+  // "labelled by hand hours later" case working: those threads have an old
+  // message date but have never been handled, and lookbackMessages_ still
+  // reads them in full once the gate lets them through.
+  //
+  // A routine run STOPS walking rather than testing every thread, because
+  // GmailApp.search returns newest first: once STALE_RUN_LIMIT threads in a row
+  // are older than the cutoff, everything after them is older still. The limit
+  // is a run of misses rather than the first one, so a thread out of order —
+  // Gmail's ordering is dependable but not contractual — cannot end the scan on
+  // its own. A deep run walks the whole window and skips nothing.
+  var scanCutoff = deep ? Math.min(cutoff, Date.now() - DEEP_LOOKBACK_MS) : cutoff;
+  var candidates = [];
+  var stale = 0;
+  for (var g = 0; g < threads.length; g++) {
+    if (threads[g].getLastMessageDate().getTime() > scanCutoff) { candidates.push(threads[g]); stale = 0; }
+    else if (!deep && ++stale >= STALE_RUN_LIMIT) break;
+  }
+  // One Gmail call for the whole batch, instead of one per thread below.
+  prefetchMessages_(candidates);
+
+  for (var t = 0; t < candidates.length; t++) {
     if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break; }
 
-    var thread = threads[t];
+    var thread = candidates[t];
+    if (isIgnored_(thread)) continue;  // silenced by hand — never read, ingested or flagged
     var code = matchSiteCode_(thread); // null if it doesn't carry one of our site labels
     if (!code) {
       // Not a last line of defence any more — for several sites it is the ONLY
@@ -549,12 +651,12 @@ function processQuoteLeads() {
             String(thread.getFirstMessageSubject() || '').slice(0, 70));
         }
       }
-      if (fbAny) { thread.addLabel(processedLabel); continue; }
+      if (fbAny) { addLabel_(thread, processedLabel); continue; }
 
       // A checkout thread whose store name isn't in STORE_NAME_CODES would
       // otherwise be re-scanned forever. Park it in Unmatched so it shows up as
       // something to fix (add the store name) rather than silently vanishing.
-      if (hasCheckoutLabel_(thread) && !isHandled_(thread)) { thread.addLabel(skippedLabel); skipped++; }
+      if (hasCheckoutLabel_(thread) && !isHandled_(thread)) { addLabel_(thread, skippedLabel); skipped++; }
       else if (namesAForeignSite_(umsgs, thread.getFirstMessageSubject())) {
         // Somebody else's site, mailing into this inbox. It names its own
         // domain and that domain is not one of ours, so there is nothing to
@@ -596,8 +698,8 @@ function processQuoteLeads() {
     // Nothing new in this thread — leave its labels exactly as they are, or an
     // old fully-handled thread would get re-flagged Unmatched on every run.
     if (considered === 0) continue;
-    if (handledAny) thread.addLabel(processedLabel);
-    else { thread.addLabel(skippedLabel); skipped++; }
+    if (handledAny) addLabel_(thread, processedLabel);
+    else { addLabel_(thread, skippedLabel); skipped++; }
   }
 
   // Safety net for the one failure the label model can't see: a genuine form
@@ -633,8 +735,10 @@ function processQuoteLeads() {
   // Only advance the watermark on a complete pass. A run cut short by the time
   // budget must leave it where it was, so the next run re-covers the remainder.
   if (!stoppedEarly) saveWatermark_(start);
-  Logger.log('processQuoteLeads [' + SCRIPT_VERSION + ']: sent=' + sent + ' (' + noLabel + ' via no-label fallback) skipped=' + skipped +
-    ' (scanned ' + threads.length + ' threads since the watermark, ' + siteLabeled + ' site-labeled, ' + notOurs + ' not ours)' +
+  Logger.log('processQuoteLeads [' + SCRIPT_VERSION + ']: ' + (deep ? 'DEEP pass — ' : '') + 'sent=' + sent +
+    ' (' + noLabel + ' via no-label fallback) skipped=' + skipped +
+    ' (search returned ' + threads.length + ' threads, ' + candidates.length + ' had new mail and were opened, ' +
+    siteLabeled + ' site-labeled, ' + notOurs + ' not ours)' +
     (stoppedEarly ? ' — stopped early (time budget); rest will be picked up on the next run.' : ' — done, nothing left to process.'));
 }
 
@@ -669,6 +773,9 @@ var CATCHUP_DAYS = 2;
 
 function dailyCatchUp() {
   var target = Date.now() - CATCHUP_DAYS * 24 * 60 * 60 * 1000;
+  // The whole point of this run is to re-read mail whose own date is old —
+  // exactly what the routine date gate drops — so it always runs deep.
+  FORCE_DEEP_SCAN = true;
   saveWatermark_(target + WATERMARK_OVERLAP_MS); // readWatermark_ subtracts the overlap again
   Logger.log('dailyCatchUp: watermark pulled back to ' + new Date(target) +
     ' — re-covering ' + CATCHUP_DAYS + ' day(s), then running the normal pass.');
@@ -808,6 +915,78 @@ function getOrCreateLabel_(name) {
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
 }
 
+// ── One read per thread per run ──────────────────────────────────────────
+// Both caches are per EXECUTION — Apps Script starts every trigger run with a
+// fresh global scope, so there is nothing to invalidate between runs and no
+// risk of serving a stale answer to the next one.
+//
+// They exist because the same thread used to be read three or four times
+// inside a single run: matchSiteCode_, isHandled_ and hasCheckoutLabel_ each
+// called thread.getLabels() independently, and the checkout sweep re-read
+// threads the main loop then read again. Every one of those was a Gmail call
+// against a daily allowance the run had already exhausted.
+var THREAD_LABELS_CACHE = {};
+var THREAD_MESSAGES_CACHE = {};
+
+// The label NAMES on a thread. One Gmail call the first time, free after that.
+function labelNamesOf_(thread) {
+  var id = thread.getId();                    // carried by the thread, not a fetch
+  var hit = THREAD_LABELS_CACHE[id];
+  if (hit) return hit;
+  var labels = thread.getLabels();
+  var names = [];
+  for (var i = 0; i < labels.length; i++) names.push(labels[i].getName());
+  THREAD_LABELS_CACHE[id] = names;
+  return names;
+}
+
+// Label a thread and keep the cache honest, so a thread the checkout sweep has
+// just marked Processed is seen as handled by the main loop later in the same
+// run instead of being read and re-posted all over again.
+function addLabel_(thread, label) {
+  thread.addLabel(label);
+  var id = thread.getId();
+  var names = THREAD_LABELS_CACHE[id];
+  if (names && names.indexOf(label.getName()) === -1) names.push(label.getName());
+}
+
+// The messages on a thread. Served from whatever prefetchMessages_ already
+// pulled; falls back to a single-thread fetch so every caller is safe.
+function messagesOf_(thread) {
+  var id = thread.getId();
+  var hit = THREAD_MESSAGES_CACHE[id];
+  if (hit) return hit;
+  var msgs = thread.getMessages();
+  THREAD_MESSAGES_CACHE[id] = msgs;
+  return msgs;
+}
+
+// Fetch the messages for a whole batch of threads in ONE Gmail call instead of
+// one call per thread — this is what GmailApp.getMessagesForThreads is for, and
+// it is the single biggest saving in the run. Chunked because the batch itself
+// has a practical size limit.
+var MESSAGE_PREFETCH_CHUNK = 100;
+// A ceiling on how much a single prefetch pulls into memory at once. The
+// backfill sweeps thousands of threads in one go, and holding every message of
+// every one of them is how a run dies of memory or of the 6-minute limit before
+// it has posted anything. Past this point messagesOf_ just fetches per thread,
+// exactly as it used to.
+var MESSAGE_PREFETCH_MAX = 300;
+
+function prefetchMessages_(threads) {
+  var pending = [];
+  for (var i = 0; i < threads.length && pending.length < MESSAGE_PREFETCH_MAX; i++) {
+    if (!THREAD_MESSAGES_CACHE[threads[i].getId()]) pending.push(threads[i]);
+  }
+  for (var off = 0; off < pending.length; off += MESSAGE_PREFETCH_CHUNK) {
+    var chunk = pending.slice(off, off + MESSAGE_PREFETCH_CHUNK);
+    var batch = GmailApp.getMessagesForThreads(chunk);
+    for (var c = 0; c < chunk.length; c++) {
+      THREAD_MESSAGES_CACHE[chunk[c].getId()] = batch[c] || [];
+    }
+  }
+}
+
 /**
  * The messages on this thread a run should actually look at.
  *
@@ -835,7 +1014,7 @@ function getOrCreateLabel_(name) {
 var LOOKBACK_MESSAGES = 10;
 
 function lookbackMessages_(thread, cutoff) {
-  var messages = thread.getMessages();
+  var messages = messagesOf_(thread);
   var i, out = [];
   if (isHandled_(thread)) {
     for (i = 0; i < messages.length; i++) {
@@ -853,10 +1032,19 @@ function lookbackMessages_(thread, cutoff) {
   return out.length > LOOKBACK_MESSAGES ? out.slice(out.length - LOOKBACK_MESSAGES) : out;
 }
 
+// ZeeOps/Ignore is documented as "silenced for good", and it was not: it counts
+// as handled, and handled only means "apply the watermark", so a silenced thread
+// that went on receiving mail had every new message ingested anyway. That is the
+// whole point of the label — the escape hatch for a thread the rules get wrong —
+// so it is now checked before anything else reads the thread.
+function isIgnored_(thread) {
+  return labelNamesOf_(thread).indexOf(IGNORE_LABEL) !== -1;
+}
+
 function isHandled_(thread) {
-  var labels = thread.getLabels();
-  for (var i = 0; i < labels.length; i++) {
-    var n = labels[i].getName();
+  var names = labelNamesOf_(thread);
+  for (var i = 0; i < names.length; i++) {
+    var n = names[i];
     if (n === PROCESSED_LABEL || n === SKIPPED_LABEL || n === IGNORE_LABEL) return true;
   }
   return false;
@@ -877,15 +1065,34 @@ function isHandled_(thread) {
 //     isn't one of them, so it never saw these threads at all.
 // Walking the label itself is bounded, can't be crowded out, and has no date
 // window — which is exactly what a mailbox with a backlog of order mail needs.
-function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max) {
+function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max, deep) {
   var out = { sent: 0, skipped: 0, stoppedEarly: false };
   var label = findCheckoutLabel_();
   if (!label) return out; // no checkout label in this mailbox — nothing to do
   var cutoff = readWatermark_(); // same message-date rule as the main run
   var threads = label.getThreads(0, max);
+  // Listing the label is one call; OPENING all of it was CHECKOUT_SWEEP_MAX × 3
+  // Gmail calls on every single run — a fixed ~450 calls every 30 minutes, the
+  // largest single item in the bill that ran the account out of quota on
+  // 27 Aug 2026, and almost always spent re-reading orders handled days ago.
+  //
+  // So a routine run opens only the threads with mail newer than the watermark,
+  // and a DEEP run (every DEEP_EVERY_N_RUNS-th, and every backfill) still walks
+  // the label in full. That distinction matters here more than in the main run:
+  // an old, never-handled order thread is exactly what this sweep exists for,
+  // and no date window would ever reach it again.
+  if (!deep) {
+    var recent = [];
+    for (var f = 0; f < threads.length; f++) {
+      if (threads[f].getLastMessageDate().getTime() > cutoff) recent.push(threads[f]);
+    }
+    threads = recent;
+  }
+  prefetchMessages_(threads);
   for (var t = 0; t < threads.length; t++) {
     if (Date.now() - start > TIME_BUDGET_MS) { out.stoppedEarly = true; return out; }
     var thread = threads[t];
+    if (isIgnored_(thread)) continue;  // silenced by hand — never read, ingested or flagged
     // A site-code label on the thread still wins over the subject's store name.
     var code = matchSiteCode_(thread);
     var messages = lookbackMessages_(thread, cutoff);
@@ -898,8 +1105,8 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max) {
       if (postLead_(code, parsed, messages[m].getDate())) { out.sent++; handledAny = true; }
     }
     if (considered === 0) continue;
-    if (handledAny) thread.addLabel(processedLabel);
-    else { thread.addLabel(skippedLabel); out.skipped++; }
+    if (handledAny) addLabel_(thread, processedLabel);
+    else { addLabel_(thread, skippedLabel); out.skipped++; }
   }
   return out;
 }
@@ -1142,11 +1349,11 @@ function findSiteLabels_() {
 var UNKNOWN_SITE_LABELS = {};
 
 function matchSiteCode_(thread) {
-  var labels = thread.getLabels();
+  var names = labelNamesOf_(thread);
   var hasCheckout = false;
   var unknown = null;
-  for (var i = 0; i < labels.length; i++) {
-    var name = labels[i].getName();
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
     var parts = name.split('/');
     var leaf = parts[parts.length - 1].trim();
     var code = codeFromLeaf_(leaf);
@@ -1166,9 +1373,9 @@ function matchSiteCode_(thread) {
 }
 
 function hasCheckoutLabel_(thread) {
-  var labels = thread.getLabels();
-  for (var i = 0; i < labels.length; i++) {
-    var parts = labels[i].getName().split('/');
+  var names = labelNamesOf_(thread);
+  for (var i = 0; i < names.length; i++) {
+    var parts = names[i].split('/');
     if (parts[parts.length - 1].trim().toLowerCase() === CHECKOUT_LABEL) return true;
   }
   return false;

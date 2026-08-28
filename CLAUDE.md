@@ -449,6 +449,19 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
   re-run `pbcopy` rather than assuming the clipboard survived.
 - After changing how mail is found, `rewindWatermark()` must be run, or the fix only
   applies to mail that hasn't arrived yet.
+- **The Apps Script runs against a ~20,000-calls-a-day Gmail allowance, and exceeding it
+  stops ingest completely and silently** — the only signal is Apps Script's own failure
+  email. On 2026-08-27 every run opened every thread in a two-day search window (~2,470
+  Gmail calls a run, ~119,000 a day: measured, not estimated) and 19 consecutive runs
+  died with "Service invoked too many times for one day: gmail". **A thread with no new
+  mail must not be opened at all** — labels, messages and bodies all cost calls, so the
+  date gate comes first, one read per thread per run is cached (`labelNamesOf_` /
+  `messagesOf_`), and messages are fetched for a whole batch with
+  `GmailApp.getMessagesForThreads`. Late labelling is covered by the periodic deep pass
+  instead of by re-reading everything every 30 minutes.
+  `scratch/quota-sim.mjs` counts the calls of a run against a synthetic mailbox and
+  `scratch/quota-behaviour.mjs` diffs what old and new versions ingest — run both before
+  pasting any change to the search or sweep.
 - **A site whose form mail this script cannot place is lost in silence, and that is the
   single bug that keeps recurring here.** It has come back as: a label leaf that is a
   name not a code (`ZP`, `CPB`, `TCSL`), a thread labelled hours late so its message
