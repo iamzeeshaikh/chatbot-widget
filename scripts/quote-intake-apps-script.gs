@@ -98,6 +98,13 @@
  */
 
 // ── Config ───────────────────────────────────────────────────────────────
+// Printed on every run's summary line. Bump it with any change worth telling
+// apart in a log. It exists because there is no other way to know WHICH copy
+// of this file is actually running inside Apps Script — the editor's contents
+// are invisible from here, a paste can silently not land, and several rounds
+// of debugging were spent guessing at that.
+var SCRIPT_VERSION = '2026-08-28d';
+
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
 // The shared secret is read from this project's Script Properties, NOT written
@@ -445,7 +452,7 @@ function processQuoteLeadsBackfill() {
       else { thread.addLabel(skippedLabel); skipped++; }
     }
   }
-  Logger.log('processQuoteLeadsBackfill: sent=' + sent + ' skipped=' + skipped +
+  Logger.log('processQuoteLeadsBackfill [' + SCRIPT_VERSION + ']: sent=' + sent + ' skipped=' + skipped +
     (stoppedEarly ? ' — stopped early (time budget); run again to continue.' : ' — done, nothing left to process.'));
 }
 
@@ -626,7 +633,7 @@ function processQuoteLeads() {
   // Only advance the watermark on a complete pass. A run cut short by the time
   // budget must leave it where it was, so the next run re-covers the remainder.
   if (!stoppedEarly) saveWatermark_(start);
-  Logger.log('processQuoteLeads: sent=' + sent + ' (' + noLabel + ' via no-label fallback) skipped=' + skipped +
+  Logger.log('processQuoteLeads [' + SCRIPT_VERSION + ']: sent=' + sent + ' (' + noLabel + ' via no-label fallback) skipped=' + skipped +
     ' (scanned ' + threads.length + ' threads since the watermark, ' + siteLabeled + ' site-labeled, ' + notOurs + ' not ours)' +
     (stoppedEarly ? ' — stopped early (time budget); rest will be picked up on the next run.' : ' — done, nothing left to process.'));
 }
