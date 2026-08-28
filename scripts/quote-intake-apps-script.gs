@@ -135,31 +135,6 @@ var NEEDS_SITE_LABEL = 'ZeeOps/Needs a site label';
 // escape hatch for anything the rules below get wrong.
 var IGNORE_LABEL = 'ZeeOps/Ignore';
 
-// Sites that ARE ours but whose quote-form mail is deliberately NOT ingested
-// here. Decision 2026-08-28, the user's: this intake stays packaging-only.
-// The five sports sites are lead-tracked in ZeeOps, but only through the chat
-// widget — every sports lead on record carries a chat transcript. Their website
-// quote forms stay out, so mail naming one of these is passed over the same way
-// another company's mail is: no label, no log line, nothing to fix.
-// Listing them (rather than letting them fall through as "unknown") is what
-// keeps that a decision instead of an accident.
-// The same five sites as they appear in a From header — "The Volleyball
-// Uniforms <...@gmail.com>". These all send through a Gmail account, so the
-// sending DOMAIN says nothing and the display name is the only thing that
-// identifies them.
-var NOT_INTAKE_SENDER_NAMES = [
-  'the volleyball uniforms', 'volleyball uniforms',
-  'texas football uniforms', 'california soccer jerseys',
-  'florida basketball jerseys', 'the baseball jerseys',
-];
-
-var NOT_INTAKE_DOMAINS = [
-  'thevolleyballuniforms.com',
-  'texasfootballuniforms.com',
-  'californiasoccerjerseys.com',
-  'floridabasketballjerseys.com',
-  'thebaseballjerseys.com',
-];
 
 // Your Gmail label names that mean "this is a real lead for this site" —
 // matches lib/quoteintake.ts QUOTE_SITE_CODES on the server exactly. Matched
@@ -586,7 +561,7 @@ function processQuoteLeads() {
         // packaging companies' form mail and cold sales pitches whose signature
         // block ("Name: … Phone: … Email: …") reads exactly like a submitted
         // form. Two rounds of narrowing still left it landing on a machinery
-        // sales pitch and on sports mail we have decided not to ingest. A
+        // sales pitch and on mail belonging to another dashboard entirely. A
         // warning that is usually wrong costs more than the silence it was
         // meant to fix — and the silence itself is already fixed, by
         // codeFromMessageText_ reading these forms' own footers and by an
@@ -1058,18 +1033,11 @@ function namesAForeignSite_(messages, subject) {
     // An unrecognised sender domain is not evidence of anything (a customer
     // writing in from their own company address is the common case), so it is
     // never allowed to declare a thread foreign on its own.
-    var fromRaw = String(messages[i].getFrom() || '');
-    var display = fromRaw.replace(/<[^>]*>/g, '').replace(/["']/g, '').trim().toLowerCase();
-    if (NOT_INTAKE_SENDER_NAMES.indexOf(display) !== -1) return true;
-    var from = fromRaw.match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
+    var from = String(messages[i].getFrom() || '').match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
     if (from) {
       var fh = from[1].toLowerCase().replace(/^www\./, '');
-      if (NOT_INTAKE_DOMAINS.indexOf(fh) !== -1) return true;
       if (codeFromHost_(fh) || SITE_DOMAIN_HOSTS.indexOf(fh) !== -1) return false;
     }
-  }
-  for (var n = 0; n < hosts.length; n++) {
-    if (NOT_INTAKE_DOMAINS.indexOf(hosts[n]) !== -1) return true;
   }
   var foreign = false;
   for (var h = 0; h < hosts.length; h++) {
