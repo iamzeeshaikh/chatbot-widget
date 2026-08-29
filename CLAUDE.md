@@ -277,6 +277,35 @@ never reorganise, re-split or "clean it up". Keep list sorts stable (sort by
 `created_at`, not `last_seen`) and key message/detail effects on `session_id` rather
 than the object, or the polling UI churns and flashes.
 
+### A standard member may not see customer contacts — and that is a READ EDGE, not a UI state
+`lib/pii.ts` decides (`canSeeContacts` = admin). Added 2026-08-29 for the sports
+workspace, whose owner wants an agent to work every lead and email it **without ever
+learning the address or number**. Masking the `email` and `phone` columns is the easy
+half and by itself it leaks: a quote lead carries the whole original form email in
+`message` ("Email: … Phone: …"), a chat transcript carries whatever the visitor typed,
+an inbound reply carries the customer's own signature in `quoted`, and the Billing row
+carries `quote_message`. **That last one shipped as a real leak and was caught by the
+probe, not by review** — 20 addresses readable in a response whose `email` field said
+"hidden". So free text is scrubbed by pattern wherever it is served, at every one of
+these edges: `lib/pipeline.ts` (card name falls back to the email), `lib/leadrecord.ts`
+(contact, captured, quoteMessage, notes, timeline, sent + inbound email), leads-list,
+leads-billing, conversations, messages, visitor, chat-download.
+
+Two consequences that are easy to miss and both were bugs before they were fixed:
+- **The send resolves the recipient server-side** (`leadRecipient`), because the browser
+  was handed a masked address and posts it straight back. CC is dropped for such a
+  member — a CC to themselves delivers a message whose `To:` header is the address they
+  may not read — and the SEND RESPONSE is masked too, or the whole thing unravels in one
+  line.
+- **A value you cannot read, you cannot overwrite**: `/api/leads/[id]/field` refuses
+  email/phone from a non-admin, or an agent could point the lead at their own address.
+
+`scratch/pii-leak-probe.mjs` is the regression test and the only honest way to make an
+absence claim: it reads every real address and number for the workspace out of the
+database, then hunts for them in every agent-visible response — and runs the same hunt
+as an admin, who must still find them. A pass where nobody sees anything means the probe
+is broken, and it says so.
+
 ### Enforce access server-side
 Workspace isolation and per-member site access are decided **on the server**, in the
 API route — never only by hiding UI. A member without access to a lead's site gets
