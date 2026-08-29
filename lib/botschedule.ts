@@ -3,18 +3,20 @@
 //
 // Schedule (Pakistan Standard Time, PKT = UTC+5, no daylight saving). Two
 // windows, and the bot is ON inside either of them:
-//   • Weekend window: Saturday 10:00 AM PKT through Monday 7:00 PM PKT — one
+//   • Weekend window: Saturday 6:00 AM PKT through Monday 7:00 PM PKT — one
 //              continuous stretch (Sunday is on for its full 24h; Monday is on
 //              up to, but not including, 19:00).
 //   • Weekday window: Tuesday–Friday, 6:00 AM to 7:00 PM PKT (19:00 exclusive,
 //              so the last bot-ON minute is 18:59). These are the hours with no
 //              human agent on shift; the rest of the weekday is human-only.
 //   • Bot OFF (human-only): everything else — Monday from 7:00 PM, Tue–Fri
-//              outside 06:00–19:00, and Saturday 00:00–10:00.
+//              outside 06:00–19:00, and Saturday 00:00–06:00.
 //
-// Widened on 2026-08-29 at the owner's request: the weekday window was
-// 11:00–16:00 and Monday ended at 16:00. Saturday's 10:00 start is deliberately
-// unchanged — the weekend was already covered and was not part of the ask.
+// Widened on 2026-08-29 at the owner's request, in two steps: the weekday window
+// was 11:00–16:00 and Monday ended at 16:00; then Saturday's start moved from
+// 10:00 to 06:00 so every bot day now begins at the same hour. The result is one
+// simple rule — the bot answers from 6:00 AM, and stops at 7:00 PM on Monday to
+// Friday while Saturday runs on into Sunday and Monday unbroken.
 //
 // During bot-OFF the bot stays completely silent (no reply/ack); a human agent
 // initiates. Manual human takeover always wins, and the bot auto-resumes when
@@ -32,7 +34,7 @@ export const PKT_OFFSET_HOURS = 5
 // Days of week: 0 = Sunday … 6 = Saturday.
 // The ON window starts on this day at the hour below…
 export const BOT_ON_START_DAY = 6 // Saturday
-export const BOT_ON_START_HOUR = 10 // 10:00 AM PKT (start hour is inclusive)
+export const BOT_ON_START_HOUR = 6 // 6:00 AM PKT (start hour is inclusive)
 // …and these days are bot-ON for the full 24h (the middle of the window).
 export const BOT_ON_FULL_DAYS = [0] // Sunday (00:00–23:59)
 // …and the window closes on this day at this hour (end hour is EXCLUSIVE, so 16
@@ -61,7 +63,7 @@ export function pktParts(now: Date = new Date()): { day: number; hour: number; m
 }
 
 // Pure schedule check (no workspace gating): is the bot ON at this PKT
-// day/hour? ON = a full-on day (Sunday), Saturday from 10:00 onward, Monday
+// day/hour? ON = a full-on day (Sunday), Saturday from 06:00 onward, Monday
 // before 19:00 — the tail of the same window, not a second one — or a weekday
 // inside the daily unattended-hours window.
 export function isScheduledOn(day: number, hour: number): boolean {
