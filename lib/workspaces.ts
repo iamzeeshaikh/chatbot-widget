@@ -95,15 +95,26 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   // scripts/sports-quote-intake-apps-script.gs) imported the real history the
   // same day this went in: 28 quote leads reaching back to 11 Apr 2026.
   //
-  // 'email' is deliberately still OFF, and it is the one item here that is not a
-  // policy decision: the Gmail integration signs in through an INTERNAL Google
-  // OAuth app, which only accounts inside the Workspace organisation can consent
-  // to. The sports member is a consumer Gmail account, so the Connect button
-  // would fail at Google's own consent screen, not in our code. It goes on the
-  // day that account moves into the organisation (or the OAuth app goes
-  // External and through verification) — not before, or it is a button that
-  // cannot work.
-  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders']),
+  // 'email' followed hours later, once the reason it was off turned out not to
+  // hold: it was off because the only sports member was a consumer Gmail account
+  // that cannot consent to our INTERNAL Google OAuth app. But the sports side
+  // has a real Google Workspace mailbox — info@thebaseballjerseys.com (MX
+  // smtp.google.com), carrying the other four sites as send-as aliases — so the
+  // Gmail connect has an account that can hold it, and each site can mail from
+  // its own address through verifiedAliases().
+  //
+  // TWO THINGS STILL HAVE TO BE TRUE, and neither is decided here:
+  //   1. That address must be a sports MEMBER. The callback requires the Google
+  //      account to equal the member's own email exactly (it refuses a mismatch
+  //      rather than sending from an unexpected address), so connecting it while
+  //      logged in as somebody else cannot work.
+  //   2. Its Workspace org must be the one the OAuth app is Internal to — the
+  //      same org as dev@zeecustomboxes.com, the only account connected today.
+  //      If it is a separate Workspace subscription, Google blocks consent at
+  //      its own screen, and the fix is a second OAuth client owned by that org,
+  //      chosen per workspace. Nothing here breaks either way: an unconnectable
+  //      Connect button is inert.
+  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {
