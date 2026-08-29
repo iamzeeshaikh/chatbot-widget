@@ -2302,6 +2302,31 @@ export default function Dashboard() {
                       <Users size={14} strokeWidth={2} aria-hidden /> Members
                     </a>
                   )}
+                  {/* Take a copy off the platform. An account-level action, so
+                      it lives with the other two rather than as a button on a
+                      tab — and admin-only, because a backup is the whole
+                      customer list in one file. */}
+                  {userRole === 'admin' && (
+                    <>
+                      <div className="my-1 border-t border-gray-100" />
+                      <p className="px-3 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-gray-400">Backup</p>
+                      <a href="/api/admin/backup?format=csv" download
+                        title="Every lead, as a spreadsheet. Open it in Excel."
+                        className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-100 transition-colors">
+                        <Download size={14} strokeWidth={2} aria-hidden /> Leads (CSV)
+                      </a>
+                      <a href="/api/admin/backup" download
+                        title="Leads plus the CRM history around them: notes, stages, deal values, tasks and email."
+                        className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-100 transition-colors">
+                        <Download size={14} strokeWidth={2} aria-hidden /> Leads + CRM (JSON)
+                      </a>
+                      <a href="/api/admin/backup?full=1" download
+                        title="Everything: the above plus every chat transcript, the site settings and the member list. Bigger file, may take a minute."
+                        className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-100 transition-colors">
+                        <Download size={14} strokeWidth={2} aria-hidden /> Whole system (JSON)
+                      </a>
+                    </>
+                  )}
                   <button onClick={handleLogout}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-100 transition-colors text-left">
                     <LogOut size={14} strokeWidth={2} aria-hidden /> Sign out
