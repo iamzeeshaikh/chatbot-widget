@@ -672,9 +672,18 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
  */
 function hideContacts(rec: LeadRecord): LeadRecord {
   const softName = (n: string) => (/@/.test(n) || /\d{7,}/.test(n) ? (scrubText(n) ?? '') : n)
+  // A file the CUSTOMER sent is the one thing text-scrubbing cannot reach: a
+  // purchase order, a letterhead or a business card carries the address as
+  // pixels. So an agent gets the fact that a file exists — not the file, and
+  // not its name, which is itself often "john_+15125550142.pdf".
+  const hideFile = (f: { name: string; mime: string; size: number; url: string | null }) =>
+    ({ ...f, name: 'Attachment (hidden)', url: null })
+
   return {
     ...rec,
     contactsHidden: true,
+    // Widget uploads are the visitor's own files, so they go the same way.
+    attachments: [],
     contact: { name: softName(rec.contact.name), email: rec.contact.email ? HIDDEN_EMAIL : '', phone: rec.contact.phone ? HIDDEN_PHONE : '' },
     captured: { name: softName(rec.captured.name), email: rec.captured.email ? HIDDEN_EMAIL : '', phone: rec.captured.phone ? HIDDEN_PHONE : '' },
     quoteMessage: scrubText(rec.quoteMessage),
@@ -694,6 +703,7 @@ function hideContacts(rec: LeadRecord): LeadRecord {
         body: scrubText(e.email.body) ?? '',
         snippet: scrubText(e.email.snippet) ?? '',
       },
+      files: e.kind === 'email_in' && e.files ? e.files.map(hideFile) : e.files,
       inbound: e.inbound && {
         ...e.inbound,
         from: HIDDEN_EMAIL,
@@ -704,6 +714,10 @@ function hideContacts(rec: LeadRecord): LeadRecord {
         // is exactly where a customer's own phone number and address live.
         quoted: scrubText(e.inbound.quoted),
         snippet: scrubText(e.inbound.snippet) ?? '',
+        // Names too: a file arrives called "quote_john_+15125550142.pdf" often
+        // enough that leaving the name while hiding the file would be theatre.
+        attachments: e.inbound.attachments?.map((a) => ({ ...a, name: 'Attachment (hidden)' })),
+        skippedAttachments: e.inbound.skippedAttachments?.map((a) => ({ ...a, name: 'Attachment (hidden)' })),
       },
     })),
   }

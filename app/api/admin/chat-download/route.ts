@@ -118,7 +118,12 @@ export async function GET(req: NextRequest) {
     const time = formatTime(at)
 
     const file = parseAttachment(m.message)
-    if (file) items.push({ kind: 'file', side, who, time, name: file.name, url: file.url, mime: file.mime })
+    if (file && hideContacts) {
+      // The downloaded transcript must not carry a link to the visitor's own
+      // file either — the download is the copy that leaves the building.
+      items.push({ kind: 'msg', side, who, time, text: 'Attachment (hidden)' })
+    }
+    else if (file) items.push({ kind: 'file', side, who, time, name: file.name, url: file.url, mime: file.mime })
     else items.push({ kind: 'msg', side, who, time, text: (hideContacts ? scrubText(m.message) : m.message) ?? '' })
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { canSeeContacts } from '@/lib/pii'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
 import { supabase } from '@/lib/supabase'
 import { googleConfig, fetchThread, fetchAttachment, GmailAuthError, GmailScopeError } from '@/lib/gmail'
@@ -26,6 +27,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const member = await getMember(req)
   const access = await guardLeadAccess(member, id, 'email')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
+  // This pulls a file the CUSTOMER sent back out of Gmail. A member who is not
+  // allowed to see the customer's contact details is not allowed to fetch their
+  // documents either — that is where an address survives as pixels.
+  if (!canSeeContacts(access.member)) {
+    return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => ({}))
   const gmailId = String(body.gmailId ?? '').trim()
