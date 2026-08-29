@@ -93,10 +93,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, blocked: true }, { headers: corsHeaders })
     }
 
-    // Geo-block enforcement (defense-in-depth): a blocked South-Asian visitor on
-    // a packaging site must NEVER produce a live-visitor row, even if an old or
-    // cached widget keeps pinging. Country comes from the reliable Vercel edge
-    // header (ipapi fallback in dev). Sports sites are never blocked.
+    // Geo-block enforcement (defense-in-depth): a blocked South-Asian visitor
+    // must NEVER produce a live-visitor row, even if an old or cached widget
+    // keeps pinging. Country comes from the reliable Vercel edge header (ipapi
+    // fallback in dev). Which sites this covers is isWidgetBlocked's decision —
+    // packaging and, since 2026-08-29, sports.
     if (siteId) {
       const code = await resolveCountryCode(req.headers)
       if (isWidgetBlocked(siteId, code)) {

@@ -175,17 +175,27 @@ export function workspaceForHost(host: string | null | undefined): Workspace | n
 }
 
 // ── Widget geo-blocking ──────────────────────────────────────────────────────
-// The chat widget is hidden from visitors in these South Asian countries, but
-// ONLY on packaging sites. Sports sites are never affected. Because the decision
-// runs through siteWorkspace(), any site added to PACKAGING_SITES is covered
-// automatically. Codes are ISO 3166-1 alpha-2 (uppercase).
+// The chat widget is hidden from visitors in these South Asian countries.
+// Codes are ISO 3166-1 alpha-2 (uppercase).
+//
+// SPORTS JOINED PACKAGING ON 2026-08-29, at the owner's request. The five
+// sports sites sell uniforms to American teams; traffic from this region is
+// suppliers and agencies pitching, not customers, and every one of those chats
+// is an agent's time spent on nothing.
+//
+// Because the decision runs through siteWorkspace(), a site added to either
+// roster is covered automatically — there is no second list to remember.
 export const WIDGET_BLOCKED_COUNTRIES = new Set(['PK', 'IN', 'LK', 'BD', 'NP'])
 
 // Should the widget be hidden for a visitor from `countryCode` on `siteId`?
-// Only blocks packaging sites for blocked countries; unknown country ('') is
-// never blocked (default to showing — don't block on uncertainty).
+//
+// An UNKNOWN country ('') is never blocked. That is deliberate and worth
+// keeping: the country comes from the edge header, and when it is missing the
+// honest answer is "we don't know", not "assume the worst" — blocking on
+// uncertainty would quietly cost real customers whenever the header failed.
 export function isWidgetBlocked(siteId: string, countryCode: string): boolean {
   if (!countryCode) return false
-  if (siteWorkspace(siteId) !== 'packaging') return false
+  const ws = siteWorkspace(siteId)
+  if (ws !== 'packaging' && ws !== 'sports') return false
   return WIDGET_BLOCKED_COUNTRIES.has(countryCode.toUpperCase())
 }

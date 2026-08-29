@@ -39,9 +39,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ blocked: true }, { headers: corsHeaders })
   }
 
-  // Geo-gate: hide the widget for blocked South Asian countries on packaging
-  // sites only. Sports sites are never gated. The country comes from the Vercel
-  // edge header (reliable), falling back to ipapi only in local dev.
+  // Geo-gate: hide the widget for blocked South Asian countries. Packaging and
+  // sports both, since 2026-08-29 — the workspace check lives in
+  // isWidgetBlocked, so this stays one rule in one place. The country comes
+  // from the Vercel edge header (reliable), falling back to ipapi in local dev.
   //
   // `preview=1` (set by ?zeechat=preview in the widget) skips the geo-check so
   // the site owners, who sit inside the blocked region, can see their own
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
   // blocked visitor stays blocked whatever query string they pass.
   const preview = req.nextUrl.searchParams.get('preview') === '1'
   let blocked = false
-  if (!preview && siteWorkspace(siteId) === 'packaging') {
+  if (!preview) {
     const code = await resolveCountryCode(req.headers)
     blocked = isWidgetBlocked(siteId, code)
   }

@@ -4,6 +4,8 @@ import { generateReply, extractLeadFields } from '@/lib/gemini'
 import { getMode } from '@/lib/mode'
 import { maybeCaptureLead } from '@/lib/leadtracking'
 import { isBotOffBySchedule } from '@/lib/botschedule'
+import { isWidgetBlocked } from '@/lib/workspaces'
+import { resolveCountryCode } from '@/lib/geo'
 import { siteIdentityPrompt } from '@/lib/sitedomains'
 import { isBotEnabled, BOT_OFF_ACK_MESSAGE } from '@/lib/botflag'
 import { getBlockedIps, requestIp } from '@/lib/blocklist'
@@ -29,6 +31,20 @@ export async function POST(req: NextRequest) {
 
     if (!siteId || !messages || !sessionId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: corsHeaders })
+    }
+
+    // Geo-block, enforced HERE as well as at the widget and the visitor ping.
+    // The other two decide what a visitor SEES; this one decides what gets
+    // stored. A cached widget from before the block, or anyone posting straight
+    // at the endpoint, would otherwise still put a conversation in the database
+    // — which is the thing the block exists to stop. Silent, like the IP
+    // blocklist below: nothing is written and nothing is answered.
+    const geoCode = await resolveCountryCode(req.headers)
+    if (isWidgetBlocked(siteId, geoCode)) {
+      return new Response(null, {
+        status: 200,
+        headers: { ...corsHeaders, 'X-Bot-Silent': '1', 'Access-Control-Expose-Headers': 'X-Bot-Silent' },
+      })
     }
 
     // Admin IP blocklist: drop silently (same shape as the bot-silent response,
