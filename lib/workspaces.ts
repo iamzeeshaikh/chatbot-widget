@@ -87,13 +87,23 @@ export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'e
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders']),
-  // Sports is dormant, and was never the audience for any of this: no widget has
-  // run on its five sites since 2026-08-05, it has produced one lead ever, and
-  // its only member is a consumer Gmail account that cannot consent to our
-  // Internal OAuth app. It keeps chat, visitors, conversations and its own
-  // history — the things it actually had. (Chat is back on since 2026-08-13,
-  // which is what the PDF transcript download was asked for.)
-  sports: new Set<WorkspaceFeature>(['chatpdf']),
+  // Sports carries the CRM as of 2026-08-29, at the user's request. The reason
+  // it did not before was that it had nothing to run a CRM on: chat had been off
+  // on all five sites since 2026-08-05 and the workspace had produced one lead
+  // ever. Both facts changed — chat came back on 2026-08-13, and the Gmail quote
+  // intake for the five sports sites (its own script, its own mailbox; see
+  // scripts/sports-quote-intake-apps-script.gs) imported the real history the
+  // same day this went in: 28 quote leads reaching back to 11 Apr 2026.
+  //
+  // 'email' is deliberately still OFF, and it is the one item here that is not a
+  // policy decision: the Gmail integration signs in through an INTERNAL Google
+  // OAuth app, which only accounts inside the Workspace organisation can consent
+  // to. The sports member is a consumer Gmail account, so the Connect button
+  // would fail at Google's own consent screen, not in our code. It goes on the
+  // day that account moves into the organisation (or the OAuth app goes
+  // External and through verification) — not before, or it is a button that
+  // cannot work.
+  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {
