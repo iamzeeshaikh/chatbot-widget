@@ -9,7 +9,7 @@
 // A half-written email survives a reload — the draft is kept in localStorage per
 // lead, cleared only once the send actually succeeds.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   X, Send, TriangleAlert, Link2, Loader2, Plus, CornerUpLeft, Paperclip, FileText, Image as ImageIcon,
 } from 'lucide-react'
@@ -115,6 +115,33 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
     return () => { alive = false }
   }, [])
 
+  // The address that belongs to THIS lead's site. One matcher, used twice: to
+  // pick the default, and to say so in the list. Those two used to be able to
+  // disagree — the right address was chosen silently and the dropdown then
+  // showed five identical-looking options with nothing marking which one the
+  // lead came from, so the only way to know was to already know.
+  const siteAlias = useMemo(() => {
+    if (!status?.aliases.length) return null
+    const site = siteId.toLowerCase()
+    const name = siteName.toLowerCase().replace(/[^a-z]/g, '')
+    return status.aliases.find((a) => {
+      const local = a.email.split('@')[0].toLowerCase()
+      const domain = (a.email.split('@')[1] ?? '').toLowerCase().replace(/[^a-z]/g, '')
+      return domain.includes(site) || domain.includes(name) || local.includes(site)
+    }) ?? null
+  }, [status, siteId, siteName])
+
+  // That address first, the rest after. Every address stays available on
+  // purpose: the same customer asks about another sport, or a note goes out
+  // from the company's own address, and a From locked to one site would need a
+  // code change to escape. Ordering and labelling make the right one obvious
+  // without taking the others away.
+  const orderedAliases = useMemo(() => {
+    const all = status?.aliases ?? []
+    if (!siteAlias) return all
+    return [siteAlias, ...all.filter((a) => a.email !== siteAlias.email)]
+  }, [status, siteAlias])
+
   // Default the From to the alias that matches this lead's site, so a reply to a
   // Tube Packaging customer goes out from the Tube Packaging address rather than
   // whatever happens to be first.
@@ -123,18 +150,10 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
     seeded.current = true
     setDraft((cur) => {
       if (cur.from) return cur
-      const bySite = status.aliases.find((a) => {
-        const local = a.email.split('@')[0].toLowerCase()
-        const domain = (a.email.split('@')[1] ?? '').toLowerCase()
-        const site = siteId.toLowerCase()
-        const name = siteName.toLowerCase().replace(/[^a-z]/g, '')
-        return domain.replace(/[^a-z]/g, '').includes(site) || domain.replace(/[^a-z]/g, '').includes(name)
-          || local.includes(site)
-      })
       const fallback = status.aliases.find((a) => a.isDefault) ?? status.aliases.find((a) => a.isPrimary) ?? status.aliases[0]
-      return { ...cur, from: (bySite ?? fallback).email }
+      return { ...cur, from: (siteAlias ?? fallback).email }
     })
-  }, [status, siteId, siteName])
+  }, [status, siteAlias])
 
   // Persist the draft as it is typed.
   const save = useCallback((next: Draft) => {
@@ -318,9 +337,10 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                 <select value={draft.from} onChange={(e) => set({ from: e.target.value })}
                   aria-label="Send from"
                   className="w-full bg-transparent border-0 px-0 py-0 text-xs font-medium text-gray-900 cursor-pointer focus:outline-none">
-                  {status.aliases.map((a) => (
+                  {orderedAliases.map((a) => (
                     <option key={a.email} value={a.email} className="bg-white text-gray-800">
-                      {a.displayName ? `${a.displayName} <${a.email}>` : a.email}
+                      {(a.displayName ? `${a.displayName} <${a.email}>` : a.email)
+                        + (a.email === siteAlias?.email ? `  —  ${siteName}'s own address` : '')}
                     </option>
                   ))}
                 </select>
