@@ -214,6 +214,11 @@ export default function MembersPage() {
                           <span className="text-xs text-gray-500">All sites</span>
                         ) : (
                           <div className="flex flex-wrap gap-1.5 max-w-md">
+                            <p className="w-full text-[11px] text-gray-500 mb-0.5">
+                              {editForm.sites.length === 0
+                                ? 'Nothing picked — this member covers every site, including any added later.'
+                                : `Only these ${editForm.sites.length} site${editForm.sites.length === 1 ? '' : 's'}. Clear them all to cover every site.`}
+                            </p>
                             {sites.map((s) => {
                               const on = editForm.sites.includes(s.site_id)
                               return (
@@ -258,7 +263,14 @@ export default function MembersPage() {
                         {m.role === 'admin' ? (
                           <span className="text-xs text-gray-500">All sites</span>
                         ) : m.assigned_sites.length === 0 ? (
-                          <span className="text-xs text-gray-500">None assigned</span>
+                          /* An empty list means EVERY site in the workspace, not
+                             none — including any site added later. It read
+                             "None assigned", which described the stored value
+                             and the opposite of what the member actually sees. */
+                          <span className="text-xs text-gray-500"
+                            title="No sites were picked, so this member covers every site in the workspace — including any added later. Pick sites to narrow them.">
+                            All sites <span className="text-gray-400">(nothing picked)</span>
+                          </span>
                         ) : (
                           <div className="flex flex-wrap gap-1">
                             {m.assigned_sites.map((id) => (
