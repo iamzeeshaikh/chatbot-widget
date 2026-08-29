@@ -2598,7 +2598,13 @@ export default function Dashboard() {
                                           contact lives in chat_logs, not the leads table, so the
                                           edit/delete endpoints have no row to touch. Edit on the CRM
                                           record page instead. */}
-                                      {!lead.id.startsWith('cap-') && (<>
+                                      {/* Editing and deleting a lead are admin-only on the
+                                          server (both endpoints refuse a standard member).
+                                          They are hidden here as well, because a button that
+                                          fails when pressed is worse than no button: an agent
+                                          reported seeing "Delete? Yes" on their own leads and
+                                          reasonably assumed they could use it. */}
+                                      {userRole === 'admin' && !lead.id.startsWith('cap-') && (<>
                                       <button onClick={() => startEditLead(lead)} className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-gray-200 rounded-lg transition-colors" title="Edit"><Pencil size={13} strokeWidth={2} aria-hidden /></button>
                                       <button onClick={() => setConfirmLeadDeleteId(lead.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors" title="Delete"><Trash2 size={13} strokeWidth={2} aria-hidden /></button>
                                       </>)}
