@@ -658,13 +658,15 @@ export default function Dashboard() {
       openConversationBySession({ sessionId: urlSession, siteId: urlSite })
       return
     }
-    if (urlTab === 'overview' || urlTab === 'conversations' || urlTab === 'visitors' || urlTab === 'billing' || urlTab === 'performance') {
+    const billingAllowed = userRole === 'admin'
+    if ((urlTab === 'overview' || urlTab === 'conversations' || urlTab === 'visitors' || urlTab === 'performance')
+      || (urlTab === 'billing' && billingAllowed)) {
       setTab(urlTab)
       return
     }
     const saved = localStorage.getItem('zee-dash-tab')
     if (saved === 'overview' || saved === 'conversations' || saved === 'visitors'
-      || (saved === 'billing' && userSites.some((id) => LEAD_TRACKED_SITES.includes(id)))
+      || (saved === 'billing' && billingAllowed && userSites.some((id) => LEAD_TRACKED_SITES.includes(id)))
       || (saved === 'performance' && userRole === 'admin')) {
       setTab(saved as typeof tab)
     }
@@ -798,6 +800,7 @@ export default function Dashboard() {
         return
       }
       setSelectedSession(null)
+      if (t === 'billing' && userRole !== 'admin') return
       if (t === 'overview' || t === 'conversations' || t === 'visitors' || t === 'billing' || t === 'performance') setTab(t)
     }
     window.addEventListener('popstate', onPop)
@@ -2140,7 +2143,11 @@ export default function Dashboard() {
               {roleVisitors.length > 999 ? '999+' : roleVisitors.length}
             </span>
           </button>
-          {hasTrackedSite && (
+          {/* Billing is the month's revenue view and it carries the CSV export
+              of every lead — an owner's page, not an agent's. Admins only here,
+              in the view below, and in the endpoint, so there is no address bar
+              to type past. */}
+          {hasTrackedSite && userRole === 'admin' && (
             <button onClick={() => setTab('billing')} className={`${NAV_TAB} ${tab === 'billing' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Billing</button>
           )}
           {userRole === 'admin' && (
@@ -3603,7 +3610,7 @@ export default function Dashboard() {
       })()}
 
       {/* ── BILLING TAB ── */}
-      {tab === 'billing' && (
+      {tab === 'billing' && userRole === 'admin' && (
         <div className="p-6 max-w-5xl mx-auto animate-in">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
             <div>

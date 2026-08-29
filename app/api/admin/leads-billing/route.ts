@@ -244,25 +244,46 @@ export async function GET(req: NextRequest) {
   const byStatus: Record<string, number> = {}
   for (const l of leads) byStatus[l.status] = (byStatus[l.status] ?? 0) + 1
 
-  // Masked LAST, after the dedupe: billing counts a person once per site by
-  // their email, so the real address has to survive until the counting is done.
-  // Mask earlier and every lead would look like the same person.
-  const outLeads = canSeeContacts(member)
-    ? leads
-    : leads.map((l) => ({
-        ...l,
-        name: l.name && (/@/.test(l.name) || /\d{7,}/.test(l.name)) ? scrubText(l.name) : l.name,
-        email: maskEmail(l.email) ?? '',
-        phone: maskPhone(l.phone),
-        // The original form email rides along on the row so the Billing tab can
-        // show the quote behind a lead. Masking the columns and forgetting this
-        // was a real leak, caught by scratch/pii-leak-probe.mjs: 20 addresses
-        // still readable in a response whose `email` field said "hidden".
-        // Only quote rows carry it, hence the guard.
-        ...('quote_message' in l
-          ? { quote_message: scrubText((l as { quote_message: string | null }).quote_message) }
-          : {}),
+  // ── What leaves this endpoint, and to whom ────────────────────────────────
+  // This is the Billing dataset: every lead of the month with its contact, its
+  // status and the quote behind it — in other words, the customer list, and the
+  // exact thing the CSV button downloads. From 2026-08-29 it is ADMIN-ONLY.
+  //
+  // It cannot simply 403 for everyone else, because the Overview tiles are
+  // computed from the same fold (Total / Today / This Week / by-site / the
+  // 7-day chart). Those need only WHEN a lead landed and WHICH site it was on.
+  // So a non-admin gets exactly those two fields per row and nothing else — the
+  // counts still add up, and there is no list to take away.
+  //
+  // Masked LAST, after the dedupe, for the admin path: billing counts a person
+  // once per site by their email, so the real address has to survive until the
+  // counting is done.
+  const isAdmin = member.role === 'admin'
+  const outLeads = !isAdmin
+    ? leads.map((l) => ({
+        session_id: l.session_id, site_id: l.site_id, site_name: l.site_name,
+        captured_at: l.captured_at, source: l.source,
       }))
+    : canSeeContacts(member)
+      ? leads
+      : leads.map((l) => ({
+          ...l,
+          name: l.name && (/@/.test(l.name) || /\d{7,}/.test(l.name)) ? scrubText(l.name) : l.name,
+          email: maskEmail(l.email) ?? '',
+          phone: maskPhone(l.phone),
+          ...('quote_message' in l
+            ? { quote_message: scrubText((l as { quote_message: string | null }).quote_message) }
+            : {}),
+        }))
 
-  return NextResponse.json({ from, to, total: leads.length, billable, billableBase, prevTotal, byStatus, leads: outLeads, bySite, trackedInScope })
+  return NextResponse.json({
+    from, to, total: leads.length,
+    // The money-shaped numbers are the Billing tab's own; Overview never reads
+    // them, so a non-admin has no reason to receive them either.
+    billable: isAdmin ? billable : 0,
+    billableBase: isAdmin ? billableBase : 0,
+    prevTotal: isAdmin ? prevTotal : 0,
+    byStatus: isAdmin ? byStatus : {},
+    leads: outLeads, bySite, trackedInScope,
+  })
 }
