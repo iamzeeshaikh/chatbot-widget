@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSession } from '@/lib/auth'
+import { canSeeContacts, scrubText } from '@/lib/pii'
 import { asUtcIso } from '@/lib/visitor'
 import { VISIBLE_CONTROL_ROLES_IN } from '@/lib/controlroles'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest) {
   if (!(await canAccessSession(member, sessionId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
+  const hideContacts = !canSeeContacts(member)
   const format = hasFeature(member.workspace, 'chatpdf') && req.nextUrl.searchParams.get('format') !== 'html'
     ? 'pdf'
     : 'html'
@@ -101,7 +103,10 @@ export async function GET(req: NextRequest) {
     if (m.role === LEAD_CAPTURE_ROLE) {
       const cap = parseLeadCapture(m.message)
       if (cap) {
-        const bits = [cap.name, cap.email, cap.phone].filter(Boolean).map(String)
+        // A downloaded transcript is the one artefact that leaves the dashboard
+        // entirely, so it gets the same treatment as the screen — the captured
+        // contact line is the name only for a member who may not see contacts.
+        const bits = (hideContacts ? [cap.name] : [cap.name, cap.email, cap.phone]).filter(Boolean).map(String)
         items.push({ kind: 'marker', text: `Lead captured${bits.length ? ' — ' + bits.join(' · ') : ''}` })
       }
       continue
@@ -114,7 +119,7 @@ export async function GET(req: NextRequest) {
 
     const file = parseAttachment(m.message)
     if (file) items.push({ kind: 'file', side, who, time, name: file.name, url: file.url, mime: file.mime })
-    else items.push({ kind: 'msg', side, who, time, text: m.message ?? '' })
+    else items.push({ kind: 'msg', side, who, time, text: (hideContacts ? scrubText(m.message) : m.message) ?? '' })
   }
 
   const exportedAt = formatDateTime(new Date().toISOString())

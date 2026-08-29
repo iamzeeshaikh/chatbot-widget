@@ -402,11 +402,16 @@ export default function LeadRecordPage() {
             <div className="divide-y divide-gray-100">
               <InlineField label="Name" value={record.contact.name} placeholder="Add a name"
                 overridden={record.overriddenFields.includes('name')} onSave={(v) => saveField('name', v)} />
+              {/* Masked for a viewer who may not see contacts: no mailto/tel
+                  link (there is nothing to open) and not editable. Emailing
+                  still works — the server addresses it from its own rows. */}
               <InlineField label="Email" value={record.contact.email} placeholder="Add an email"
-                href={record.contact.email ? `mailto:${record.contact.email}` : undefined}
+                href={record.contact.email && !record.contactsHidden ? `mailto:${record.contact.email}` : undefined}
+                readOnly={record.contactsHidden}
                 overridden={record.overriddenFields.includes('email')} onSave={(v) => saveField('email', v)} />
               <InlineField label="Phone" value={record.contact.phone} placeholder="Add a phone number"
-                href={record.contact.phone ? `tel:${record.contact.phone.replace(/[^\d+]/g, '')}` : undefined}
+                href={record.contact.phone && !record.contactsHidden ? `tel:${record.contact.phone.replace(/[^\d+]/g, '')}` : undefined}
+                readOnly={record.contactsHidden}
                 overridden={record.overriddenFields.includes('phone')} onSave={(v) => saveField('phone', v)} />
             </div>
 
@@ -701,6 +706,7 @@ export default function LeadRecordPage() {
           leadId={record.id}
           leadEmail={record.contact.email}
           leadName={record.contact.name}
+          contactsHidden={record.contactsHidden}
           siteId={record.siteId}
           siteName={record.siteName}
           replyTo={replyTo}

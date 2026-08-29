@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSession } from '@/lib/auth'
+import { canSeeContacts, scrubText } from '@/lib/pii'
 import { asUtcIso } from '@/lib/visitor'
 import { VISIBLE_CONTROL_ROLES_IN } from '@/lib/controlroles'
 import { readTyping, VISITOR_TYPING_KEY } from '@/lib/typing'
@@ -48,8 +49,13 @@ export async function GET(req: NextRequest) {
 
   // Normalise naive-UTC timestamps so bubble times / date separators render in
   // the correct timezone (a bare timestamp was misread as local, skewing hours).
+  // A transcript is whatever the visitor typed, and visitors type their own
+  // address and number into chat all the time — so for a member who may not see
+  // contacts the message text is scrubbed, not just the lead's fields.
+  const hide = !canSeeContacts(member)
   const messages = (data ?? []).map((m) => ({
     ...m,
+    message: hide ? scrubText(m.message) : m.message,
     author: m.role === 'admin' ? (authorByAt[m.created_at] ?? null) : null,
     created_at: asUtcIso(m.created_at),
   }))

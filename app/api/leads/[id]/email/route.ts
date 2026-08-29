@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
+import { leadRecipient } from '@/lib/leadrecord'
+import { canSeeContacts } from '@/lib/pii'
 import { googleConfig, sendEmail, GmailAuthError, configProblem } from '@/lib/gmail'
 import { threadContextFor } from '@/lib/emailsweep'
 import { supabase } from '@/lib/supabase'
@@ -60,12 +62,30 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!text.trim()) return NextResponse.json({ error: 'The message is empty.' }, { status: 400 })
   if (text.length > MAX_BODY) return NextResponse.json({ error: 'That message is too long to send.' }, { status: 400 })
 
-  const toList = parseAddressList(to)
+  // WHERE THIS EMAIL IS ALLOWED TO GO, for a member who may not see contacts:
+  // to the lead, and nowhere else. The recipient is read from our own rows, not
+  // from the request — the browser was served a masked address and could
+  // otherwise post any address it liked. CC is dropped for the same reason: a
+  // CC to themselves would deliver a message whose To: header is the very
+  // address they are not allowed to read.
+  const canSee = canSeeContacts(access.member)
+  let toValue = to
+  let ccValue = cc
+  if (!canSee) {
+    const real = await leadRecipient(id)
+    if (!real) {
+      return NextResponse.json({ error: 'This lead has no email address on file, so it cannot be emailed.' }, { status: 400 })
+    }
+    toValue = real
+    ccValue = ''
+  }
+
+  const toList = parseAddressList(toValue)
   if (!toList.ok || toList.list.length === 0) {
     return NextResponse.json({ error: toList.ok ? 'A recipient is required.' : `"${toList.bad}" is not a valid email address.` }, { status: 400 })
   }
-  if (cc) {
-    const ccList = parseAddressList(cc)
+  if (ccValue) {
+    const ccList = parseAddressList(ccValue)
     if (!ccList.ok) return NextResponse.json({ error: `"${ccList.bad}" is not a valid CC address.` }, { status: 400 })
   }
 
@@ -100,7 +120,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   let sent
   try {
     sent = await sendEmail(access.member.email, cfg, {
-      from, to: toList.list.join(', '), cc: cc || undefined, subject, body: text,
+      from, to: toList.list.join(', '), cc: ccValue || undefined, subject, body: text,
       threadId: thread?.threadId,
       inReplyTo: thread?.inReplyTo,
       references: thread?.references,
@@ -121,7 +141,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     sentBy: access.member.email,
     from,
     to: toList.list.join(', '),
-    cc: cc || undefined,
+    cc: ccValue || undefined,   // what was actually sent, not what was asked for
     subject,
     body: text,
     snippet: makeSnippet(text),

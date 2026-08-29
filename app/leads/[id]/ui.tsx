@@ -106,12 +106,16 @@ export function CopyButton({ value, label, className = '' }: { value: string; la
 // Reads as a value, not as a form control: no permanent input chrome. The edit
 // affordance only appears on hover / keyboard focus, and the whole row is a
 // click target for editing.
-export function InlineField({ label, value, placeholder, href, overridden, onSave }: {
+export function InlineField({ label, value, placeholder, href, overridden, readOnly, onSave }: {
   label: string
   value: string
   placeholder: string
   href?: string
   overridden?: boolean
+  /** Shown but not editable — a value this viewer is not allowed to read
+   *  (see lib/pii.ts) must not be overwritable either, or an agent could
+   *  replace a masked address with one of their own. */
+  readOnly?: boolean
   onSave: (next: string) => Promise<void> | void
 }) {
   const [editing, setEditing] = useState(false)
@@ -122,6 +126,7 @@ export function InlineField({ label, value, placeholder, href, overridden, onSav
   // Seeded when editing STARTS rather than synced from the prop: a background
   // refresh landing mid-keystroke must never overwrite what is being typed.
   function startEdit() {
+    if (readOnly) return
     setDraft(value)
     setEditing(true)
   }

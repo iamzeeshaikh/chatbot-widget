@@ -36,6 +36,7 @@ import {
   type CrmEmailInEntry,
 } from './emailreply'
 import { signAttachments, type EmailAttachment } from './emailattach'
+import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 
 export type LeadKind = 'chat' | 'quote' | 'checkout'
 
@@ -85,6 +86,10 @@ export interface LeadRecord {
   hasConversation: boolean
   contact: { name: string; email: string; phone: string }
   captured: { name: string; email: string; phone: string }
+  /** True when this viewer may not see the address or number (see lib/pii.ts).
+   *  The values above are already masked; this only tells the UI to stop
+   *  rendering them as mailto:/tel: links nobody can use. */
+  contactsHidden?: boolean
   overriddenFields: string[]
   owner: string | null
   stage: CrmStage
@@ -200,6 +205,33 @@ export async function writeControlRow(
 }
 
 // ── The record ───────────────────────────────────────────────────────────────
+/**
+ * The lead's REAL email address, for the server to send to.
+ *
+ * Needed because an agent who may not see contacts is served a masked address,
+ * so the recipient the browser posts back is "•••••• hidden" — the send has to
+ * resolve the real one here rather than trust the request. That is the whole
+ * point: the CRM can email someone the agent cannot read the address of.
+ */
+export async function leadRecipient(id: string): Promise<string | null> {
+  const resolved = await resolveLeadSite(id)
+  if (resolved?.lead?.email) return resolved.lead.email.trim() || null
+
+  // A chat lead's address lives in its control rows; ascending, so the newest
+  // wins — the same fold the record page uses.
+  const { data } = await supabase.from('chat_logs')
+    .select('role, message, created_at')
+    .eq('session_id', id)
+    .in('role', [CONTACT_ROLE, LEAD_CAPTURE_ROLE])
+    .order('created_at', { ascending: true })
+  let email = ''
+  for (const r of data ?? []) {
+    if (r.role === CONTACT_ROLE) { const c = parseContact(r.message); if (c.email) email = c.email }
+    else { const c = parseLeadCapture(r.message); if (c?.email) email = c.email }
+  }
+  return email.trim() || null
+}
+
 export async function loadLeadRecord(member: Member, id: string): Promise<LeadRecord | null> {
   const resolved = await resolveLeadSite(id)
   if (!resolved) return null
@@ -576,7 +608,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const openTasks = liveTasks.filter((t) => t.status === 'open').sort(byDueAsc)
   const doneTasks = liveTasks.filter((t) => t.status === 'done').sort(byCompletedDesc)
 
-  return {
+  const record: LeadRecord = {
     id,
     siteId,
     siteName,
@@ -614,6 +646,66 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     timeline,
     assignableMembers: Array.from(assignable).sort(),
     messageCount: realMessages.length,
+  }
+
+  return canSeeContacts(member) ? record : hideContacts(record)
+}
+
+/**
+ * The record as an agent who may not see contacts gets it.
+ *
+ * Every field that can carry an address or a number, not just the two obvious
+ * ones. The list was built by reading the payload rather than by guessing, and
+ * these are the ones that actually carry it:
+ *   • contact / captured — the columns themselves, and the NAME, which falls
+ *     back to the email whenever a lead arrived without one
+ *   • quoteMessage — the entire original form email, "Email: … Phone: …" and all
+ *   • notes — free text somebody may well have pasted an address into
+ *   • timeline messages — a chat transcript is whatever the visitor typed
+ *   • sent email — `to`, `cc`, subject and body (the body carries the quoted
+ *     chain); `from` is OUR OWN alias and stays, since the agent picks it
+ *   • inbound replies — `from` is the customer, and the body is theirs
+ *   • related leads — the same person's other leads, matched on the contact
+ *
+ * The stored data is untouched. This is a read edge: an admin still sees all of
+ * it, and nothing here is destructive.
+ */
+function hideContacts(rec: LeadRecord): LeadRecord {
+  const softName = (n: string) => (/@/.test(n) || /\d{7,}/.test(n) ? (scrubText(n) ?? '') : n)
+  return {
+    ...rec,
+    contactsHidden: true,
+    contact: { name: softName(rec.contact.name), email: rec.contact.email ? HIDDEN_EMAIL : '', phone: rec.contact.phone ? HIDDEN_PHONE : '' },
+    captured: { name: softName(rec.captured.name), email: rec.captured.email ? HIDDEN_EMAIL : '', phone: rec.captured.phone ? HIDDEN_PHONE : '' },
+    quoteMessage: scrubText(rec.quoteMessage),
+    notes: rec.notes.map((n) => ({ ...n, body: scrubText(n.body) ?? '' })),
+    related: rec.related.map((r) => ({
+      ...r, name: r.name ? softName(r.name) : r.name, email: maskEmail(r.email), phone: maskPhone(r.phone),
+    })),
+    timeline: rec.timeline.map((e) => ({
+      ...e,
+      title: scrubText(e.title) ?? '',
+      body: e.body === undefined ? undefined : (scrubText(e.body) ?? ''),
+      email: e.email && {
+        ...e.email,
+        to: HIDDEN_EMAIL,
+        cc: e.email.cc ? HIDDEN_EMAIL : e.email.cc,
+        subject: scrubText(e.email.subject) ?? '',
+        body: scrubText(e.email.body) ?? '',
+        snippet: scrubText(e.email.snippet) ?? '',
+      },
+      inbound: e.inbound && {
+        ...e.inbound,
+        from: HIDDEN_EMAIL,
+        to: HIDDEN_EMAIL,
+        subject: scrubText(e.inbound.subject) ?? '',
+        body: scrubText(e.inbound.body) ?? '',
+        // The quoted chain and the signature the reply was trimmed of — which
+        // is exactly where a customer's own phone number and address live.
+        quoted: scrubText(e.inbound.quoted),
+        snippet: scrubText(e.inbound.snippet) ?? '',
+      },
+    })),
   }
 }
 

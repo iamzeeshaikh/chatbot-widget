@@ -92,5 +92,8 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  return NextResponse.json({ visitors, blockedIps: member.role === 'admin' ? Array.from(blockedIps).sort() : [] })
+  // The blocklist goes to every member now that any of them can set one —
+  // withholding it would have left an agent's own block invisible to them, and
+  // the list is already scoped to their workspace.
+  return NextResponse.json({ visitors, blockedIps: Array.from(blockedIps).sort() })
 }

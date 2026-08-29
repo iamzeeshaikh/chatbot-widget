@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteOfSession, canAccessSite } from '@/lib/auth'
+import { canSeeContacts, HIDDEN_EMAIL, HIDDEN_PHONE } from '@/lib/pii'
 import { unpackVisitor, CONTACT_ROLE, parseContact, EMPTY_CONTACT, VisitorContact, TAGS_ROLE, parseTags, normalizeTags, asUtcIso } from '@/lib/visitor'
 import { isControlRole } from '@/lib/controlroles'
 
@@ -113,11 +114,18 @@ export async function GET(req: NextRequest) {
     path = [{ url: packed.page_url, title: packed.page_title, at: lastSeen }]
   }
 
+  // The visitor panel shows the same contact block the record does — and this
+  // one is filled in from what the visitor typed in chat (fillContactFromMessages
+  // above), so it finds an address even when no lead was ever captured.
+  const shownContact = canSeeContacts(member)
+    ? contact
+    : { ...contact, email: contact.email ? HIDDEN_EMAIL : '', phone: contact.phone ? HIDDEN_PHONE : '' }
+
   return NextResponse.json({
     detail: {
       session_id: sessionId,
       site_id: siteId,
-      contact,
+      contact: shownContact,
       tags,
       stats: {
         visits: packed.visits,

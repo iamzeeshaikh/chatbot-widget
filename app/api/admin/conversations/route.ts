@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import { canSeeContacts, maskEmail, scrubText } from '@/lib/pii'
 import type { Workspace } from '@/lib/workspaces'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
 import { deriveAssignments, ASSIGNMENT_ROLE } from '@/lib/assignment'
@@ -45,11 +46,25 @@ export async function GET(req: NextRequest) {
   // which is what the live dashboard needs (older ones live in Visitors/history).
   const summaryRes = await supabase.rpc('session_message_summaries', { since: SINCE })
     .order('last_at', { ascending: false })
+  // Both paths go out through the same masking, so a fallback to the legacy
+  // scan cannot quietly serve what the fast path hides. The preview is the last
+  // thing said in the chat — often the visitor's own address — and the lead
+  // badge carries the address outright.
+  const hide = !canSeeContacts(member)
+  const out = <T extends { sessions: { preview: string; lead: { name: string | null; email: string | null } | null }[] }>(r: T): T => {
+    if (!hide) return r
+    for (const s of r.sessions) {
+      s.preview = scrubText(s.preview) ?? ''
+      if (s.lead) s.lead.email = maskEmail(s.lead.email)
+    }
+    return r
+  }
+
   if (!summaryRes.error && Array.isArray(summaryRes.data)) {
-    return NextResponse.json(await fastPath(summaryRes.data, scope, SINCE, member.workspace))
+    return NextResponse.json(out(await fastPath(summaryRes.data, scope, SINCE, member.workspace)))
   }
   console.warn('[conversations] session_message_summaries RPC unavailable, using legacy scan:', summaryRes.error?.message)
-  return NextResponse.json(await legacyPath(scope, SINCE, member.workspace))
+  return NextResponse.json(out(await legacyPath(scope, SINCE, member.workspace)))
 }
 
 // ── Control-row guard for the DB-side summary ────────────────────────────────

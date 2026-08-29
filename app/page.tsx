@@ -3253,9 +3253,11 @@ export default function Dashboard() {
                     </dl>
                   </section>
 
-                  {/* Ban a spam/bot visitor by IP (admin only). Blocks them across
-                      ALL sites — they can't load the widget or send messages. */}
-                  {userRole === 'admin' && visitorDetail?.technical.ip && (
+                  {/* Ban a spam/bot visitor by IP. Open to agents too, since
+                      dealing with a spammer is their job and waiting for an
+                      admin leaves it on the widget; the block is scoped to this
+                      workspace's own sites and is reversible by anyone here. */}
+                  {visitorDetail?.technical.ip && (
                     <section>
                       {blockedIps.includes(visitorDetail.technical.ip) ? (
                         <button onClick={() => toggleIpBlock(visitorDetail!.technical.ip!, false)}
@@ -3404,7 +3406,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            {userRole === 'admin' && blockedIps.length > 0 && (
+            {blockedIps.length > 0 && (
               <div className="flex items-center gap-1.5 flex-wrap mb-3">
                 <span className="text-[11px] text-gray-500 font-medium"><span className="inline-flex items-center gap-1"><Ban size={11} strokeWidth={2} aria-hidden /> Blocked IPs:</span></span>
                 {blockedIps.map((ip) => (

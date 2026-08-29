@@ -2,11 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { setIpBlocked, getBlockedIps } from '@/lib/blocklist'
 
-// Block / unblock a visitor IP (admin only — blocking is destructive enough
-// that standard agents shouldn't wield it). GET lists the current blocklist.
+// Block / unblock a visitor IP. Open to every member of the workspace since
+// 2026-08-29, at the owner's request: dealing with an abusive visitor is the
+// agent's job, and making them wait for an admin is how spam stays on the
+// widget all afternoon.
+//
+// What keeps that safe is the scoping, not the role: a block carries the
+// member's WORKSPACE, so it can only ever affect that workspace's own sites,
+// and it is recorded against the member who set it. It is also reversible by
+// anyone who can set it.
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
-  if (!member || member.role !== 'admin') return NextResponse.json({ ips: [] }, { status: member ? 403 : 401 })
+  if (!member) return NextResponse.json({ ips: [] }, { status: 401 })
   // This workspace's own blocks only — a sports admin never sees or manages a
   // packaging block, and vice versa.
   return NextResponse.json({ ips: Array.from(await getBlockedIps(member.workspace)).sort() })
@@ -15,7 +22,6 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (member.role !== 'admin') return NextResponse.json({ error: 'Admins only' }, { status: 403 })
 
   const { ip, block } = await req.json()
   const cleanIp = typeof ip === 'string' ? ip.trim() : ''

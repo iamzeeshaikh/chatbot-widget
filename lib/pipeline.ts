@@ -36,6 +36,7 @@ import {
 } from './crm'
 import { CRM_TASK_ROLE, parseCrmTask, taskBucket } from './tasks'
 import { parseCrmEmailIn, parseCrmEmailRead } from './emailreply'
+import { canSeeContacts, maskEmail, scrubText } from './pii'
 import type { LeadKind } from './leadrecord'
 
 const CONTROL_ROW_CAP = 30000
@@ -302,6 +303,18 @@ export async function loadPipeline(
   if (filters.stage && filters.stage !== 'all') list = list.filter((c) => c.stage === filters.stage)
 
   for (const c of list) if (!c.name) c.name = c.email || 'Unnamed lead'
+
+  // Contacts are masked for a member who may not see them — INCLUDING the name,
+  // which falls back to the email or phone whenever a lead arrived without one.
+  // Masking the email column alone would have left the address sitting in the
+  // card's title, which is the first thing on the board.
+  if (!canSeeContacts(member)) {
+    for (const c of list) {
+      const nameLooksLikeContact = /@/.test(c.name) || /\d{7,}/.test(c.name)
+      if (nameLooksLikeContact) c.name = scrubText(c.name) || 'Unnamed lead'
+      c.email = maskEmail(c.email)
+    }
+  }
 
   // ── columns: exact aggregates over EVERY matching lead ─────────────────────
   const perColumn = opts.perColumn ?? CARDS_PER_COLUMN

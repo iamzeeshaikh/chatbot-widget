@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, LEAD_TRACKED_SITES } from '@/lib/leadtracking'
 import { LEAD_STATUS_ROLE, parseLeadStatus, type LeadStatus } from '@/lib/leadstatus'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
@@ -243,5 +244,25 @@ export async function GET(req: NextRequest) {
   const byStatus: Record<string, number> = {}
   for (const l of leads) byStatus[l.status] = (byStatus[l.status] ?? 0) + 1
 
-  return NextResponse.json({ from, to, total: leads.length, billable, billableBase, prevTotal, byStatus, leads, bySite, trackedInScope })
+  // Masked LAST, after the dedupe: billing counts a person once per site by
+  // their email, so the real address has to survive until the counting is done.
+  // Mask earlier and every lead would look like the same person.
+  const outLeads = canSeeContacts(member)
+    ? leads
+    : leads.map((l) => ({
+        ...l,
+        name: l.name && (/@/.test(l.name) || /\d{7,}/.test(l.name)) ? scrubText(l.name) : l.name,
+        email: maskEmail(l.email) ?? '',
+        phone: maskPhone(l.phone),
+        // The original form email rides along on the row so the Billing tab can
+        // show the quote behind a lead. Masking the columns and forgetting this
+        // was a real leak, caught by scratch/pii-leak-probe.mjs: 20 addresses
+        // still readable in a response whose `email` field said "hidden".
+        // Only quote rows carry it, hence the guard.
+        ...('quote_message' in l
+          ? { quote_message: scrubText((l as { quote_message: string | null }).quote_message) }
+          : {}),
+      }))
+
+  return NextResponse.json({ from, to, total: leads.length, billable, billableBase, prevTotal, byStatus, leads: outLeads, bySite, trackedInScope })
 }

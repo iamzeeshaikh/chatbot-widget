@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { CONTACT_ROLE, parseContact } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
 
@@ -123,6 +124,19 @@ export async function GET(req: NextRequest) {
   const merged = [...leads, ...captureLeads].sort((a, b) =>
     String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
   )
+
+  // Recent Leads is a list of names and sites for a member who may not see
+  // contacts — the address and number are masked here, on the way out, and the
+  // NAME is scrubbed too because a lead that arrived without one is titled by
+  // its own email address.
+  if (!canSeeContacts(member)) {
+    for (const l of merged as Array<Record<string, unknown>>) {
+      if (typeof l.name === 'string' && (/@/.test(l.name) || /\d{7,}/.test(l.name))) l.name = scrubText(l.name)
+      if ('email' in l) l.email = maskEmail(l.email as string | null)
+      if ('phone' in l) l.phone = maskPhone(l.phone as string | null)
+      if (typeof l.message === 'string') l.message = scrubText(l.message)
+    }
+  }
 
   return NextResponse.json({ leads: merged })
 }

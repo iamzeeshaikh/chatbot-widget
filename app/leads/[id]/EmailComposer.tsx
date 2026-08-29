@@ -40,12 +40,18 @@ export interface ReplyTo { replyToGmailId: string; to: string; subject: string }
 
 const draftKey = (leadId: string) => `zee-email-draft-${leadId}`
 
-export default function EmailComposer({ leadId, leadEmail, leadName, siteId, siteName, onClose, onSent, replyTo }: {
+export default function EmailComposer({ leadId, leadEmail, leadName, siteId, siteName, contactsHidden, onClose, onSent, replyTo }: {
   leadId: string
   leadEmail: string
   leadName: string
   siteId: string
   siteName: string
+  /** This viewer may not read the customer's address (lib/pii.ts). The To box
+   *  shows the masked value and cannot be typed in; the SERVER addresses the
+   *  message from its own rows, so the send still goes to the right person.
+   *  Cc is withheld entirely — a Cc to themselves would deliver a message whose
+   *  To: header is the address they are not allowed to read. */
+  contactsHidden?: boolean
   onClose: () => void
   onSent: () => void
   replyTo?: ReplyTo | null
@@ -352,8 +358,10 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
               <Row label="To">
                 <div className="flex items-center gap-1.5 w-full">
                   <input value={draft.to} onChange={(e) => set({ to: e.target.value })} aria-label="To"
+                    readOnly={contactsHidden}
+                    title={contactsHidden ? 'This lead\u2019s address is hidden. The message still goes to them.' : undefined}
                     className="flex-1 min-w-0 bg-transparent border-0 px-0 py-0 text-xs text-gray-700 focus:outline-none focus:text-gray-900" />
-                  {!showCc && (
+                  {!showCc && !contactsHidden && (
                     <button type="button" onClick={() => setShowCc(true)}
                       className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-medium text-gray-500 hover:text-gray-900 px-1.5 py-0.5 rounded-md hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                       <Plus size={9} strokeWidth={2.5} aria-hidden /> Cc
@@ -362,7 +370,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                 </div>
               </Row>
 
-              {showCc && (
+              {showCc && !contactsHidden && (
                 <Row label="Cc">
                   <input value={draft.cc} onChange={(e) => set({ cc: e.target.value })} autoFocus
                     placeholder="name@example.com" aria-label="Cc"
