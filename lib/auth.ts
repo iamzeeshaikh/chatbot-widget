@@ -154,7 +154,18 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
 // The set of sites a member may access. Admins see every site in their
 // workspace; standard members see only their assigned subset.
 export function memberSites(member: Member): string[] {
-  return member.role === 'admin' ? workspaceSites(member.workspace) : member.assigned_sites
+  if (member.role === 'admin') return workspaceSites(member.workspace)
+  // A standard member with NO sites picked gets the whole workspace, not
+  // nothing. Two reasons, both from how this is actually used:
+  //   • it is the sane default — a member added without a site list was
+  //     previously blind, which reads as a broken account rather than a policy;
+  //   • it stays true on its own. Listing every site on every member means
+  //     going back and editing all of them the day a site is added, and the one
+  //     nobody remembers to edit is the one that quietly loses leads.
+  // Narrowing someone to a few sites still works exactly as before: pick them,
+  // and only those apply. Empty means "everything in this workspace" — never
+  // anything outside it.
+  return member.assigned_sites.length > 0 ? member.assigned_sites : workspaceSites(member.workspace)
 }
 
 export function siteScope(member: Member): Set<string> {

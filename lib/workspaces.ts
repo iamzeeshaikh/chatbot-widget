@@ -85,7 +85,18 @@ export function workspaceSites(ws: Workspace): string[] {
 // `chatpdf` is the PDF variant of the conversation download. Requested for the
 // sports workspace only — packaging keeps its original single-file HTML
 // download, and the route falls back to HTML for any workspace without this.
-export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf'
+// `contactprivacy` is the odd one out: it does not ADD a surface, it withholds
+// one. Where it is on, a standard (non-admin) member never sees a customer's
+// email address or phone number anywhere — they work the lead by name and the
+// CRM addresses their emails for them (lib/pii.ts).
+//
+// SPORTS ONLY, and that is the point of putting it here rather than keying it
+// off the role alone. Packaging's human agents must go on seeing everything:
+// they are the ones who phone the customer back. The rule used to be "any
+// standard member", which hid nothing today only because every packaging member
+// happens to be an admin — the day one was added as standard, their contacts
+// would have vanished with no decision behind it.
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders']),
@@ -116,7 +127,7 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   //      its own screen, and the fix is a second OAuth client owned by that org,
   //      chosen per workspace. Nothing here breaks either way: an unconnectable
   //      Connect button is inert.
-  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email']),
+  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {

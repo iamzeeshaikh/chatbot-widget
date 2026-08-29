@@ -25,13 +25,20 @@
 // so nothing there changes at all; this bites exactly where it was asked for.
 
 import type { Member } from './auth'
+import { hasFeature } from './workspaces'
 
 export const HIDDEN_EMAIL = '•••••• hidden'
 export const HIDDEN_PHONE = '•••••• hidden'
 const HIDDEN_INLINE = '••••••'
 
-export function canSeeContacts(member: Pick<Member, 'role'> | null | undefined): boolean {
-  return member?.role === 'admin'
+// Admins always see contacts. Everyone else sees them too UNLESS their
+// workspace has asked for the opposite — see `contactprivacy` in
+// lib/workspaces.ts. Packaging's agents phone their customers back, so nothing
+// is withheld there; sports asked for exactly the reverse.
+export function canSeeContacts(member: Pick<Member, 'role' | 'workspace'> | null | undefined): boolean {
+  if (!member) return false
+  if (member.role === 'admin') return true
+  return !hasFeature(member.workspace, 'contactprivacy')
 }
 
 export function maskEmail(value: string | null | undefined): string | null {
