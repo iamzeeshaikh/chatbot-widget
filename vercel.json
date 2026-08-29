@@ -7,7 +7,7 @@
     },
     {
       "path": "/api/crm/email/sweep",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }

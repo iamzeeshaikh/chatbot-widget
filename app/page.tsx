@@ -620,6 +620,11 @@ export default function Dashboard() {
   const [taskBadgeOverdue, setTaskBadgeOverdue] = useState(0)
   // Customer replies nobody has opened, on leads this agent owns.
   const [unreadReplies, setUnreadReplies] = useState(0)
+  // Previous unread count, so a RISE can chime. Seeded silently on the first
+  // poll: opening the dashboard to three waiting replies is not three new
+  // events, and alerting for them would train people to ignore the sound.
+  const prevUnreadReplies = useRef(0)
+  const unreadSeeded = useRef(false)
   // Identity comes from the server (validated session), never the readable
   // cookie — so a stale cookie can't show the wrong workspace/role.
   useEffect(() => {
@@ -1254,13 +1259,21 @@ export default function Dashboard() {
         if (!d) return
         setTaskBadge(typeof d.count === 'number' ? d.count : 0)
         setTaskBadgeOverdue(typeof d.overdue === 'number' ? d.overdue : 0)
-        setUnreadReplies(typeof d.unreadReplies === 'number' ? d.unreadReplies : 0)
+        const nextUnread = typeof d.unreadReplies === 'number' ? d.unreadReplies : 0
+        // A customer answering is an event worth hearing. The badge alone meant
+        // noticing a small number change in the corner, so a reply sat unseen
+        // unless somebody happened to refresh — which is exactly how it was
+        // reported. Same chime as a waiting chat, through the same mute switch.
+        if (unreadSeeded.current && nextUnread > prevUnreadReplies.current) playDashSound()
+        prevUnreadReplies.current = nextUnread
+        unreadSeeded.current = true
+        setUnreadReplies(nextUnread)
       })
       .catch(() => {})
     pull()
     const iv = setInterval(whenVisible(pull), 60000)
     return () => clearInterval(iv)
-  }, [authReady, visibleTick, workspace])
+  }, [authReady, visibleTick, workspace, playDashSound])
 
   // Load the IP blocklist once for admins, so the "Ban / Unban" state is correct
   // on the conversation panel too (not just the Visitors tab).
