@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
-import { leadRecipient } from '@/lib/leadrecord'
+import { leadRecipient, markThreadRepliesRead } from '@/lib/leadrecord'
 import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
 import { googleConfig, sendEmail, GmailAuthError, configProblem } from '@/lib/gmail'
 import { threadContextFor } from '@/lib/emailsweep'
@@ -155,6 +155,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { error } = await writeControlRow({
     sessionId: id, siteId: access.siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry),
   })
+
+  // Answering IS reading: the badge on this lead says "awaiting your reply", so
+  // a successful send clears the unread replies on the thread it answered. It
+  // used to take a separate click on the message itself, which meant a lead you
+  // had already replied to kept asking for attention.
+  await markThreadRepliesRead(id, access.siteId, sent.threadId ?? thread?.threadId, access.member.email)
 
   // The row we STORE keeps the real recipient — that is the record of what was
   // sent, and an admin must be able to read it. What goes back to the browser

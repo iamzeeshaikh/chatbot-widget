@@ -213,6 +213,54 @@ export async function writeControlRow(
  * resolve the real one here rather than trust the request. That is the whole
  * point: the CRM can email someone the agent cannot read the address of.
  */
+/**
+ * Answering a reply is what "I have seen this" means.
+ *
+ * The unread badge says AWAITING YOUR REPLY, and it used to survive the reply —
+ * it only cleared when somebody expanded the message on the timeline, so a lead
+ * you had already answered went on nagging. Sending now marks the inbound
+ * messages ON THAT THREAD read.
+ *
+ * Deliberately scoped to the thread, not the whole lead: a second conversation
+ * with the same customer can be genuinely unanswered, and clearing it because
+ * you replied to a different one would hide real work. Append-only like every
+ * read marker, so the audit trail keeps who cleared it and when.
+ */
+export async function markThreadRepliesRead(
+  id: string, siteId: string, threadId: string | null | undefined, by: string,
+): Promise<number> {
+  if (!threadId) return 0
+  const { data } = await supabase.from('chat_logs')
+    .select('role, message')
+    .eq('session_id', id)
+    .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE])
+    .order('created_at', { ascending: true })
+
+  const inbound = new Map<string, string>()   // gmailId -> threadId
+  const read = new Set<string>()
+  for (const r of data ?? []) {
+    if (r.role === CRM_EMAIL_IN_ROLE) {
+      const e = parseCrmEmailIn(r.message)
+      if (e) inbound.set(e.gmailId, e.threadId)
+    } else {
+      const rd = parseCrmEmailRead(r.message)
+      if (rd) read.add(rd.gmailId)
+    }
+  }
+
+  const at = new Date().toISOString()
+  let marked = 0
+  for (const [gmailId, thread] of inbound) {
+    if (thread !== threadId || read.has(gmailId)) continue
+    await writeControlRow({
+      sessionId: id, siteId, role: CRM_EMAIL_READ_ROLE, at,
+      message: JSON.stringify({ gmailId, by, at }),
+    })
+    marked++
+  }
+  return marked
+}
+
 export async function leadRecipient(id: string): Promise<string | null> {
   const resolved = await resolveLeadSite(id)
   if (resolved?.lead?.email) return resolved.lead.email.trim() || null
