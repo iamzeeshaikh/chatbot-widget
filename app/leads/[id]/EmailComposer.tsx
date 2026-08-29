@@ -340,7 +340,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                   {orderedAliases.map((a) => (
                     <option key={a.email} value={a.email} className="bg-white text-gray-800">
                       {(a.displayName ? `${a.displayName} <${a.email}>` : a.email)
-                        + (a.email === siteAlias?.email ? `  —  ${siteName}'s own address` : '')}
+                        + (a.email === siteAlias?.email ? '  —  this lead\u2019s site' : '')}
                     </option>
                   ))}
                 </select>
