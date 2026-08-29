@@ -61,7 +61,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = 'sports-2026-08-29a';
+var SCRIPT_VERSION = 'sports-2026-08-29b';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -428,7 +428,7 @@ function processQuoteLeadsBackfill() {
   outer:
   for (var code in siteLabels) {
     if (stoppedEarly || Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
-    var threads = siteLabels[code].getThreads(0, BACKFILL_MAX_THREADS_PER_LABEL);
+    var threads = threadsOfLabel_(siteLabels[code], BACKFILL_MAX_THREADS_PER_LABEL);
     for (var t = 0; t < threads.length; t++) {
       if (Date.now() - start > TIME_BUDGET_MS) { stoppedEarly = true; break outer; }
       var thread = threads[t];
@@ -874,6 +874,25 @@ function getOrCreateLabel_(name) {
 var THREAD_LABELS_CACHE = {};
 var THREAD_MESSAGES_CACHE = {};
 
+// Every thread under a label, up to `max` — PAGED, because Gmail refuses a
+// single request for more than 500 ("Exception: Argument max cannot exceed
+// 500") and that is a hard throw, not a truncation. The backfill asks for
+// thousands, so without this it dies on its first label and imports nothing.
+// GmailApp.search already pages for exactly this reason; label.getThreads
+// needed the same treatment and did not have it.
+var LABEL_PAGE_SIZE = 500; // Gmail's hard per-call limit
+
+function threadsOfLabel_(label, max) {
+  var out = [];
+  for (var off = 0; off < max; off += LABEL_PAGE_SIZE) {
+    var want = Math.min(LABEL_PAGE_SIZE, max - off);
+    var page = label.getThreads(off, want);
+    out = out.concat(page);
+    if (page.length < want) break;               // last page
+  }
+  return out;
+}
+
 // The label NAMES on a thread. One Gmail call the first time, free after that.
 function labelNamesOf_(thread) {
   var id = thread.getId();                    // carried by the thread, not a fetch
@@ -1015,7 +1034,7 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max, deep) {
   var label = findCheckoutLabel_();
   if (!label) return out; // no checkout label in this mailbox — nothing to do
   var cutoff = readWatermark_(); // same message-date rule as the main run
-  var threads = label.getThreads(0, max);
+  var threads = threadsOfLabel_(label, max);
   // Listing the label is one call; OPENING all of it was CHECKOUT_SWEEP_MAX × 3
   // Gmail calls on every single run — a fixed ~450 calls every 30 minutes, the
   // largest single item in the bill that ran the account out of quota on

@@ -405,7 +405,7 @@ sub(`      // ("*Name*\\nEric"). Zee Custom Boxes' and The Candle Packaging's "G
       // nothing ever looked there.`);
 
 // ── Sports-only functional differences ───────────────────────────────────
-sub("var SCRIPT_VERSION = '2026-08-28f';", "var SCRIPT_VERSION = 'sports-2026-08-29a';");
+sub("var SCRIPT_VERSION = '2026-08-29b';", "var SCRIPT_VERSION = 'sports-2026-08-29b';");
 sub("payload: JSON.stringify({ siteCode: 'SCB', email: '' })", "payload: JSON.stringify({ siteCode: 'TVU', email: '' })");
 sub("var DIAGNOSE_QUERY = 'peptidesboxes.com';", "var DIAGNOSE_QUERY = 'thevolleyballuniforms.com';");
 
