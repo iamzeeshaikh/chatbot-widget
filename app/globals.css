@@ -222,3 +222,75 @@ html.dark .from-indigo-50 { --tw-gradient-from: rgba(99, 102, 241, 0.08) var(--t
 .animate-in {
   animation: zee-fade-in 0.28s ease-out both;
 }
+
+/* ── Sports workspace: the accent colour, everywhere ──────────────────────────
+   The two dashboards are ONE app behind two domains, and until now the only
+   things that told them apart were a title, a favicon and one accent colour on
+   the logo tile — which is not enough to know at a glance which dashboard you
+   are looking at. Everything else was blue on both.
+
+   This remaps the accent utilities the app actually uses, the same way dark
+   mode is remapped above rather than by touching hundreds of call sites in
+   app/page.tsx (a file that must not be restructured). `data-ws` is stamped on
+   <html> next to the title/favicon swap.
+
+   THE GREEN IS ONE STEP DARKER THAN THE BLUE IT REPLACES, on purpose: Tailwind's
+   green ramp is lighter than its blue at the same number, so a like-for-like
+   swap would have dropped every accent below the contrast floor this file
+   exists to hold. Measured on white — blue-600 5.17:1, green-600 only 3.30:1,
+   green-700 5.02:1. So 600 → 700 and 700 → 800, and the numbers stay AA.
+   Tints and borders keep their own step: they carry no text. */
+html[data-ws="sports"] .bg-blue-600 { background-color: #15803d !important; }
+html[data-ws="sports"] .bg-blue-500 { background-color: #16a34a !important; }
+html[data-ws="sports"] .hover\:bg-blue-700:hover { background-color: #166534 !important; }
+html[data-ws="sports"] .bg-blue-100 { background-color: #dcfce7 !important; }
+html[data-ws="sports"] .hover\:bg-blue-100:hover { background-color: #dcfce7 !important; }
+html[data-ws="sports"] .hover\:bg-blue-200:hover { background-color: #bbf7d0 !important; }
+html[data-ws="sports"] .bg-blue-50 { background-color: #f0fdf4 !important; }
+html[data-ws="sports"] .bg-blue-50\/60 { background-color: rgba(240, 253, 244, 0.6) !important; }
+
+html[data-ws="sports"] .text-blue-600 { color: #15803d !important; }
+html[data-ws="sports"] .text-blue-700 { color: #166534 !important; }
+html[data-ws="sports"] .text-blue-900 { color: #14532d !important; }
+html[data-ws="sports"] .hover\:text-blue-700:hover { color: #166534 !important; }
+html[data-ws="sports"] .hover\:text-blue-800:hover { color: #14532d !important; }
+
+html[data-ws="sports"] .border-blue-200 { border-color: #bbf7d0 !important; }
+html[data-ws="sports"] .border-blue-300 { border-color: #86efac !important; }
+html[data-ws="sports"] .border-blue-400 { border-color: #4ade80 !important; }
+html[data-ws="sports"] .border-blue-500 { border-color: #16a34a !important; }
+html[data-ws="sports"] .focus\:border-blue-500:focus { border-color: #16a34a !important; }
+html[data-ws="sports"] .focus\:border-blue-400:focus { border-color: #4ade80 !important; }
+
+/* Focus rings are the one thing that must never lose contrast: they are how a
+   keyboard user knows where they are. green-600 on white is 3.30:1, over the
+   3:1 floor for a non-text indicator. */
+html[data-ws="sports"] .ring-blue-500 { --tw-ring-color: #16a34a !important; }
+html[data-ws="sports"] .ring-blue-400 { --tw-ring-color: #4ade80 !important; }
+html[data-ws="sports"] .ring-blue-200 { --tw-ring-color: #bbf7d0 !important; }
+html[data-ws="sports"] .ring-blue-700\/20 { --tw-ring-color: rgba(22, 101, 52, 0.2) !important; }
+
+html[data-ws="sports"] .accent-blue-600 { accent-color: #15803d !important; }
+html[data-ws="sports"] .accent-blue-500 { accent-color: #16a34a !important; }
+
+html[data-ws="sports"] .from-blue-100 { --tw-gradient-from: #dcfce7 var(--tw-gradient-from-position) !important; }
+html[data-ws="sports"] .to-blue-50 { --tw-gradient-to: #f0fdf4 var(--tw-gradient-to-position) !important; }
+
+/* Dark mode. Higher specificity than both the .dark rules above and the sports
+   rules just written, so it wins whichever order they land in. The tints are
+   translucent for the same reason the blue ones are: a solid pale green on a
+   dark card reads as a hole punched in it. */
+html.dark[data-ws="sports"] .bg-blue-50 { background-color: rgba(34, 197, 94, 0.12) !important; }
+html.dark[data-ws="sports"] .bg-blue-50\/60 { background-color: rgba(34, 197, 94, 0.08) !important; }
+html.dark[data-ws="sports"] .bg-blue-100 { background-color: rgba(34, 197, 94, 0.18) !important; }
+html.dark[data-ws="sports"] .hover\:bg-blue-100:hover { background-color: rgba(34, 197, 94, 0.18) !important; }
+html.dark[data-ws="sports"] .hover\:bg-blue-200:hover { background-color: rgba(34, 197, 94, 0.28) !important; }
+html.dark[data-ws="sports"] .text-blue-600 { color: #4ade80 !important; }
+html.dark[data-ws="sports"] .text-blue-700 { color: #86efac !important; }
+html.dark[data-ws="sports"] .text-blue-900 { color: #bbf7d0 !important; }
+html.dark[data-ws="sports"] .hover\:text-blue-700:hover { color: #bbf7d0 !important; }
+html.dark[data-ws="sports"] .hover\:text-blue-800:hover { color: #dcfce7 !important; }
+html.dark[data-ws="sports"] .border-blue-200,
+html.dark[data-ws="sports"] .border-blue-300 { border-color: rgba(34, 197, 94, 0.4) !important; }
+html.dark[data-ws="sports"] .from-blue-100 { --tw-gradient-from: rgba(34, 197, 94, 0.14) var(--tw-gradient-from-position) !important; }
+html.dark[data-ws="sports"] .to-blue-50 { --tw-gradient-to: rgba(34, 197, 94, 0.04) var(--tw-gradient-to-position) !important; }

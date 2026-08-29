@@ -676,6 +676,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     document.title = brand === 'sports' ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
+    // Which workspace's accent colour the page wears. Read by the
+    // [data-ws="sports"] block in globals.css, which remaps the accent
+    // utilities the same way dark mode is remapped — so the two dashboards are
+    // told apart at a glance instead of by reading the title. Packaging keeps
+    // the blue it has always had: no attribute, no override.
+    document.documentElement.dataset.ws = brand
     // Swap the TAB icon to the workspace's own mark. Deliberately leaves
     // rel='apple-touch-icon' alone: "Add to Home Screen" reads the live DOM, so
     // removing it here left agents installing the dashboard for task reminders
@@ -1902,7 +1908,12 @@ export default function Dashboard() {
   // The product's name. Do not change it without asking — it was renamed to
   // "ZeeOps Desk" in a5f0f8c on the strength of a confirmation the user says
   // they never gave, and restored here.
-  const dashTitle = 'ZeeOps Chat Widget'
+  // The name in the header. Sports says so; packaging keeps the name its team
+  // has been looking at all along, because renaming a dashboard under people
+  // mid-work is a change nobody asked for. Between this, the green accent and
+  // the favicon, which dashboard you are in is answerable at a glance — which
+  // was the whole complaint: both were blue and both said the same thing.
+  const dashTitle = brand === 'sports' ? 'ZeeOps Sports' : 'ZeeOps Chat Widget'
   const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
   // Effective bot state for the open conversation. The packaging schedule can put
