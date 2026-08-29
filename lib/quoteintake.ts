@@ -102,6 +102,23 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   TDCS: 'thediecutstickers',
   CPB: 'customperfumeboxes',
   SDB: 'shopdisplayboxes',
+
+  // 2026-08-29: the SPORTS workspace joins the quote intake. Nothing about the
+  // routing changes — a lead's dashboard is decided by its site_id
+  // (workspaceForSite in lib/workspaces.ts), so a sports code posted to this
+  // same endpoint lands in the sports dashboard and is invisible to packaging,
+  // exactly as the widget's sports leads already are. There is no second
+  // endpoint and no second secret.
+  //
+  // Their form mail is the reason the Apps Script needed a new way to place a
+  // site: all five send THROUGH A GMAIL ACCOUNT, so the sending domain says
+  // nothing and there is no domain-bearing footer to read. A Gmail label (or
+  // the sender's display name) is what identifies them.
+  TFU: 'texasfootball',
+  TVU: 'volleyballuniforms',
+  CSJ: 'californiasoccer',
+  FBJ: 'floridabasketball',
+  TBJ: 'baseballjerseys',
 }
 
 export function siteIdFromQuoteCode(code: string): string | null {

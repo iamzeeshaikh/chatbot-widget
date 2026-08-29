@@ -112,7 +112,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = '2026-08-28f';
+var SCRIPT_VERSION = '2026-08-29a';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -164,7 +164,14 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // haven't been seen yet, and guessing one that means something else in this
 // mailbox would file leads under the wrong site. Run listSiteLabels to see
 // which labels exist and add them as they're confirmed.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL'];
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL',
+  // 2026-08-29 — the five SPORTS sites. This file was deliberately clear of
+  // them (they were chat-widget-only), and the user has since asked for their
+  // quote-form leads too. Nothing here decides which dashboard a lead lands in:
+  // the server maps the code to a site_id and the site_id belongs to the sports
+  // workspace, so a sports lead cannot appear in the packaging dashboard even
+  // though this one script ingests both.
+  'TFU', 'TVU', 'CSJ', 'FBJ', 'TBJ'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -212,6 +219,20 @@ var LABEL_ALIASES = {
   // Note this is NOT "candle": that name belongs to The Candle Packaging (TCP),
   // a different site, so the alias has to carry the word "sleeves".
   'candle sleeves': 'TCSL',
+  // The sports labels, in both the short-code and the written-out form, so it
+  // does not matter which one gets typed into Gmail. Every one of these is a
+  // site name, not a word that means anything else in this mailbox.
+  'texas football': 'TFU',
+  'texas football uniforms': 'TFU',
+  'volleyball': 'TVU',
+  'volleyball uniforms': 'TVU',
+  'the volleyball uniforms': 'TVU',
+  'california soccer': 'CSJ',
+  'california soccer jerseys': 'CSJ',
+  'florida basketball': 'FBJ',
+  'florida basketball jerseys': 'FBJ',
+  'baseball jerseys': 'TBJ',
+  'the baseball jerseys': 'TBJ',
 };
 
 // The one place a label leaf becomes a site code. Returns the code, or null.
@@ -295,6 +316,11 @@ var SITE_DOMAINS = {
   TDCS: 'thediecutstickers.com',
   CPB: 'customperfumeboxes.com',
   SDB: 'shopdisplayboxes.com',
+  TFU: 'texasfootballuniforms.com',
+  TVU: 'thevolleyballuniforms.com',
+  CSJ: 'californiasoccerjerseys.com',
+  FBJ: 'floridabasketballjerseys.com',
+  TBJ: 'thebaseballjerseys.com',
 };
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
@@ -455,6 +481,60 @@ function listSiteLabels() {
     var suffix = n === MAX_THREADS_PER_LABEL ? '+ (capped)' : '';
     Logger.log(codes[i] + ' → "' + label.getName() + '" (' + n + suffix + ' threads)');
   }
+}
+
+// ── Dry run: what WOULD be ingested, without ingesting anything ──────────
+// Run this BEFORE processQuoteLeadsBackfill on a mailbox whose labels are new.
+// A backfill of a freshly-labelled account posts months of mail in one go, and
+// a label put on the wrong search, or a form this parser reads badly, becomes
+// hundreds of wrong leads that then have to be found and cleaned out by hand.
+// This sends NOTHING and changes NOTHING: it walks each site label, parses the
+// newest messages exactly as the real run would, and prints what the webhook
+// would have received — including the ones it could not read, which are the
+// ones worth looking at.
+var PREVIEW_THREADS_PER_LABEL = 5;
+
+function previewLeads() {
+  var start = Date.now();
+  var siteLabels = findSiteLabels_();
+  var codes = Object.keys(siteLabels);
+  if (!codes.length) {
+    Logger.log('No site labels found in this mailbox. Create one per site (the leaf name ' +
+      'can be the code — TFU, TVU, CSJ, FBJ, TBJ — or the site name), then run listSiteLabels.');
+    return;
+  }
+  Logger.log('DRY RUN [' + SCRIPT_VERSION + '] — nothing is sent and nothing is labelled.');
+  var readable = 0, unreadable = 0;
+  for (var c = 0; c < codes.length; c++) {
+    if (Date.now() - start > TIME_BUDGET_MS) { Logger.log('...stopped early (time budget).'); break; }
+    var code = codes[c];
+    var threads = siteLabels[code].getThreads(0, PREVIEW_THREADS_PER_LABEL);
+    Logger.log('');
+    Logger.log('=== ' + code + '  (' + siteLabels[code].getName() + ')  — newest ' + threads.length + ' thread(s)');
+    prefetchMessages_(threads);
+    for (var t = 0; t < threads.length; t++) {
+      var msgs = messagesOf_(threads[t]);
+      var msg = msgs[msgs.length - 1];               // newest message on the thread
+      if (!msg) continue;
+      var parsed = parseLeadBody_(msg.getPlainBody());
+      var when = Utilities.formatDate(msg.getDate(), 'UTC', 'yyyy-MM-dd');
+      if (parsed.email || parsed.phone) {
+        readable++;
+        Logger.log('  WOULD SEND  ' + when + '  name=' + (parsed.name || '(none)') +
+          '  email=' + (parsed.email || '(none)') + '  phone=' + (parsed.phone || '(none)') +
+          '  product=' + (parsed.product || '(none)'));
+      } else {
+        unreadable++;
+        Logger.log('  NO CONTACT  ' + when + '  from=' + msg.getFrom() +
+          '  subject=' + String(threads[t].getFirstMessageSubject() || '').slice(0, 60));
+        Logger.log('              first lines: ' +
+          String(msg.getPlainBody() || '').split('\n').slice(0, 4).join(' | ').slice(0, 200));
+      }
+    }
+  }
+  Logger.log('');
+  Logger.log('DRY RUN total: ' + readable + ' would be sent, ' + unreadable +
+    ' carry no readable email/phone. If the readable ones look right, run processQuoteLeadsBackfill.');
 }
 
 // MANUAL USE ONLY — not on the trigger. processQuoteLeads only looks at
@@ -1160,6 +1240,41 @@ var SITE_NAMED_MARKERS = [
   /(?:Submitted|Sent) from:?\s+([A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/im,
 ];
 
+// The sender's DISPLAY NAME -> our site code, for sites whose form mail goes
+// out through a Gmail account: "The Volleyball Uniforms <something@gmail.com>".
+// The domain in that address is gmail.com, which identifies nothing, and these
+// forms carry no domain-bearing footer either — so without this the only thing
+// that can place them is a Gmail label somebody remembered to apply.
+//
+// A display name is WEAKER EVIDENCE than everything else in this file: unlike a
+// label or a form's own "Page URL:" footer, anyone can put any name in a From
+// header. So it is the only resolver that is not trusted on its own — the body
+// must also have the shape of a submitted form (looksLikeFormSubmission_,
+// two-plus field lines) before a display name is allowed to name a site. A
+// spammer would have to both impersonate the site's own mailer AND send a
+// filled-in quote form, at which point the server's spam rules are what stands
+// in the way, as they do for every other path here.
+var SENDER_NAME_CODES = {
+  'texas football uniforms': 'TFU',
+  'the texas football uniforms': 'TFU',
+  'the volleyball uniforms': 'TVU',
+  'volleyball uniforms': 'TVU',
+  'california soccer jerseys': 'CSJ',
+  'florida basketball jerseys': 'FBJ',
+  'the baseball jerseys': 'TBJ',
+  'baseball jerseys': 'TBJ',
+};
+
+// The display-name half of a From header: `Name <addr@host>` -> `name`.
+function senderDisplayName_(fromHeader) {
+  return String(fromHeader || '').replace(/<[^>]*>/g, '').replace(/["']/g, '').trim().toLowerCase();
+}
+
+function codeFromSenderName_(fromHeader) {
+  var code = SENDER_NAME_CODES[senderDisplayName_(fromHeader)];
+  return code && !isIgnoredLeaf_(code) ? code : null;
+}
+
 /**
  * Which of OUR sites did this message come from, judged from the message
  * itself rather than from a Gmail label?
@@ -1171,7 +1286,9 @@ var SITE_NAMED_MARKERS = [
  *   1. a form's own "this is the page it was submitted from" line
  *   2. a form's own "new quote request from <domain>" line
  *   3. the sending address's domain (noreply@thecoffeesleeves.com)
- *   4. LAST RESORT: any URL in the body pointing at one of our domains — and
+ *   4. the sender's display name, for sites that mail through Gmail — and only
+ *      when the body is a filled-in form (see SENDER_NAME_CODES)
+ *   5. LAST RESORT: any URL in the body pointing at one of our domains — and
  *      only when the whole body points at exactly ONE of them. Two different
  *      sites in one body is ambiguous, and filing a lead under the wrong site
  *      is worse than not filing it, so ambiguity returns null.
@@ -1192,6 +1309,11 @@ function codeFromMessageText_(body, fromHeader) {
 
   var sender = String(fromHeader || '').match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
   if (sender) { code = codeFromHost_(sender[1]); if (code) return code; }
+
+  // 5. The sender's display name — only for a body that is actually a filled-in
+  //    form. See SENDER_NAME_CODES for why this one alone needs that guard.
+  code = codeFromSenderName_(fromHeader);
+  if (code && looksLikeFormSubmission_(text)) return code;
 
   // Guarded, because "a link to one of our sites" on its own is not evidence
   // of a lead — a deploy notification, an invoice or our own newsletter all
