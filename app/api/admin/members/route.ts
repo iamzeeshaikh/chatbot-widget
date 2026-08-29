@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { storedMemberNames, setMemberDisplayName, MAX_MEMBER_NAME } from '@/lib/membername'
+import { agentDisplayName } from '@/lib/agentname'
 import { getMember, revokeSessions, Member } from '@/lib/auth'
 import { workspaceSites } from '@/lib/workspaces'
 
@@ -32,7 +34,20 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: true })
 
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 })
-  return NextResponse.json({ members: data ?? [] })
+  // `display_name` is what a CUSTOMER sees when this member answers in the
+  // widget. `display_name_source` says whether it was set by hand or derived
+  // from the address, so the page can show the derived one as a placeholder
+  // rather than pretending somebody chose it.
+  const names = await storedMemberNames()
+  const members = (data ?? []).map((m) => {
+    const set = names.get(String(m.email).toLowerCase())
+    return {
+      ...m,
+      display_name: set ?? agentDisplayName(m.email),
+      display_name_source: set ? 'set' : 'derived',
+    }
+  })
+  return NextResponse.json({ members })
 }
 
 // ── Add member (into this workspace) ─────────────────────────────────────────
@@ -76,7 +91,9 @@ export async function POST(req: NextRequest) {
 
 // Confirm the target member exists and lives in the admin's workspace.
 async function loadSameWorkspace(admin: Member, id: string) {
-  const { data } = await supabase.from('members').select('id, workspace').eq('id', id).maybeSingle()
+  // `email` comes back too: a display name is stored against the member's
+  // address (no DDL, so it cannot live on the row itself).
+  const { data } = await supabase.from('members').select('id, workspace, email').eq('id', id).maybeSingle()
   if (!data || data.workspace !== admin.workspace) return null
   return data
 }
@@ -86,7 +103,7 @@ export async function PATCH(req: NextRequest) {
   const { admin, error } = await requireAdmin(req)
   if (error) return error
 
-  const { id, role, assigned_sites, password } = await req.json()
+  const { id, role, assigned_sites, password, display_name } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   if (role && !['admin', 'standard'].includes(role)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
@@ -104,6 +121,19 @@ export async function PATCH(req: NextRequest) {
   if (Object.keys(update).length > 0) {
     const { error: dbErr } = await supabase.from('members').update(update).eq('id', id)
     if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 })
+  }
+
+  // The widget-facing name. Empty string CLEARS it, falling back to the name
+  // derived from the address — that is why undefined and '' mean different
+  // things here.
+  if (typeof display_name === 'string') {
+    const target = await loadSameWorkspace(admin!, id)
+    if (!target) return NextResponse.json({ error: 'Member not found in your workspace' }, { status: 403 })
+    if (display_name.length > MAX_MEMBER_NAME) {
+      return NextResponse.json({ error: `A display name can be at most ${MAX_MEMBER_NAME} characters.` }, { status: 400 })
+    }
+    const nameErr = await setMemberDisplayName(target.email, display_name, admin!.email)
+    if (nameErr) return NextResponse.json({ error: nameErr }, { status: 500 })
   }
 
   if (password) {

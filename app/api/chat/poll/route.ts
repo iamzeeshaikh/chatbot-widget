@@ -4,6 +4,7 @@ import { getMode } from '@/lib/mode'
 import { typingActive, AGENT_TYPING_KEY } from '@/lib/typing'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
 import { agentDisplayName } from '@/lib/agentname'
+import { storedMemberNames } from '@/lib/membername'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -54,6 +55,9 @@ export async function GET(req: NextRequest) {
   // so they never pick up a name.
   const authorByAt = new Map<string, string>()
   if (rawMessages.length > 0) {
+    // A name an admin chose on the Members page wins over the one derived from
+    // the address — that is the whole reason the field exists.
+    const chosen = await storedMemberNames()
     const { data: authors } = await supabase
       .from('chat_logs')
       .select('message, created_at')
@@ -62,7 +66,9 @@ export async function GET(req: NextRequest) {
       .gte('created_at', rawMessages[0].created_at)
     for (const row of authors ?? []) {
       const a = parseReplyAuthor(row.message)
-      if (a?.email) authorByAt.set(row.created_at, agentDisplayName(a.email))
+      if (a?.email) {
+        authorByAt.set(row.created_at, chosen.get(a.email.toLowerCase()) || agentDisplayName(a.email))
+      }
     }
   }
 

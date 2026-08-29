@@ -40,10 +40,16 @@ export const CRM_VALUE_ROLE = 'crm_value'
 // preview in the first place — they are listed here anyway so that a row
 // written to a lead session by mistake is still filtered out of the transcript,
 // the previews and the message counts. One entry, both protections.
+// The name a CUSTOMER sees when this member answers in the chat widget.
+// Member-scoped, so it lives on the reserved site with the other member rows
+// (see lib/membername.ts) and never touches a conversation.
+export const CRM_MEMBER_NAME_ROLE = 'crm_member_name'
+
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
+  CRM_MEMBER_NAME_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

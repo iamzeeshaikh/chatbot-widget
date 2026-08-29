@@ -10,6 +10,10 @@ interface Member {
   role: 'admin' | 'standard'
   assigned_sites: string[]
   created_at: string
+  /** What a CUSTOMER sees when this member answers in the chat widget. */
+  display_name: string
+  /** 'set' when somebody chose it; 'derived' when it came from the address. */
+  display_name_source: 'set' | 'derived'
 }
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 
@@ -33,7 +37,7 @@ export default function MembersPage() {
 
   // Edit
   const [editId, setEditId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<{ role: 'admin' | 'standard'; sites: string[]; password: string }>({ role: 'standard', sites: [], password: '' })
+  const [editForm, setEditForm] = useState<{ role: 'admin' | 'standard'; sites: string[]; password: string; displayName: string }>({ role: 'standard', sites: [], password: '', displayName: '' })
 
   // Delete
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -87,7 +91,13 @@ export default function MembersPage() {
 
   function startEdit(m: Member) {
     setEditId(m.id)
-    setEditForm({ role: m.role, sites: m.assigned_sites ?? [], password: '' })
+    // Only a name somebody CHOSE is seeded — a derived one stays a placeholder,
+    // so opening the editor and saving does not silently freeze today's guess
+    // into a stored value.
+    setEditForm({
+      role: m.role, sites: m.assigned_sites ?? [], password: '',
+      displayName: m.display_name_source === 'set' ? m.display_name : '',
+    })
     setError('')
   }
 
@@ -99,6 +109,9 @@ export default function MembersPage() {
         id, role: editForm.role,
         assigned_sites: editForm.role === 'admin' ? [] : editForm.sites,
         password: editForm.password || undefined,
+        // Always sent while editing, '' included: an empty box CLEARS the name
+        // and falls back to the one derived from the address.
+        display_name: editForm.displayName,
       }),
     })
     const data = await res.json()
@@ -165,19 +178,30 @@ export default function MembersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-100">
-                  {['Email', 'Role', 'Assigned Sites', 'Added', ''].map((h) => (
+                  {['Email', 'Shown to customers', 'Role', 'Assigned Sites', 'Added', ''].map((h) => (
                     <th key={h} className="text-left px-4 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {members.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-12 text-gray-500 text-sm">No members yet</td></tr>
+                  <tr><td colSpan={6} className="text-center py-12 text-gray-500 text-sm">No members yet</td></tr>
                 ) : members.map((m) => {
                   const isEditing = editId === m.id
                   if (isEditing) return (
                     <tr key={m.id} className="border-b border-gray-200 bg-gray-50 align-top">
                       <td className="px-4 py-3 text-gray-900">{m.email}</td>
+                      {/* The name on the bubble in the customer's chat window.
+                          Left empty it falls back to one derived from the
+                          address ("samirkhan@…" → "Samirkhan"), which is why the
+                          derived form is the placeholder rather than the value:
+                          the box has to be able to look empty. */}
+                      <td className="px-4 py-3">
+                        <input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
+                          maxLength={40} placeholder={m.display_name}
+                          aria-label="Name shown to customers"
+                          className="block w-40 bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500" />
+                      </td>
                       <td className="px-4 py-3">
                         <select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value as 'admin' | 'standard' })}
                           className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 focus:outline-none focus:border-blue-500">
@@ -218,6 +242,13 @@ export default function MembersPage() {
                   return (
                     <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors group">
                       <td className="px-4 py-3 text-gray-900 font-medium">{m.email}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-xs text-gray-800">{m.display_name}</span>
+                        {m.display_name_source === 'derived' && (
+                          <span title="Taken from the email address. Edit this member to set a proper name."
+                            className="ml-1.5 text-[10px] text-gray-500 border border-gray-300 rounded-full px-1.5 py-0.5">auto</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${m.role === 'admin' ? 'bg-purple-100 text-purple-700 border border-purple-300' : 'bg-gray-200 text-gray-700 border border-gray-300'}`}>
                           {m.role === 'admin' ? 'Admin' : 'Standard'}
