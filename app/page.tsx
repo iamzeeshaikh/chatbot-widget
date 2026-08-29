@@ -8,7 +8,7 @@ import GlobalSearch from '@/app/components/GlobalSearch'
 // mercy of each OS's font; these follow currentColor and the type scale.
 import {
   Smartphone, Tablet, Monitor, Circle, UserCheck, UserRound, Mail, ShoppingCart,
-  MessageSquare, BarChart3, Lock, Vibrate, Sun, Moon, Bell, BellOff, Users,
+  MessageSquare, BarChart3, Lock, Vibrate, Sun, Moon, Bell, BellOff, Users, Loader2,
   Trophy, Globe, Bot, BotOff, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
   ChevronRight, Repeat, Eye, Contact, UserPlus, Languages, Pin, User, FileText,
   Paperclip, Ban, Flame, AlertTriangle, ChevronUp, ChevronDown, Download,
@@ -864,6 +864,7 @@ export default function Dashboard() {
   const analyzingRef = useRef(false)
   const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
   const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [analyticsUnique, setAnalyticsUnique] = useState(0)
   // Billing report (lead-tracked sites). Month string "YYYY-MM"; default current.
   const [billingMonth, setBillingMonth] = useState(() => new Date().toISOString().slice(0, 7))
@@ -1134,18 +1135,34 @@ export default function Dashboard() {
   // Cached per range: switching Hourly/Daily/Weekly/Monthly shows the cached
   // series instantly and refreshes it in the background.
   const analyticsCache = useRef<Record<string, { points: AnalyticsPoint[]; totalUnique: number }>>({})
+  // Which range the newest request is for. A late answer for a range the user
+  // has already moved off must not repaint the chart — pressing Monthly then
+  // Weekly used to leave whichever query happened to finish last on screen.
+  const analyticsWanted = useRef<string>('')
   useEffect(() => {
     if (tab !== 'overview' || !authReady) return
     const range = analyticsRange
+    analyticsWanted.current = range
     const cached = analyticsCache.current[range]
-    if (cached) { setAnalytics(cached.points); setAnalyticsUnique(cached.totalUnique) }
+    if (cached) {
+      // Seen before: show it at once and refresh quietly behind it.
+      setAnalytics(cached.points); setAnalyticsUnique(cached.totalUnique); setAnalyticsLoading(false)
+    } else {
+      // Never seen: the OLD range's series must come off the screen. Leaving it
+      // there is what made Monthly look broken — the chart sat on daily data,
+      // with the Monthly button lit, for as long as the query took (and twelve
+      // months of rows is the slowest query this page makes).
+      setAnalytics([]); setAnalyticsUnique(0); setAnalyticsLoading(true)
+    }
     fetch(`/api/admin/analytics?range=${range}`)
       .then((r) => r.json()).catch(() => ({ points: [] }))
       .then((d) => {
         const entry = { points: d.points ?? [], totalUnique: d.totalUnique ?? 0 }
         analyticsCache.current[range] = entry
+        if (analyticsWanted.current !== range) return   // the user moved on
         setAnalytics(entry.points)
         setAnalyticsUnique(entry.totalUnique)
+        setAnalyticsLoading(false)
       })
   }, [tab, authReady, analyticsRange])
 
@@ -2342,7 +2359,18 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-                <AnalyticsChart points={analytics} accent={accentColor} totalUnique={analyticsUnique} />
+                {/* A range the browser has not seen yet takes as long as its
+                    query does — twelve months is seconds, not milliseconds. Say
+                    so, in the chart's own space, rather than leaving the last
+                    range's line under a lit-up button. */}
+                {analyticsLoading ? (
+                  <div className="h-[260px] flex flex-col items-center justify-center gap-2 text-gray-500">
+                    <Loader2 size={18} strokeWidth={2} className="animate-spin" aria-hidden />
+                    <p className="text-xs">Loading {analyticsRange} figures…</p>
+                  </div>
+                ) : (
+                  <AnalyticsChart points={analytics} accent={accentColor} totalUnique={analyticsUnique} />
+                )}
               </div>
 
               {/* Chart + Sites row */}

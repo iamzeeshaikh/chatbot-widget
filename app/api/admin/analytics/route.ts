@@ -77,6 +77,21 @@ const AGENT_ROW_CAP = 60000
 const CHAT_ROW_CAP = 20000
 
 
+// A short-lived answer cache, per instance.
+//
+// The Monthly range is twelve months of visitor rows and chat rows folded in
+// Node — seconds of work on a Micro Postgres, every time anybody presses the
+// button. The numbers behind it move by minutes, not by seconds, so serving a
+// recent answer is not a compromise. The key carries the member's own site
+// scope: two members with different sites must never share an entry.
+const ANSWER_TTL_MS: Record<Range, number> = {
+  hourly: 60_000,      // the live end of the chart — keep it fresh
+  daily: 120_000,
+  weekly: 300_000,
+  monthly: 600_000,    // the slowest and the least volatile
+}
+const answers = new Map<string, { at: number; body: unknown }>()
+
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ points: [] }, { status: 401 })
@@ -84,6 +99,11 @@ export async function GET(req: NextRequest) {
   const allowed = Array.from(scope)
 
   const range = (req.nextUrl.searchParams.get('range') as Range) || 'daily'
+  const cacheKey = `${member.workspace}|${range}|${[...allowed].sort().join(',')}`
+  const hit = answers.get(cacheKey)
+  if (hit && Date.now() - hit.at < (ANSWER_TTL_MS[range] ?? 120_000)) {
+    return NextResponse.json(hit.body)
+  }
   const buckets = buildBuckets(['hourly', 'daily', 'weekly', 'monthly'].includes(range) ? range : 'daily')
   // Bucket starts are in PKT-epoch space; convert back to real UTC for the query.
   const startISO = new Date(buckets[0].start - PKT_MS).toISOString()
@@ -184,5 +204,12 @@ export async function GET(req: NextRequest) {
   }
 
   const points = buckets.map((b, i) => ({ label: b.label, visitors: visitorCounts[i], unique: uniqueSets[i].size, chats: chatCounts[i], picked: pickedCounts[i], notPicked: notPickedCounts[i] }))
-  return NextResponse.json({ range, points, totalUnique: windowUnique.size })
+  const body = { range, points, totalUnique: windowUnique.size }
+  answers.set(cacheKey, { at: Date.now(), body })
+  // The map is bounded by (workspaces × ranges × distinct site scopes), which is
+  // a handful of entries — but prune anyway rather than trust that forever.
+  if (answers.size > 200) {
+    for (const [k, v] of answers) if (Date.now() - v.at > 900_000) answers.delete(k)
+  }
+  return NextResponse.json(body)
 }
