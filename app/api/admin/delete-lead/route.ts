@@ -13,15 +13,15 @@ export async function DELETE(req: NextRequest) {
     const { id } = await req.json()
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-    const { data: lead } = await supabase.from('leads').select('site_id, message').eq('id', id).maybeSingle()
+    // ADMINS ONLY (2026-08-29, the owner's call). Quote leads were already
+    // admin-only because the buying partner reconciles against them; the rest
+    // followed, because a deleted lead does not come back and an agent has
+    // never needed to remove one — a wrong lead is an admin's job to clear.
     if (member.role !== 'admin') {
-      // Quote leads (custom-quote emails pulled in from Gmail) are billing
-      // records the client's business partner independently verifies against
-      // — only an admin can remove one, regardless of site access.
-      if (!lead || isQuoteLeadMessage(lead.message) || !canAccessSite(member, lead.site_id)) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
+      return NextResponse.json({ error: 'Only an admin can delete a lead.' }, { status: 403 })
     }
+    const { data: lead } = await supabase.from('leads').select('site_id, message').eq('id', id).maybeSingle()
+    if (!lead) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     await supabase.from('leads').delete().eq('id', id)
     return NextResponse.json({ ok: true })

@@ -8,6 +8,14 @@ export async function DELETE(req: NextRequest) {
   try {
     const member = await getMember(req)
     if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // ADMINS ONLY (2026-08-29). This is the most destructive button in the
+    // product and it did not look like it: chat_logs holds the conversation AND
+    // every CRM control row keyed to that session, so deleting a session takes
+    // the lead's notes, stage history and email record with it. Nothing comes
+    // back. Site scope alone was not enough of a guard for that.
+    if (member.role !== 'admin') {
+      return NextResponse.json({ error: 'Only an admin can delete a conversation.' }, { status: 403 })
+    }
 
     let { sessionIds } = await req.json()
     if (!Array.isArray(sessionIds) || sessionIds.length === 0) {

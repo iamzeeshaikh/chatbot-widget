@@ -707,6 +707,7 @@ export default function LeadRecordPage() {
           leadEmail={record.contact.email}
           leadName={record.contact.name}
           contactsHidden={record.contactsHidden}
+          recipientLocked={record.recipientLocked}
           siteId={record.siteId}
           siteName={record.siteName}
           replyTo={replyTo}

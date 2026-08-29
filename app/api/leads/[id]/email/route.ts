@@ -62,22 +62,45 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!text.trim()) return NextResponse.json({ error: 'The message is empty.' }, { status: 400 })
   if (text.length > MAX_BODY) return NextResponse.json({ error: 'That message is too long to send.' }, { status: 400 })
 
-  // WHERE THIS EMAIL IS ALLOWED TO GO, for a member who may not see contacts:
-  // to the lead, and nowhere else. The recipient is read from our own rows, not
-  // from the request — the browser was served a masked address and could
-  // otherwise post any address it liked. CC is dropped for the same reason: a
-  // CC to themselves would deliver a message whose To: header is the very
-  // address they are not allowed to read.
+  // ── WHERE THIS EMAIL IS ALLOWED TO GO ─────────────────────────────────────
+  // An agent's email goes to the lead. Not to an address they typed.
+  //
+  // The composer let anyone put anything in To, which meant the company's own
+  // Gmail could be used to send a customer list — with attachments — to a
+  // personal address, and it would leave looking like ordinary company mail.
+  // That is the one exfiltration route the product itself provides, so it is
+  // the one worth closing. Everything else an agent could do (copy the screen,
+  // photograph it) is outside what this code can reach, and pretending
+  // otherwise would be theatre.
+  //
+  // The recipient is therefore READ FROM OUR OWN ROWS for any non-admin, never
+  // taken from the request. Admins are unrestricted — they are the ones who
+  // forward a lead to a supplier or a colleague.
+  //
+  // CC follows the same logic but keeps one real case alive: copying somebody
+  // ELSE AT THE SAME COMPANY (buyer + purchasing). So a non-admin's CC is kept
+  // only where its domain matches the customer's own. A member who may not even
+  // see the address gets no CC at all — a CC to themselves would deliver a
+  // message whose To: header is the address they are not allowed to read.
   const canSee = canSeeContacts(access.member)
+  const isAdmin = access.member.role === 'admin'
   let toValue = to
   let ccValue = cc
-  if (!canSee) {
+  if (!isAdmin) {
     const real = await leadRecipient(id)
     if (!real) {
       return NextResponse.json({ error: 'This lead has no email address on file, so it cannot be emailed.' }, { status: 400 })
     }
     toValue = real
-    ccValue = ''
+    if (!canSee) {
+      ccValue = ''
+    } else {
+      const domain = real.split('@')[1]?.toLowerCase() ?? ''
+      const kept = parseAddressList(cc)
+      ccValue = kept.ok
+        ? kept.list.filter((a) => a.split('@')[1]?.toLowerCase() === domain).join(', ')
+        : ''
+    }
   }
 
   const toList = parseAddressList(toValue)

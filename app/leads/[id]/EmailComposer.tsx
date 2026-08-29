@@ -40,7 +40,7 @@ export interface ReplyTo { replyToGmailId: string; to: string; subject: string }
 
 const draftKey = (leadId: string) => `zee-email-draft-${leadId}`
 
-export default function EmailComposer({ leadId, leadEmail, leadName, siteId, siteName, contactsHidden, onClose, onSent, replyTo }: {
+export default function EmailComposer({ leadId, leadEmail, leadName, siteId, siteName, contactsHidden, recipientLocked, onClose, onSent, replyTo }: {
   leadId: string
   leadEmail: string
   leadName: string
@@ -52,6 +52,11 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
    *  Cc is withheld entirely — a Cc to themselves would deliver a message whose
    *  To: header is the address they are not allowed to read. */
   contactsHidden?: boolean
+  /** This viewer's mail can only go to the lead (every non-admin). The To box
+   *  is shown, filled and locked: the server would replace anything typed
+   *  there anyway, and a box that silently ignores you is worse than one that
+   *  says it is fixed. Cc still accepts the customer's own colleagues. */
+  recipientLocked?: boolean
   onClose: () => void
   onSent: () => void
   replyTo?: ReplyTo | null
@@ -358,8 +363,12 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
               <Row label="To">
                 <div className="flex items-center gap-1.5 w-full">
                   <input value={draft.to} onChange={(e) => set({ to: e.target.value })} aria-label="To"
-                    readOnly={contactsHidden}
-                    title={contactsHidden ? 'This lead\u2019s address is hidden. The message still goes to them.' : undefined}
+                    readOnly={contactsHidden || recipientLocked}
+                    title={contactsHidden
+                      ? 'This lead\u2019s address is hidden. The message still goes to them.'
+                      : recipientLocked
+                        ? 'Replies go to this lead. To email anyone else, ask an admin.'
+                        : undefined}
                     className="flex-1 min-w-0 bg-transparent border-0 px-0 py-0 text-xs text-gray-700 focus:outline-none focus:text-gray-900" />
                   {!showCc && !contactsHidden && (
                     <button type="button" onClick={() => setShowCc(true)}

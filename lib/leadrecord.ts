@@ -90,6 +90,10 @@ export interface LeadRecord {
    *  The values above are already masked; this only tells the UI to stop
    *  rendering them as mailto:/tel: links nobody can use. */
   contactsHidden?: boolean
+  /** True when this viewer's email can only go to the lead itself — every
+   *  non-admin. The server enforces it either way; this stops the composer
+   *  offering a To box whose contents would be silently replaced. */
+  recipientLocked?: boolean
   overriddenFields: string[]
   owner: string | null
   stage: CrmStage
@@ -657,6 +661,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const doneTasks = liveTasks.filter((t) => t.status === 'done').sort(byCompletedDesc)
 
   const record: LeadRecord = {
+    recipientLocked: member.role !== 'admin',
     id,
     siteId,
     siteName,
