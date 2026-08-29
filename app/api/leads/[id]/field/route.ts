@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
+import { canSeeContacts } from '@/lib/pii'
 import { CRM_FIELD_ROLE, isCrmField } from '@/lib/crm'
 
 export const dynamic = 'force-dynamic'
@@ -16,6 +17,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const { field, value } = await req.json().catch(() => ({}))
   if (!isCrmField(field)) return NextResponse.json({ error: 'Unknown field' }, { status: 400 })
+  // A value you are not allowed to READ is one you must not be able to
+  // overwrite: an agent could otherwise replace the customer's address with
+  // their own and have the CRM send them the correspondence. The UI already
+  // renders these read-only; this is the half that actually holds.
+  if ((field === 'email' || field === 'phone') && !canSeeContacts(access.member)) {
+    return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+  }
   const clean = typeof value === 'string' ? value.trim().slice(0, 200) : ''
 
   const at = new Date().toISOString()

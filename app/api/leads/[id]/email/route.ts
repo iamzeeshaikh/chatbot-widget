@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
 import { leadRecipient } from '@/lib/leadrecord'
-import { canSeeContacts } from '@/lib/pii'
+import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
 import { googleConfig, sendEmail, GmailAuthError, configProblem } from '@/lib/gmail'
 import { threadContextFor } from '@/lib/emailsweep'
 import { supabase } from '@/lib/supabase'
@@ -155,13 +155,28 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { error } = await writeControlRow({
     sessionId: id, siteId: access.siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry),
   })
+
+  // The row we STORE keeps the real recipient — that is the record of what was
+  // sent, and an admin must be able to read it. What goes back to the browser
+  // is masked for a member who may not see contacts: the send resolved an
+  // address they are not allowed to know, and handing it straight back in the
+  // response would undo every other masking in one line. (Found by sending as
+  // the agent and reading the reply — the timeline was already safe.)
+  const shown = canSee ? entry : {
+    ...entry,
+    to: HIDDEN_EMAIL,
+    cc: entry.cc ? HIDDEN_EMAIL : entry.cc,
+    subject: scrubText(entry.subject) ?? '',
+    body: scrubText(entry.body) ?? '',
+    snippet: scrubText(entry.snippet) ?? '',
+  }
   if (error) {
     console.error('[email] sent but the timeline row failed:', error)
     return NextResponse.json({
-      ok: true, sent: true, recorded: false, email: entry,
+      ok: true, sent: true, recorded: false, email: shown,
       warning: 'The email was sent, but it could not be recorded on the timeline.',
     })
   }
 
-  return NextResponse.json({ ok: true, sent: true, recorded: true, email: entry })
+  return NextResponse.json({ ok: true, sent: true, recorded: true, email: shown })
 }
