@@ -43,6 +43,7 @@ export const SITE_DOMAINS: Record<string, string> = {
   lipboxes: 'lipboxes.com',
   thepolymailers: 'thepolymailers.com',
   theretailpackaging: 'theretailpackaging.com',
+  thefoodtrays: 'thefoodtrays.com',
   // Sports workspace
   texasfootball: 'texasfootballuniforms.com',
   volleyballuniforms: 'thevolleyballuniforms.com',
