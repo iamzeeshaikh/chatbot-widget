@@ -54,7 +54,7 @@ export default function TasksPage() {
   const [showDone, setShowDone] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   // Leads whose customer has written back and nobody has opened it.
-  const [unread, setUnread] = useState<{ leadId: string; count: number; from: string; snippet: string; at: string }[]>([])
+  const [unread, setUnread] = useState<{ leadId: string; siteId?: string; siteName?: string; count: number; from: string; subject?: string; snippet: string; at: string }[]>([])
 
   useEffect(() => {
     try {
@@ -238,17 +238,35 @@ export default function TasksPage() {
                 {unread.reduce((n, u) => n + u.count, 0)}
               </span>
             </h2>
+            {/* Two lines, because one could not answer "who, about what, on
+                which site" — it showed a name and then Gmail's own snippet,
+                which begins with the reply you sent and buries the customer's
+                actual sentence behind "On Sat 29 Aug … wrote:". Now: who and
+                where on top, subject and their real words underneath. */}
             {unread.map((u) => (
               <Link key={u.leadId} href={`/leads/${encodeURIComponent(u.leadId)}`}
-                className="flex items-baseline gap-2 px-2.5 py-1.5 border-b border-gray-100 last:border-b-0 hover:bg-violet-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-                <span className="text-xs font-semibold text-gray-900 truncate max-w-[180px]">{u.from}</span>
-                <span className="text-[11px] text-gray-600 truncate flex-1 min-w-0">{u.snippet}</span>
-                {u.count > 1 && (
-                  <span className="shrink-0 text-[9px] font-bold px-1.5 rounded-full bg-violet-100 text-violet-700 border border-violet-300 tabular-nums">
-                    {u.count}
-                  </span>
-                )}
-                <span className="shrink-0 text-[10px] text-gray-500 tabular-nums">{timeAgo(u.at)}</span>
+                className="block px-2.5 py-2 border-b border-gray-100 last:border-b-0 hover:bg-violet-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-xs font-semibold text-gray-900 truncate max-w-[220px]">{u.from}</span>
+                  {u.siteName && (
+                    <span className="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200 truncate max-w-[140px]">
+                      {u.siteName}
+                    </span>
+                  )}
+                  {u.count > 1 && (
+                    <span className="shrink-0 text-[9px] font-bold px-1.5 rounded-full bg-violet-100 text-violet-700 border border-violet-300 tabular-nums"
+                      title={`${u.count} replies you have not opened`}>
+                      {u.count} replies
+                    </span>
+                  )}
+                  <span className="ml-auto shrink-0 text-[10px] text-gray-500 tabular-nums">{timeAgo(u.at)}</span>
+                </div>
+                <div className="mt-0.5 flex items-baseline gap-1.5 min-w-0">
+                  {u.subject && (
+                    <span className="shrink-0 max-w-[45%] truncate text-[11px] font-medium text-gray-800">{u.subject}</span>
+                  )}
+                  <span className="truncate text-[11px] text-gray-600 min-w-0">{u.snippet}</span>
+                </div>
               </Link>
             ))}
           </section>

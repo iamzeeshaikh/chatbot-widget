@@ -4,6 +4,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { loadMemberTasks } from '@/lib/taskquery'
 import { needsAttentionCount } from '@/lib/tasks'
 import { unreadRepliesFor } from '@/lib/unread'
+import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,17 @@ export async function GET(req: NextRequest) {
     overdue: mine.filter((t) => t.status === 'open' && t.bucket === 'overdue').length,
     today: mine.filter((t) => t.status === 'open' && t.bucket === 'today').length,
     unreadReplies: unread.reduce((n, u) => n + u.count, 0),
-    unreadLeads: unread.slice(0, 10),
+    // The card names the customer and previews what they wrote — both can
+    // carry an address. `from` falls back to the raw address whenever the
+    // sender has no display name set, which is most one-person senders, so
+    // masking only the preview would have leaked on exactly those.
+    unreadLeads: canSeeContacts(member)
+      ? unread.slice(0, 10)
+      : unread.slice(0, 10).map((u) => ({
+          ...u,
+          from: u.from.includes('@') ? HIDDEN_EMAIL : u.from,
+          subject: scrubText(u.subject) ?? '',
+          snippet: scrubText(u.snippet) ?? '',
+        })),
   })
 }

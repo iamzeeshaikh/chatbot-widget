@@ -24,9 +24,14 @@ export const UNREAD_WINDOW_DAYS = 30
 export interface UnreadLead {
   leadId: string
   siteId: string
+  /** The site's display name, so the card can say WHICH brand replied. */
+  siteName: string
   count: number
   from: string
+  /** What the customer actually wrote, quoted history stripped. */
   snippet: string
+  /** The thread's subject, shown above the preview. */
+  subject: string
   at: string
 }
 
@@ -54,12 +59,15 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
     if (!page || page.length < 1000) break
   }
 
-  const inbound = new Map<string, Map<string, { from: string; snippet: string; at: string }>>()
+  const inbound = new Map<string, Map<string, { from: string; snippet: string; subject: string; at: string }>>()
   const read = new Set<string>()
   const owner = new Map<string, string | null>()
   /** Fallback recipient: who last emailed this lead. */
   const sender = new Map<string, string>()
   const siteOf = new Map<string, string>()
+  const siteNames = new Map<string, string>()
+  const siteRes = await supabase.from('sites').select('site_id, name')
+  for (const row of siteRes.data ?? []) siteNames.set(row.site_id, row.name)
 
   for (const r of data) {
     if (r.role === CRM_EMAIL_IN_ROLE) {
@@ -67,7 +75,14 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
       if (!e) continue
       if (!inbound.has(r.session_id)) inbound.set(r.session_id, new Map())
       inbound.get(r.session_id)!.set(e.gmailId, {
-        from: e.fromName || e.from, snippet: e.snippet || e.subject, at: e.at || r.created_at,
+        from: e.fromName || e.from,
+        // e.body is the new text with the quoted chain and signature already
+        // removed (splitQuoted); Gmail's own snippet is NOT — it reads
+        // "Ok, let's do it. On Sat 29 Aug … wrote: > we can do with 100",
+        // which buries the one line that matters under the reply you sent.
+        snippet: (e.body || '').replace(/\s+/g, ' ').trim() || e.snippet || e.subject,
+        subject: e.subject || '',
+        at: e.at || r.created_at,
       })
       siteOf.set(r.session_id, r.site_id)
     } else if (r.role === CRM_EMAIL_ROLE) {
@@ -90,7 +105,7 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
     // Owner first; otherwise whoever's mailbox the reply landed in.
     const responsible = (owner.get(leadId) || sender.get(leadId) || '').toLowerCase()
     if (responsible !== me) continue
-    let newest: { from: string; snippet: string; at: string } | null = null
+    let newest: { from: string; snippet: string; subject: string; at: string } | null = null
     let count = 0
     for (const [gmailId, m] of msgs) {
       if (read.has(gmailId)) continue
@@ -98,7 +113,11 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
       if (!newest || m.at > newest.at) newest = m
     }
     if (count === 0 || !newest) continue
-    out.push({ leadId, siteId: siteOf.get(leadId) ?? '', count, from: newest.from, snippet: newest.snippet, at: newest.at })
+    const siteId = siteOf.get(leadId) ?? ''
+    out.push({
+      leadId, siteId, siteName: siteNames.get(siteId) ?? siteId, count,
+      from: newest.from, snippet: newest.snippet, subject: newest.subject, at: newest.at,
+    })
   }
   return out.sort((a, b) => b.at.localeCompare(a.at))
 }

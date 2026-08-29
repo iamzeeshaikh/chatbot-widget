@@ -52,6 +52,13 @@ export async function GET(req: NextRequest) {
   if (!(await canAccessSession(member, sessionId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
+  // ADMINS ONLY (2026-08-29, the owner's call). A transcript download is the
+  // one clean way a whole conversation leaves the dashboard as a file — the
+  // masking above still applies to whoever gets one, but an agent no longer
+  // gets one at all. Reading the chat on screen is unaffected.
+  if (member.role !== 'admin') {
+    return NextResponse.json({ error: 'Only an admin can download a transcript.' }, { status: 403 })
+  }
   const hideContacts = !canSeeContacts(member)
   const format = hasFeature(member.workspace, 'chatpdf') && req.nextUrl.searchParams.get('format') !== 'html'
     ? 'pdf'

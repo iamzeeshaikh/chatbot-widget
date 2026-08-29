@@ -82,6 +82,14 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   const member = await getMember(req)
   const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
+  // ADMINS ONLY (2026-08-29, with lead and conversation deletion). A note
+  // delete is a SOFT one — the row stays and is marked deleted, so nothing is
+  // actually lost. It is closed anyway because the owner's rule is simply that
+  // an agent deletes nothing, and a rule with exceptions is one nobody
+  // remembers. Writing and editing notes is untouched.
+  if (access.member.role !== 'admin') {
+    return NextResponse.json({ error: 'Only an admin can delete a note.' }, { status: 403 })
+  }
 
   const { noteId } = await req.json().catch(() => ({}))
   if (typeof noteId !== 'string' || !noteId) return NextResponse.json({ error: 'noteId required' }, { status: 400 })

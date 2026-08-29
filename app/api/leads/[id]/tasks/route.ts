@@ -155,6 +155,12 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   const member = await getMember(req)
   const access = await guardLeadAccess(member, id, 'tasks')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
+  // ADMINS ONLY — the same rule as notes and leads. Creating a task and
+  // marking it done are still every agent's job; removing one from the record
+  // is not.
+  if (access.member.role !== 'admin') {
+    return NextResponse.json({ error: 'Only an admin can delete a task.' }, { status: 403 })
+  }
 
   const { taskId } = await req.json().catch(() => ({}))
   if (typeof taskId !== 'string' || !taskId) {
