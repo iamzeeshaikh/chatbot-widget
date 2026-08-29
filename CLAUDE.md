@@ -278,9 +278,13 @@ never reorganise, re-split or "clean it up". Keep list sorts stable (sort by
 than the object, or the polling UI churns and flashes.
 
 ### A standard member may not see customer contacts — and that is a READ EDGE, not a UI state
-`lib/pii.ts` decides (`canSeeContacts` = admin). Added 2026-08-29 for the sports
-workspace, whose owner wants an agent to work every lead and email it **without ever
-learning the address or number**. Masking the `email` and `phone` columns is the easy
+`lib/pii.ts` decides. **Admins always see contacts; everyone else does too unless their
+workspace carries `contactprivacy` in `WORKSPACE_FEATURES` — which today is SPORTS ONLY.**
+Packaging's agents must keep seeing every email and phone: they are the ones who ring the
+customer back, and the rule was deliberately moved off "any standard member" onto the
+workspace list the day packaging's own agents were switched to standard. Added 2026-08-29
+for the sports workspace, whose owner wants an agent to work every lead and email it
+**without ever learning the address or number**. Masking the `email` and `phone` columns is the easy
 half and by itself it leaks: a quote lead carries the whole original form email in
 `message` ("Email: … Phone: …"), a chat transcript carries whatever the visitor typed,
 an inbound reply carries the customer's own signature in `quoted`, and the Billing row
@@ -305,6 +309,14 @@ absence claim: it reads every real address and number for the workspace out of t
 database, then hunts for them in every agent-visible response — and runs the same hunt
 as an admin, who must still find them. A pass where nobody sees anything means the probe
 is broken, and it says so.
+
+### A standard member with no sites picked covers the whole workspace
+`memberSites` (lib/auth.ts): admin → every site in the workspace; standard → their
+`assigned_sites`, **or the whole workspace when that list is empty**. Empty used to mean
+"nothing", which read as a broken account, and listing every site on every member is the
+kind of thing that stays correct only until the next site is added and one member is
+missed. Narrowing still works: pick sites and only those apply. Empty never reaches
+outside the member's own workspace.
 
 ### Enforce access server-side
 Workspace isolation and per-member site access are decided **on the server**, in the
