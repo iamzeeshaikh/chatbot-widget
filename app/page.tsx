@@ -101,7 +101,7 @@ const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="
 const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#16a34a"/><path d="M35 22 Q31 50 38 62 Q44 72 50 74 Q56 72 62 62 Q69 50 65 22Z" fill="white"/><path d="M35 30 Q20 30 20 44 Q20 56 35 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M65 30 Q80 30 80 44 Q80 56 65 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><rect x="44" y="74" width="12" height="10" rx="2" fill="white"/><rect x="32" y="84" width="36" height="8" rx="3" fill="white"/></svg>')}`
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -2576,6 +2576,24 @@ export default function Dashboard() {
                               <td onClick={(e) => { if (!isEmailLead) { e.stopPropagation(); openLeadConversation(lead) } }}
                                 className="px-3 py-3 whitespace-nowrap" title={!isEmailLead ? 'Open the chat conversation' : undefined}>
                                 <LeadSourceBadge message={lead.message} />
+                                {/* Who ran the conversation this lead came out of.
+                                    The test is the one the Overview chart's "Picked"
+                                    line already uses — a session carries an `admin`
+                                    row only when a PERSON typed in it — so the badge
+                                    and the chart can never tell different stories.
+                                    It answers "how many of these did the bot bring in
+                                    on its own?" without opening every chat. */}
+                                {!isEmailLead && lead.handledBy && (
+                                  <span title={lead.handledBy === 'bot'
+                                    ? 'The bot handled this conversation — no agent replied in it'
+                                    : 'An agent replied in this conversation'}
+                                    className={`ml-1 text-[10px] font-semibold border rounded-full px-1.5 py-0.5 whitespace-nowrap ${
+                                      lead.handledBy === 'bot'
+                                        ? 'text-violet-700 bg-violet-100 border-violet-200'
+                                        : 'text-emerald-700 bg-emerald-100 border-emerald-200'}`}>
+                                    {lead.handledBy === 'bot' ? 'Bot' : 'Agent'}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
               {/* A plain anchor: normal click, middle-click and cmd-click all

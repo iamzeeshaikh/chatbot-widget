@@ -287,6 +287,8 @@
 #zee-chat-header { background: ' + primaryColor + '; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }\
 #zee-chat-header-left { display: flex; align-items: center; gap: 10px; }\
 #zee-chat-avatar { width: 36px; height: 36px; border-radius: 50%; background: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; line-height: 1; }\
+#zee-msg-author-proto { }\
+.zee-msg-author { font-size: 11px; font-weight: 600; color: #6b7280; margin: 8px 0 2px 4px; }\
 #zee-chat-title { color: white; font-weight: 600; font-size: 15px; }\
 #zee-chat-subtitle { color: rgba(255,255,255,0.8); font-size: 11px; }\
 #zee-chat-header-actions { display: flex; align-items: center; gap: 2px; }\
@@ -684,9 +686,21 @@
       '<span class="zee-att-size">' + formatBytes(file.size) + '</span></span></a>';
   }
 
-  function appendMessage(role, text) {
+  // `author` is set only for a reply a PERSON sent (the server pairs each admin
+  // row with its reply_author). It puts their name above the bubble so the
+  // visitor can tell a human answered — before this, an agent's reply looked
+  // exactly like the bot's, and people go on typing to a robot accordingly.
+  function appendMessage(role, text, author) {
     var el = document.getElementById('zee-chat-messages');
     if (!el) return;
+    if (author && lastAuthorShown !== author) {
+      var who = document.createElement('div');
+      who.className = 'zee-msg-author';
+      who.textContent = author;
+      el.appendChild(who);
+      lastAuthorShown = author;
+    }
+    if (!author) lastAuthorShown = null;   // the bot spoke — name the next human again
     var div = document.createElement('div');
     div.className = 'zee-msg ' + role;
     var file = parseFileMessage(text);
@@ -698,6 +712,21 @@
     }
     el.appendChild(div);
     scrollToBottom();
+  }
+  // Who was named above the last bubble, so a run of replies from the same
+  // person is labelled once instead of on every line.
+  var lastAuthorShown = null;
+
+  // Header: "<Name> · Online" once a human is handling the chat. The site name
+  // stays as the window's own title elsewhere; this line is about WHO.
+  function setAgentHeader(name) {
+    var title = document.getElementById('zee-chat-title');
+    var sub = document.getElementById('zee-chat-subtitle');
+    if (!title || !sub) return;
+    if (title.getAttribute('data-agent') === name) return;
+    title.setAttribute('data-agent', name);
+    title.textContent = name;
+    sub.textContent = 'Online \u00b7 ' + (config.bot_name || 'Support');
   }
 
   function showTyping() {
@@ -880,8 +909,11 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           var newMsgs = data.messages || [];
+          // A person is on the other end: say so in the header too, so it is
+          // visible even after scrolling away from their first reply.
+          if (data.agentName) setAgentHeader(data.agentName);
           for (var i = 0; i < newMsgs.length; i++) {
-            appendMessage('bot', newMsgs[i].message);
+            appendMessage('bot', newMsgs[i].message, newMsgs[i].author);
             messages.push({ role: 'assistant', content: newMsgs[i].message });
             botMessageCount++;
             pollSince = newMsgs[i].created_at;

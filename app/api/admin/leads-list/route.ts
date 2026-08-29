@@ -125,6 +125,32 @@ export async function GET(req: NextRequest) {
     String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
   )
 
+  // ── Who actually handled this chat: the bot, or a person? ─────────────────
+  // The test is the same one the Overview chart's "Picked" line uses, so the
+  // two can never disagree: a session carries an `admin` row only when a HUMAN
+  // typed in it. The bot's own answers are `assistant` rows. No admin row on a
+  // chat lead therefore means the bot ran that conversation start to finish.
+  //
+  // One extra query, bounded by the sessions already on this page.
+  const chatSessions = merged
+    .map((l) => (l as { session_id?: string }).session_id)
+    .filter((v): v is string => !!v)
+  const humanSessions = new Set<string>()
+  if (chatSessions.length > 0) {
+    for (let i = 0; i < chatSessions.length; i += 200) {
+      const { data: admins } = await supabase
+        .from('chat_logs')
+        .select('session_id')
+        .eq('role', 'admin')
+        .in('session_id', chatSessions.slice(i, i + 200))
+      for (const r of admins ?? []) humanSessions.add(r.session_id)
+    }
+  }
+  for (const l of merged as Array<Record<string, unknown>>) {
+    const sid = typeof l.session_id === 'string' ? l.session_id : null
+    l.handledBy = sid ? (humanSessions.has(sid) ? 'agent' : 'bot') : null
+  }
+
   // Recent Leads is a list of names and sites for a member who may not see
   // contacts — the address and number are masked here, on the way out, and the
   // NAME is scrubbed too because a lead that arrived without one is titled by
