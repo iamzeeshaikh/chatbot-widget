@@ -449,6 +449,20 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
   re-run `pbcopy` rather than assuming the clipboard survived.
 - After changing how mail is found, `rewindWatermark()` must be run, or the fix only
   applies to mail that hasn't arrived yet.
+- **The SPORTS sites have their own separate script, in a separate Gmail account.**
+  Packaging quote mail arrives at one account, sports quote mail at another, and an
+  Apps Script can only read the mailbox of the account it runs in — so there are two
+  projects. `scripts/sports-quote-intake-apps-script.gs` is GENERATED, never hand-edited:
+  run `node scripts/make-sports-intake.mjs` after any change to the packaging script and
+  it re-swaps the roster onto the same engine, then fails the build if a single packaging
+  site, code, domain or store name survives anywhere in the output, comments included.
+  Two hand-forked copies would drift, and a parser fix landing in only one of them is
+  exactly this project's recurring bug. Sports mail needs a resolver packaging does not:
+  all five sites send **through Gmail accounts**, so the sending domain identifies
+  nothing — hence `SENDER_NAME_CODES`, the only rule here that also demands the body be
+  a filled-in form, because a display name is the one piece of evidence a stranger can
+  fake. Nothing about this changes the packaging dashboard: `/api/quote-intake` routes
+  by `site_id`, and a sports `site_id` belongs to the sports workspace.
 - **The Apps Script runs against a ~20,000-calls-a-day Gmail allowance, and exceeding it
   stops ingest completely and silently** — the only signal is Apps Script's own failure
   email. On 2026-08-27 every run opened every thread in a two-day search window (~2,470
