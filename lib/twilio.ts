@@ -209,14 +209,22 @@ export async function lookupNumber(cfg: TwilioConfig, phone: string): Promise<un
 
 /** The last few calls, for working out why one did not land. */
 export async function recentCalls(cfg: TwilioConfig): Promise<unknown[]> {
-  const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls.json?PageSize=5`, {
+  // Twenty, not five: a single softphone call is TWO rows — the agent's browser
+  // leg and the leg out to the customer — so a five-row window showed half of
+  // the last few attempts and made them impossible to pair up.
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls.json?PageSize=20`, {
     headers: { Authorization: authHeader(cfg) },
   })
   if (!res.ok) throw new Error(`Twilio refused the call list (${res.status})`)
   const j = await res.json()
   return (j.calls ?? []).map((c: Record<string, unknown>) => ({
-    sid: c.sid, from: c.from, to: c.to, status: c.status,
-    duration: c.duration, direction: c.direction, at: c.start_time,
+    sid: c.sid,
+    // Which browser leg a customer leg belongs to. Without it the two halves of
+    // one call cannot be told apart from two separate attempts.
+    parent: c.parent_call_sid,
+    from: c.from, to: c.to, status: c.status,
+    duration: c.duration, direction: c.direction,
+    at: c.start_time, ended: c.end_time,
   }))
 }
 
