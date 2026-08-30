@@ -93,6 +93,37 @@ export async function sendWhatsApp(cfg: TwilioConfig, to: string, body: string):
   return { sid: String(j.sid ?? ''), status: String(j.status ?? '') }
 }
 
+export interface PlacedCall { sid: string; status: string }
+
+/**
+ * Ring `to`, and when it answers, fetch instructions from `twimlUrl`.
+ *
+ * `to` here is the AGENT's phone: the call reaches them first, and the TwiML
+ * that comes back then dials the customer. The customer's number is never in
+ * this request, and never in the browser — it is looked up on the server when
+ * Twilio asks what to do next.
+ */
+export async function placeCall(
+  cfg: TwilioConfig, to: string, twimlUrl: string, statusCallback: string,
+): Promise<PlacedCall> {
+  const form = new URLSearchParams({
+    From: cfg.phoneNumber,
+    To: to,
+    Url: twimlUrl,
+    StatusCallback: statusCallback,
+    StatusCallbackEvent: 'completed',
+    StatusCallbackMethod: 'POST',
+  })
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls.json`, {
+    method: 'POST',
+    headers: { Authorization: authHeader(cfg), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form,
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(String(j?.message ?? `Twilio refused the call (${res.status})`))
+  return { sid: String(j.sid ?? ''), status: String(j.status ?? '') }
+}
+
 /**
  * Is this webhook really from Twilio?
  *

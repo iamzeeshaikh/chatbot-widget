@@ -31,7 +31,8 @@ import {
   CRM_TASK_ROLE, parseCrmTask, byDueAsc, byCompletedDesc, type CrmTaskEntry,
 } from './tasks'
 import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
-import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from './crm'
+import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE } from './crm'
+import { parseCall, callDurationLabel, type CallEntry } from './call'
 import { parseWaMessage, type WaMessage } from './whatsapp'
 import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
@@ -45,7 +46,7 @@ export type LeadKind = 'chat' | 'quote' | 'checkout'
 export interface TimelineEvent {
   id: string
   at: string
-  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task' | 'email' | 'email_in' | 'wa_out' | 'wa_in'
+  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task' | 'email' | 'email_in' | 'wa_out' | 'wa_in' | 'call'
   group: 'messages' | 'notes' | 'stage' | 'system' | 'tasks'
   actor: string
   title: string
@@ -63,6 +64,8 @@ export interface TimelineEvent {
   inbound?: CrmEmailInEntry
   /** Set on `wa_out` / `wa_in` events — the WhatsApp message. */
   wa?: WaMessage
+  /** Set on `call` events. */
+  call?: CallEntry
   /** True while nobody has opened this reply. */
   unread?: boolean
   /** Signed, short-lived links for files on an email event. */
@@ -439,6 +442,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     }
   }
 
+  const calls = new Map<string, CallEntry>()
   const lead = resolved.lead
   const kind: LeadKind = !lead ? 'chat' : isCheckoutLeadMessage(lead.message) ? 'checkout' : isQuoteLeadMessage(lead.message) ? 'quote' : 'chat'
 
@@ -598,6 +602,14 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       // keeps one event per reply even if the sweep wrote the row twice.
       continue
     }
+    if (row.role === CRM_CALL_ROLE) {
+      // Two rows share a SID — one when it was dialled, one when it ended — so
+      // they are folded after the loop into a single event rather than showing
+      // the same call twice.
+      const c = parseCall(row.message)
+      if (c) calls.set(c.sid, c)
+      continue
+    }
     if (row.role === CRM_WA_OUT_ROLE || row.role === CRM_WA_IN_ROLE) {
       const w = parseWaMessage(row.message)
       if (w) {
@@ -685,6 +697,30 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     const list = ev.kind === 'email' ? ev.email?.attachments : ev.kind === 'email_in' ? ev.inbound?.attachments : null
     if (!list?.length) continue
     ev.files = list.map((a) => ({ name: a.name, mime: a.mime, size: a.size, url: signedByPath.get(a.path) ?? null }))
+  }
+
+  // One event per call, from the folded map. A call that is still ringing says
+  // so; a finished one carries how long it lasted, which is the number anybody
+  // reading the record actually wants.
+  for (const c of calls.values()) {
+    const at = asUtcIso(c.at)
+    if (!at) continue
+    const len = callDurationLabel(c.duration)
+    const answered = (c.duration ?? 0) > 0
+    push({
+      id: `call-${c.sid}`, at, kind: 'call', group: 'messages',
+      actor: AGENT_LABEL(c.by),
+      title: c.status === 'ringing' ? 'Calling…'
+        : answered ? `Called — ${len}`
+        : `Call not answered (${c.status})`,
+      call: c,
+    })
+    // A call we placed is an outbound touch, like an email or a WhatsApp
+    // message — it is us reaching the customer.
+    if (answered) {
+      outboundAt.push(at)
+      if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
+    }
   }
 
   timeline.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())

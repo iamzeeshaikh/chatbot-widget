@@ -51,11 +51,16 @@ export const CRM_MEMBER_NAME_ROLE = 'crm_member_name'
 export const CRM_WA_IN_ROLE = 'crm_wa_in'
 export const CRM_WA_OUT_ROLE = 'crm_wa_out'
 
+// A phone call placed from a lead's record. One row per call, updated by a
+// second row when Twilio reports how it ended — newest wins on read, like every
+// other control row here.
+export const CRM_CALL_ROLE = 'crm_call'
+
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
-  CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE,
+  CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

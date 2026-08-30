@@ -19,7 +19,7 @@ import {
   Sparkles, MessageSquare, StickyNote, Target, UserCheck, Paperclip,
   Pencil, Banknote, CircleCheck, History, Send, ChevronDown, ChevronRight,
   Inbox, Quote, Reply, FileText, Image as ImageIcon, TriangleAlert, RefreshCw, Loader2,
-  MessageCircle, MessageCircleReply, type LucideIcon,
+  MessageCircle, MessageCircleReply, PhoneCall, type LucideIcon,
 } from 'lucide-react'
 import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
@@ -55,6 +55,7 @@ const ICON: Record<TimelineEvent['kind'], LucideIcon> = {
   email_in: Inbox,
   wa_out: MessageCircle,
   wa_in: MessageCircleReply,
+  call: PhoneCall,
 }
 
 // Accent per event type. Saturated mid-tones, chosen to read on both themes —
@@ -70,6 +71,7 @@ function accent(e: TimelineEvent): string {
     // WhatsApp, and it separates the channel from email at a glance.
     case 'wa_out': return '#16a34a'
     case 'wa_in': return '#059669'
+    case 'call': return '#0891b2'
     case 'task': return e.taskDone ? '#22c55e' : '#8b5cf6'
     case 'note': return '#6366f1'
     case 'created': return '#22c55e'

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { storedMemberNames, setMemberDisplayName, MAX_MEMBER_NAME } from '@/lib/membername'
+import { storedMemberNames, setMemberDisplayName, memberCallPhone, MAX_MEMBER_NAME } from '@/lib/membername'
 import { agentDisplayName } from '@/lib/agentname'
 import { getMember, revokeSessions, Member } from '@/lib/auth'
 import { workspaceSites } from '@/lib/workspaces'
@@ -39,14 +39,18 @@ export async function GET(req: NextRequest) {
   // from the address, so the page can show the derived one as a placeholder
   // rather than pretending somebody chose it.
   const names = await storedMemberNames()
-  const members = (data ?? []).map((m) => {
+  const members = await Promise.all((data ?? []).map(async (m) => {
     const set = names.get(String(m.email).toLowerCase())
     return {
       ...m,
       display_name: set ?? agentDisplayName(m.email),
       display_name_source: set ? 'set' : 'derived',
+      // The member's OWN phone — the line the CRM rings when they place a call.
+      // Only ever shown to an admin on this page; never to a customer, and
+      // never to another member.
+      call_phone: (await memberCallPhone(String(m.email))) ?? '',
     }
-  })
+  }))
   return NextResponse.json({ members })
 }
 
@@ -103,7 +107,7 @@ export async function PATCH(req: NextRequest) {
   const { admin, error } = await requireAdmin(req)
   if (error) return error
 
-  const { id, role, assigned_sites, password, display_name } = await req.json()
+  const { id, role, assigned_sites, password, display_name, call_phone } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   if (role && !['admin', 'standard'].includes(role)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
@@ -126,13 +130,23 @@ export async function PATCH(req: NextRequest) {
   // The widget-facing name. Empty string CLEARS it, falling back to the name
   // derived from the address — that is why undefined and '' mean different
   // things here.
-  if (typeof display_name === 'string') {
+  if (typeof display_name === 'string' || typeof call_phone === 'string') {
     const target = await loadSameWorkspace(admin!, id)
     if (!target) return NextResponse.json({ error: 'Member not found in your workspace' }, { status: 403 })
-    if (display_name.length > MAX_MEMBER_NAME) {
+    if (typeof display_name === 'string' && display_name.length > MAX_MEMBER_NAME) {
       return NextResponse.json({ error: `A display name can be at most ${MAX_MEMBER_NAME} characters.` }, { status: 400 })
     }
-    const nameErr = await setMemberDisplayName(target.email, display_name, admin!.email)
+    // Both live in one row, so a change to either has to carry the other
+    // forward — writing only the edited field would silently clear the other.
+    const names = await storedMemberNames()
+    const currentName = names.get(String(target.email).toLowerCase()) ?? ''
+    const currentPhone = (await memberCallPhone(String(target.email))) ?? ''
+    const nameErr = await setMemberDisplayName(
+      target.email,
+      typeof display_name === 'string' ? display_name : currentName,
+      admin!.email,
+      typeof call_phone === 'string' ? call_phone : currentPhone,
+    )
     if (nameErr) return NextResponse.json({ error: nameErr }, { status: 500 })
   }
 

@@ -14,6 +14,8 @@ interface Member {
   display_name: string
   /** 'set' when somebody chose it; 'derived' when it came from the address. */
   display_name_source: 'set' | 'derived'
+  /** The member's own phone — the line the CRM rings when they place a call. */
+  call_phone: string
 }
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 
@@ -37,7 +39,7 @@ export default function MembersPage() {
 
   // Edit
   const [editId, setEditId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<{ role: 'admin' | 'standard'; sites: string[]; password: string; displayName: string }>({ role: 'standard', sites: [], password: '', displayName: '' })
+  const [editForm, setEditForm] = useState<{ role: 'admin' | 'standard'; sites: string[]; password: string; displayName: string; callPhone: string }>({ role: 'standard', sites: [], password: '', displayName: '', callPhone: '' })
 
   // Delete
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -97,6 +99,7 @@ export default function MembersPage() {
     setEditForm({
       role: m.role, sites: m.assigned_sites ?? [], password: '',
       displayName: m.display_name_source === 'set' ? m.display_name : '',
+      callPhone: m.call_phone ?? '',
     })
     setError('')
   }
@@ -112,6 +115,7 @@ export default function MembersPage() {
         // Always sent while editing, '' included: an empty box CLEARS the name
         // and falls back to the one derived from the address.
         display_name: editForm.displayName,
+        call_phone: editForm.callPhone,
       }),
     })
     const data = await res.json()
@@ -201,6 +205,14 @@ export default function MembersPage() {
                           maxLength={40} placeholder={m.display_name}
                           aria-label="Name shown to customers"
                           className="block w-40 bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500" />
+                        {/* The member's OWN phone. The CRM rings this first when
+                            they press Call, then bridges the customer — so it is
+                            never shown to a customer, and the customer's number
+                            is never shown to them. */}
+                        <input value={editForm.callPhone} onChange={(e) => setEditForm({ ...editForm, callPhone: e.target.value })}
+                          maxLength={24} placeholder="+92300…  (their phone, for calls)"
+                          aria-label="Member's own phone for calls"
+                          className="mt-1 block w-48 bg-gray-200 border border-gray-300 rounded px-2 py-1 text-[11px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500" />
                       </td>
                       <td className="px-4 py-3">
                         <select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value as 'admin' | 'standard' })}
@@ -253,6 +265,9 @@ export default function MembersPage() {
                           <span title="Taken from the email address. Edit this member to set a proper name."
                             className="ml-1.5 text-[10px] text-gray-500 border border-gray-300 rounded-full px-1.5 py-0.5">auto</span>
                         )}
+                        {m.call_phone
+                          ? <span className="block text-[10px] text-gray-500 mt-0.5" title="Rung first when this member places a call">☎ {m.call_phone}</span>
+                          : <span className="block text-[10px] text-gray-400 mt-0.5" title="Without a number, this member cannot place calls from the CRM">no call number</span>}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${m.role === 'admin' ? 'bg-purple-100 text-purple-700 border border-purple-300' : 'bg-gray-200 text-gray-700 border border-gray-300'}`}>

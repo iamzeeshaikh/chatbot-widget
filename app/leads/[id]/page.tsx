@@ -57,6 +57,8 @@ export default function LeadRecordPage() {
   const [waText, setWaText] = useState('')
   const [waSending, setWaSending] = useState(false)
   const [waError, setWaError] = useState('')
+  const [calling, setCalling] = useState(false)
+  const [callError, setCallError] = useState('')
   // Set when the composer was opened by Reply on an inbound message; cleared on
   // close so the next plain "Email" click is a fresh message, not a stale reply.
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null)
@@ -181,6 +183,22 @@ export default function LeadRecordPage() {
     } catch (err) {
       setRecord((r) => (r ? { ...r, stage: previous } : r))
       setStageError(err instanceof Error ? err.message : 'Could not save the stage')
+    }
+  }
+
+  async function placeCall() {
+    setCalling(true); setCallError('')
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(id)}/call`, { method: 'POST' })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setCallError(d.error || 'The call could not be placed.'); return }
+      // Nothing to show but the fact that a phone is about to ring: the timeline
+      // picks the call up as soon as Twilio reports it.
+      load()
+    } catch {
+      setCallError('The call could not be placed.')
+    } finally {
+      setCalling(false)
     }
   }
 
@@ -463,8 +481,17 @@ export default function LeadRecordPage() {
                 hint={record.contact.phone ? 'Message this lead on WhatsApp' : 'Add a phone number first'}
                 disabled={!record.contact.phone}
                 onClick={() => setWaOpen(true)} />
-              <QuickAction icon={Phone} label="Call" disabled hint="Coming soon" />
+              {/* Calling rings the AGENT's own phone first, then bridges the
+                  customer — so neither side ever learns the other's number and
+                  no headset or open tab is needed. */}
+              <QuickAction icon={Phone} label={calling ? 'Ringing…' : 'Call'}
+                hint={record.contact.phone ? 'Ring your phone, then connect you to this lead' : 'Add a phone number first'}
+                disabled={!record.contact.phone || calling}
+                onClick={placeCall} />
             </div>
+            {callError && (
+              <p role="alert" className="px-3 pb-2 text-[11px] text-red-700">{callError}</p>
+            )}
           </Card>
 
           {/* Properties list — quiet labels, strong values, grouped. */}
