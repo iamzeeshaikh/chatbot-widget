@@ -106,6 +106,19 @@ export async function recentCalls(cfg: TwilioConfig): Promise<unknown[]> {
   }))
 }
 
+/** The last few recordings, to tell "no recording was made" apart from
+ *  "the recording was made but our callback never ran". */
+export async function recentRecordings(cfg: TwilioConfig): Promise<unknown[]> {
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/Recordings.json?PageSize=5`, {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  if (!res.ok) throw new Error(`Twilio refused the recording list (${res.status})`)
+  const j = await res.json()
+  return (j.recordings ?? []).map((r: Record<string, unknown>) => ({
+    sid: r.sid, callSid: r.call_sid, duration: r.duration, status: r.status, at: r.date_created,
+  }))
+}
+
 export interface PlacedCall { sid: string; status: string }
 
 /**
