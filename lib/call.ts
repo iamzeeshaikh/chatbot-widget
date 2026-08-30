@@ -27,6 +27,9 @@ export interface CallEntry {
   status: string
   /** Seconds, once the call has ended. */
   duration?: number
+  /** Set on a voicemail — the recording, fetched back through our own endpoint
+   *  because Twilio's media URL needs the account's credentials. */
+  recordingSid?: string
 }
 
 export function parseCall(message: string | null | undefined): CallEntry | null {
@@ -40,6 +43,7 @@ export function parseCall(message: string | null | undefined): CallEntry | null 
       at: typeof o.at === 'string' ? o.at : '',
       status: typeof o.status === 'string' ? o.status : '',
       duration: typeof o.duration === 'number' ? o.duration : undefined,
+      recordingSid: typeof o.recordingSid === 'string' && o.recordingSid ? o.recordingSid : undefined,
     }
   } catch {
     return null

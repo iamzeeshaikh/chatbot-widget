@@ -88,9 +88,11 @@ export interface ReplyContext {
   subject: string
 }
 
-export default function Timeline({ events, currency, onEditNote, onDeleteNote, canManageNote, onReply, onRetryFile }: {
+export default function Timeline({ events, currency, leadId, onEditNote, onDeleteNote, canManageNote, onReply, onRetryFile }: {
   events: TimelineEvent[]
   currency: CrmCurrency
+  /** Needed to fetch a voicemail back through our own guarded endpoint. */
+  leadId: string
   onEditNote: (noteId: string, body: string) => Promise<void>
   onDeleteNote: (noteId: string) => Promise<void>
   canManageNote: (e: TimelineEvent) => boolean
@@ -253,6 +255,17 @@ export default function Timeline({ events, currency, onEditNote, onDeleteNote, c
                       <><EmailEntry entry={e.email} /><Files files={e.files} /></>
                     ) : e.kind === 'email_in' && e.inbound ? (
                       <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} gmailId={e.inbound.gmailId} onRetryFile={onRetryFile} /></>
+                    ) : e.kind === 'call' && e.call?.recordingSid ? (
+                      /* The audio is streamed through our own endpoint, which
+                         checks this recording belongs to this lead — a Twilio
+                         media URL would need the account credentials and must
+                         never reach a browser. */
+                      <audio
+                        controls
+                        preload="none"
+                        className="mt-1 w-full max-w-sm h-9"
+                        src={`/api/leads/${encodeURIComponent(leadId)}/call/recording?sid=${encodeURIComponent(e.call.recordingSid)}`}
+                      />
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
                         {e.body}

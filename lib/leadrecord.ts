@@ -709,15 +709,18 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     const answered = (c.duration ?? 0) > 0
     push({
       id: `call-${c.sid}`, at, kind: 'call', group: 'messages',
-      actor: AGENT_LABEL(c.by),
-      title: c.status === 'ringing' ? 'Calling…'
+      actor: c.status === 'voicemail' ? 'Customer' : AGENT_LABEL(c.by),
+      title: c.status === 'voicemail' ? `Voicemail${len ? ` — ${len}` : ''}`
+        : c.status === 'ringing' ? 'Calling…'
         : answered ? `Called — ${len}`
         : `Call not answered (${c.status})`,
       call: c,
     })
     // A call we placed is an outbound touch, like an email or a WhatsApp
     // message — it is us reaching the customer.
-    if (answered) {
+    // A voicemail is the customer reaching US, so it is deliberately not an
+    // outbound touch — the same rule an inbound email follows.
+    if (answered && c.status !== 'voicemail') {
       outboundAt.push(at)
       if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
     }
