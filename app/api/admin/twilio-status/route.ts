@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
-import { twilioConfig, twilioProblem, fetchAccount } from '@/lib/twilio'
+import { twilioConfig, twilioProblem, fetchAccount, recentCalls } from '@/lib/twilio'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +19,16 @@ export async function GET(req: NextRequest) {
   const problem = twilioProblem()
   const cfg = twilioConfig()
   if (!cfg) return NextResponse.json({ configured: false, problem })
+
+  // ?calls=1 — the last few calls as Twilio saw them, which is the only way to
+  // find out why a call that "queued" never reached anybody.
+  if (req.nextUrl.searchParams.get('calls') === '1') {
+    try {
+      return NextResponse.json({ calls: await recentCalls(cfg) })
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 502 })
+    }
+  }
 
   try {
     const account = await fetchAccount(cfg)

@@ -93,6 +93,19 @@ export async function sendWhatsApp(cfg: TwilioConfig, to: string, body: string):
   return { sid: String(j.sid ?? ''), status: String(j.status ?? '') }
 }
 
+/** The last few calls, for working out why one did not land. */
+export async function recentCalls(cfg: TwilioConfig): Promise<unknown[]> {
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls.json?PageSize=5`, {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  if (!res.ok) throw new Error(`Twilio refused the call list (${res.status})`)
+  const j = await res.json()
+  return (j.calls ?? []).map((c: Record<string, unknown>) => ({
+    sid: c.sid, from: c.from, to: c.to, status: c.status,
+    duration: c.duration, direction: c.direction, at: c.start_time,
+  }))
+}
+
 export interface PlacedCall { sid: string; status: string }
 
 /**
