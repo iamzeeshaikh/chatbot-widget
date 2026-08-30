@@ -54,16 +54,20 @@ export default function Softphone() {
   const [phase, setPhase] = useState<Phase>('off')
   const [who, setWho] = useState('')
   const [muted, setMuted] = useState(false)
+  // A calm line for the ordinary endings — "nobody answered" is not a fault,
+  // and showing it in red made a working call look broken.
+  const [notice, setNotice] = useState('')
   const [seconds, setSeconds] = useState(0)
   const [error, setError] = useState('')
 
   const deviceRef = useRef<TwilioDevice | null>(null)
   const callRef = useRef<TwilioCall | null>(null)
 
-  const endedTo = useCallback((msg: string) => {
+  const endedTo = useCallback((msg: string, tone: 'error' | 'notice' = 'error') => {
     callRef.current = null
     setPhase('idle'); setMuted(false); setSeconds(0); setWho('')
-    if (msg) setError(msg)
+    if (tone === 'notice') { setNotice(msg); setError('') }
+    else if (msg) setError(msg)
   }, [])
 
   // Wire one call's lifecycle. Both directions share it — an accepted incoming
@@ -71,11 +75,18 @@ export default function Softphone() {
   const bind = useCallback((call: TwilioCall, label: string) => {
     callRef.current = call
     setWho(label)
-    call.on('accept', () => { setPhase('live'); setSeconds(0); setError('') })
-    call.on('disconnect', () => endedTo(''))
-    call.on('cancel', () => endedTo('The caller hung up.'))
+    call.on('accept', () => { setPhase('live'); setSeconds(0); setError(''); setNotice('') })
+    call.on('disconnect', () => endedTo('Call ended.', 'notice'))
+    call.on('cancel', () => endedTo('The caller hung up.', 'notice'))
     call.on('reject', () => endedTo(''))
     call.on('error', (e: unknown) => {
+      const code = (e as { code?: number })?.code
+      // 31000 arrives on a NORMAL teardown: our <Dial action> hands back TwiML
+      // that ends the agent's leg once the customer's leg is over, and the SDK
+      // reports that as "Call is no longer valid". Shown as a failure it made
+      // an unanswered call — the commonest outcome there is — read as a broken
+      // system. The real reason is on the timeline either way.
+      if (code === 31000) { endedTo('Call ended — the other side did not pick up, or the call finished.', 'notice'); return }
       const m = (e as { message?: string })?.message
       endedTo(m ? `Call failed: ${m}` : 'The call failed.')
     })
@@ -153,7 +164,7 @@ export default function Softphone() {
   useEffect(() => attachSoftphone(async ({ leadId, leadName }) => {
     const device = deviceRef.current
     if (!device) return
-    setError(''); setPhase('connecting'); setWho(leadName || 'Calling…')
+    setError(''); setNotice(''); setPhase('connecting'); setWho(leadName || 'Calling…')
     try {
       // The lead id is all that is sent. The number lives on the server.
       const call = await device.connect({ params: { leadId } })
@@ -184,8 +195,8 @@ export default function Softphone() {
   }
 
   // Nothing to show when there is no phone and nothing has gone wrong.
-  if (phase === 'off' && !error) return null
-  if (phase === 'idle' && !error) return null
+  if (phase === 'off' && !error && !notice) return null
+  if (phase === 'idle' && !error && !notice) return null
 
   return (
     <div
@@ -195,6 +206,13 @@ export default function Softphone() {
     >
       {error && (
         <p role="alert" className="mb-2 text-[11px] text-red-700">{error}</p>
+      )}
+      {!error && notice && (
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-[11px] text-gray-500">{notice}</p>
+          <button onClick={() => setNotice('')} aria-label="Dismiss"
+            className="-mt-0.5 shrink-0 rounded px-1 text-[11px] text-gray-400 hover:bg-gray-100 hover:text-gray-600">×</button>
+        </div>
       )}
 
       {phase === 'incoming' && (

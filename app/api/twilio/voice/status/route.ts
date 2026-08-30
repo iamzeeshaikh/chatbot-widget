@@ -61,8 +61,21 @@ export async function POST(req: NextRequest) {
     }),
   }])
 
-  // A StatusCallback wants nothing back; a <Dial action> wants TwiML, and an
-  // empty 204 there hangs up on a caller who may still be on the line. An empty
-  // <Response/> is correct for both — it means "nothing further to do".
+  // Two callers again. A StatusCallback ignores whatever comes back; a <Dial
+  // action> — the browser softphone's path — plays it to the AGENT, who is
+  // still on the line and otherwise just gets cut off in silence. Saying what
+  // happened is the difference between "nobody picked up" and "this thing is
+  // broken", which is exactly how an unanswered call was read the first time.
+  const outcome = params.DialCallStatus ?? ''
+  const spoken = outcome === 'no-answer' ? 'There was no answer.'
+    : outcome === 'busy' ? 'The line was busy.'
+    : outcome === 'failed' ? 'The call could not be connected.'
+    : ''
+  if (spoken) {
+    return new NextResponse(
+      `<Response><Say voice="Polly.Joanna">${spoken}</Say><Hangup /></Response>`,
+      { headers: { 'Content-Type': 'text/xml' } },
+    )
+  }
   return new NextResponse('<Response/>', { headers: { 'Content-Type': 'text/xml' } })
 }
