@@ -31,7 +31,10 @@ export async function POST(req: NextRequest) {
     return new NextResponse('Bad signature', { status: 403 })
   }
 
-  const from = params.From ?? ''
+  // `From` is not one of the recording callback's parameters — it is put on the
+  // URL by the greeting handler. The param is still read first in case Twilio
+  // ever sends one.
+  const from = params.From || req.nextUrl.searchParams.get('from') || ''
   const sid = params.CallSid ?? params.RecordingSid ?? ''
   const recordingSid = params.RecordingSid ?? ''
   const duration = Number(params.RecordingDuration ?? '0') || 0

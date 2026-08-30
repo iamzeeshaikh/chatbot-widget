@@ -33,6 +33,13 @@ export async function POST(req: NextRequest) {
   }
 
   const origin = `${proto}://${host}`
+  // WHO called has to travel in the callback URL. Twilio's recording callback
+  // carries RecordingSid, CallSid and a duration — and NOT `From`, which is the
+  // one field the CRM needs to know whose lead this voicemail belongs to. The
+  // first version read `From` there, found nothing, and dropped every voicemail
+  // in silence. The signature covers the query string too, so this stays
+  // verifiable.
+  const caller = params.From ?? ''
   // Voice and wording chosen to sound like a business, not a robot reading a
   // form: short, says what happens next, and asks for the one thing that makes
   // a callback possible.
@@ -40,7 +47,7 @@ export async function POST(req: NextRequest) {
     '<Response>'
     + '<Say voice="Polly.Joanna">Thanks for calling. Our team is not available right now.</Say>'
     + '<Say voice="Polly.Joanna">Please leave your name, your team, and what you need after the tone, and we will get back to you.</Say>'
-    + `<Record maxLength="120" playBeep="true" trim="trim-silence" recordingStatusCallback="${origin}/api/twilio/voice/recording" recordingStatusCallbackMethod="POST" />`
+    + `<Record maxLength="120" playBeep="true" trim="trim-silence" recordingStatusCallback="${origin}/api/twilio/voice/recording?from=${encodeURIComponent(caller)}" recordingStatusCallbackMethod="POST" />`
     + '<Say voice="Polly.Joanna">We did not get a message. Goodbye.</Say>'
     + '</Response>',
   )
