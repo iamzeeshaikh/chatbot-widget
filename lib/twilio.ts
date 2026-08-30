@@ -102,6 +102,25 @@ export async function sendWhatsApp(
   return { sid: String(j.sid ?? ''), status: String(j.status ?? '') }
 }
 
+/**
+ * Numbers this account is allowed to call.
+ *
+ * A TRIAL account may only dial numbers verified in the console, and the
+ * failure arrives as a mid-call error rather than anything a person would
+ * connect to the cause. Listing them turns "why did nothing ring?" into a
+ * question that can be answered before the call is placed.
+ */
+export async function verifiedCallerIds(cfg: TwilioConfig): Promise<{ phone: string; name: string }[]> {
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/OutgoingCallerIds.json?PageSize=20`, {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  if (!res.ok) throw new Error(`Twilio refused the verified-number list (${res.status})`)
+  const j = await res.json()
+  return (j.outgoing_caller_ids ?? []).map((c: Record<string, unknown>) => ({
+    phone: String(c.phone_number ?? ''), name: String(c.friendly_name ?? ''),
+  }))
+}
+
 /** The last few messages, for working out why one did not land. */
 export async function recentMessages(cfg: TwilioConfig): Promise<unknown[]> {
   const res = await fetch(`${API}/Accounts/${cfg.sid}/Messages.json?PageSize=10`, {
