@@ -617,7 +617,16 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       // newest wins — so the timeline shows one message whose title reflects
       // what finally happened, rather than the same line three times.
       const w = parseWaMessage(row.message)
-      if (w) waMessages.set(w.sid || `row-${row.id ?? at}`, { w, at })
+      if (w) {
+        const key = w.sid || `row-${row.id ?? at}`
+        // Newest row wins for the CONTENT (it carries the delivery outcome) but
+        // the timestamp stays the earliest — that is when the agent actually
+        // sent it. Taking the newest row's time moved a message minutes down
+        // the timeline the moment WhatsApp reported back, so a reply appeared
+        // to arrive before the message it answered.
+        const first = waMessages.get(key)?.at
+        waMessages.set(key, { w, at: first && first < at ? first : at })
+      }
       continue
     }
     if (row.role === CRM_TASK_ROLE) {
