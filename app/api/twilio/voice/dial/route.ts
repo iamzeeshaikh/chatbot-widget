@@ -74,10 +74,18 @@ export async function POST(req: NextRequest) {
   const statusUrl = `${origin}/api/twilio/voice/status?leadId=${encodeURIComponent(leadId)}`
   // callerId is the business's number — the customer sees the company, and the
   // agent's browser has no number to show in the first place.
-  // `record` captures the conversation on the lead, the same as a voicemail.
+  //
+  // NO answerOnBridge HERE, and it is not an oversight. It is right for the
+  // INCOMING flow, where the parent is a real caller who should hear ringing
+  // instead of silence. On a call that ORIGINATES in the browser it holds the
+  // parent leg unanswered — so the SDK tore the call down after two or three
+  // seconds, Twilio cancelled the customer leg with it, and the customer's
+  // phone never rang at all. The call log then reported 'no-answer' against a
+  // leg that lasted ZERO seconds, which reads like the customer ignored a call
+  // they were never offered.
   return xml(
     '<Response>'
-    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="30" answerOnBridge="true"`
+    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="30"`
     + ` action="${escapeXml(statusUrl)}" method="POST">`
     + `<Number>${escapeXml(customer)}</Number>`
     + '</Dial>'
