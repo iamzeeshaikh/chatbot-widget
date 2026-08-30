@@ -61,6 +61,10 @@ export async function GET(req: NextRequest) {
       problem,                       // e.g. a missing WhatsApp sender, which is not fatal
       account: account.friendlyName,
       status: account.status,        // 'active' when the account is in good standing
+      // 'Trial' or 'Full'. A trial account can only call numbers verified in
+      // the console — the single most likely reason a call "does nothing" — and
+      // `status` does not reveal it, so it is reported separately.
+      accountType: account.type,
       whatsappFrom: cfg.whatsappFrom,
       phoneNumber: cfg.phoneNumber,
     })

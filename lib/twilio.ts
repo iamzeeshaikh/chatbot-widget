@@ -45,12 +45,18 @@ function authHeader(cfg: TwilioConfig): string {
   return 'Basic ' + Buffer.from(`${cfg.sid}:${cfg.token}`).toString('base64')
 }
 
-/** The account itself — used to prove the credentials work before anything else does. */
-export async function fetchAccount(cfg: TwilioConfig): Promise<{ friendlyName: string; status: string }> {
+/** The account itself — used to prove the credentials work before anything else does.
+ *
+ *  `type` is reported separately from `status` and the two are easy to confuse:
+ *  status is active/suspended/closed and says NOTHING about whether the account
+ *  is on trial, while type is 'Trial' or 'Full'. A trial account may only dial
+ *  numbers verified in the console, which is the difference between "calling is
+ *  restricted" and "calling works" — so it is read rather than assumed. */
+export async function fetchAccount(cfg: TwilioConfig): Promise<{ friendlyName: string; status: string; type: string }> {
   const res = await fetch(`${API}/Accounts/${cfg.sid}.json`, { headers: { Authorization: authHeader(cfg) } })
   if (!res.ok) throw new Error(`Twilio refused the credentials (${res.status})`)
   const j = await res.json()
-  return { friendlyName: String(j.friendly_name ?? ''), status: String(j.status ?? '') }
+  return { friendlyName: String(j.friendly_name ?? ''), status: String(j.status ?? ''), type: String(j.type ?? '') }
 }
 
 export interface SentWhatsApp { sid: string; status: string }
