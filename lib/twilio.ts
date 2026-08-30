@@ -183,6 +183,30 @@ export async function dialingPermission(cfg: TwilioConfig, isoCode: string): Pro
   }
 }
 
+/**
+ * What kind of line is this number?
+ *
+ * The decisive question when a call "rang" and nobody's phone rang: a mobile
+ * behaves as expected, while a VoIP or virtual number — a second-number app, a
+ * calling card, a WhatsApp-only line — accepts the call at the network and may
+ * never ring a handset at all. The call log cannot tell those apart; it reports
+ * no-answer for both.
+ */
+export async function lookupNumber(cfg: TwilioConfig, phone: string): Promise<unknown> {
+  const e164 = phone.replace(/[^\d+]/g, '')
+  const res = await fetch(
+    `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(e164)}?Fields=line_type_intelligence`,
+    { headers: { Authorization: authHeader(cfg) } },
+  )
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(String(j?.message ?? `Twilio refused the lookup (${res.status})`))
+  const lt = (j.line_type_intelligence ?? {}) as Record<string, unknown>
+  return {
+    valid: j.valid, country: j.country_code,
+    type: lt.type ?? 'unknown', carrier: lt.carrier_name ?? '', errorCode: lt.error_code ?? null,
+  }
+}
+
 /** The last few calls, for working out why one did not land. */
 export async function recentCalls(cfg: TwilioConfig): Promise<unknown[]> {
   const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls.json?PageSize=5`, {
