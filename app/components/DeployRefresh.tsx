@@ -18,11 +18,16 @@
 //   • visible tab  → show a small reload pill and wait; the reload happens
 //     when the tab next goes hidden — never yank the page out from under
 //     someone mid-sentence
+//   • a live call   → never reload while the softphone has a call up. The tab
+//     going hidden is the NORMAL thing for an agent on a call — they look at
+//     their handset, or switch window to read something out — and reloading
+//     there destroys the Device mid-sentence.
 //   • unsent text  → if any textarea holds text (chat composer, CRM note,
 //     task title), never auto-reload — even hidden. The pill stays for a
 //     manual reload once the agent has sent or discarded their draft.
 
 import { useEffect, useRef, useState } from 'react'
+import { softphoneBusy } from '@/lib/softphonebus'
 import { RefreshCw } from 'lucide-react'
 
 // 5 minutes: a deploy is a rare event, so the only job is convergence within
@@ -49,7 +54,7 @@ export default function DeployRefresh() {
     let alive = true
 
     const maybeReload = () => {
-      if (staleRef.current && document.hidden && !hasUnsavedText()) window.location.reload()
+      if (staleRef.current && document.hidden && !hasUnsavedText() && !softphoneBusy()) window.location.reload()
     }
 
     const check = async () => {

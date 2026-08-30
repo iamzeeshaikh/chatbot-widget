@@ -41,6 +41,24 @@ export function watchSoftphoneReady(fn: (v: boolean) => void): () => void {
   return () => { readyWatchers.delete(fn) }
 }
 
+// Is a call happening right now?
+//
+// DeployRefresh reloads a stale tab the moment it goes hidden, which is correct
+// for a dashboard and catastrophic for a phone: the agent turns to their
+// handset, the tab goes hidden, the page reloads, the Device is destroyed and
+// the call dies about a second in — looking exactly like the call "failed".
+// A draft in a textarea already blocks that reload; a live call has at least as
+// much claim to.
+let busy = false
+
+export function setSoftphoneBusy(v: boolean): void {
+  busy = v
+}
+
+export function softphoneBusy(): boolean {
+  return busy
+}
+
 /** A page asks for a call. False means there is no softphone to take it, and
  *  the caller should fall back to ringing the agent's own phone. */
 export function requestBrowserCall(req: CallRequest): boolean {

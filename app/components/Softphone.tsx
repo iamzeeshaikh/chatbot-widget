@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { attachSoftphone, setSoftphoneReady } from '@/lib/softphonebus'
+import { attachSoftphone, setSoftphoneBusy, setSoftphoneReady } from '@/lib/softphonebus'
 
 // The dashboard, as a telephone.
 //
@@ -65,6 +65,7 @@ export default function Softphone() {
 
   const endedTo = useCallback((msg: string, tone: 'error' | 'notice' = 'error') => {
     callRef.current = null
+    setSoftphoneBusy(false)
     setPhase('idle'); setMuted(false); setSeconds(0); setWho('')
     if (tone === 'notice') { setNotice(msg); setError('') }
     else if (msg) setError(msg)
@@ -74,6 +75,7 @@ export default function Softphone() {
   // call and a connected outgoing one behave identically from here on.
   const bind = useCallback((call: TwilioCall, label: string) => {
     callRef.current = call
+    setSoftphoneBusy(true)
     setWho(label)
     call.on('accept', () => { setPhase('live'); setSeconds(0); setError(''); setNotice('') })
     call.on('disconnect', () => endedTo('Call ended.', 'notice'))

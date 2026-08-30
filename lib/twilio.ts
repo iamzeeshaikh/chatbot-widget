@@ -207,6 +207,34 @@ export async function lookupNumber(cfg: TwilioConfig, phone: string): Promise<un
   }
 }
 
+/**
+ * Voice Insights for one call: who ended it, and whether audio ever flowed.
+ *
+ * The call log says a leg lasted two seconds. It does not say WHY, and every
+ * explanation — the browser's media never connected, the far end rejected it,
+ * our own TwiML hung up — produces the same two seconds. This is the only
+ * source that separates them, so it is worth the extra endpoint.
+ */
+export async function callInsights(cfg: TwilioConfig, callSid: string): Promise<unknown> {
+  const res = await fetch(`https://insights.twilio.com/v1/Voice/${encodeURIComponent(callSid)}/Summary`, {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(String(j?.message ?? `Twilio refused the insights (${res.status})`))
+  const attrs = (j.attributes ?? {}) as Record<string, unknown>
+  const from = (j.properties ?? {}) as Record<string, unknown>
+  return {
+    state: j.call_state, type: j.call_type,
+    disconnectedBy: j.disconnected_by,
+    duration: j.duration, connectDuration: j.connect_duration,
+    // Where the SDK/network gave up, when it did.
+    edge: from.pdd_ms !== undefined ? { postDialDelayMs: from.pdd_ms } : undefined,
+    tags: j.tags,
+    attributes: attrs,
+    sdkEdge: j.sdk_edge, clientEdge: j.client_edge, carrierEdge: j.carrier_edge,
+  }
+}
+
 /** The last few calls, for working out why one did not land. */
 export async function recentCalls(cfg: TwilioConfig): Promise<unknown[]> {
   // Twenty, not five: a single softphone call is TWO rows — the agent's browser
