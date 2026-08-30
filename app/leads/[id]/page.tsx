@@ -20,7 +20,7 @@ import { useParams } from 'next/navigation'
 import {
   ArrowLeft, MessagesSquare, StickyNote, ListTodo, Mail, Phone, Target,
   Paperclip, Link2, Activity, FileText, Lock, Search, TriangleAlert,
-  Repeat, Building2, Globe, Tag, Inbox, ChevronRight,
+  Repeat, Building2, Globe, Tag, Inbox, ChevronRight, MessageCircle, X,
 } from 'lucide-react'
 import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
 import {
@@ -53,6 +53,10 @@ export default function LeadRecordPage() {
   const [taskBusy, setTaskBusy] = useState<Set<string>>(new Set())
   const [taskError, setTaskError] = useState('')
   const [composing, setComposing] = useState(false)
+  const [waOpen, setWaOpen] = useState(false)
+  const [waText, setWaText] = useState('')
+  const [waSending, setWaSending] = useState(false)
+  const [waError, setWaError] = useState('')
   // Set when the composer was opened by Reply on an inbound message; cleared on
   // close so the next plain "Email" click is a fresh message, not a stale reply.
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null)
@@ -177,6 +181,28 @@ export default function LeadRecordPage() {
     } catch (err) {
       setRecord((r) => (r ? { ...r, stage: previous } : r))
       setStageError(err instanceof Error ? err.message : 'Could not save the stage')
+    }
+  }
+
+  async function sendWhatsApp() {
+    const text = waText.trim()
+    if (!text) return
+    setWaSending(true); setWaError('')
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(id)}/whatsapp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: text }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setWaError(d.error || 'The message could not be sent.'); return }
+      // Only cleared on success: a failed send must not lose what was typed —
+      // the 24-hour rule refuses often enough that retyping would be the norm.
+      setWaText(''); setWaOpen(false)
+      load()
+    } catch {
+      setWaError('The message could not be sent.')
+    } finally {
+      setWaSending(false)
     }
   }
 
@@ -430,6 +456,13 @@ export default function LeadRecordPage() {
                 hint={record.contact.email ? 'Email this lead from your Gmail' : 'Add an email address first'}
                 disabled={!record.contact.email}
                 onClick={() => setComposing(true)} />
+              {/* WhatsApp: the customer's number is never shown, and the server
+                  addresses the message from its own rows — the same rule the
+                  email send follows. */}
+              <QuickAction icon={MessageCircle} label="WhatsApp"
+                hint={record.contact.phone ? 'Message this lead on WhatsApp' : 'Add a phone number first'}
+                disabled={!record.contact.phone}
+                onClick={() => setWaOpen(true)} />
               <QuickAction icon={Phone} label="Call" disabled hint="Coming soon" />
             </div>
           </Card>
@@ -700,6 +733,40 @@ export default function LeadRecordPage() {
           </Card>
         </div>
       </main>
+
+      {waOpen && (
+        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-gray-900/40 p-3" onClick={() => setWaOpen(false)}>
+          <div className="w-full max-w-lg bg-white border border-gray-200 rounded-2xl shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+              <span className="w-7 h-7 rounded-lg bg-green-100 text-green-700 flex items-center justify-center">
+                <MessageCircle size={15} strokeWidth={2} aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900">WhatsApp</p>
+                <p className="text-[11px] text-gray-500 truncate">to {record.contact.name || 'this lead'}</p>
+              </div>
+              <button onClick={() => setWaOpen(false)} aria-label="Close"
+                className="ml-auto p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg"><X size={15} strokeWidth={2} aria-hidden /></button>
+            </div>
+            <div className="p-4">
+              <textarea value={waText} onChange={(e) => setWaText(e.target.value)} rows={5} autoFocus
+                placeholder="Write your message…"
+                className="w-full text-sm text-gray-900 bg-white border border-gray-300 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none" />
+              {waError && <p role="alert" className="mt-2 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{waError}</p>}
+              {/* Said before it bites, not after: WhatsApp refuses a free-form
+                  message more than 24 hours after the customer's last one. */}
+              <p className="mt-2 text-[11px] text-gray-500">WhatsApp only allows a free reply within 24 hours of the customer&rsquo;s last message.</p>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-100">
+              <button onClick={sendWhatsApp} disabled={waSending || !waText.trim()}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
+                {waSending ? 'Sending…' : 'Send'}
+              </button>
+              <button onClick={() => setWaOpen(false)} className="text-xs text-gray-600 hover:text-gray-900 px-2 py-1.5">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {composing && (
         <EmailComposer

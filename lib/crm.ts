@@ -45,11 +45,17 @@ export const CRM_VALUE_ROLE = 'crm_value'
 // (see lib/membername.ts) and never touches a conversation.
 export const CRM_MEMBER_NAME_ROLE = 'crm_member_name'
 
+// WhatsApp, both directions, on a lead's timeline. Separate roles rather than
+// one with a `direction` field, so a query can ask for "messages from the
+// customer" without parsing every row — the same shape the email pair uses.
+export const CRM_WA_IN_ROLE = 'crm_wa_in'
+export const CRM_WA_OUT_ROLE = 'crm_wa_out'
+
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
-  CRM_MEMBER_NAME_ROLE,
+  CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

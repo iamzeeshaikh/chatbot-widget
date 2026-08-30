@@ -31,6 +31,8 @@ import {
   CRM_TASK_ROLE, parseCrmTask, byDueAsc, byCompletedDesc, type CrmTaskEntry,
 } from './tasks'
 import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
+import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from './crm'
+import { parseWaMessage, type WaMessage } from './whatsapp'
 import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry,
@@ -43,7 +45,7 @@ export type LeadKind = 'chat' | 'quote' | 'checkout'
 export interface TimelineEvent {
   id: string
   at: string
-  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task' | 'email' | 'email_in'
+  kind: 'created' | 'message' | 'note' | 'stage' | 'assign' | 'attachment' | 'field' | 'value' | 'task' | 'email' | 'email_in' | 'wa_out' | 'wa_in'
   group: 'messages' | 'notes' | 'stage' | 'system' | 'tasks'
   actor: string
   title: string
@@ -59,6 +61,8 @@ export interface TimelineEvent {
   email?: CrmEmailEntry
   /** Set on `email_in` events — the customer's reply. */
   inbound?: CrmEmailInEntry
+  /** Set on `wa_out` / `wa_in` events — the WhatsApp message. */
+  wa?: WaMessage
   /** True while nobody has opened this reply. */
   unread?: boolean
   /** Signed, short-lived links for files on an email event. */
@@ -230,6 +234,25 @@ export async function writeControlRow(
  * you replied to a different one would hide real work. Append-only like every
  * read marker, so the audit trail keeps who cleared it and when.
  */
+/** The lead's REAL phone number, for the server to message. Same reasoning as
+ *  leadRecipient: an agent who may not see it still has to be able to use it. */
+export async function leadPhone(id: string): Promise<string | null> {
+  const resolved = await resolveLeadSite(id)
+  if (resolved?.lead?.phone) return resolved.lead.phone.trim() || null
+
+  const { data } = await supabase.from('chat_logs')
+    .select('role, message, created_at')
+    .eq('session_id', id)
+    .in('role', [CONTACT_ROLE, LEAD_CAPTURE_ROLE])
+    .order('created_at', { ascending: true })
+  let phone = ''
+  for (const r of data ?? []) {
+    if (r.role === CONTACT_ROLE) { const c = parseContact(r.message); if (c.phone) phone = c.phone }
+    else { const c = parseLeadCapture(r.message); if (c?.phone) phone = c.phone }
+  }
+  return phone.trim() || null
+}
+
 export async function markThreadRepliesRead(
   id: string, siteId: string, threadId: string | null | undefined, by: string,
 ): Promise<number> {
@@ -456,6 +479,16 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
   }
 
+  // A WhatsApp message we sent is an outbound touch for the same reason an
+  // email is — it is us reaching the customer.
+  for (const row of logs) {
+    if (row.role !== CRM_WA_OUT_ROLE) continue
+    const at = asUtcIso(row.created_at)
+    if (!at) continue
+    outboundAt.push(at)
+    if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
+  }
+
   // A customer reply is deliberately NOT an outbound touch: `lastContactedAt`
   // measures OUR outreach and feeds the follow-up cadence, so folding an
   // inbound message into it would make a lead we have ignored look freshly
@@ -563,6 +596,22 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     if (row.role === CRM_EMAIL_IN_ROLE) {
       // Emitted after the loop from the deduped map — see below. Skipping here
       // keeps one event per reply even if the sweep wrote the row twice.
+      continue
+    }
+    if (row.role === CRM_WA_OUT_ROLE || row.role === CRM_WA_IN_ROLE) {
+      const w = parseWaMessage(row.message)
+      if (w) {
+        const outbound = w.direction === 'outbound'
+        push({
+          id: `wa-${row.id ?? at}`, at, kind: outbound ? 'wa_out' : 'wa_in', group: 'messages',
+          actor: outbound ? AGENT_LABEL(w.sentBy ?? '') : 'Customer',
+          // The number is NOT in the title: a masked record would otherwise
+          // leak it in the one line that is always visible.
+          title: outbound ? 'WhatsApp sent' : 'WhatsApp received',
+          body: w.body,
+          wa: w,
+        })
+      }
       continue
     }
     if (row.role === CRM_TASK_ROLE) {
@@ -757,6 +806,7 @@ function hideContacts(rec: LeadRecord): LeadRecord {
         snippet: scrubText(e.email.snippet) ?? '',
       },
       files: e.kind === 'email_in' && e.files ? e.files.map(hideFile) : e.files,
+      wa: e.wa && { ...e.wa, from: HIDDEN_PHONE, to: HIDDEN_PHONE, body: scrubText(e.wa.body) ?? '' },
       inbound: e.inbound && {
         ...e.inbound,
         from: HIDDEN_EMAIL,
