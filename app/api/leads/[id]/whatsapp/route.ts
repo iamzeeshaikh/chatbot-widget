@@ -36,9 +36,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: 'This lead has no phone number on file, so it cannot be messaged.' }, { status: 400 })
   }
 
+  // Twilio reports what WhatsApp actually did minutes later, against this URL.
+  // The lead id travels on it; the number does not.
+  const statusUrl = `${req.nextUrl.origin}/api/twilio/whatsapp/status?leadId=${encodeURIComponent(id)}`
+
   let sent
   try {
-    sent = await sendWhatsApp(cfg, to, text)
+    sent = await sendWhatsApp(cfg, to, text, statusUrl)
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'WhatsApp refused the message.' }, { status: 502 })
   }
@@ -47,6 +51,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     sid: sent.sid, from: cfg.whatsappFrom.replace(/^whatsapp:/, ''), to,
     body: text, at: new Date().toISOString(),
     sentBy: access.member.email, direction: 'outbound' as const,
+    // Twilio's first word — 'queued' or 'sent'. It means ACCEPTED, not
+    // arrived; the callback replaces it with what really happened.
+    status: sent.status || 'queued',
   }
   const { error } = await writeControlRow({
     sessionId: id, siteId: access.siteId, role: CRM_WA_OUT_ROLE, message: JSON.stringify(entry),

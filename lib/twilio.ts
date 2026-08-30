@@ -68,12 +68,21 @@ export interface SentWhatsApp { sid: string; status: string }
  * readable sentence rather than a code, since the agent can do something about
  * it (wait for a reply, or use another channel).
  */
-export async function sendWhatsApp(cfg: TwilioConfig, to: string, body: string): Promise<SentWhatsApp> {
+export async function sendWhatsApp(
+  cfg: TwilioConfig, to: string, body: string, statusCallback?: string,
+): Promise<SentWhatsApp> {
   const form = new URLSearchParams({
     From: cfg.whatsappFrom,
     To: `whatsapp:${to.replace(/^whatsapp:/, '')}`,
     Body: body,
   })
+  // WHY THIS MATTERS MORE THAN IT LOOKS: a 200 from this call means Twilio
+  // ACCEPTED the message, not that WhatsApp delivered it. Most real failures —
+  // the 24-hour window, a number that is not on WhatsApp, a blocked sender —
+  // are reported minutes later against the message, not here. Without a status
+  // callback the CRM writes "WhatsApp sent" and never learns otherwise, which
+  // is exactly how two messages came to sit on a record having reached nobody.
+  if (statusCallback) form.set('StatusCallback', statusCallback)
   const res = await fetch(`${API}/Accounts/${cfg.sid}/Messages.json`, {
     method: 'POST',
     headers: { Authorization: authHeader(cfg), 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -91,6 +100,20 @@ export async function sendWhatsApp(cfg: TwilioConfig, to: string, body: string):
     throw new Error(String(j?.message ?? `Twilio refused the message (${res.status})`))
   }
   return { sid: String(j.sid ?? ''), status: String(j.status ?? '') }
+}
+
+/** The last few messages, for working out why one did not land. */
+export async function recentMessages(cfg: TwilioConfig): Promise<unknown[]> {
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/Messages.json?PageSize=10`, {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  if (!res.ok) throw new Error(`Twilio refused the message list (${res.status})`)
+  const j = await res.json()
+  return (j.messages ?? []).map((m: Record<string, unknown>) => ({
+    sid: m.sid, from: m.from, to: m.to, status: m.status,
+    errorCode: m.error_code, errorMessage: m.error_message,
+    at: m.date_created, body: typeof m.body === 'string' ? m.body.slice(0, 40) : '',
+  }))
 }
 
 /** The last few calls, for working out why one did not land. */

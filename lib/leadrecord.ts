@@ -33,7 +33,7 @@ import {
 import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE } from './crm'
 import { parseCall, callDurationLabel, type CallEntry } from './call'
-import { parseWaMessage, type WaMessage } from './whatsapp'
+import { parseWaMessage, waDeliveryLabel, waErrorHint, type WaMessage } from './whatsapp'
 import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry,
@@ -443,6 +443,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   }
 
   const calls = new Map<string, CallEntry>()
+  const waMessages = new Map<string, { w: WaMessage; at: string }>()
   const lead = resolved.lead
   const kind: LeadKind = !lead ? 'chat' : isCheckoutLeadMessage(lead.message) ? 'checkout' : isQuoteLeadMessage(lead.message) ? 'quote' : 'chat'
 
@@ -611,19 +612,12 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       continue
     }
     if (row.role === CRM_WA_OUT_ROLE || row.role === CRM_WA_IN_ROLE) {
+      // An outbound message can have SEVERAL rows: one when it was accepted,
+      // then one per delivery update. They are folded by SID after the loop —
+      // newest wins — so the timeline shows one message whose title reflects
+      // what finally happened, rather than the same line three times.
       const w = parseWaMessage(row.message)
-      if (w) {
-        const outbound = w.direction === 'outbound'
-        push({
-          id: `wa-${row.id ?? at}`, at, kind: outbound ? 'wa_out' : 'wa_in', group: 'messages',
-          actor: outbound ? AGENT_LABEL(w.sentBy ?? '') : 'Customer',
-          // The number is NOT in the title: a masked record would otherwise
-          // leak it in the one line that is always visible.
-          title: outbound ? 'WhatsApp sent' : 'WhatsApp received',
-          body: w.body,
-          wa: w,
-        })
-      }
+      if (w) waMessages.set(w.sid || `row-${row.id ?? at}`, { w, at })
       continue
     }
     if (row.role === CRM_TASK_ROLE) {
@@ -697,6 +691,23 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     const list = ev.kind === 'email' ? ev.email?.attachments : ev.kind === 'email_in' ? ev.inbound?.attachments : null
     if (!list?.length) continue
     ev.files = list.map((a) => ({ name: a.name, mime: a.mime, size: a.size, url: signedByPath.get(a.path) ?? null }))
+  }
+
+  // One event per WhatsApp message, from the folded map. `at` is the FIRST
+  // row's timestamp — when it was sent — not the delivery report's, or a
+  // message would jump down the timeline minutes after it was written.
+  for (const { w, at } of waMessages.values()) {
+    const outbound = w.direction === 'outbound'
+    const label = waDeliveryLabel(w)
+    push({
+      id: `wa-${w.sid || at}`, at, kind: outbound ? 'wa_out' : 'wa_in', group: 'messages',
+      actor: outbound ? AGENT_LABEL(w.sentBy ?? '') : 'Customer',
+      // The number is NOT in the title: a masked record would otherwise leak it
+      // in the one line that is always visible.
+      title: label.title,
+      body: label.failed ? [w.body, waErrorHint(w.errorCode)].filter(Boolean).join('\n\n') : w.body,
+      wa: w,
+    })
   }
 
   // One event per call, from the folded map. A call that is still ringing says

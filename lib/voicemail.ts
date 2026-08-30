@@ -17,11 +17,11 @@ function escapeXml(v: string): string {
 
 /** The greeting + recording, used when no browser picks up. Also used on its
  *  own when the softphone is not configured at all. */
-export function voicemailTwiml(origin: string, caller: string): string {
+export function voicemailTwiml(origin: string, caller: string, called = ''): string {
   return '<Say voice="Polly.Joanna">Thanks for calling. Our team is not available right now.</Say>'
     + '<Say voice="Polly.Joanna">Please leave your name, your team, and what you need after the tone, and we will get back to you.</Say>'
     + `<Record maxLength="120" playBeep="true" trim="trim-silence"`
-    + ` recordingStatusCallback="${escapeXml(`${origin}/api/twilio/voice/recording?from=${encodeURIComponent(caller)}`)}"`
+    + ` recordingStatusCallback="${escapeXml(`${origin}/api/twilio/voice/recording?from=${encodeURIComponent(caller)}&to=${encodeURIComponent(called)}`)}"`
     + ' recordingStatusCallbackMethod="POST" />'
     + '<Say voice="Polly.Joanna">We did not get a message. Goodbye.</Say>'
 }

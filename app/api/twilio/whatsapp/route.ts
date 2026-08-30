@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     if (u) media.push({ url: u, type: params[`MediaContentType${i}`] ?? '' })
   }
 
-  const found = await leadForCaller(from, `WhatsApp enquiry\n\n${body}`, { name: profileName })
+  const found = await leadForCaller(from, `WhatsApp enquiry\n\n${body}`, { name: profileName, calledNumber: to })
   const sessionId = found?.sessionId ?? null
   const siteId = found?.siteId ?? ''
 

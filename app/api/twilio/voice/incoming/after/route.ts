@@ -44,13 +44,15 @@ export async function POST(req: NextRequest) {
   const status = params.DialCallStatus ?? ''
 
   if (status !== 'completed') {
-    return xml(`<Response>${voicemailTwiml(origin, caller)}</Response>`)
+    return xml(`<Response>${voicemailTwiml(origin, caller, params.To || req.nextUrl.searchParams.get('to') || '')}</Response>`)
   }
 
   // Answered in the dashboard. Record it against the customer — creating the
   // lead now, because a call somebody actually took is a real contact.
   const duration = Number(params.DialCallDuration ?? '0') || 0
-  const found = caller ? await leadForCaller(caller, 'Called the phone line and spoke to the team.') : null
+  const found = caller
+    ? await leadForCaller(caller, 'Called the phone line and spoke to the team.', { calledNumber: params.To || '' })
+    : null
   if (found) {
     await supabase.from('chat_logs').insert([{
       session_id: found.sessionId, site_id: found.siteId, role: CRM_CALL_ROLE,

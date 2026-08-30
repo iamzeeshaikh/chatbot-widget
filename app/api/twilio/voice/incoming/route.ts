@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
   // only — exactly as it behaved before the softphone existed.
   const agents = voiceTokenConfig() ? await ringableAgents() : []
   if (agents.length === 0) {
-    return xml(`<Response>${voicemailTwiml(origin, caller)}</Response>`)
+    return xml(`<Response>${voicemailTwiml(origin, caller, params.To || req.nextUrl.searchParams.get('to') || '')}</Response>`)
   }
 
   // Who is calling, for the agent's screen. Looked up but never created: a

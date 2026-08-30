@@ -17,6 +17,40 @@ export interface WaMessage {
   /** Set on outbound: who pressed send. */
   sentBy?: string
   direction: 'inbound' | 'outbound'
+  /** Outbound only: what WhatsApp did with it. Twilio reports this minutes
+   *  after the send, against the message SID — 'queued'/'sent' mean accepted,
+   *  'delivered'/'read' mean it arrived, 'failed'/'undelivered' mean it did
+   *  not. Absent on rows written before delivery was tracked. */
+  status?: string
+  /** Twilio's numeric reason for a failure, e.g. 63016. */
+  errorCode?: number
+}
+
+/** What a person should read on the timeline. The distinction that matters is
+ *  accepted-by-Twilio versus actually-arrived: the first is not the second, and
+ *  showing both as "sent" is what hid two undelivered messages. */
+export function waDeliveryLabel(w: WaMessage): { title: string; failed: boolean } {
+  if (w.direction !== 'outbound') return { title: 'WhatsApp received', failed: false }
+  switch (w.status) {
+    case 'delivered': return { title: 'WhatsApp delivered', failed: false }
+    case 'read': return { title: 'WhatsApp read', failed: false }
+    case 'failed':
+    case 'undelivered': return { title: `WhatsApp not delivered${w.errorCode ? ` (${w.errorCode})` : ''}`, failed: true }
+    // No status at all: a row from before delivery tracking, or a callback that
+    // has not arrived yet. "Sent" is the honest word for accepted-not-confirmed.
+    default: return { title: 'WhatsApp sent', failed: false }
+  }
+}
+
+/** The 24-hour rule and its friends, in words an agent can act on. */
+export function waErrorHint(code: number | undefined): string {
+  switch (code) {
+    case 63016: return 'WhatsApp only allows a free-form message within 24 hours of the customer’s last message. This one was outside that window, so it was not delivered. Wait for them to message first, or use an approved template.'
+    case 63015: return 'That number has not joined the WhatsApp sandbox, so Twilio would not deliver to it.'
+    case 63003: return 'That number is not reachable on WhatsApp.'
+    case 63024: return 'WhatsApp rejected the message as invalid.'
+    default: return ''
+  }
 }
 
 export function parseWaMessage(message: string | null | undefined): WaMessage | null {
@@ -31,6 +65,8 @@ export function parseWaMessage(message: string | null | undefined): WaMessage | 
       media: Array.isArray(o.media) ? o.media : undefined,
       at: str(o.at), sentBy: o.sentBy ? str(o.sentBy) : undefined,
       direction: o.direction === 'outbound' ? 'outbound' : 'inbound',
+      status: typeof o.status === 'string' ? o.status : undefined,
+      errorCode: typeof o.errorCode === 'number' ? o.errorCode : undefined,
     }
   } catch {
     return null

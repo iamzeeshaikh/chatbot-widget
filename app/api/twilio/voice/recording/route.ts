@@ -34,7 +34,9 @@ export async function POST(req: NextRequest) {
   const duration = Number(params.RecordingDuration ?? '0') || 0
   if (!from || !sid) return new NextResponse('', { status: 204 })
 
-  const found = await leadForCaller(from, 'Voicemail — the caller left a message on the phone line.')
+  const found = await leadForCaller(from, 'Voicemail — the caller left a message on the phone line.', {
+    calledNumber: params.To || req.nextUrl.searchParams.get('to') || '',
+  })
   const sessionId = found?.sessionId ?? null
   const siteId = found?.siteId ?? ''
 
