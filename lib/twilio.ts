@@ -141,6 +141,48 @@ export async function recentMessages(cfg: TwilioConfig): Promise<unknown[]> {
   }))
 }
 
+/**
+ * Twilio's own warnings and errors for this account.
+ *
+ * The Calls resource says a call was 'no-answer' whether it rang out or was
+ * refused somewhere in the network — it carries no error code. The Monitor
+ * API's alerts are where the actual reason shows up, so a call that "went
+ * through" but never rang is only diagnosable here.
+ */
+export async function recentAlerts(cfg: TwilioConfig): Promise<unknown[]> {
+  const res = await fetch('https://monitor.twilio.com/v1/Alerts?PageSize=15', {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  if (!res.ok) throw new Error(`Twilio refused the alert list (${res.status})`)
+  const j = await res.json()
+  return (j.alerts ?? []).map((a: Record<string, unknown>) => ({
+    at: a.date_created, level: a.log_level, code: a.error_code,
+    text: typeof a.alert_text === 'string' ? a.alert_text.slice(0, 220) : '',
+    resource: a.resource_sid,
+  }))
+}
+
+/**
+ * May this account call a given country at all?
+ *
+ * Twilio blocks outbound voice to most countries by default — a protection
+ * against toll fraud — and a blocked destination does not announce itself in
+ * the call log. `+44…` is one of them until it is switched on in the console.
+ */
+export async function dialingPermission(cfg: TwilioConfig, isoCode: string): Promise<unknown> {
+  const res = await fetch(`https://voice.twilio.com/v1/DialingPermissions/Countries/${encodeURIComponent(isoCode)}`, {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(`Twilio refused the dialing permissions (${res.status})`)
+  return {
+    country: j.name, iso: j.iso_code,
+    lowRiskEnabled: j.low_risk_numbers_enabled,
+    highRiskSpecialEnabled: j.high_risk_special_numbers_enabled,
+    highRiskTollfraudEnabled: j.high_risk_tollfraud_numbers_enabled,
+  }
+}
+
 /** The last few calls, for working out why one did not land. */
 export async function recentCalls(cfg: TwilioConfig): Promise<unknown[]> {
   const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls.json?PageSize=5`, {

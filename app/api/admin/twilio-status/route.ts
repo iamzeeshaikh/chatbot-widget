@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
-import { twilioConfig, twilioProblem, fetchAccount, recentCalls, recentRecordings, recentMessages, verifiedCallerIds } from '@/lib/twilio'
+import {
+  twilioConfig, twilioProblem, fetchAccount, recentCalls, recentRecordings,
+  recentMessages, verifiedCallerIds, recentAlerts, dialingPermission,
+} from '@/lib/twilio'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +28,23 @@ export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get('verified') === '1') {
     try {
       return NextResponse.json({ verified: await verifiedCallerIds(cfg) })
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 502 })
+    }
+  }
+
+  if (req.nextUrl.searchParams.get('alerts') === '1') {
+    try {
+      return NextResponse.json({ alerts: await recentAlerts(cfg) })
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 502 })
+    }
+  }
+
+  const country = req.nextUrl.searchParams.get('country')
+  if (country) {
+    try {
+      return NextResponse.json({ permission: await dialingPermission(cfg, country) })
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 502 })
     }
