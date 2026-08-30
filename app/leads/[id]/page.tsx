@@ -15,6 +15,7 @@
 // utilities so globals.css can remap them for dark mode — see ui.tsx.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { requestBrowserCall, watchSoftphoneReady } from '@/lib/softphonebus'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
@@ -58,6 +59,10 @@ export default function LeadRecordPage() {
   const [waSending, setWaSending] = useState(false)
   const [waError, setWaError] = useState('')
   const [calling, setCalling] = useState(false)
+  // Whether the tab itself can take the call. Watched rather than read once:
+  // the softphone registers a second or two after the page paints, and a button
+  // whose label was decided before that would say the wrong thing all session.
+  const [canCallHere, setCanCallHere] = useState(false)
   const [callError, setCallError] = useState('')
   // Set when the composer was opened by Reply on an inbound message; cleared on
   // close so the next plain "Email" click is a fresh message, not a stale reply.
@@ -92,6 +97,8 @@ export default function LeadRecordPage() {
   // record to check the phone number has not dealt with the reply, and having
   // the badge vanish underneath them would lose the one signal that says this
   // lead still needs an answer.
+  useEffect(() => watchSoftphoneReady(setCanCallHere), [])
+
   const markRepliesRead = useCallback(async () => {
     if (!record) return
     const ids = record.timeline
@@ -187,6 +194,15 @@ export default function LeadRecordPage() {
   }
 
   async function placeCall() {
+    // The tab first: an agent with the dashboard open talks through their
+    // headset and nothing has to ring. Only if there is no softphone — another
+    // browser, a signed-out phone, telephony not configured — do we fall back
+    // to ringing their own line, which costs a second call leg and needs a
+    // number on their member record.
+    if (requestBrowserCall({ leadId: id, leadName: displayName })) {
+      setCallError('')
+      return
+    }
     setCalling(true); setCallError('')
     try {
       const res = await fetch(`/api/leads/${encodeURIComponent(id)}/call`, { method: 'POST' })
@@ -481,11 +497,14 @@ export default function LeadRecordPage() {
                 hint={record.contact.phone ? 'Message this lead on WhatsApp' : 'Add a phone number first'}
                 disabled={!record.contact.phone}
                 onClick={() => setWaOpen(true)} />
-              {/* Calling rings the AGENT's own phone first, then bridges the
-                  customer — so neither side ever learns the other's number and
-                  no headset or open tab is needed. */}
+              {/* Calling happens in this tab when the softphone is registered,
+                  and otherwise rings the agent's own phone and bridges the
+                  customer. Either way neither side learns the other's number:
+                  the browser sends a lead id, never a number. */}
               <QuickAction icon={Phone} label={calling ? 'Ringing…' : 'Call'}
-                hint={record.contact.phone ? 'Ring your phone, then connect you to this lead' : 'Add a phone number first'}
+                hint={!record.contact.phone ? 'Add a phone number first'
+                  : canCallHere ? 'Call this lead from your browser'
+                  : 'Ring your phone, then connect you to this lead'}
                 disabled={!record.contact.phone || calling}
                 onClick={placeCall} />
             </div>

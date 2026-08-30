@@ -17,7 +17,7 @@ export const maxDuration = 30
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id, 'records')
+  const access = await guardLeadAccess(member, id, 'telephony')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const cfg = twilioConfig()

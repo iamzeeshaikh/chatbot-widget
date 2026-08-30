@@ -1,0 +1,238 @@
+'use client'
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { attachSoftphone, setSoftphoneReady } from '@/lib/softphonebus'
+
+// The dashboard, as a telephone.
+//
+// WHY IT IS IN THE ROOT LAYOUT: a call has to survive navigation. Mounted on a
+// lead page, the Device would be destroyed the moment the agent clicked
+// Pipeline — mid-sentence — and an incoming call would only ring if they
+// happened to be looking at the right record. So it is mounted once, above the
+// router, and pages talk to it through lib/softphonebus.
+//
+// WHAT THE AGENT NEVER SEES: a phone number. Outgoing, the browser sends a LEAD
+// ID and the server looks the number up (/api/twilio/voice/dial). Incoming, the
+// caller ID on the client leg is pinned to the BUSINESS number and the caller's
+// name arrives as a parameter — because the Voice SDK hands `From` straight to
+// page JavaScript, and left alone that one attribute would undo the whole
+// contact-privacy rule.
+//
+// IT COSTS NOTHING WHEN UNUSED: the token endpoint answers "not ready" for a
+// workspace without telephony or a server without the four Twilio variables,
+// and the ~90KB SDK is only imported after that answer comes back ready.
+
+type Phase = 'off' | 'idle' | 'incoming' | 'connecting' | 'live'
+
+// Twilio's Call and Device, as much of them as this file touches. The SDK is
+// loaded dynamically, so its types are not available at module scope.
+interface TwilioCall {
+  accept(): void
+  reject(): void
+  disconnect(): void
+  mute(m: boolean): void
+  isMuted(): boolean
+  parameters: Record<string, string>
+  customParameters?: Map<string, string>
+  on(event: string, fn: (...args: unknown[]) => void): void
+}
+interface TwilioDevice {
+  register(): Promise<void>
+  destroy(): void
+  connect(opts: { params: Record<string, string> }): Promise<TwilioCall>
+  updateToken(token: string): void
+  on(event: string, fn: (...args: unknown[]) => void): void
+}
+
+function mmss(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+export default function Softphone() {
+  const [phase, setPhase] = useState<Phase>('off')
+  const [who, setWho] = useState('')
+  const [muted, setMuted] = useState(false)
+  const [seconds, setSeconds] = useState(0)
+  const [error, setError] = useState('')
+
+  const deviceRef = useRef<TwilioDevice | null>(null)
+  const callRef = useRef<TwilioCall | null>(null)
+
+  const endedTo = useCallback((msg: string) => {
+    callRef.current = null
+    setPhase('idle'); setMuted(false); setSeconds(0); setWho('')
+    if (msg) setError(msg)
+  }, [])
+
+  // Wire one call's lifecycle. Both directions share it — an accepted incoming
+  // call and a connected outgoing one behave identically from here on.
+  const bind = useCallback((call: TwilioCall, label: string) => {
+    callRef.current = call
+    setWho(label)
+    call.on('accept', () => { setPhase('live'); setSeconds(0); setError('') })
+    call.on('disconnect', () => endedTo(''))
+    call.on('cancel', () => endedTo('The caller hung up.'))
+    call.on('reject', () => endedTo(''))
+    call.on('error', (e: unknown) => {
+      const m = (e as { message?: string })?.message
+      endedTo(m ? `Call failed: ${m}` : 'The call failed.')
+    })
+  }, [endedTo])
+
+  useEffect(() => {
+    let cancelled = false
+    let refresh: ReturnType<typeof setInterval> | null = null
+
+    async function boot() {
+      let info: { ready?: boolean; token?: string; expiresIn?: number }
+      try {
+        const res = await fetch('/api/twilio/voice/token')
+        // 401/403 is the ordinary answer for a signed-out tab or a workspace
+        // without telephony. Not an error state — just no phone.
+        if (!res.ok) return
+        info = await res.json()
+      } catch { return }
+      if (cancelled || !info.ready || !info.token) return
+
+      // Only now is the SDK worth downloading.
+      const { Device, Call } = await import('@twilio/voice-sdk')
+      if (cancelled) return
+
+      const device = new Device(info.token, {
+        // Opus where available; the fallback keeps older browsers working.
+        codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
+      }) as unknown as TwilioDevice
+      deviceRef.current = device
+
+      device.on('registered', () => { setPhase('idle'); setSoftphoneReady(true) })
+      device.on('unregistered', () => setSoftphoneReady(false))
+      device.on('error', (e: unknown) => {
+        const m = (e as { message?: string })?.message
+        setError(m ? `Phone error: ${m}` : 'The phone went offline.')
+      })
+      device.on('incoming', (call: unknown) => {
+        const c = call as TwilioCall
+        // The name is a custom parameter; `From` is the business's own number
+        // on purpose and says nothing about who is calling.
+        const label = c.customParameters?.get('leadName') || 'New caller'
+        bind(c, label)
+        setPhase('incoming')
+      })
+
+      try {
+        await device.register()
+      } catch {
+        setError('The phone could not connect. Reload the page to try again.')
+      }
+
+      // Tokens last an hour; renew well before that so a call in progress is
+      // never cut off by an expiry.
+      refresh = setInterval(async () => {
+        try {
+          const r = await fetch('/api/twilio/voice/token')
+          if (!r.ok) return
+          const j = await r.json()
+          if (j.ready && j.token) device.updateToken(j.token)
+        } catch { /* the next tick tries again */ }
+      }, 45 * 60 * 1000)
+    }
+
+    boot()
+    return () => {
+      cancelled = true
+      if (refresh) clearInterval(refresh)
+      deviceRef.current?.destroy()
+      deviceRef.current = null
+      setSoftphoneReady(false)
+    }
+  }, [bind])
+
+  // A lead page asking for a call.
+  useEffect(() => attachSoftphone(async ({ leadId, leadName }) => {
+    const device = deviceRef.current
+    if (!device) return
+    setError(''); setPhase('connecting'); setWho(leadName || 'Calling…')
+    try {
+      // The lead id is all that is sent. The number lives on the server.
+      const call = await device.connect({ params: { leadId } })
+      bind(call, leadName || 'Calling…')
+    } catch (e) {
+      const m = e instanceof Error ? e.message : ''
+      endedTo(m.includes('Permission') || m.includes('NotAllowed')
+        ? 'Your browser blocked the microphone. Allow it and try again.'
+        : 'The call could not be started.')
+    }
+  }), [bind, endedTo])
+
+  // The live timer.
+  useEffect(() => {
+    if (phase !== 'live') return
+    const t = setInterval(() => setSeconds((s) => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [phase])
+
+  const answer = () => { callRef.current?.accept(); setPhase('connecting') }
+  const decline = () => { callRef.current?.reject(); endedTo('') }
+  const hangUp = () => { callRef.current?.disconnect(); endedTo('') }
+  const toggleMute = () => {
+    const c = callRef.current
+    if (!c) return
+    const next = !c.isMuted()
+    c.mute(next); setMuted(next)
+  }
+
+  // Nothing to show when there is no phone and nothing has gone wrong.
+  if (phase === 'off' && !error) return null
+  if (phase === 'idle' && !error) return null
+
+  return (
+    <div
+      role="region"
+      aria-label="Phone"
+      className="fixed bottom-4 right-4 z-50 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
+    >
+      {error && (
+        <p role="alert" className="mb-2 text-[11px] text-red-700">{error}</p>
+      )}
+
+      {phase === 'incoming' && (
+        <>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Incoming call</p>
+          <p className="mt-0.5 truncate text-sm font-semibold text-gray-900">{who}</p>
+          <div className="mt-3 flex gap-2">
+            <button onClick={answer}
+              className="flex-1 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-green-700">
+              Answer
+            </button>
+            <button onClick={decline}
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100">
+              Decline
+            </button>
+          </div>
+        </>
+      )}
+
+      {(phase === 'connecting' || phase === 'live') && (
+        <>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            {phase === 'live' ? `On a call · ${mmss(seconds)}` : 'Connecting…'}
+          </p>
+          <p className="mt-0.5 truncate text-sm font-semibold text-gray-900">{who}</p>
+          <div className="mt-3 flex gap-2">
+            <button onClick={toggleMute} disabled={phase !== 'live'}
+              aria-pressed={muted}
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50">
+              {muted ? 'Unmute' : 'Mute'}
+            </button>
+            <button onClick={hangUp}
+              className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700">
+              Hang up
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

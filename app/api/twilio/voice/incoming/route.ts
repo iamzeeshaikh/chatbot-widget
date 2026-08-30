@@ -1,20 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { identityFor, voiceTokenConfig } from '@/lib/voicetoken'
+import { findLeadByPhone } from '@/lib/inbound'
+import { voicemailTwiml } from '@/lib/voicemail'
+import { HARDCODED_ACCOUNTS } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 // Somebody dialled the business number.
 //
-// Until the browser softphone lands this answers with a greeting and takes a
-// message. It matters more than it sounds: the number is printed on the sites
-// now, and an unconfigured Twilio number plays Twilio's own demo recording
-// ("thanks for trying our documentation") to whoever calls — which is worse
-// than not answering at all.
+// WHAT HAPPENS, in order:
+//   1. every agent's BROWSER rings, for 20 seconds — whoever has the dashboard
+//      open picks up and talks from the tab;
+//   2. nobody answers → the greeting plays and a message is taken.
 //
-// The recording is posted to /recording below, where it is attached to the
-// caller's lead.
+// No mobile is ever rung. That is a decision, not an omission: the owner does
+// not want calls forwarded to his own line, and the agents are remote, so the
+// dashboard is the phone. The voicemail is the floor beneath it — before this
+// endpoint existed, an unconfigured Twilio number played Twilio's own demo
+// recording to whoever called, which is worse than not answering.
+//
+// ── The customer's number does NOT reach the agent's browser ────────────────
+// This is the part that is easy to get wrong. By default the client leg's
+// `From` is the caller's own number, and the Voice SDK hands that straight to
+// page JavaScript — which would undo the whole contact-privacy rule in one
+// attribute. So `callerId` is pinned to the BUSINESS number, and what the agent
+// actually needs (who is calling, and which lead to open) travels as named
+// parameters instead: a name, and a lead id. Never a number.
+const RING_SECONDS = 20
+/** Twilio allows ten legs in one Dial; the cap is here so a workspace that
+ *  grows to fifty members does not produce a rejected TwiML document. */
+const MAX_CLIENT_LEGS = 8
+
 function xml(body: string): NextResponse {
   return new NextResponse(body, { headers: { 'Content-Type': 'text/xml' } })
+}
+
+function escapeXml(v: string): string {
+  return v.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c] ?? c))
+}
+
+/** Every member who could pick up — this workspace only. */
+async function ringableAgents(): Promise<string[]> {
+  const { data } = await supabase
+    .from('members').select('email').eq('workspace', 'sports').limit(MAX_CLIENT_LEGS)
+  const emails = (data ?? []).map((m) => String(m.email || '').toLowerCase()).filter(Boolean)
+  const builtin = HARDCODED_ACCOUNTS.find((a) => a.workspace === 'sports')?.email
+  if (builtin && !emails.includes(builtin) && emails.length < MAX_CLIENT_LEGS) emails.push(builtin)
+  return emails
 }
 
 export async function POST(req: NextRequest) {
@@ -40,15 +74,36 @@ export async function POST(req: NextRequest) {
   // in silence. The signature covers the query string too, so this stays
   // verifiable.
   const caller = params.From ?? ''
-  // Voice and wording chosen to sound like a business, not a robot reading a
-  // form: short, says what happens next, and asks for the one thing that makes
-  // a callback possible.
+
+  // Without a TwiML App there is no softphone to ring, so this is voicemail-
+  // only — exactly as it behaved before the softphone existed.
+  const agents = voiceTokenConfig() ? await ringableAgents() : []
+  if (agents.length === 0) {
+    return xml(`<Response>${voicemailTwiml(origin, caller)}</Response>`)
+  }
+
+  // Who is calling, for the agent's screen. Looked up but never created: a
+  // spam call that rings out must not leave a lead behind.
+  const known = caller ? await findLeadByPhone(caller) : null
+  const label = known?.name?.trim() || 'New caller'
+
+  const after = `${origin}/api/twilio/voice/incoming/after?from=${encodeURIComponent(caller)}`
+  const legs = agents.map((email) => (
+    `<Client>`
+    + `<Identity>${escapeXml(identityFor(email))}</Identity>`
+    + `<Parameter name="leadName" value="${escapeXml(label)}" />`
+    + (known ? `<Parameter name="leadId" value="${escapeXml(known.sessionId)}" />` : '')
+    + `</Client>`
+  )).join('')
+
   return xml(
     '<Response>'
-    + '<Say voice="Polly.Joanna">Thanks for calling. Our team is not available right now.</Say>'
-    + '<Say voice="Polly.Joanna">Please leave your name, your team, and what you need after the tone, and we will get back to you.</Say>'
-    + `<Record maxLength="120" playBeep="true" trim="trim-silence" recordingStatusCallback="${origin}/api/twilio/voice/recording?from=${encodeURIComponent(caller)}" recordingStatusCallbackMethod="POST" />`
-    + '<Say voice="Polly.Joanna">We did not get a message. Goodbye.</Say>'
+    // answerOnBridge: the caller hears ringing rather than silence while the
+    // browsers are being tried.
+    + `<Dial timeout="${RING_SECONDS}" answerOnBridge="true" callerId="${escapeXml(cfg.phoneNumber)}"`
+    + ` action="${escapeXml(after)}" method="POST">`
+    + legs
+    + '</Dial>'
     + '</Response>',
   )
 }

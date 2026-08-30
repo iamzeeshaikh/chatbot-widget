@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import DeployRefresh from "./components/DeployRefresh";
+import Softphone from "./components/Softphone";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -58,6 +59,11 @@ export default function RootLayout({
             tab and reloads it (hidden) or offers a reload (visible). In the
             root layout so pipeline, tasks and lead records inherit it too. */}
         <DeployRefresh />
+        {/* The dashboard's own phone. In the root layout because a call has to
+            survive navigation, and an incoming one has to ring wherever the
+            agent is — not only on the record it belongs to. It renders nothing
+            (and downloads nothing) unless the workspace actually has calling. */}
+        <Softphone />
         {/* Register the service worker so the dashboard installs as a PWA. */}
         <script
           dangerouslySetInnerHTML={{

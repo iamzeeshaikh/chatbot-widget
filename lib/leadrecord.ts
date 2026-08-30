@@ -709,8 +709,11 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     const answered = (c.duration ?? 0) > 0
     push({
       id: `call-${c.sid}`, at, kind: 'call', group: 'messages',
-      actor: c.status === 'voicemail' ? 'Customer' : AGENT_LABEL(c.by),
+      // 'voicemail' and 'inbound' are the customer reaching US; everything
+      // else is a call an agent placed.
+      actor: c.status === 'voicemail' || c.status === 'inbound' ? 'Customer' : AGENT_LABEL(c.by),
       title: c.status === 'voicemail' ? `Voicemail${len ? ` — ${len}` : ''}`
+        : c.status === 'inbound' ? `Incoming call${len ? ` — ${len}` : ''}`
         : c.status === 'ringing' ? 'Calling…'
         : answered ? `Called — ${len}`
         : `Call not answered (${c.status})`,
@@ -720,7 +723,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     // message — it is us reaching the customer.
     // A voicemail is the customer reaching US, so it is deliberately not an
     // outbound touch — the same rule an inbound email follows.
-    if (answered && c.status !== 'voicemail') {
+    if (answered && c.status !== 'voicemail' && c.status !== 'inbound') {
       outboundAt.push(at)
       if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
     }

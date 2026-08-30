@@ -96,7 +96,15 @@ export function workspaceSites(ws: Workspace): string[] {
 // standard member", which hid nothing today only because every packaging member
 // happens to be an admin — the day one was added as standard, their contacts
 // would have vanished with no decision behind it.
-export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy'
+// 'telephony' — WhatsApp, phone calls and the in-browser softphone. SPORTS
+// ONLY, and the reason is not policy but plumbing: there is exactly one Twilio
+// account, and its number and WhatsApp sender belong to the sports business.
+// Until this existed the Call and WhatsApp buttons were gated on 'records',
+// which packaging has too — so a packaging agent pressing WhatsApp would have
+// messaged their customer FROM the sports number, over a sports account, and
+// the reply would have landed on a sports lead. Packaging gets its own Twilio
+// account or it gets nothing; it does not borrow this one.
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders']),
@@ -127,7 +135,7 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   //      its own screen, and the fix is a second OAuth client owned by that org,
   //      chosen per workspace. Nothing here breaks either way: an unconnectable
   //      Connect button is inert.
-  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy']),
+  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy', 'telephony']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {

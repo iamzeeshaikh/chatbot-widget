@@ -2,19 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
 import { CRM_CALL_ROLE } from '@/lib/crm'
-import { phoneKey } from '@/lib/identity'
-import { quoteSessionId, QUOTE_TAG } from '@/lib/quoteintake'
-import { SPORTS_SITES } from '@/lib/workspaces'
+import { leadForCaller } from '@/lib/inbound'
 
 export const dynamic = 'force-dynamic'
 
-// A voicemail, attached to whoever left it.
-//
-// Same identity rule as the WhatsApp webhook: match the caller on the last nine
-// digits of their number, and create a lead when nobody matches — a stranger
-// leaving a voicemail about uniforms is a lead, and dropping it because there
-// was no row to attach it to is the silent loss this project keeps fixing.
-const VOICEMAIL_SITE = SPORTS_SITES[0] ?? 'texasfootball'
+// A voicemail, attached to whoever left it. Who that is — matched on the
+// number, or created if nobody matches — is lib/inbound.ts's job, shared with
+// the WhatsApp and answered-call paths so the three cannot drift.
 
 export async function POST(req: NextRequest) {
   const cfg = twilioConfig()
@@ -40,26 +34,9 @@ export async function POST(req: NextRequest) {
   const duration = Number(params.RecordingDuration ?? '0') || 0
   if (!from || !sid) return new NextResponse('', { status: 204 })
 
-  const key = phoneKey(from)
-  let sessionId: string | null = null
-  let siteId = VOICEMAIL_SITE
-
-  if (key) {
-    const { data: leads } = await supabase.from('leads')
-      .select('id, site_id, phone')
-      .in('site_id', SPORTS_SITES).not('phone', 'is', null)
-      .order('created_at', { ascending: false }).limit(2000)
-    const match = (leads ?? []).find((l) => phoneKey(l.phone) === key)
-    if (match) { sessionId = quoteSessionId(match.id); siteId = match.site_id }
-  }
-
-  if (!sessionId) {
-    const { data: created } = await supabase.from('leads').insert([{
-      site_id: siteId, phone: from,
-      message: `${QUOTE_TAG}Voicemail — the caller left a message on the phone line.`,
-    }]).select('id').maybeSingle()
-    if (created?.id) sessionId = quoteSessionId(created.id)
-  }
+  const found = await leadForCaller(from, 'Voicemail — the caller left a message on the phone line.')
+  const sessionId = found?.sessionId ?? null
+  const siteId = found?.siteId ?? ''
 
   if (sessionId) {
     await supabase.from('chat_logs').insert([{

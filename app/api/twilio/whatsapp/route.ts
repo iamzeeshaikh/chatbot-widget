@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
 import { CRM_WA_IN_ROLE } from '@/lib/crm'
-import { phoneKey } from '@/lib/identity'
-import { quoteSessionId, QUOTE_TAG } from '@/lib/quoteintake'
-import { SPORTS_SITES } from '@/lib/workspaces'
+import { leadForCaller } from '@/lib/inbound'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,12 +23,8 @@ export const dynamic = 'force-dynamic'
 // lead: one is created rather than the message being dropped.
 //
 // The site: WhatsApp gives us one number for five sites, so there is nothing in
-// the message that says which one. A new lead therefore lands on WHATSAPP_SITE
-// and the agent moves it if it belongs elsewhere. Guessing from the text would
-// be worse — a wrong site is harder to notice than an unset one.
-const WHATSAPP_SITE = SPORTS_SITES[0] ?? 'texasfootball'
-
-interface LeadRow { id: string; site_id: string; phone: string | null }
+// the message that says which one — see lib/inbound.ts, which decides that (and
+// the number matching) for every inbound channel.
 
 export async function POST(req: NextRequest) {
   const cfg = twilioConfig()
@@ -67,38 +61,9 @@ export async function POST(req: NextRequest) {
     if (u) media.push({ url: u, type: params[`MediaContentType${i}`] ?? '' })
   }
 
-  const key = phoneKey(from)
-  let sessionId: string | null = null
-  let siteId = WHATSAPP_SITE
-
-  if (key) {
-    // Only this workspace's leads — a WhatsApp number belongs to one business.
-    const { data: leads } = await supabase
-      .from('leads')
-      .select('id, site_id, phone')
-      .in('site_id', SPORTS_SITES)
-      .not('phone', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(2000)
-    const match = (leads ?? []).find((l: LeadRow) => phoneKey(l.phone) === key)
-    if (match) {
-      sessionId = quoteSessionId(match.id)
-      siteId = match.site_id
-    }
-  }
-
-  if (!sessionId) {
-    // A number nobody has on file: this is a new lead, and losing it because it
-    // arrived on WhatsApp instead of a form would be the same silent loss this
-    // project keeps having to fix.
-    const { data: created } = await supabase.from('leads').insert([{
-      site_id: siteId,
-      name: profileName || null,
-      phone: from,
-      message: `${QUOTE_TAG}WhatsApp enquiry\n\n${body}`.slice(0, 4000),
-    }]).select('id').maybeSingle()
-    if (created?.id) sessionId = quoteSessionId(created.id)
-  }
+  const found = await leadForCaller(from, `WhatsApp enquiry\n\n${body}`, { name: profileName })
+  const sessionId = found?.sessionId ?? null
+  const siteId = found?.siteId ?? ''
 
   if (sessionId) {
     // Dedupe on Twilio's SID: a retried webhook must not double-post.

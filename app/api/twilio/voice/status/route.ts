@@ -51,10 +51,18 @@ export async function POST(req: NextRequest) {
     role: CRM_CALL_ROLE,
     message: JSON.stringify({
       sid, by, at: at || new Date().toISOString(),
-      status: params.CallStatus ?? 'completed',
-      duration: Number(params.CallDuration ?? '0') || 0,
+      // Two callers, two vocabularies: Twilio's StatusCallback reports
+      // CallStatus/CallDuration, while a <Dial action> — which is how a call
+      // placed from the BROWSER comes back — reports DialCallStatus and
+      // DialCallDuration. Reading only the first shape recorded every softphone
+      // call as a zero-second 'completed'.
+      status: params.DialCallStatus || params.CallStatus || 'completed',
+      duration: Number(params.DialCallDuration ?? params.CallDuration ?? '0') || 0,
     }),
   }])
 
-  return new NextResponse('', { status: 204 })
+  // A StatusCallback wants nothing back; a <Dial action> wants TwiML, and an
+  // empty 204 there hangs up on a caller who may still be on the line. An empty
+  // <Response/> is correct for both — it means "nothing further to do".
+  return new NextResponse('<Response/>', { headers: { 'Content-Type': 'text/xml' } })
 }

@@ -151,6 +151,37 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
   }
 }
 
+/**
+ * Look a member up by address — for the paths where there is no cookie to read.
+ *
+ * Twilio's webhooks are the case: the browser softphone identifies itself with
+ * a client identity that decodes back to an email, and the webhook still has to
+ * decide what that member is allowed to reach. Built-in accounts are
+ * synthesised the same way getMember does it, so the owner account works there
+ * too.
+ */
+export async function memberByEmail(email: string): Promise<Member | null> {
+  const addr = String(email || '').toLowerCase().trim()
+  if (!addr) return null
+  const acct = HARDCODED_ACCOUNTS.find((a) => a.email === addr)
+  if (acct) {
+    return { id: `builtin:${acct.email}`, email: acct.email, workspace: acct.workspace, role: 'admin', assigned_sites: [] }
+  }
+  const { data } = await supabase
+    .from('members')
+    .select('id, email, workspace, role, assigned_sites')
+    .ilike('email', addr)
+    .maybeSingle()
+  if (!data) return null
+  return {
+    id: data.id,
+    email: data.email,
+    workspace: data.workspace as Workspace,
+    role: data.role as Role,
+    assigned_sites: data.assigned_sites ?? [],
+  }
+}
+
 // The set of sites a member may access. Admins see every site in their
 // workspace; standard members see only their assigned subset.
 export function memberSites(member: Member): string[] {

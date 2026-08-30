@@ -19,7 +19,7 @@ const MAX_BODY = 4000
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id, 'records')
+  const access = await guardLeadAccess(member, id, 'telephony')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   const problem = twilioProblem()
