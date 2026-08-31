@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import {
   twilioConfig, twilioProblem, fetchAccount, recentCalls, recentRecordings,
-  recentMessages, verifiedCallerIds, recentAlerts, dialingPermission, lookupNumber, callInsights,
+  recentMessages, verifiedCallerIds, recentAlerts, dialingPermission, lookupNumber, callInsights, callEvents,
 } from '@/lib/twilio'
 
 export const dynamic = 'force-dynamic'
@@ -45,6 +45,15 @@ export async function GET(req: NextRequest) {
   if (insights) {
     try {
       return NextResponse.json({ insights: await callInsights(cfg, insights) })
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 502 })
+    }
+  }
+
+  const events = req.nextUrl.searchParams.get('events')
+  if (events) {
+    try {
+      return NextResponse.json({ events: await callEvents(cfg, events) })
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 502 })
     }

@@ -235,6 +235,26 @@ export async function callInsights(cfg: TwilioConfig, callSid: string): Promise<
   }
 }
 
+/**
+ * The SIP signalling for one call.
+ *
+ * When Twilio says a leg "rang for thirty seconds" and the handset never rang,
+ * this is the only place the two stories can be told apart: a carrier that
+ * genuinely alerted the phone sends 180 Ringing, while one that swallowed the
+ * call answers 183 (or nothing) and then times out. The call log reports
+ * 'no-answer' either way.
+ */
+export async function callEvents(cfg: TwilioConfig, callSid: string): Promise<unknown[]> {
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls/${encodeURIComponent(callSid)}/Events.json?PageSize=20`, {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(String(j?.message ?? `Twilio refused the call events (${res.status})`))
+  return (j.events ?? []).map((e: Record<string, unknown>) => ({
+    request: e.request, response: e.response,
+  }))
+}
+
 /** The last few calls, for working out why one did not land. */
 export async function recentCalls(cfg: TwilioConfig): Promise<unknown[]> {
   // Twenty, not five: a single softphone call is TWO rows — the agent's browser
