@@ -1,71 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
-import { asUtcIso, unpackVisitor } from '@/lib/visitor'
-import { PKT_OFFSET_HOURS } from '@/lib/botschedule'
-import { findBurstKeys, burstKey } from '@/lib/botfilter'
+import { findBurstKeys } from '@/lib/botfilter'
+import { buildBuckets, isRange, tally, toPktMs, PKT_MS, type Range } from '@/lib/analytics'
 
 export const dynamic = 'force-dynamic'
-
-type Range = 'hourly' | 'daily' | 'weekly' | 'monthly'
-
-interface Bucket { start: number; end: number; label: string }
-
-// All bucketing happens in Pakistan time, like every other dashboard timestamp.
-// We work in "PKT epoch" space: UTC ms shifted by +5h, then read/derive wall
-// time with the UTC accessors (same trick as lib/botschedule.pktParts). A day
-// bucket therefore runs midnight–midnight PKT, not UTC.
-const PKT_MS = PKT_OFFSET_HOURS * 60 * 60 * 1000
-// chat_logs/active_visitors timestamps are naive UTC — normalise via asUtcIso
-// (parsing them raw would use the server's local zone) before shifting to PKT.
-const toPktMs = (ts: string) => new Date(asUtcIso(ts) ?? ts).getTime() + PKT_MS
-
-// Build the time buckets for a range (oldest → newest), ending "now".
-function buildBuckets(range: Range): Bucket[] {
-  const now = new Date(Date.now() + PKT_MS)
-  const buckets: Bucket[] = []
-  const label = (d: Date, opts: Intl.DateTimeFormatOptions) => d.toLocaleDateString('en', { ...opts, timeZone: 'UTC' })
-
-  if (range === 'hourly') {
-    const base = new Date(now); base.setUTCMinutes(0, 0, 0)
-    for (let i = 23; i >= 0; i--) {
-      const start = new Date(base); start.setUTCHours(base.getUTCHours() - i)
-      const end = new Date(start); end.setUTCHours(start.getUTCHours() + 1)
-      // 12-hour PKT labels ("9 PM"), matching every other dashboard timestamp.
-      const h = start.getUTCHours()
-      buckets.push({ start: start.getTime(), end: end.getTime(), label: `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}` })
-    }
-  } else if (range === 'daily') {
-    const base = new Date(now); base.setUTCHours(0, 0, 0, 0)
-    for (let i = 29; i >= 0; i--) {
-      const start = new Date(base); start.setUTCDate(base.getUTCDate() - i)
-      const end = new Date(start); end.setUTCDate(start.getUTCDate() + 1)
-      buckets.push({ start: start.getTime(), end: end.getTime(), label: label(start, { month: 'short', day: 'numeric' }) })
-    }
-  } else if (range === 'weekly') {
-    const base = new Date(now); base.setUTCHours(0, 0, 0, 0)
-    const dow = base.getUTCDay() === 0 ? 6 : base.getUTCDay() - 1 // Monday start
-    base.setUTCDate(base.getUTCDate() - dow)
-    for (let i = 11; i >= 0; i--) {
-      const start = new Date(base); start.setUTCDate(base.getUTCDate() - i * 7)
-      const end = new Date(start); end.setUTCDate(start.getUTCDate() + 7)
-      buckets.push({ start: start.getTime(), end: end.getTime(), label: label(start, { month: 'short', day: 'numeric' }) })
-    }
-  } else {
-    const base = new Date(now)
-    for (let i = 11; i >= 0; i--) {
-      const start = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - i, 1))
-      const end = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - i + 1, 1))
-      buckets.push({ start: start.getTime(), end: end.getTime(), label: label(start, { month: 'short', year: '2-digit' }) })
-    }
-  }
-  return buckets
-}
-
-function bucketIndex(buckets: Bucket[], ts: number): number {
-  for (let i = 0; i < buckets.length; i++) if (ts >= buckets[i].start && ts < buckets[i].end) return i
-  return -1
-}
 
 // Row caps. Sized against the widest range this endpoint serves — 12 months —
 // measured on 2026-08-13 across the 24 packaging sites: 30.8k visitor rows,
@@ -98,13 +37,14 @@ export async function GET(req: NextRequest) {
   const scope = await siteScope(member)
   const allowed = Array.from(scope)
 
-  const range = (req.nextUrl.searchParams.get('range') as Range) || 'daily'
+  const rangeParam = req.nextUrl.searchParams.get('range')
+  const range: Range = isRange(rangeParam) ? rangeParam : 'daily'
   const cacheKey = `${member.workspace}|${range}|${[...allowed].sort().join(',')}`
   const hit = answers.get(cacheKey)
   if (hit && Date.now() - hit.at < (ANSWER_TTL_MS[range] ?? 120_000)) {
     return NextResponse.json(hit.body)
   }
-  const buckets = buildBuckets(['hourly', 'daily', 'weekly', 'monthly'].includes(range) ? range : 'daily')
+  const buckets = buildBuckets(range)
   // Bucket starts are in PKT-epoch space; convert back to real UTC for the query.
   const startISO = new Date(buckets[0].start - PKT_MS).toISOString()
 
@@ -149,62 +89,24 @@ export async function GET(req: NextRequest) {
   warnIfCapped('analytics: agent messages', agentRows.length, AGENT_ROW_CAP)
   warnIfCapped('analytics: visitor messages', chatRows.length, CHAT_ROW_CAP)
 
-  // Visitors = widget sessions started in the bucket (the ping route upserts
-  // exactly one active_visitors row per session, created_at = session start).
+  // Counting itself lives in lib/analytics.ts, shared with the per-site
+  // breakdown a click on the chart opens — see the note there for why.
+  //
   // Bot bursts — dozens of sessions with the exact same user-agent in one hour
   // (e.g. the 557-row flood on Jul 4 2026) — are excluded so the line shows
-  // real humans (see lib/botfilter.ts).
-  // Sessions an agent ENGAGED — any 'admin' message, proactive greeting OR a
-  // reply. This mirrors the Performance tab's "picked up": of the visitors that
-  // came, how many the team served vs ignored (picked + notPicked === visitors).
+  // real humans (lib/botfilter.ts), and the burst set is computed here, across
+  // every row in the window, so both endpoints exclude the same sessions.
   const agentSessions = new Set<string>()
   for (const l of agentRows) agentSessions.add(l.session_id)
 
-  const visStamped = visRows.map((v) => ({ v, userAgent: v.user_agent, tsMs: toPktMs(v.created_at) }))
-  const bursts = findBurstKeys(visStamped)
-  const visitorCounts = new Array(buckets.length).fill(0)
-  const pickedCounts = new Array(buckets.length).fill(0)
-  const notPickedCounts = new Array(buckets.length).fill(0)
-  const countedSessions = new Set<string>() // one visitor row per session, but guard anyway
-  // Unique people per bucket: keyed by the widget's persistent visitor id
-  // (falling back to IP, then session, for rows recorded before vid existed).
-  const uniqueSets: Set<string>[] = buckets.map(() => new Set())
-  const windowUnique = new Set<string>()
-  for (const s of visStamped) {
-    if (bursts.has(burstKey(s.userAgent, s.tsMs))) continue
-    const idx = bucketIndex(buckets, s.tsMs)
-    if (idx < 0) continue
-    visitorCounts[idx]++
-    if (!countedSessions.has(s.v.session_id)) {
-      countedSessions.add(s.v.session_id)
-      if (agentSessions.has(s.v.session_id)) pickedCounts[idx]++
-      else notPickedCounts[idx]++
-    }
-    const { vid, ip } = unpackVisitor(s.v.page_url)
-    const key = vid || ip || s.v.session_id
-    uniqueSets[idx].add(key)
-    windowUnique.add(key)
-  }
+  const bursts = findBurstKeys(visRows.map((v) => ({ userAgent: v.user_agent, tsMs: toPktMs(v.created_at) })))
+  const counts = tally(buckets, visRows, agentSessions, chatRows, bursts)
 
-  // New chats = a session's FIRST genuine visitor message. Counting any
-  // message here (the old logic) made an agent's follow-up on a weeks-old
-  // conversation register as a brand-new chat that day — which is how a day
-  // with 1 visitor could show 19 "chats". The visitor-role filter is now in the
-  // query itself, which also skips every control row (mode, reply_author, …).
-  const firstSeen: Record<string, number> = {}
-  for (const l of chatRows) {
-    if (l.message === '(session started)') continue
-    const ts = toPktMs(l.created_at)
-    if (firstSeen[l.session_id] === undefined || ts < firstSeen[l.session_id]) firstSeen[l.session_id] = ts
-  }
-  const chatCounts = new Array(buckets.length).fill(0)
-  for (const ts of Object.values(firstSeen)) {
-    const idx = bucketIndex(buckets, ts)
-    if (idx >= 0) chatCounts[idx]++
-  }
-
-  const points = buckets.map((b, i) => ({ label: b.label, visitors: visitorCounts[i], unique: uniqueSets[i].size, chats: chatCounts[i], picked: pickedCounts[i], notPicked: notPickedCounts[i] }))
-  const body = { range, points, totalUnique: windowUnique.size }
+  const points = buckets.map((b, i) => ({
+    label: b.label, visitors: counts.visitors[i], unique: counts.unique[i],
+    chats: counts.chats[i], picked: counts.picked[i], notPicked: counts.notPicked[i],
+  }))
+  const body = { range, points, totalUnique: counts.windowUnique }
   answers.set(cacheKey, { at: Date.now(), body })
   // The map is bounded by (workspaces × ranges × distinct site scopes), which is
   // a handful of entries — but prune anyway rather than trust that forever.

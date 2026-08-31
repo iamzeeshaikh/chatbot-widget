@@ -428,7 +428,11 @@ const PICKED_COLOR = '#22c55e'
 const NOTPICKED_COLOR = '#f87171'
 const CHATS_COLOR = '#f59e0b'
 
-function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoint[]; accent: string; totalUnique: number }) {
+function AnalyticsChart({ points, accent, totalUnique, onPick }: {
+  points: AnalyticsPoint[]; accent: string; totalUnique: number
+  /** Clicking a point asks "which sites was that?" — see SiteBreakdown. */
+  onPick?: (index: number) => void
+}) {
   const W = 760, H = 220, padL = 30, padR = 14, padT = 14, padB = 26
   const n = points.length
   const maxV = Math.max(1, ...points.map((p) => Math.max(p.visitors, p.chats, p.picked ?? 0, p.notPicked ?? 0)))
@@ -471,12 +475,16 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
 
   const [hover, setHover] = useState<number | null>(null)
   const pct = (v: number, total: number) => `${(v / total) * 100}%`
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const vbX = ((e.clientX - rect.left) / rect.width) * W
-    if (n <= 1) { setHover(0); return }
+  // Which point is under the pointer. Shared by hover and click so the tooltip
+  // and the panel can never disagree about which one was meant.
+  const indexAt = (clientX: number, rect: DOMRect) => {
+    if (n <= 1) return 0
+    const vbX = ((clientX - rect.left) / rect.width) * W
     const step = (W - padL - padR) / (n - 1)
-    setHover(Math.max(0, Math.min(n - 1, Math.round((vbX - padL) / step))))
+    return Math.max(0, Math.min(n - 1, Math.round((vbX - padL) / step)))
+  }
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    setHover(indexAt(e.clientX, e.currentTarget.getBoundingClientRect()))
   }
 
   return (
@@ -500,7 +508,31 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
           <p className="text-xs text-gray-500">No activity in this period yet</p>
         </div>
       ) : (
-        <div className="relative" style={{ height: 220 }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        <div
+          className={`relative ${onPick ? 'cursor-pointer' : ''}`}
+          style={{ height: 220 }}
+          onMouseMove={onMove}
+          onMouseLeave={() => setHover(null)}
+          onClick={(e) => onPick?.(indexAt(e.clientX, e.currentTarget.getBoundingClientRect()))}
+          role={onPick ? 'button' : undefined}
+          tabIndex={onPick ? 0 : undefined}
+          aria-label={onPick ? 'Open the per-site breakdown for a point on the chart' : undefined}
+          onKeyDown={(e) => {
+            // Keyboard: arrows walk the points, Enter/Space opens the one in
+            // focus — the chart is a real control, not a picture.
+            if (!onPick) return
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+              e.preventDefault()
+              setHover((h) => {
+                const cur = h ?? n - 1
+                return Math.max(0, Math.min(n - 1, cur + (e.key === 'ArrowRight' ? 1 : -1)))
+              })
+            } else if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              onPick(hover ?? n - 1)
+            }
+          }}
+        >
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }} preserveAspectRatio="none">
             <defs>
               <linearGradient id={`grad-v-${gid}`} x1="0" y1="0" x2="0" y2="1">
@@ -551,12 +583,130 @@ function AnalyticsChart({ points, accent, totalUnique }: { points: AnalyticsPoin
                   <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: PICKED_COLOR }} /><span className="text-gray-700">Picked</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].picked ?? 0}</span></p>
                   <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: NOTPICKED_COLOR }} /><span className="text-gray-700">Not picked</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].notPicked ?? 0}</span></p>
                   <p className="text-[11px] whitespace-nowrap flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: CHATS_COLOR }} /><span className="text-gray-700">Chats</span><span className="font-semibold text-gray-900 ml-auto pl-2">{points[hover].chats}</span></p>
+                  {onPick && <p className="mt-1 pt-1 border-t border-gray-200 text-[10px] text-gray-500 whitespace-nowrap">Click for the site-by-site breakdown</p>}
                 </div>
               </div>
             </>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+interface BreakdownSite { siteId: string; name: string; visits: number; unique: number; chats: number; picked: number; notPicked: number }
+interface Breakdown {
+  label: string
+  sites: BreakdownSite[]
+  total: { visits: number; unique: number; chats: number; picked: number; notPicked: number } | null
+}
+
+// "That point on the chart — which sites was it?"
+//
+// A modal rather than a section under the chart: the answer is a table that can
+// run to twenty-odd rows, and pushing the rest of the Overview down every time
+// somebody checked a month would make the page jump under their cursor.
+function SiteBreakdown({ data, loading, error, accent, onClose }: {
+  data: Breakdown | null; loading: boolean; error: string; accent: string; onClose: () => void
+}) {
+  // Escape closes it, like every other dismissable layer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const rows = data?.sites ?? []
+  const maxVisits = Math.max(1, ...rows.map((r) => r.visits))
+  const num = (v: number) => v.toLocaleString('en-US')
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
+      role="dialog" aria-modal="true" aria-label="Traffic by site">
+      <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-[1px]" onClick={onClose} aria-hidden />
+      <div className="relative w-full max-w-3xl rounded-xl border border-gray-200 bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Traffic by site</h3>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {data?.label ? `For ${data.label}` : 'For the point you picked'}
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            className="shrink-0 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700">
+            <X size={16} strokeWidth={2} aria-hidden />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-14 text-gray-500">
+            <Loader2 size={18} strokeWidth={2} className="animate-spin" aria-hidden />
+            <span className="text-xs">Working it out…</span>
+          </div>
+        ) : error ? (
+          <p role="alert" className="px-5 py-10 text-center text-xs text-red-700">{error}</p>
+        ) : rows.length === 0 ? (
+          <p className="px-5 py-10 text-center text-xs text-gray-500">No site had any activity in this period.</p>
+        ) : (
+          <>
+            {data?.total && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-gray-200 border-b border-gray-200">
+                {([
+                  ['Visits', data.total.visits],
+                  ['Unique', data.total.unique],
+                  ['Chats', data.total.chats],
+                  ['Picked', data.total.picked],
+                  ['Not picked', data.total.notPicked],
+                ] as [string, number][]).map(([k, v]) => (
+                  <div key={k} className="bg-white px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-500">{k}</p>
+                    <p className="mt-0.5 text-lg font-semibold text-gray-900 tabular-nums">{num(v)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="max-h-[55vh] overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-white shadow-[0_1px_0_0_rgba(0,0,0,0.08)]">
+                  <tr className="text-left text-gray-500">
+                    <th className="px-5 py-2 font-medium">Site</th>
+                    <th className="px-3 py-2 font-medium text-right">Visits</th>
+                    <th className="px-3 py-2 font-medium text-right">Unique</th>
+                    <th className="px-3 py-2 font-medium text-right">Chats</th>
+                    <th className="px-3 py-2 font-medium text-right">Picked</th>
+                    <th className="px-5 py-2 font-medium text-right">Not picked</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.siteId} className="border-t border-gray-200">
+                      <td className="px-5 py-2">
+                        <span className="block text-gray-900">{r.name}</span>
+                        {/* A bar, so the biggest site is obvious without reading
+                            every number in the column. */}
+                        <span className="mt-1 block h-1 rounded-full bg-gray-200" aria-hidden>
+                          <span className="block h-1 rounded-full" style={{ width: `${(r.visits / maxVisits) * 100}%`, backgroundColor: accent }} />
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-900 font-semibold">{num(r.visits)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-700">{num(r.unique)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-700">{num(r.chats)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-green-700">{num(r.picked)}</td>
+                      <td className="px-5 py-2 text-right tabular-nums text-red-700">{num(r.notPicked)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* Said out loud, because the column visibly does not add up and a
+                reader would otherwise assume the table is wrong. */}
+            <p className="px-5 py-3 border-t border-gray-200 text-[11px] text-gray-500">
+              Unique counts people, so the site rows add up to more than the total when
+              somebody visited more than one site.
+            </p>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -868,6 +1018,13 @@ export default function Dashboard() {
   const [analyticsRange, setAnalyticsRange] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily')
   const [analytics, setAnalytics] = useState<AnalyticsPoint[]>([])
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  // The per-site breakdown for one point on the chart. Not cached: it is opened
+  // deliberately, one bucket at a time, and a stale answer behind a click the
+  // user just made would be worse than the second it takes to fetch.
+  const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
+  const [breakdownOpen, setBreakdownOpen] = useState(false)
+  const [breakdownLoading, setBreakdownLoading] = useState(false)
+  const [breakdownError, setBreakdownError] = useState('')
   const [analyticsUnique, setAnalyticsUnique] = useState(0)
   // Billing report (lead-tracked sites). Month string "YYYY-MM"; default current.
   const [billingMonth, setBillingMonth] = useState(() => new Date().toISOString().slice(0, 7))
@@ -1142,6 +1299,21 @@ export default function Dashboard() {
   // has already moved off must not repaint the chart — pressing Monthly then
   // Weekly used to leave whichever query happened to finish last on screen.
   const analyticsWanted = useRef<string>('')
+  const openBreakdown = useCallback(async (index: number) => {
+    const range = analyticsRange
+    setBreakdownOpen(true); setBreakdownLoading(true); setBreakdownError(''); setBreakdown(null)
+    try {
+      const res = await fetch(`/api/admin/analytics/breakdown?range=${range}&bucket=${index}`)
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setBreakdownError(d.error || 'That breakdown could not be loaded.'); return }
+      setBreakdown(d as Breakdown)
+    } catch {
+      setBreakdownError('That breakdown could not be loaded.')
+    } finally {
+      setBreakdownLoading(false)
+    }
+  }, [analyticsRange])
+
   useEffect(() => {
     if (tab !== 'overview' || !authReady) return
     const range = analyticsRange
@@ -2401,7 +2573,11 @@ export default function Dashboard() {
                     <p className="text-xs">Loading {analyticsRange} figures…</p>
                   </div>
                 ) : (
-                  <AnalyticsChart points={analytics} accent={accentColor} totalUnique={analyticsUnique} />
+                  <AnalyticsChart points={analytics} accent={accentColor} totalUnique={analyticsUnique} onPick={openBreakdown} />
+                )}
+                {breakdownOpen && (
+                  <SiteBreakdown data={breakdown} loading={breakdownLoading} error={breakdownError}
+                    accent={accentColor} onClose={() => setBreakdownOpen(false)} />
                 )}
               </div>
 
