@@ -245,13 +245,17 @@ export async function callInsights(cfg: TwilioConfig, callSid: string): Promise<
  * 'no-answer' either way.
  */
 export async function callEvents(cfg: TwilioConfig, callSid: string): Promise<unknown[]> {
-  const res = await fetch(`${API}/Accounts/${cfg.sid}/Calls/${encodeURIComponent(callSid)}/Events.json?PageSize=20`, {
+  // Insights, not the classic API: the 2010-04-01 Calls resource has no Events
+  // sub-resource, and asking for one returns a bare 404 that reads like the call
+  // does not exist.
+  const res = await fetch(`https://insights.twilio.com/v1/Voice/${encodeURIComponent(callSid)}/Events?PageSize=30`, {
     headers: { Authorization: authHeader(cfg) },
   })
   const j = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(String(j?.message ?? `Twilio refused the call events (${res.status})`))
   return (j.events ?? []).map((e: Record<string, unknown>) => ({
-    request: e.request, response: e.response,
+    at: e.timestamp, name: e.name, group: e.group, level: e.level,
+    sdkEdge: e.sdk_edge, carrierEdge: e.carrier_edge, clientEdge: e.client_edge,
   }))
 }
 
