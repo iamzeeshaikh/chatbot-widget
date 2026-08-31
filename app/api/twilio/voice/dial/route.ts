@@ -85,7 +85,14 @@ export async function POST(req: NextRequest) {
   // they were never offered.
   return xml(
     '<Response>'
-    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="30"`
+    // FIFTY-FIVE seconds, not thirty. A UK mobile diverts to its own voicemail
+    // at roughly 25–30 seconds, which is exactly where a 30s timeout gave up —
+    // so a call that WAS reaching the network came back as 'no-answer' having
+    // never got far enough to prove it. Past the divert point the outcome is
+    // legible: voicemail answering means the call is being delivered and the
+    // handset is not alerting, and a still-silent line means it is not.
+    // It also matches how long a person actually waits before hanging up.
+    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="55"`
     + ` action="${escapeXml(statusUrl)}" method="POST">`
     + `<Number>${escapeXml(customer)}</Number>`
     + '</Dial>'
