@@ -6,6 +6,7 @@ import { LEAD_CAPTURE_ROLE, parseLeadCapture, LEAD_TRACKED_SITES } from '@/lib/l
 import { LEAD_STATUS_ROLE, parseLeadStatus, type LeadStatus } from '@/lib/leadstatus'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
 import { unpackVisitor } from '@/lib/visitor'
+import { notALeadSessions } from '@/lib/notalead'
 import { QUOTE_TAG, CHECKOUT_TAG, stripQuoteTag, quoteSessionId } from '@/lib/quoteintake'
 
 export const dynamic = 'force-dynamic'
@@ -207,7 +208,13 @@ export async function GET(req: NextRequest) {
     }
   }).filter((l) => l.email)
 
+  // Anything marked "not a lead" — a supplier pitching through the quote form,
+  // a duplicate, a mistake — never reaches the billable count. It is the one
+  // number a client actually pays against, so a pitch left in it is a charge
+  // for something that was never a customer.
+  const notLeads = await notALeadSessions(Array.from(scope))
   const leads = [...chatLeads, ...quoteLeads, ...checkoutLeads]
+    .filter((l) => !notLeads.has(l.session_id))
     .sort((a, b) => new Date(b.captured_at).getTime() - new Date(a.captured_at).getTime())
 
   // Billable count: the same customer sometimes contacts through both the

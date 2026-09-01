@@ -34,6 +34,7 @@ import { findBurstKeys, burstKey } from './botfilter'
 import { isClosingMessage } from './closing'
 import { QUOTE_TAG, CHECKOUT_TAG, quoteSessionId, stripQuoteTag } from './quoteintake'
 import { pktDayKey, pktDaysInRange, describeRange, type ReportRange } from './datetime'
+import { notALeadSessions } from './notalead'
 
 const ROW_CAP = 60000
 
@@ -342,7 +343,13 @@ export async function buildReport(member: Member, range: ReportRange): Promise<R
   // Oldest first, so the FIRST time a customer appears is the row that carries
   // the charge and any later repeat is the one marked as a duplicate. That
   // matches how a client reads an invoice line.
-  const chronological = [...leads].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  // Anything marked "not a lead" — a supplier pitch that reached the quote
+  // form, a duplicate, a mistake — is dropped before anything is counted, so
+  // the report's totals match what the dashboard shows.
+  const excluded = await notALeadSessions(Array.from(scope))
+  const realLeads = excluded.size === 0 ? leads : leads.filter((l) => !excluded.has(l.session_id))
+
+  const chronological = [...realLeads].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const charged = new Set<string>()
   const detail: LeadDetail[] = []
 

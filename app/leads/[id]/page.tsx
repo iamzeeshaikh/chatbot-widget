@@ -80,6 +80,7 @@ export default function LeadRecordPage() {
   const [waFile, setWaFile] = useState<File | null>(null)
   const [waUploading, setWaUploading] = useState(false)
   const [waChecking, setWaChecking] = useState(false)
+  const [markingSpam, setMarkingSpam] = useState(false)
   const [callError, setCallError] = useState('')
   // Set when the composer was opened by Reply on an inbound message; cleared on
   // close so the next plain "Email" click is a fresh message, not a stale reply.
@@ -439,6 +440,15 @@ export default function LeadRecordPage() {
             <div className="flex items-center gap-2 min-w-0 flex-wrap">
               <h1 className="text-xl font-bold text-gray-900 leading-tight break-words tracking-tight">{displayName}</h1>
               <StagePill stage={record.stage} />
+              {/* Marked as not a customer — a supplier pitch, a duplicate, a
+                  mistake. The record is untouched; it has just stopped counting
+                  in the tiles, the site cards, Billing and the report. */}
+              {record.notALead && (
+                <span title={`Marked by ${record.notALead.by}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                  Not a lead
+                </span>
+              )}
             </div>
             <p className="text-[10px] text-gray-500 flex items-center gap-1.5 flex-wrap leading-tight mt-0.5">
               <Building2 size={10} strokeWidth={2} aria-hidden />{record.siteName}
@@ -577,6 +587,27 @@ export default function LeadRecordPage() {
               </div>
             )}
           </Card>
+
+          {/* Not a customer. Deliberately a MARK, not a delete: a wrong call is
+              undone by pressing it again, the row stays readable, and the hole
+              in the intake filter stays findable. */}
+          <div className="px-1 pb-1">
+            <button
+              onClick={async () => {
+                setMarkingSpam(true)
+                try {
+                  await fetch(`/api/leads/${encodeURIComponent(id)}/not-a-lead`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ spam: !record.notALead }),
+                  })
+                  load()
+                } finally { setMarkingSpam(false) }
+              }}
+              disabled={markingSpam}
+              className="text-[11px] text-gray-500 hover:text-gray-800 underline decoration-dotted underline-offset-2 disabled:opacity-50">
+              {markingSpam ? 'Saving…' : record.notALead ? 'This is a real lead — count it again' : 'Not a lead (promotional, duplicate…) — stop counting it'}
+            </button>
+          </div>
 
           {/* Properties list — quiet labels, strong values, grouped. */}
           <Card title="Details" icon={FileText} bodyClass="py-1">

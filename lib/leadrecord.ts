@@ -33,6 +33,8 @@ import {
 import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE } from './crm'
 import { cachedLineType, whatsAppStateFrom, type WhatsAppStatus } from './whatsappstatus'
+import { parseNotALead, type NotALeadMark } from './notalead'
+import { CRM_NOT_A_LEAD_ROLE } from './crm'
 import { phoneKey } from './identity'
 import { parseCall, callDurationLabel, type CallEntry } from './call'
 import { parseWaMessage, waDeliveryLabel, waErrorHint, type WaMessage } from './whatsapp'
@@ -95,6 +97,9 @@ export interface LeadRecord {
   hasConversation: boolean
   contact: { name: string; email: string; phone: string }
   captured: { name: string; email: string; phone: string }
+  /** Set when somebody has marked this "not a lead" — a supplier pitch, a
+   *  duplicate, a mistake. The record still opens; it just stops counting. */
+  notALead?: NotALeadMark
   /** Whether this number is reachable on WhatsApp, as far as anything can tell.
    *  WhatsApp offers no way to test a number without messaging it, so this is
    *  assembled from what already happened — see lib/whatsappstatus.ts. */
@@ -788,9 +793,18 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     !!rawPhone,
   )
 
+  // Newest row wins, so un-marking is another row rather than a delete.
+  let notALead: NotALeadMark | undefined
+  for (const r of logs) {
+    if (r.role !== CRM_NOT_A_LEAD_ROLE) continue
+    const m = parseNotALead(r.message)
+    if (m) notALead = m.spam ? m : undefined
+  }
+
   const record: LeadRecord = {
     recipientLocked: member.role !== 'admin',
     whatsapp,
+    notALead,
     id,
     siteId,
     siteName,

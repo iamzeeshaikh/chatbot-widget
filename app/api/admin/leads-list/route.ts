@@ -4,6 +4,7 @@ import { getMember, siteScope } from '@/lib/auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { CONTACT_ROLE, parseContact } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
+import { notALeadSessions, sessionForLead } from '@/lib/notalead'
 
 export const dynamic = 'force-dynamic'
 
@@ -164,5 +165,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ leads: merged })
+  // Leads somebody has marked "not a lead" — a supplier pitching their factory
+  // through the quote form, a duplicate, a mistake. They are dropped from the
+  // list the Overview tiles and the site cards are computed from, so they stop
+  // counting; the record itself is untouched and still opens by URL.
+  const excluded = await notALeadSessions(allowed)
+  const kept = excluded.size === 0
+    ? merged
+    : merged.filter((l) => !excluded.has(sessionForLead(l as { id: string; session_id?: string | null })))
+
+  // Said out loud rather than left to be discovered: a smaller number with no
+  // explanation is exactly how a filter that went wrong stays hidden.
+  return NextResponse.json({ leads: kept, notALead: merged.length - kept.length })
 }

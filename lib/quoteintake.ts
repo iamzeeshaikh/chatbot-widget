@@ -163,6 +163,27 @@ const SELLER_PITCH_RE = /here'?s what you'?ll get|when working with us|why choos
 // that one sender and nothing else.
 const MARKETING_PITCH_RE = /when people search for|top keywords|what kind of reach|we can (get|bring|send) you|we can have your brand|free (seo )?(audit|analysis|consultation)|we noticed your (website|site)|increase your (online )?(visibility|presence)|organic traffic|domain authority|generate (more )?(leads|traffic) for your|page one of google|get you ranked|rank(ing)? on (the )?first page/i
 
+// A MANUFACTURER pitching its own factory through the quote form. The sender
+// wants to sell production capacity, not buy anything — so however detailed and
+// professional it reads, it is not a lead.
+//
+// (Real example, 1 Sep 2026, texasfootball: "If you are scaling your custom
+// apparel orders for the upcoming Fall 2026 rush, cut out the domestic
+// middleman and secure your margins factory-direct … We manufacture elite
+// sublimated team uniforms … True Factory Pricing: Premium cuts starting at
+// $8/piece … Low MOQs engineered for both small sports clubs and bulk contract
+// runs." It slipped past every filter above because it never uses marketing or
+// SEO language — it talks about garments, exactly like a real customer.)
+//
+// What separates it from a buyer is DIRECTION, so every phrase here is one only
+// the SUPPLYING side writes. Deliberately excluded: "MOQ", "sublimation",
+// "wholesale pricing", "per piece" and "samples" — buyers ask about all of
+// those constantly, and one of them is in half the genuine enquiries.
+//
+// Checked against all 1,429 stored leads on 1 Sep 2026: matches that one
+// submission and nothing else.
+const SUPPLIER_PITCH_RE = /cut out the (domestic )?middle ?man|factory[- ]direct|we manufacture\b|zero hidden customs|move production to us|low moqs\b|true factory pricing|starting at \$\d+(\.\d+)?\s*\/?\s*(piece|pc|unit)\b|we('re| are) an? (leading |premier |top )?(manufacturer|supplier|exporter|factory)\b|our (own )?(factory|production facility|manufacturing unit)|why (us|our) [a-z ]{0,24}(partners|clients) (choose|move|switch)|scaling your (custom )?(apparel|uniform|garment) orders/i
+
 // The same bot network generates a fake "phone number" as a single literal
 // digit 8 followed by exactly 10 more digits (e.g. "86717731828") — seen
 // across ~40 spam submissions with zero exceptions, while every real lead's
@@ -225,7 +246,8 @@ const TEST_PHONE_RE = /^\d{3}555\d{4}$/
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
   if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
-  return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText) || MARKETING_PITCH_RE.test(bodyText)
+  return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText)
+    || MARKETING_PITCH_RE.test(bodyText) || SUPPLIER_PITCH_RE.test(bodyText)
 }
 
 // Strip the QUOTE_TAG, any forwarded-message header block, and the

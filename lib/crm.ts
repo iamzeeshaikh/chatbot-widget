@@ -61,11 +61,17 @@ export const CRM_CALL_ROLE = 'crm_call'
 // and because the lookup costs money per call and the answer never changes.
 export const CRM_WA_LOOKUP_ROLE = 'crm_wa_lookup'
 
+// A lead somebody has marked "not a lead" — a supplier pitch, a duplicate, a
+// mistake. Append-only: the newest row per session wins, so un-marking is
+// another row rather than a delete. See lib/notalead.ts.
+export const CRM_NOT_A_LEAD_ROLE = 'crm_not_a_lead'
+
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
   CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_WA_LOOKUP_ROLE,
+  CRM_NOT_A_LEAD_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────
