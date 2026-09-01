@@ -785,6 +785,7 @@ export default function LeadRecordPage() {
             canMessage={!!record.contact.phone}
             onSend={sendWhatsAppMessage}
             onRefresh={load}
+            onCall={placeCall}
           />
 
           <Card title="Activity" icon={Activity} tone="primary"

@@ -57,6 +57,12 @@ export default function Softphone() {
   // A calm line for the ordinary endings — "nobody answered" is not a fault,
   // and showing it in red made a working call look broken.
   const [notice, setNotice] = useState('')
+  // Set when a browser call died without audio ever flowing. That is the
+  // signature of a network that blocks WebRTC media, and the fix is not another
+  // browser call — it is the path that needs no WebRTC at all.
+  const [offerPhoneFallback, setOfferPhoneFallback] = useState<{ leadId: string; leadName: string } | null>(null)
+  const [ringing, setRinging] = useState(false)
+  const lastCallRef = useRef<{ leadId: string; leadName: string } | null>(null)
   const [seconds, setSeconds] = useState(0)
   const [error, setError] = useState('')
 
@@ -109,6 +115,11 @@ export default function Softphone() {
     })
     call.on('warning-cleared', () => { warnRef.current = '' })
     call.on('disconnect', () => {
+      // Never went live = the audio path never formed. Twilio kills such a call
+      // after ~30 seconds of silence (error 32014, "no audio received from
+      // callee") while the customer's phone rings on, which reads as "the call
+      // ended by itself".
+      if (!liveRef.current && lastCallRef.current) setOfferPhoneFallback(lastCallRef.current)
       const w = warnRef.current
       endedTo(
         w === 'ice-connectivity-lost'
@@ -248,7 +259,9 @@ export default function Softphone() {
   useEffect(() => attachSoftphone(async ({ leadId, leadName }) => {
     const device = deviceRef.current
     if (!device) return
-    setError(''); setNotice(''); setPhase('connecting'); setWho(leadName || 'Calling…')
+    setError(''); setNotice(''); setOfferPhoneFallback(null)
+    lastCallRef.current = { leadId, leadName }
+    setPhase('connecting'); setWho(leadName || 'Calling…')
 
     // ── The microphone, BEFORE the call ────────────────────────────────────
     // This used to be left to the SDK, and the failure was silent and awful:
@@ -303,9 +316,26 @@ export default function Softphone() {
     c.mute(next); setMuted(next)
   }
 
+  async function ringMyPhone() {
+    const target = offerPhoneFallback
+    if (!target || ringing) return
+    setRinging(true); setError('')
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(target.leadId)}/call`, { method: 'POST' })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setError(d.error || 'Your phone could not be rung.'); return }
+      setOfferPhoneFallback(null)
+      setNotice('Your phone is ringing — answer it and you will be connected.')
+    } catch {
+      setError('Your phone could not be rung.')
+    } finally {
+      setRinging(false)
+    }
+  }
+
   // Nothing to show when there is no phone and nothing has gone wrong.
-  if (phase === 'off' && !error && !notice) return null
-  if (phase === 'idle' && !error && !notice) return null
+  if (phase === 'off' && !error && !notice && !offerPhoneFallback) return null
+  if (phase === 'idle' && !error && !notice && !offerPhoneFallback) return null
 
   return (
     <div
@@ -328,6 +358,22 @@ export default function Softphone() {
         </div>
       )}
 
+      {/* The way out of a network that blocks WebRTC: ring the agent's own
+          phone and bridge the customer to it. No browser audio is involved, so
+          it works where the softphone cannot. */}
+      {offerPhoneFallback && phase === 'idle' && (
+        <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 p-2">
+          <p className="text-[11px] text-amber-900">
+            No audio reached the other side — your network is blocking browser calls.
+          </p>
+          <button onClick={ringMyPhone} disabled={ringing}
+            className="mt-1.5 w-full rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-50">
+            {ringing ? 'Ringing your phone…' : 'Ring my phone instead'}
+          </button>
+          <button onClick={() => setOfferPhoneFallback(null)}
+            className="mt-1 w-full text-[11px] text-gray-500 hover:text-gray-700">Dismiss</button>
+        </div>
+      )}
       {phase === 'incoming' && (
         <>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Incoming call</p>

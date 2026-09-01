@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert, Mic, Square, Trash2 } from 'lucide-react'
+import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert, Mic, Square, Trash2, Phone } from 'lucide-react'
 import type { TimelineEvent } from '@/lib/leadrecord'
 import { formatDateTime } from '@/lib/datetime'
 
@@ -27,6 +27,9 @@ interface Props {
   canMessage: boolean
   onSend: (text: string, file: File | null) => Promise<string | null>
   onRefresh: () => void
+  /** Ring this customer. WhatsApp puts a call button in the chat header and so
+   *  does this — the person you want to phone is the one you are reading. */
+  onCall?: () => void
 }
 
 
@@ -96,7 +99,7 @@ function Ticks({ status }: { status?: string }) {
   return <Check size={12} strokeWidth={2.5} className="text-green-100/70" aria-label="Sent" />
 }
 
-export default function WhatsAppThread({ events, leadId, state, stateReason, canMessage, onSend, onRefresh }: Props) {
+export default function WhatsAppThread({ events, leadId, state, stateReason, canMessage, onSend, onRefresh, onCall }: Props) {
   const msgs = events
     .filter((e) => e.kind === 'wa_in' || e.kind === 'wa_out')
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
@@ -227,13 +230,24 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
             {msgs.length > 0 && ` · ${msgs.length} message${msgs.length === 1 ? '' : 's'}`}
           </p>
         </div>
+        {/* An ordinary phone call, from the chat — the customer in front of you
+            is the one you want to ring. It is NOT a WhatsApp call: Meta does not
+            allow a business with a US number to place those, so this dials their
+            number the normal way, through the browser. */}
+        {onCall && canMessage && (
+          <button onClick={onCall} title="Call this customer from your browser"
+            className="ml-auto shrink-0 rounded-full border border-green-300 bg-white p-2 text-green-700 hover:bg-green-50 transition-colors">
+            <Phone size={15} strokeWidth={2.25} aria-hidden />
+            <span className="sr-only">Call</span>
+          </button>
+        )}
         {/* The 24-hour rule, stated before it bites rather than after. */}
         {closesAt !== null && (
           <span
             title={open
               ? 'WhatsApp allows a free-form reply for 24 hours after the customer’s last message'
               : 'Outside the 24-hour window — WhatsApp will refuse a free-form message until they write again'}
-            className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
+            className={`${onCall && canMessage ? '' : 'ml-auto '}shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
               open ? 'text-green-800 bg-green-100 border-green-200' : 'text-amber-800 bg-amber-50 border-amber-300'}`}
           >
             {open ? `Window open · ${hoursLeft(closesAt)}` : 'Window closed'}
