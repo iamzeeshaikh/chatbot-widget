@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await guardLeadAccess(member, id, 'telephony')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
-  const cfg = twilioConfig()
+  const cfg = twilioConfig(access.member.workspace)
   if (!cfg || !cfg.phoneNumber) {
     return NextResponse.json({ error: 'Calling is not configured on the server.', needsSetup: true }, { status: 503 })
   }

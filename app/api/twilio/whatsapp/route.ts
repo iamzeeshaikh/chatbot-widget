@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, verifyTwilioSignature, workspaceForBusinessNumber } from '@/lib/twilio'
 import { CRM_WA_IN_ROLE } from '@/lib/crm'
 import { leadForCaller } from '@/lib/inbound'
 
@@ -27,8 +27,8 @@ export const dynamic = 'force-dynamic'
 // the number matching) for every inbound channel.
 
 export async function POST(req: NextRequest) {
-  const cfg = twilioConfig()
-  if (!cfg) return new NextResponse('Twilio is not configured', { status: 503 })
+  const auth = twilioAuth()
+  if (!auth) return new NextResponse('Twilio is not configured', { status: 503 })
 
   const raw = await req.text()
   const params: Record<string, string> = {}
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
   const url = `${proto}://${host}${req.nextUrl.pathname}`
   const signature = req.headers.get('x-twilio-signature') ?? ''
-  if (!verifyTwilioSignature(cfg.token, url, params, signature)) {
+  if (!verifyTwilioSignature(auth.token, url, params, signature)) {
     console.warn('[whatsapp] refused a webhook with a bad signature')
     return new NextResponse('Bad signature', { status: 403 })
   }
@@ -61,7 +61,10 @@ export async function POST(req: NextRequest) {
     if (u) media.push({ url: u, type: params[`MediaContentType${i}`] ?? '' })
   }
 
-  const found = await leadForCaller(from, `WhatsApp enquiry\n\n${body}`, { name: profileName, calledNumber: to })
+  // Which business was messaged — the sender number is the only evidence.
+  const workspace = workspaceForBusinessNumber(to)
+  if (!workspace) return new NextResponse('<Response/>', { headers: { 'Content-Type': 'text/xml' } })
+  const found = await leadForCaller(from, workspace, `WhatsApp enquiry\n\n${body}`, { name: profileName, calledNumber: to })
   const sessionId = found?.sessionId ?? null
   const siteId = found?.siteId ?? ''
 

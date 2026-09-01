@@ -19,8 +19,8 @@ export async function GET(req: NextRequest) {
   if (!member) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   if (member.role !== 'admin') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
-  const problem = twilioProblem()
-  const cfg = twilioConfig()
+  const problem = twilioProblem(member.workspace)
+  const cfg = twilioConfig(member.workspace)
   if (!cfg) return NextResponse.json({ configured: false, problem })
 
   // ?calls=1 — the last few calls as Twilio saw them, which is the only way to

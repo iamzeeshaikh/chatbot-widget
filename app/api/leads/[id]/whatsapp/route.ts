@@ -22,8 +22,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await guardLeadAccess(member, id, 'telephony')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
-  const problem = twilioProblem()
-  const cfg = twilioConfig()
+  const problem = twilioProblem(access.member.workspace)
+  const cfg = twilioConfig(access.member.workspace)
   if (problem || !cfg) return NextResponse.json({ error: problem, needsSetup: true }, { status: 503 })
 
   const body = await req.json().catch(() => ({}))

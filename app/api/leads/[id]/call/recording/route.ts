@@ -25,7 +25,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
-  const cfg = twilioConfig()
+  const cfg = twilioConfig(access.member.workspace)
   if (!cfg) return NextResponse.json({ error: 'Not configured' }, { status: 503 })
 
   const wanted = req.nextUrl.searchParams.get('sid') ?? ''

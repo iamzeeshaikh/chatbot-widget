@@ -14,29 +14,91 @@
 //   TWILIO_PHONE_NUMBER   the voice number
 
 import { createHmac, timingSafeEqual } from 'crypto'
+import type { Workspace } from './workspaces'
 
 const API = 'https://api.twilio.com/2010-04-01'
 
-export interface TwilioConfig { sid: string; token: string; whatsappFrom: string; phoneNumber: string }
+export interface TwilioConfig {
+  sid: string; token: string; whatsappFrom: string; phoneNumber: string
+  /** Which business this number speaks for. */
+  workspace: Workspace
+}
 
-export function twilioConfig(): TwilioConfig | null {
+// ── One account, two businesses, and they must never borrow each other's line ─
+//
+// Sports and packaging share a Twilio ACCOUNT (one bill, one console) but not a
+// NUMBER: sports answers on its own line, packaging on its own, and a lead
+// belongs to exactly one of them. Getting that wrong is not cosmetic — it would
+// message a packaging customer from the sports business, and their reply would
+// land on a sports lead in the other dashboard.
+//
+// So the number is never read from a bare env var any more. Every caller names
+// the workspace, and the lookup fails closed: a workspace with no number
+// configured gets none, rather than quietly falling back to the other one's.
+const WORKSPACE_NUMBERS: Record<Workspace, { phone: string; whatsapp: string }> = {
+  sports: {
+    phone: process.env.TWILIO_PHONE_NUMBER ?? '',
+    whatsapp: process.env.TWILIO_WHATSAPP_FROM ?? '',
+  },
+  packaging: {
+    phone: process.env.TWILIO_PACKAGING_PHONE_NUMBER ?? '',
+    whatsapp: process.env.TWILIO_PACKAGING_WHATSAPP_FROM ?? '',
+  },
+}
+
+export function twilioConfig(workspace: Workspace): TwilioConfig | null {
   const sid = process.env.TWILIO_ACCOUNT_SID
   const token = process.env.TWILIO_AUTH_TOKEN
   if (!sid || !token) return null
-  return {
-    sid, token,
-    whatsappFrom: process.env.TWILIO_WHATSAPP_FROM ?? '',
-    phoneNumber: process.env.TWILIO_PHONE_NUMBER ?? '',
-  }
+  const nums = WORKSPACE_NUMBERS[workspace]
+  if (!nums) return null
+  return { sid, token, whatsappFrom: nums.whatsapp, phoneNumber: nums.phone, workspace }
 }
 
-/** Human-readable reason the integration cannot run, or null when it can. */
-export function twilioProblem(): string | null {
+/** The account credentials alone — no number, no workspace.
+ *
+ *  Webhooks need this and only this: a signature is verified with the ACCOUNT's
+ *  auth token, and which business the call belongs to is not known until the
+ *  signed body has been read. Asking for a workspace first would mean trusting
+ *  an unverified field to pick the key that verifies it. */
+export function twilioAuth(): { sid: string; token: string } | null {
+  const sid = process.env.TWILIO_ACCOUNT_SID
+  const token = process.env.TWILIO_AUTH_TOKEN
+  if (!sid || !token) return null
+  return { sid, token }
+}
+
+/** Which workspace owns a given business number, or null if it is not ours.
+ *  This is how an INBOUND call or message decides whose customer is calling —
+ *  the only thing the two businesses share is the account, so the number that
+ *  was dialled is the only evidence there is. */
+export function workspaceForBusinessNumber(to: string | null | undefined): Workspace | null {
+  const key = phoneKeyOf(to)
+  if (!key) return null
+  for (const ws of Object.keys(WORKSPACE_NUMBERS) as Workspace[]) {
+    const n = WORKSPACE_NUMBERS[ws]
+    if (phoneKeyOf(n.phone) === key || phoneKeyOf(n.whatsapp) === key) return ws
+  }
+  return null
+}
+
+// Compared on the last nine digits, like every other phone in this codebase:
+// the same line arrives as "whatsapp:+12134493746", "+1 213 449 3746" and
+// "2134493746" depending on who wrote it.
+function phoneKeyOf(v: string | null | undefined): string {
+  const digits = String(v ?? '').replace(/^whatsapp:/, '').replace(/\D/g, '')
+  return digits.length >= 9 ? digits.slice(-9) : ''
+}
+
+/** Human-readable reason the integration cannot run for this workspace, or
+ *  null when it can. Named per workspace because "WhatsApp is not set up" is
+ *  true of one business and false of the other. */
+export function twilioProblem(workspace: Workspace): string | null {
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
     return 'Twilio is not configured on the server (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN).'
   }
-  if (!process.env.TWILIO_WHATSAPP_FROM) {
-    return 'No WhatsApp sender is configured (TWILIO_WHATSAPP_FROM).'
+  if (!WORKSPACE_NUMBERS[workspace]?.whatsapp) {
+    return 'No WhatsApp sender is configured for this workspace yet.'
   }
   return null
 }

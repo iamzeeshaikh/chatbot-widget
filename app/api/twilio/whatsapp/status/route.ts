@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, verifyTwilioSignature } from '@/lib/twilio'
 import { CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { parseWaMessage } from '@/lib/whatsapp'
 import { resolveLeadSite } from '@/lib/leadrecord'
@@ -24,8 +24,8 @@ export const dynamic = 'force-dynamic'
 const WORTH_RECORDING = new Set(['delivered', 'read', 'failed', 'undelivered'])
 
 export async function POST(req: NextRequest) {
-  const cfg = twilioConfig()
-  if (!cfg) return new NextResponse('', { status: 204 })
+  const auth = twilioAuth()
+  if (!auth) return new NextResponse('', { status: 204 })
 
   const raw = await req.text()
   const params: Record<string, string> = {}
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
   const url = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search}`
-  if (!verifyTwilioSignature(cfg.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
+  if (!verifyTwilioSignature(auth.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
     console.warn('[whatsapp] refused a status webhook with a bad signature')
     return new NextResponse('Bad signature', { status: 403 })
   }

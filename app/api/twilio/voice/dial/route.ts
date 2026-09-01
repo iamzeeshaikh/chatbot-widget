@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
 import { emailFromIdentity } from '@/lib/voicetoken'
 import { memberByEmail } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow, leadPhone } from '@/lib/leadrecord'
@@ -33,8 +33,8 @@ function say(msg: string): NextResponse {
 }
 
 export async function POST(req: NextRequest) {
-  const cfg = twilioConfig()
-  if (!cfg) return say('This service is not configured.')
+  const auth = twilioAuth()
+  if (!auth) return say('This service is not configured.')
 
   const raw = await req.text()
   const params: Record<string, string> = {}
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
   const url = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search}`
-  if (!verifyTwilioSignature(cfg.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
+  if (!verifyTwilioSignature(auth.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
     console.warn('[voice] refused a dial webhook with a bad signature')
     return new NextResponse('Bad signature', { status: 403 })
   }
@@ -56,6 +56,11 @@ export async function POST(req: NextRequest) {
 
   const access = await guardLeadAccess(member, leadId, 'telephony')
   if (!access.ok) return say('You are not allowed to call this contact.')
+
+  // The agent's own workspace decides the caller ID — and guardLeadAccess has
+  // already refused a lead outside it, so the two cannot disagree.
+  const cfg = twilioConfig(member.workspace)
+  if (!cfg || !cfg.phoneNumber) return say('Calling is not set up for this account.')
 
   const customer = await leadPhone(leadId)
   if (!customer) return say('This lead has no phone number on file.')

@@ -96,18 +96,21 @@ export function workspaceSites(ws: Workspace): string[] {
 // standard member", which hid nothing today only because every packaging member
 // happens to be an admin — the day one was added as standard, their contacts
 // would have vanished with no decision behind it.
-// 'telephony' — WhatsApp, phone calls and the in-browser softphone. SPORTS
-// ONLY, and the reason is not policy but plumbing: there is exactly one Twilio
-// account, and its number and WhatsApp sender belong to the sports business.
-// Until this existed the Call and WhatsApp buttons were gated on 'records',
-// which packaging has too — so a packaging agent pressing WhatsApp would have
-// messaged their customer FROM the sports number, over a sports account, and
-// the reply would have landed on a sports lead. Packaging gets its own Twilio
-// account or it gets nothing; it does not borrow this one.
+// 'telephony' — WhatsApp, phone calls and the in-browser softphone.
+//
+// Both workspaces have it as of 2026-09-01, but they do NOT share a line. One
+// Twilio account, two numbers: sports answers on its own, packaging on its own
+// (+1 503 461 4788, bought for this), and lib/twilio.ts will not hand either
+// workspace the other's — twilioConfig() takes a workspace and fails closed.
+//
+// It was sports-only before that for a plumbing reason worth remembering: the
+// buttons used to be gated on 'records', which packaging also has, so a
+// packaging agent pressing WhatsApp would have messaged their customer FROM the
+// sports number and the reply would have landed on a sports lead.
 export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
-  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders']),
+  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony']),
   // Sports carries the CRM as of 2026-08-29, at the user's request. The reason
   // it did not before was that it had nothing to run a CRM on: chat had been off
   // on all five sites since 2026-08-05 and the workspace had produced one lead

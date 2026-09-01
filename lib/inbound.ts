@@ -19,7 +19,7 @@
 import { supabase } from './supabase'
 import { phoneKey } from './identity'
 import { quoteSessionId, QUOTE_TAG } from './quoteintake'
-import { SPORTS_SITES } from './workspaces'
+import { SPORTS_SITES, PACKAGING_SITES, type Workspace } from './workspaces'
 
 // ── Which SITE did they contact? ────────────────────────────────────────────
 // A phone call carries no site. Five websites print the same number, so the
@@ -37,18 +37,25 @@ import { SPORTS_SITES } from './workspaces'
 //   TWILIO_SITE_NUMBERS="texasfootball=+1213…,baseballjerseys=+1424…"
 //
 // The number Twilio reports in `To` then names the site exactly. Until that
-// variable lists a number, an inbound contact is filed on the fallback site and
-// SAYS SO on the record, so an agent knows the site still has to be settled.
-const INBOUND_SITE = SPORTS_SITES[0] ?? 'texasfootball'
+// variable lists a number, an inbound contact is filed on the workspace's first
+// site and SAYS SO on the record, so an agent knows the site still has to be
+// settled.
+
+/** The sites an inbound contact may be matched against. Scoped to ONE business:
+ *  the two workspaces share a Twilio account but not a customer list, and a
+ *  packaging caller must never be matched onto a sports lead. */
+function sitesOf(workspace: Workspace): string[] {
+  return workspace === 'sports' ? SPORTS_SITES : PACKAGING_SITES
+}
 
 /** The site that owns a given business number, or null if we cannot tell. */
-export function siteForCalledNumber(to: string | null | undefined): string | null {
+export function siteForCalledNumber(to: string | null | undefined, workspace: Workspace): string | null {
   const dialled = String(to || '').replace(/^whatsapp:/, '').replace(/[^\d+]/g, '')
   if (!dialled) return null
   for (const pair of String(process.env.TWILIO_SITE_NUMBERS || '').split(',')) {
     const [site, number] = pair.split('=').map((v) => v.trim())
     if (!site || !number) continue
-    if (!SPORTS_SITES.includes(site)) continue
+    if (!sitesOf(workspace).includes(site)) continue
     // Compared on the last nine digits, like every other phone in this codebase
     // — the same line is written +1 213 449 3746 and 2134493746 by different
     // people, and an env var is typed by a person.
@@ -67,12 +74,12 @@ export interface InboundLead { sessionId: string; siteId: string; created: boole
  * only looks, and the paths that mean something actually happened (a voicemail,
  * an answered call, a WhatsApp message) are the ones that create.
  */
-export async function findLeadByPhone(phone: string): Promise<{ leadId: string; sessionId: string; siteId: string; name: string } | null> {
+export async function findLeadByPhone(phone: string, workspace: Workspace): Promise<{ leadId: string; sessionId: string; siteId: string; name: string } | null> {
   const key = phoneKey(String(phone || '').trim())
   if (!key) return null
   const { data: leads } = await supabase.from('leads')
     .select('id, site_id, phone, name')
-    .in('site_id', SPORTS_SITES).not('phone', 'is', null)
+    .in('site_id', sitesOf(workspace)).not('phone', 'is', null)
     .order('created_at', { ascending: false }).limit(2000)
   const match = (leads ?? []).find((l) => phoneKey(l.phone) === key)
   if (!match) return null
@@ -81,20 +88,22 @@ export async function findLeadByPhone(phone: string): Promise<{ leadId: string; 
 
 export async function leadForCaller(
   phone: string,
+  workspace: Workspace,
   newLeadMessage: string,
   extra?: { name?: string; calledNumber?: string },
 ): Promise<InboundLead | null> {
   const from = String(phone || '').trim()
   if (!from) return null
 
-  const match = await findLeadByPhone(from)
+  const match = await findLeadByPhone(from, workspace)
   if (match) return { sessionId: match.sessionId, siteId: match.siteId, created: false }
 
-  const known = siteForCalledNumber(extra?.calledNumber)
-  const siteId = known ?? INBOUND_SITE
+  const known = siteForCalledNumber(extra?.calledNumber, workspace)
+  const siteId = known ?? sitesOf(workspace)[0]
+  if (!siteId) return null
   // Said on the record rather than left to be discovered. Without this line the
   // lead asserts a site nobody chose.
-  const caveat = known ? '' : '\n\nSite not identified — this phone line is shared by all five sites, so it was filed here as a placeholder. Please set the right one.'
+  const caveat = known ? '' : '\n\nSite not identified — this phone line is shared by every site in this workspace, so it was filed here as a placeholder. Please set the right one.'
   const { data: created } = await supabase.from('leads').insert([{
     site_id: siteId,
     name: extra?.name || null,

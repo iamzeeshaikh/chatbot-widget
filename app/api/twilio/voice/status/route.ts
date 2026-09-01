@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, verifyTwilioSignature } from '@/lib/twilio'
 import { CRM_CALL_ROLE } from '@/lib/crm'
 import { parseCall } from '@/lib/call'
 import { resolveLeadSite } from '@/lib/leadrecord'
@@ -13,8 +13,8 @@ export const dynamic = 'force-dynamic'
 // the reader takes the newest. Nothing is updated in place, so "who called, and
 // what happened" stays in the record.
 export async function POST(req: NextRequest) {
-  const cfg = twilioConfig()
-  if (!cfg) return new NextResponse('', { status: 204 })
+  const auth = twilioAuth()
+  if (!auth) return new NextResponse('', { status: 204 })
 
   const raw = await req.text()
   const params: Record<string, string> = {}
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
   const url = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search}`
-  if (!verifyTwilioSignature(cfg.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
+  if (!verifyTwilioSignature(auth.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
     return new NextResponse('Bad signature', { status: 403 })
   }
 

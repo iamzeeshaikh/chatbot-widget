@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, twilioConfig, verifyTwilioSignature, workspaceForBusinessNumber } from '@/lib/twilio'
 import { identityFor, voiceTokenConfig } from '@/lib/voicetoken'
 import { findLeadByPhone } from '@/lib/inbound'
+import type { Workspace } from '@/lib/workspaces'
 import { voicemailTwiml } from '@/lib/voicemail'
 import { HARDCODED_ACCOUNTS } from '@/lib/auth'
 
@@ -41,19 +42,20 @@ function escapeXml(v: string): string {
   return v.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c] ?? c))
 }
 
-/** Every member who could pick up — this workspace only. */
-async function ringableAgents(): Promise<string[]> {
+/** Every member who could pick up — the workspace whose number was dialled,
+ *  and only that one. */
+async function ringableAgents(workspace: Workspace): Promise<string[]> {
   const { data } = await supabase
-    .from('members').select('email').eq('workspace', 'sports').limit(MAX_CLIENT_LEGS)
+    .from('members').select('email').eq('workspace', workspace).limit(MAX_CLIENT_LEGS)
   const emails = (data ?? []).map((m) => String(m.email || '').toLowerCase()).filter(Boolean)
-  const builtin = HARDCODED_ACCOUNTS.find((a) => a.workspace === 'sports')?.email
+  const builtin = HARDCODED_ACCOUNTS.find((a) => a.workspace === workspace)?.email
   if (builtin && !emails.includes(builtin) && emails.length < MAX_CLIENT_LEGS) emails.push(builtin)
   return emails
 }
 
 export async function POST(req: NextRequest) {
-  const cfg = twilioConfig()
-  if (!cfg) return xml('<Response><Say>This service is not configured.</Say></Response>')
+  const auth = twilioAuth()
+  if (!auth) return xml('<Response><Say>This service is not configured.</Say></Response>')
 
   const raw = await req.text()
   const params: Record<string, string> = {}
@@ -62,7 +64,7 @@ export async function POST(req: NextRequest) {
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
   const url = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search}`
-  if (!verifyTwilioSignature(cfg.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
+  if (!verifyTwilioSignature(auth.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
     return new NextResponse('Bad signature', { status: 403 })
   }
 
@@ -74,17 +76,25 @@ export async function POST(req: NextRequest) {
   // in silence. The signature covers the query string too, so this stays
   // verifiable.
   const caller = params.From ?? ''
+  // WHOSE line was dialled. The two businesses share an account, so the number
+  // is the only thing that says which of them this caller wanted — and getting
+  // it wrong would ring the other company's agents and file the lead there.
+  const workspace = workspaceForBusinessNumber(params.To)
+  const cfg = workspace ? twilioConfig(workspace) : null
+  if (!workspace || !cfg) {
+    return xml(`<Response><Say voice="Polly.Joanna">This number is not in service.</Say><Hangup /></Response>`)
+  }
 
   // Without a TwiML App there is no softphone to ring, so this is voicemail-
   // only — exactly as it behaved before the softphone existed.
-  const agents = voiceTokenConfig() ? await ringableAgents() : []
+  const agents = voiceTokenConfig() ? await ringableAgents(workspace) : []
   if (agents.length === 0) {
     return xml(`<Response>${voicemailTwiml(origin, caller, params.To || req.nextUrl.searchParams.get('to') || '')}</Response>`)
   }
 
   // Who is calling, for the agent's screen. Looked up but never created: a
   // spam call that rings out must not leave a lead behind.
-  const known = caller ? await findLeadByPhone(caller) : null
+  const known = caller ? await findLeadByPhone(caller, workspace) : null
   const label = known?.name?.trim() || 'New caller'
 
   const after = `${origin}/api/twilio/voice/incoming/after?from=${encodeURIComponent(caller)}`

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, verifyTwilioSignature, workspaceForBusinessNumber } from '@/lib/twilio'
 import { CRM_CALL_ROLE } from '@/lib/crm'
 import { leadForCaller } from '@/lib/inbound'
 import { voicemailTwiml } from '@/lib/voicemail'
@@ -25,8 +25,8 @@ function xml(body: string): NextResponse {
 }
 
 export async function POST(req: NextRequest) {
-  const cfg = twilioConfig()
-  if (!cfg) return xml('<Response><Say>This service is not configured.</Say></Response>')
+  const auth = twilioAuth()
+  if (!auth) return xml('<Response><Say>This service is not configured.</Say></Response>')
 
   const raw = await req.text()
   const params: Record<string, string> = {}
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
   const url = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search}`
-  if (!verifyTwilioSignature(cfg.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
+  if (!verifyTwilioSignature(auth.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
     return new NextResponse('Bad signature', { status: 403 })
   }
 
@@ -50,8 +50,10 @@ export async function POST(req: NextRequest) {
   // Answered in the dashboard. Record it against the customer — creating the
   // lead now, because a call somebody actually took is a real contact.
   const duration = Number(params.DialCallDuration ?? '0') || 0
-  const found = caller
-    ? await leadForCaller(caller, 'Called the phone line and spoke to the team.', { calledNumber: params.To || '' })
+  const called = params.To || req.nextUrl.searchParams.get('to') || ''
+  const workspace = workspaceForBusinessNumber(called)
+  const found = caller && workspace
+    ? await leadForCaller(caller, workspace, 'Called the phone line and spoke to the team.', { calledNumber: called })
     : null
   if (found) {
     await supabase.from('chat_logs').insert([{

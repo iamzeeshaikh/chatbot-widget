@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
-import { leadPhone } from '@/lib/leadrecord'
+import { twilioAuth, twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { leadPhone, resolveLeadSite } from '@/lib/leadrecord'
+import { siteWorkspace } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,8 +20,8 @@ function escapeXml(v: string): string {
 // customer's phone number, so an unsigned version would be a public lookup
 // service for exactly the thing the whole design keeps hidden.
 export async function POST(req: NextRequest) {
-  const cfg = twilioConfig()
-  if (!cfg) return xml('<Response><Say>This service is not configured.</Say></Response>')
+  const auth = twilioAuth()
+  if (!auth) return xml('<Response><Say>This service is not configured.</Say></Response>')
 
   const raw = await req.text()
   const params: Record<string, string> = {}
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
   // The signed URL includes the query string, so it is rebuilt in full.
   const url = `${proto}://${host}${req.nextUrl.pathname}${req.nextUrl.search}`
-  if (!verifyTwilioSignature(cfg.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
+  if (!verifyTwilioSignature(auth.token, url, params, req.headers.get('x-twilio-signature') ?? '')) {
     console.warn('[voice] refused a connect webhook with a bad signature')
     return new NextResponse('Bad signature', { status: 403 })
   }
@@ -39,6 +40,15 @@ export async function POST(req: NextRequest) {
   const customer = leadId ? await leadPhone(leadId) : null
   if (!customer) {
     return xml('<Response><Say>That lead no longer has a phone number.</Say></Response>')
+  }
+  // The caller ID comes from the LEAD's own business, never from a default:
+  // showing a packaging customer the sports number would be the mix-up this
+  // whole split exists to prevent.
+  const resolved = await resolveLeadSite(leadId)
+  const workspace = resolved ? siteWorkspace(resolved.siteId) : null
+  const cfg = workspace ? twilioConfig(workspace) : null
+  if (!cfg || !cfg.phoneNumber) {
+    return xml('<Response><Say>Calling is not set up for this account.</Say></Response>')
   }
 
   // callerId is the BUSINESS number: the customer sees the company, never the
