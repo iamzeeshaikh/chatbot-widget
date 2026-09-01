@@ -134,11 +134,51 @@ export default function Softphone() {
       }) as unknown as TwilioDevice
       deviceRef.current = device
 
-      device.on('registered', () => { setPhase('idle'); setSoftphoneReady(true) })
+      device.on('registered', () => { setPhase('idle'); setSoftphoneReady(true); setError('') })
       device.on('unregistered', () => setSoftphoneReady(false))
       device.on('error', (e: unknown) => {
-        const m = (e as { message?: string })?.message
-        setError(m ? `Phone error: ${m}` : 'The phone went offline.')
+        const err = e as { code?: number; message?: string }
+        // ── Which device errors are worth a red line, and which are weather ──
+        // 31009 (TransportError, "no transport available") and 31005 mean the
+        // signalling websocket dropped — a network blip, a laptop waking, a
+        // proxy timing out. The SDK reconnects on its own, and the MEDIA path
+        // is separate, so an established call keeps working right through it.
+        // Shown as an error it appeared in red over a call that was audibly
+        // fine, which teaches an agent to ignore the one place we tell them
+        // something is wrong.
+        if (err.code === 31009 || err.code === 31005) {
+          if (callRef.current) return                 // a live call is unaffected
+          setSoftphoneReady(false)
+          setNotice('Phone reconnecting…')
+          // Ask for a fresh token and register again: after a long drop the old
+          // one may have expired, and re-registering with it fails silently.
+          void (async () => {
+            try {
+              const r = await fetch('/api/twilio/voice/token')
+              if (r.ok) {
+                const j = await r.json()
+                if (j.ready && j.token) device.updateToken(j.token)
+              }
+              await device.register()
+              setNotice('')
+            } catch { /* the next event tries again */ }
+          })()
+          return
+        }
+        // 20101/20104: the token itself is bad or expired — a new one is the
+        // whole fix, so it is fetched rather than reported.
+        if (err.code === 20101 || err.code === 20104) {
+          void (async () => {
+            try {
+              const r = await fetch('/api/twilio/voice/token')
+              if (!r.ok) return
+              const j = await r.json()
+              if (j.ready && j.token) { device.updateToken(j.token); await device.register() }
+            } catch { /* ignored */ }
+          })()
+          return
+        }
+        setError(err.message ? `Phone error: ${err.message}` : 'The phone went offline.')
       })
       device.on('incoming', (call: unknown) => {
         const c = call as TwilioCall
@@ -246,7 +286,11 @@ export default function Softphone() {
       aria-label="Phone"
       className="fixed bottom-4 right-4 z-50 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
     >
-      {error && (
+      {/* An error is worth the top of the panel only when there is no call to
+          look at. During a call the state that matters is the timer and the
+          hang-up button, and a red line above them reads as "this call is
+          broken" when it is not. */}
+      {error && phase !== 'live' && phase !== 'ringing' && (
         <p role="alert" className="mb-2 text-[11px] text-red-700">{error}</p>
       )}
       {!error && notice && (
