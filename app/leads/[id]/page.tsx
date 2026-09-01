@@ -30,6 +30,7 @@ import {
 } from '@/lib/crm'
 import { isImageMime } from '@/lib/attachment'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
+import WhatsAppThread from './WhatsAppThread'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
@@ -236,11 +237,10 @@ export default function LeadRecordPage() {
     }
   }
 
-  async function sendWhatsApp() {
-    const text = waText.trim()
-    // A file can go on its own — a voice note usually carries no words.
-    if (!text && !waFile) return
-    setWaSending(true); setWaError('')
+  // Shared by the modal and the in-place thread composer: one send path, so a
+  // fix to the upload or the 24-hour error never lands in only one of them.
+  // Returns an error string, or null when it went.
+  async function sendWhatsAppMessage(text: string, waFile: File | null): Promise<string | null> {
     try {
       // The file goes STRAIGHT to Storage, not through this app: Vercel caps a
       // request body at 4.5MB and WhatsApp allows 16MB, so proxying it would
@@ -254,9 +254,9 @@ export default function LeadRecordPage() {
         })
         const pd = await prep.json().catch(() => ({}))
         setWaUploading(false)
-        if (!prep.ok) { setWaError(pd.error || 'That file could not be sent.'); return }
+        if (!prep.ok) return pd.error || 'That file could not be sent.'
         const put = await fetch(pd.uploadUrl, { method: 'PUT', body: waFile, headers: waFile.type ? { 'Content-Type': waFile.type } : undefined })
-        if (!put.ok) { setWaError('The file could not be uploaded.'); return }
+        if (!put.ok) return 'The file could not be uploaded.'
         media = { mediaPath: pd.path, mediaName: waFile.name, mediaType: waFile.type || '' }
       }
       const res = await fetch(`/api/leads/${encodeURIComponent(id)}/whatsapp`, {
@@ -264,17 +264,28 @@ export default function LeadRecordPage() {
         body: JSON.stringify({ body: text, ...(media ?? {}) }),
       })
       const d = await res.json().catch(() => ({}))
-      if (!res.ok) { setWaError(d.error || 'The message could not be sent.'); return }
-      // Only cleared on success: a failed send must not lose what was typed —
-      // the 24-hour rule refuses often enough that retyping would be the norm.
-      setWaText(''); setWaFile(null); setWaOpen(false)
-      load()
+      if (!res.ok) return d.error || 'The message could not be sent.'
+      return null
     } catch {
-      setWaError('The message could not be sent.')
+      return 'The message could not be sent.'
     } finally {
       setWaUploading(false)
-      setWaSending(false)
     }
+  }
+
+  // The modal keeps working (the WhatsApp quick action still opens it); it now
+  // calls the same send as the thread.
+  async function sendWhatsApp() {
+    const text = waText.trim()
+    if (!text && !waFile) return
+    setWaSending(true); setWaError('')
+    const err = await sendWhatsAppMessage(text, waFile)
+    setWaSending(false)
+    // Only cleared on success: a failed send must not lose what was typed — the
+    // 24-hour rule refuses often enough that retyping would be the norm.
+    if (err) { setWaError(err); return }
+    setWaText(''); setWaFile(null); setWaOpen(false)
+    load()
   }
 
   async function saveField(field: 'name' | 'email' | 'phone', value: string) {
@@ -447,7 +458,11 @@ export default function LeadRecordPage() {
                   Self-clearing: it disappears the moment a reply goes out, so
                   there is nothing to mark read. */}
               {record.waAwaitingReply && (
-                <button onClick={() => setWaOpen(true)}
+                <button onClick={() => {
+                    const el = document.getElementById('whatsapp-thread')
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    setTimeout(() => el?.querySelector('textarea')?.focus(), 350)
+                  }}
                   title="This customer's last WhatsApp message has no reply yet"
                   className="inline-flex items-center gap-1 rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-800 hover:bg-green-100">
                   <MessageCircle size={10} strokeWidth={2.5} aria-hidden />
@@ -551,9 +566,16 @@ export default function LeadRecordPage() {
                   addresses the message from its own rows — the same rule the
                   email send follows. */}
               <QuickAction icon={MessageCircle} label="WhatsApp"
-                hint={record.whatsapp?.reason || (record.contact.phone ? 'Message this lead on WhatsApp' : 'Add a phone number first')}
+                hint={record.whatsapp?.reason || (record.contact.phone ? 'Open the WhatsApp conversation' : 'Add a phone number first')}
                 disabled={!record.contact.phone}
-                onClick={() => setWaOpen(true)} />
+                onClick={() => {
+                  // Straight to the thread and into the box — the conversation
+                  // is on the page now, so a modal on top of it would hide the
+                  // very messages being replied to.
+                  const el = document.getElementById('whatsapp-thread')
+                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                  setTimeout(() => el?.querySelector('textarea')?.focus(), 350)
+                }} />
               {/* Calling happens in this tab when the softphone is registered,
                   and otherwise rings the agent's own phone and bridges the
                   customer. Either way neither side learns the other's number:
@@ -750,6 +772,20 @@ export default function LeadRecordPage() {
                 record={record} onSave={saveValue} />
             </div>
           </Card>
+
+          {/* The WhatsApp conversation, as a conversation — bubbles, ticks, and
+              the reply box in place. The timeline below still carries every one
+              of these messages; this is a second VIEW of the same rows, put
+              first because answering a customer beats reading history. */}
+          <WhatsAppThread
+            events={record.timeline}
+            leadId={record.id}
+            state={record.whatsapp?.state}
+            stateReason={record.whatsapp?.reason}
+            canMessage={!!record.contact.phone}
+            onSend={sendWhatsAppMessage}
+            onRefresh={load}
+          />
 
           <Card title="Activity" icon={Activity} tone="primary"
             action={<span className="text-[10px] text-gray-500 tabular-nums">{record.messageCount} message{record.messageCount === 1 ? '' : 's'}</span>}>
