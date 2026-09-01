@@ -20,7 +20,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
   ArrowLeft, MessagesSquare, StickyNote, ListTodo, Mail, Phone, Target,
-  Paperclip, Link2, Activity, FileText, Lock, Search, TriangleAlert,
+  Paperclip, Link2, Activity, FileText, Lock, Search, TriangleAlert, PlayCircle,
   Repeat, Building2, Globe, Tag, Inbox, ChevronRight, MessageCircle, X,
 } from 'lucide-react'
 import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
@@ -898,13 +898,44 @@ export default function LeadRecordPage() {
             )}
           </Card>
 
-          {record.quoteMessage && (
-            <Card title={record.kind === 'checkout' ? 'Order email' : 'Quote request'} icon={Inbox}>
-              <p className="px-3 py-2 text-[11px] text-gray-700 whitespace-pre-wrap break-words max-h-60 overflow-y-auto leading-snug">
-                {record.quoteMessage}
-              </p>
-            </Card>
-          )}
+          {record.quoteMessage && (() => {
+            // A lead born from a VOICEMAIL has a placeholder here — "the caller
+            // left a message on the phone line" — describing a recording that
+            // sits further down the timeline. Reading the sentence and then
+            // hunting for the audio is the wrong way round, so the card jumps
+            // to it and starts it playing.
+            const voicemail = record.timeline.find((e) => e.kind === 'call' && e.call?.status === 'voicemail' && e.call?.recordingSid)
+            const playVoicemail = () => {
+              if (!voicemail) return
+              const el = document.getElementById(`tl-${voicemail.id}`)
+              el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              // A moment for the scroll, then play — the element is already in
+              // the DOM, so this needs no loading state.
+              setTimeout(() => { void el?.querySelector('audio')?.play().catch(() => {}) }, 400)
+            }
+            return (
+              <Card title={record.kind === 'checkout' ? 'Order email' : 'Quote request'} icon={Inbox}>
+                {voicemail ? (
+                  <button onClick={playVoicemail}
+                    title="Play the voicemail"
+                    className="w-full text-left px-3 py-2 hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-b-xl">
+                    <span className="flex items-center gap-2 text-[11px] font-semibold text-blue-700">
+                      <PlayCircle size={14} strokeWidth={2} aria-hidden />
+                      Play the voicemail
+                      {voicemail.call?.duration ? <span className="text-gray-500 font-normal tabular-nums">· {voicemail.call.duration}s</span> : null}
+                    </span>
+                    <span className="mt-1 block text-[11px] text-gray-700 whitespace-pre-wrap break-words leading-snug">
+                      {record.quoteMessage}
+                    </span>
+                  </button>
+                ) : (
+                  <p className="px-3 py-2 text-[11px] text-gray-700 whitespace-pre-wrap break-words max-h-60 overflow-y-auto leading-snug">
+                    {record.quoteMessage}
+                  </p>
+                )}
+              </Card>
+            )
+          })()}
 
           <Card>
             <div className="px-3 py-2">

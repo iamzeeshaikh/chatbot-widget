@@ -160,8 +160,11 @@ export default function Timeline({ events, currency, leadId, onEditNote, onDelet
             // The actor already names who acted; for a plain message the icon
             // carries the type, so repeating "Visitor message" adds nothing.
             const showTitle = e.kind !== 'message'
+            // A DOM id per event, so anything on the page can point AT one —
+            // the Quote request card links straight to the voicemail it is
+            // describing rather than leaving the reader to scroll for it.
             return (
-              <li key={e.id}>
+              <li key={e.id} id={`tl-${e.id}`}>
                 {dayLabel && (
                   <div className="flex items-center gap-2 py-2 first:pt-0">
                     <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400 shrink-0">{dayLabel}</span>
