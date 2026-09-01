@@ -24,6 +24,19 @@ export const dynamic = 'force-dynamic'
 const WORTH_RECORDING = new Set(['delivered', 'read', 'failed', 'undelivered'])
 
 export async function POST(req: NextRequest) {
+  // A delivery report is INFORMATION, never a transaction. Anything that throws
+  // in here — a row that will not parse, Storage having a moment — used to
+  // surface as a 500, which Twilio retries and files as an 11200 alert against
+  // the account. The status is worth recording; it is not worth an error.
+  try {
+    return await record(req)
+  } catch (e) {
+    console.error('[whatsapp] status callback failed', e)
+    return new NextResponse('', { status: 204 })
+  }
+}
+
+async function record(req: NextRequest) {
   const auth = twilioAuth()
   if (!auth) return new NextResponse('', { status: 204 })
 

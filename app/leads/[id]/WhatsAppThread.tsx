@@ -31,29 +31,17 @@ interface Props {
 
 
 // ── Recording a voice note in the browser ───────────────────────────────────
-// WhatsApp accepts OGG (opus only), MP4/AAC, MPEG, AMR and 3GP — and NOT webm,
-// which is exactly what Chrome's MediaRecorder produces by default. Recording
-// the default and sending it would fail at Twilio, after the agent had already
-// spoken into it.
+// WhatsApp takes audio as OGG (opus codec only), AAC, MPEG, AMR or 3GP. It does
+// NOT take webm — which is what Chrome's MediaRecorder produces — and it does
+// not take Chrome's audio/mp4 either: that came back from Twilio as 63021,
+// "channel invalid content", after the agent had already spoken into it.
 //
-// So the container is chosen from what WhatsApp will take, in the order
-// browsers actually support: MP4/AAC (Chrome, Safari), then OGG/opus (Firefox).
-// If a browser offers neither, the button says so instead of recording
-// something undeliverable.
-const RECORDING_TYPES: { mime: string; ext: string }[] = [
-  { mime: 'audio/mp4', ext: 'm4a' },
-  { mime: 'audio/mp4;codecs=mp4a.40.2', ext: 'm4a' },
-  { mime: 'audio/ogg;codecs=opus', ext: 'ogg' },
-  { mime: 'audio/mpeg', ext: 'mp3' },
-]
-
-function pickRecordingType(): { mime: string; ext: string } | null {
-  if (typeof MediaRecorder === 'undefined') return null
-  for (const t of RECORDING_TYPES) {
-    try { if (MediaRecorder.isTypeSupported(t.mime)) return t } catch { /* older browsers throw */ }
-  }
-  return null
-}
+// No browser records ogg/opus except Firefox, so the encoder is carried:
+// opus-recorder runs libopus in a worker and writes a real OGG/opus file, which
+// is exactly the format a WhatsApp voice note is. The worker is served from
+// /opus/encoderWorker.min.js (committed under public/, not resolved from
+// node_modules at runtime).
+const OPUS_WORKER = '/opus/encoderWorker.min.js'
 
 function clock(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -123,9 +111,7 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
   // Voice note recording.
   const [recording, setRecording] = useState(false)
   const [recSeconds, setRecSeconds] = useState(0)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const chunksRef = useRef<BlobPart[]>([])
-  const streamRef = useRef<MediaStream | null>(null)
+  const recorderRef = useRef<InstanceType<typeof import('opus-recorder').default> | null>(null)
   const keepRef = useRef(true)
 
   useEffect(() => {
@@ -136,17 +122,25 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
 
   // Never leave the microphone open behind us.
   useEffect(() => () => {
+    keepRef.current = false
     try { recorderRef.current?.stop() } catch { /* already stopped */ }
-    streamRef.current?.getTracks().forEach((t) => t.stop())
   }, [])
 
   async function startRecording() {
-    const type = pickRecordingType()
-    if (!type) { setError('This browser cannot record audio in a format WhatsApp accepts. Attach an audio file instead.'); return }
     setError('')
-    let stream: MediaStream
+    let Recorder: typeof import('opus-recorder').default
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      Recorder = (await import('opus-recorder')).default
+    } catch {
+      setError('The voice recorder could not be loaded. Attach an audio file instead.')
+      return
+    }
+
+    // opus-recorder asks for the microphone itself, but asking here first turns
+    // a refusal into a sentence rather than a button that does nothing.
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true })
+      probe.getTracks().forEach((t) => t.stop())
     } catch (e) {
       const name = (e as { name?: string })?.name ?? ''
       setError(name === 'NotAllowedError'
@@ -154,27 +148,39 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
         : 'The microphone could not be opened.')
       return
     }
-    streamRef.current = stream
-    chunksRef.current = []
-    keepRef.current = true
-    const rec = new MediaRecorder(stream, { mimeType: type.mime })
+
+    const rec = new Recorder({
+      encoderPath: OPUS_WORKER,
+      // Voice, not music: one channel at 16kHz keeps a minute-long note well
+      // under a hundred kilobytes, and is what a phone sends anyway.
+      numberOfChannels: 1,
+      encoderSampleRate: 16000,
+      encoderApplication: 2048,        // libopus VOIP mode — tuned for speech
+      streamPages: false,
+    })
     recorderRef.current = rec
-    rec.ondataavailable = (ev) => { if (ev.data.size > 0) chunksRef.current.push(ev.data) }
-    rec.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-      if (!keepRef.current) return                 // cancelled: throw it away
-      const blob = new Blob(chunksRef.current, { type: type.mime.split(';')[0] })
+    keepRef.current = true
+    rec.ondataavailable = (data: Uint8Array) => {
+      if (!keepRef.current) return
+      const blob = new Blob([data as unknown as BlobPart], { type: 'audio/ogg' })
       if (blob.size === 0) { setError('Nothing was recorded.'); return }
-      setFile(new File([blob], `voice-note.${type.ext}`, { type: type.mime.split(';')[0] }))
+      setFile(new File([blob], 'voice-note.ogg', { type: 'audio/ogg' }))
+    }
+    try {
+      await rec.start()
+    } catch {
+      setError('Recording could not start.')
+      recorderRef.current = null
+      return
     }
     setRecSeconds(0)
     setRecording(true)
-    rec.start()
   }
 
   function stopRecording(keep: boolean) {
     keepRef.current = keep
+    // stop() flushes the encoder, which is what fires ondataavailable with the
+    // finished OGG — so a discard has to be flagged BEFORE stopping.
     try { recorderRef.current?.stop() } catch { /* already stopped */ }
     recorderRef.current = null
     setRecording(false)

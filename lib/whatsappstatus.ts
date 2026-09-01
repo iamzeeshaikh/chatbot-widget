@@ -96,11 +96,21 @@ export function whatsAppStateFrom(
 
   if (inbound) return { state: 'yes', reason: 'They have messaged this business on WhatsApp.' }
   if (delivered) return { state: 'yes', reason: 'A WhatsApp message to this number was delivered.' }
-  // 63003 / 63024 mean the number itself is not reachable on WhatsApp. 63016 is
-  // the 24-hour window — a perfectly valid WhatsApp user we simply may not
-  // message right now — so it must NOT be read as "no".
-  if (failedCode === 63003 || failedCode === 63024) {
+  // ── Only ONE code means "this number has no WhatsApp" ────────────────────
+  // 63003 is it. Everything else is about the MESSAGE, not the account:
+  //   • 63016 — outside the 24-hour window;
+  //   • 63024 — WhatsApp refused this particular message (a business writing
+  //     first without an approved template hits this constantly);
+  //   • 63021 — the content was not something the channel accepts.
+  // 63024 was read as "no" here and told the owner a number was not on WhatsApp
+  // when it plainly was — he had the chat open. A verdict this confident has to
+  // come from evidence that actually supports it.
+  if (failedCode === 63003) {
     return { state: 'no', reason: 'WhatsApp reported this number as not reachable.' }
+  }
+  if (failedCode === 63024 || failedCode === 63021 || failedCode === 63016) {
+    // A refusal proves the message was wrong, not the number — fall through to
+    // the line-type evidence below rather than claiming either way.
   }
 
   const type = (line?.type ?? '').toLowerCase()
