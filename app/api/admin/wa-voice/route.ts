@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
   const auth = twilioAuth()
   if (!auth) return NextResponse.json({ error: 'Twilio is not configured.' }, { status: 503 })
 
-  const res = await fetch(API, {
+  // The Senders list is per channel, and asking without one is rejected
+  // outright rather than defaulting to WhatsApp.
+  const res = await fetch(`${API}?Channel=whatsapp`, {
     headers: { Authorization: 'Basic ' + Buffer.from(`${auth.sid}:${auth.token}`).toString('base64') },
   })
   const j = await res.json().catch(() => ({}))
