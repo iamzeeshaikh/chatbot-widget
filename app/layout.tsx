@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import DeployRefresh from "./components/DeployRefresh";
 import Softphone from "./components/Softphone";
+import WorkspaceChrome from "./components/WorkspaceChrome";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -59,6 +60,9 @@ export default function RootLayout({
             tab and reloads it (hidden) or offers a reload (visible). In the
             root layout so pipeline, tasks and lead records inherit it too. */}
         <DeployRefresh />
+        {/* Tab icon, tab title and accent colour for whichever dashboard this
+            is — on every route, not just the dashboard's own page. */}
+        <WorkspaceChrome />
         {/* The dashboard's own phone. In the root layout because a call has to
             survive navigation, and an incoming one has to ring wherever the
             agent is — not only on the record it belongs to. It renders nothing

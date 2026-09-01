@@ -202,11 +202,16 @@ export async function GET(req: NextRequest) {
   // list the Overview tiles and the site cards are computed from, so they stop
   // counting; the record itself is untouched and still opens by URL.
   const excluded = await notALeadSessions(allowed)
-  const kept = excluded.size === 0
-    ? merged
-    : merged.filter((l) => !excluded.has(sessionForLead(l as { id: string; session_id?: string | null })))
+  // Marked leads are flagged, not deleted from the response. Dropping them
+  // outright made marking a one-way trip: the row vanished from every list and
+  // the only way back was a URL nobody had kept. The dashboard filters them out
+  // of its counts and can show them on request.
+  for (const l of merged as Array<Record<string, unknown>>) {
+    l.notALead = excluded.has(sessionForLead(l as { id: string; session_id?: string | null }))
+  }
+  const notALeadCount = (merged as Array<Record<string, unknown>>).filter((l) => l.notALead).length
 
   // Said out loud rather than left to be discovered: a smaller number with no
   // explanation is exactly how a filter that went wrong stays hidden.
-  return NextResponse.json({ leads: kept, notALead: merged.length - kept.length })
+  return NextResponse.json({ leads: merged, notALead: notALeadCount })
 }

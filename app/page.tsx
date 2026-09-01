@@ -97,11 +97,9 @@ const SITE_ACCENT: Record<string, string> = {
   peptidesboxes: '#0284c7',
 }
 
-const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="40" width="76" height="52" rx="5" fill="#2563eb"/><polygon points="12,40 50,22 88,40" fill="#1d4ed8"/><rect x="38" y="40" width="24" height="52" fill="#93c5fd" opacity="0.35"/></svg>')}`
-const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#16a34a"/><path d="M35 22 Q31 50 38 62 Q44 72 50 74 Q56 72 62 62 Q69 50 65 22Z" fill="white"/><path d="M35 30 Q20 30 20 44 Q20 56 35 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M65 30 Q80 30 80 44 Q80 56 65 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><rect x="44" y="74" width="12" height="10" rx="2" fill="white"/><rect x="32" y="84" width="36" height="8" rx="3" fill="white"/></svg>')}`
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean; /** Somebody marked this "not a lead" — excluded from every count. */ notALead?: boolean }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -832,22 +830,9 @@ export default function Dashboard() {
   const brand = workspace
 
   useEffect(() => {
-    document.title = brand === 'sports' ? 'Sports Dashboard | ZeeOps' : 'Packaging Dashboard | ZeeOps'
-    // Which workspace's accent colour the page wears. Read by the
-    // [data-ws="sports"] block in globals.css, which remaps the accent
-    // utilities the same way dark mode is remapped — so the two dashboards are
-    // told apart at a glance instead of by reading the title. Packaging keeps
-    // the blue it has always had: no attribute, no override.
-    document.documentElement.dataset.ws = brand
-    // Swap the TAB icon to the workspace's own mark. Deliberately leaves
-    // rel='apple-touch-icon' alone: "Add to Home Screen" reads the live DOM, so
-    // removing it here left agents installing the dashboard for task reminders
-    // with a blank home-screen icon.
-    document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']").forEach((l) => l.remove())
-    const link = document.createElement('link')
-    link.rel = 'icon'; link.type = 'image/svg+xml'
-    link.href = brand === 'sports' ? FAVICON_SPORTS : FAVICON_PACKAGING
-    document.head.appendChild(link)
+    // Nothing to do: the tab icon, title and accent are set for EVERY route by
+    // <WorkspaceChrome /> in the root layout. A lead page and the pipeline need
+    // them just as much as this page does, and two owners would fight.
   }, [brand])
 
   const [sites, setSites] = useState<Site[]>([])
@@ -891,7 +876,7 @@ export default function Dashboard() {
   // Recent Leads mixes two very different kinds of row — a real chat
   // conversation the bot captured, and a quote-request email pulled from
   // Gmail (no chat session at all) — filterable so it's easy to see just one.
-  const [overviewLeadType, setOverviewLeadType] = useState<'all' | LeadSource>('all')
+  const [overviewLeadType, setOverviewLeadType] = useState<'all' | LeadSource | 'excluded'>('all')
   // A Quote-type Recent Lead has no chat session to open — clicking one pops
   // its full details here instead (mirrors the Billing tab's quote modal).
   const [viewOverviewLead, setViewOverviewLead] = useState<Lead | null>(null)
@@ -2180,8 +2165,14 @@ export default function Dashboard() {
     return true
   })
   const siteFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
-  const overviewFilteredLeads = overviewLeadType === 'all' ? siteFilteredLeads
-    : siteFilteredLeads.filter((l) => leadSource(l.message) === overviewLeadType)
+  // Leads somebody marked "not a lead" are hidden by default — that is the
+  // point of marking them — but reachable, because a wrong call has to be
+  // undoable by the person who made it and not only by whoever kept the URL.
+  const overviewFilteredLeads = overviewLeadType === 'excluded'
+    ? siteFilteredLeads.filter((l) => l.notALead)
+    : overviewLeadType === 'all'
+      ? siteFilteredLeads.filter((l) => !l.notALead)
+      : siteFilteredLeads.filter((l) => !l.notALead && leadSource(l.message) === overviewLeadType)
   const overviewLeadPageCount = Math.max(1, Math.ceil(overviewFilteredLeads.length / OVERVIEW_LEADS_PER_PAGE))
   const overviewLeadPageClamped = Math.min(overviewLeadPage, overviewLeadPageCount - 1)
   const overviewLeadsPageRows = overviewFilteredLeads.slice(
@@ -2700,8 +2691,9 @@ export default function Dashboard() {
                     <option value="month">This month</option>
                   </select>
                   <select value={overviewLeadType} onChange={(e) => { setOverviewLeadType(e.target.value as typeof overviewLeadType); setOverviewLeadPage(0) }}
-                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
+                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : overviewLeadType === 'excluded' ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All types</option>
+                    <option value="excluded">Not a lead (excluded)</option>
                     <option value="chat">Chat only</option>
                     <option value="quote">Quote only</option>
                     <option value="checkout">Checkout only</option>
@@ -2790,6 +2782,12 @@ export default function Dashboard() {
                                     later left no trace here at all — which is how
                                     a real enquiry sat unanswered while its row sat
                                     in this table looking like every other one. */}
+                                {lead.notALead && (
+                                  <span title="Marked as not a lead — excluded from every count"
+                                    className="ml-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 whitespace-nowrap inline-flex items-center gap-1 text-amber-800 bg-amber-50 border-amber-300">
+                                    Not a lead
+                                  </span>
+                                )}
                                 {lead.waWaiting && (
                                   <span title="Waiting on a WhatsApp reply"
                                     className="ml-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 whitespace-nowrap inline-flex items-center gap-1 text-green-700 bg-green-100 border-green-200">

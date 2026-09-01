@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert } from 'lucide-react'
+import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert, Mic, Square, Trash2 } from 'lucide-react'
 import type { TimelineEvent } from '@/lib/leadrecord'
 import { formatDateTime } from '@/lib/datetime'
 
@@ -27,6 +27,37 @@ interface Props {
   canMessage: boolean
   onSend: (text: string, file: File | null) => Promise<string | null>
   onRefresh: () => void
+}
+
+
+// ── Recording a voice note in the browser ───────────────────────────────────
+// WhatsApp accepts OGG (opus only), MP4/AAC, MPEG, AMR and 3GP — and NOT webm,
+// which is exactly what Chrome's MediaRecorder produces by default. Recording
+// the default and sending it would fail at Twilio, after the agent had already
+// spoken into it.
+//
+// So the container is chosen from what WhatsApp will take, in the order
+// browsers actually support: MP4/AAC (Chrome, Safari), then OGG/opus (Firefox).
+// If a browser offers neither, the button says so instead of recording
+// something undeliverable.
+const RECORDING_TYPES: { mime: string; ext: string }[] = [
+  { mime: 'audio/mp4', ext: 'm4a' },
+  { mime: 'audio/mp4;codecs=mp4a.40.2', ext: 'm4a' },
+  { mime: 'audio/ogg;codecs=opus', ext: 'ogg' },
+  { mime: 'audio/mpeg', ext: 'mp3' },
+]
+
+function pickRecordingType(): { mime: string; ext: string } | null {
+  if (typeof MediaRecorder === 'undefined') return null
+  for (const t of RECORDING_TYPES) {
+    try { if (MediaRecorder.isTypeSupported(t.mime)) return t } catch { /* older browsers throw */ }
+  }
+  return null
+}
+
+function clock(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  return `${m}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 /** WhatsApp's own 24-hour rule, worked out from the thread rather than guessed:
@@ -88,6 +119,66 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
   const [error, setError] = useState('')
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const boxRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // Voice note recording.
+  const [recording, setRecording] = useState(false)
+  const [recSeconds, setRecSeconds] = useState(0)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<BlobPart[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
+  const keepRef = useRef(true)
+
+  useEffect(() => {
+    if (!recording) return
+    const t = setInterval(() => setRecSeconds((v) => v + 1), 1000)
+    return () => clearInterval(t)
+  }, [recording])
+
+  // Never leave the microphone open behind us.
+  useEffect(() => () => {
+    try { recorderRef.current?.stop() } catch { /* already stopped */ }
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+  }, [])
+
+  async function startRecording() {
+    const type = pickRecordingType()
+    if (!type) { setError('This browser cannot record audio in a format WhatsApp accepts. Attach an audio file instead.'); return }
+    setError('')
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch (e) {
+      const name = (e as { name?: string })?.name ?? ''
+      setError(name === 'NotAllowedError'
+        ? 'Your browser is blocking the microphone. Allow it from the padlock in the address bar and try again.'
+        : 'The microphone could not be opened.')
+      return
+    }
+    streamRef.current = stream
+    chunksRef.current = []
+    keepRef.current = true
+    const rec = new MediaRecorder(stream, { mimeType: type.mime })
+    recorderRef.current = rec
+    rec.ondataavailable = (ev) => { if (ev.data.size > 0) chunksRef.current.push(ev.data) }
+    rec.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+      if (!keepRef.current) return                 // cancelled: throw it away
+      const blob = new Blob(chunksRef.current, { type: type.mime.split(';')[0] })
+      if (blob.size === 0) { setError('Nothing was recorded.'); return }
+      setFile(new File([blob], `voice-note.${type.ext}`, { type: type.mime.split(';')[0] }))
+    }
+    setRecSeconds(0)
+    setRecording(true)
+    rec.start()
+  }
+
+  function stopRecording(keep: boolean) {
+    keepRef.current = keep
+    try { recorderRef.current?.stop() } catch { /* already stopped */ }
+    recorderRef.current = null
+    setRecording(false)
+  }
 
   // Newest message in view when the thread grows, the way a chat behaves.
   useEffect(() => {
@@ -219,13 +310,40 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
         {error && <p role="alert" className="mb-1.5 text-[11px] text-red-700">{error}</p>}
         {file && (
           <div className="mb-1.5 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-100 px-2.5 py-1.5">
-            <Paperclip size={12} className="text-gray-500 shrink-0" aria-hidden />
-            <span className="text-xs text-gray-800 truncate">{file.name}</span>
+            {file.type.startsWith('audio/')
+              ? <Mic size={12} className="text-green-700 shrink-0" aria-hidden />
+              : <Paperclip size={12} className="text-gray-500 shrink-0" aria-hidden />}
+            <span className="text-xs text-gray-800 truncate">
+              {file.name.startsWith('voice-note.') ? `Voice note · ${clock(recSeconds)}` : file.name}
+            </span>
             <span className="text-[11px] text-gray-500 shrink-0">{Math.max(1, Math.round(file.size / 1024))}KB</span>
             <button onClick={() => setFile(null)} aria-label="Remove the file"
               className="ml-auto shrink-0 rounded px-1 text-gray-500 hover:bg-gray-200 hover:text-gray-800">&times;</button>
           </div>
         )}
+        {/* Recording takes over the composer, the way it does in WhatsApp: there
+            is nothing else to do while the microphone is live, and leaving the
+            text box available invites typing into a message that is about to be
+            replaced by audio. */}
+        {recording ? (
+          <div className="flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-2">
+            <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden>
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-600" />
+            </span>
+            <span className="text-[13px] font-semibold text-red-800 tabular-nums">Recording · {clock(recSeconds)}</span>
+            <button onClick={() => stopRecording(false)}
+              className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-white"
+              title="Discard this recording">
+              <Trash2 size={13} strokeWidth={2} aria-hidden /> Discard
+            </button>
+            <button onClick={() => stopRecording(true)}
+              className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-700"
+              title="Stop and attach the recording">
+              <Square size={12} strokeWidth={2.5} aria-hidden /> Stop
+            </button>
+          </div>
+        ) : (
         <div className="flex items-end gap-2">
           <label className="shrink-0 cursor-pointer rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
             title="Attach a photo, PDF, voice note or video (16MB)">
@@ -247,15 +365,31 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
             placeholder={canMessage ? 'Write a message…' : 'Add a phone number first'}
             className="flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-3 py-2 text-[13px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 disabled:bg-gray-100"
           />
-          <button
-            onClick={send}
-            disabled={sending || !canMessage || (!text.trim() && !file)}
-            aria-label="Send on WhatsApp"
-            className="shrink-0 rounded-full bg-green-600 p-2.5 text-white hover:bg-green-700 disabled:opacity-40 transition-colors"
-          >
-            <Send size={16} strokeWidth={2.25} aria-hidden />
-          </button>
+          {/* Mic when there is nothing to send, arrow when there is — the same
+              swap WhatsApp does, so the button under the thumb is always the
+              one that means "go". */}
+          {!text.trim() && !file ? (
+            <button
+              onClick={startRecording}
+              disabled={!canMessage}
+              aria-label="Record a voice note"
+              title="Record a voice note"
+              className="shrink-0 rounded-full bg-green-600 p-2.5 text-white hover:bg-green-700 disabled:opacity-40 transition-colors"
+            >
+              <Mic size={16} strokeWidth={2.25} aria-hidden />
+            </button>
+          ) : (
+            <button
+              onClick={send}
+              disabled={sending || !canMessage}
+              aria-label="Send on WhatsApp"
+              className="shrink-0 rounded-full bg-green-600 p-2.5 text-white hover:bg-green-700 disabled:opacity-40 transition-colors"
+            >
+              <Send size={16} strokeWidth={2.25} aria-hidden />
+            </button>
+          )}
         </div>
+        )}
         {closesAt !== null && !open && (
           <p className="mt-1.5 text-[11px] text-amber-800">
             More than 24 hours have passed since their last message, so WhatsApp will refuse this
