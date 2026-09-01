@@ -63,6 +63,12 @@ export default function Softphone() {
   const deviceRef = useRef<TwilioDevice | null>(null)
   const callRef = useRef<TwilioCall | null>(null)
   const liveRef = useRef(false)
+  // The last thing the SDK complained about on this call. Kept because a call
+  // that dies at a fixed 15–20 seconds is a MEDIA failure, not a person hanging
+  // up, and the SDK says which one — 'ice-connectivity-lost' means the audio
+  // path never formed, 'low-bytes-sent' means the microphone is silent. Without
+  // it every such call reads as the useless "Call ended."
+  const warnRef = useRef('')
 
   const endedTo = useCallback((msg: string, tone: 'error' | 'notice' = 'error') => {
     callRef.current = null
@@ -93,7 +99,28 @@ export default function Softphone() {
       liveRef.current = true
       setPhase('live'); setSeconds(0); setError(''); setNotice('')
     })
-    call.on('disconnect', () => endedTo('Call ended.', 'notice'))
+    call.on('warning', (name: unknown) => {
+      const w = String(name ?? '')
+      warnRef.current = w
+      // These two are fatal in practice: the call will die shortly. Say so
+      // while it is happening rather than after.
+      if (w === 'ice-connectivity-lost') setNotice('Audio path lost — the network is blocking the call.')
+      else if (w === 'low-bytes-sent') setNotice('No sound is leaving your microphone.')
+    })
+    call.on('warning-cleared', () => { warnRef.current = '' })
+    call.on('disconnect', () => {
+      const w = warnRef.current
+      endedTo(
+        w === 'ice-connectivity-lost'
+          ? 'Call ended: the audio connection could not be held. This is usually a network or firewall blocking WebRTC — try another network, or use a phone instead.'
+          : w === 'low-bytes-sent'
+            ? 'Call ended: no sound was leaving your microphone. Check the right microphone is selected and unmuted.'
+            : w === 'low-bytes-received'
+              ? 'Call ended: no sound was arriving from the other side.'
+              : 'Call ended.',
+        w ? 'error' : 'notice',
+      )
+    })
     call.on('cancel', () => endedTo('The caller hung up.', 'notice'))
     call.on('reject', () => endedTo(''))
     call.on('error', (e: unknown) => {
