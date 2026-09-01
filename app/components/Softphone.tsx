@@ -22,7 +22,7 @@ import { attachSoftphone, setSoftphoneBusy, setSoftphoneReady } from '@/lib/soft
 // workspace without telephony or a server without the four Twilio variables,
 // and the ~90KB SDK is only imported after that answer comes back ready.
 
-type Phase = 'off' | 'idle' | 'incoming' | 'connecting' | 'live'
+type Phase = 'off' | 'idle' | 'incoming' | 'connecting' | 'ringing' | 'live'
 
 // Twilio's Call and Device, as much of them as this file touches. The SDK is
 // loaded dynamically, so its types are not available at module scope.
@@ -62,9 +62,11 @@ export default function Softphone() {
 
   const deviceRef = useRef<TwilioDevice | null>(null)
   const callRef = useRef<TwilioCall | null>(null)
+  const liveRef = useRef(false)
 
   const endedTo = useCallback((msg: string, tone: 'error' | 'notice' = 'error') => {
     callRef.current = null
+    liveRef.current = false
     setSoftphoneBusy(false)
     setPhase('idle'); setMuted(false); setSeconds(0); setWho('')
     if (tone === 'notice') { setNotice(msg); setError('') }
@@ -78,6 +80,19 @@ export default function Softphone() {
     setSoftphoneBusy(true)
     setWho(label)
     call.on('accept', () => { setPhase('live'); setSeconds(0); setError(''); setNotice('') })
+    // 'ringing' arrives while the far end is being tried. Without it the panel
+    // sat on "Connecting…" for the whole call and gave no sign of progress.
+    call.on('ringing', () => { setPhase('ringing') })
+    // The SDK does not always emit 'accept' on an outgoing leg, and when it
+    // does not the timer never starts — so the first sign of a live media
+    // stream is treated as the call being up, which is what it is. Guarded by
+    // a ref because 'volume' fires many times a second.
+    liveRef.current = false
+    call.on('volume', () => {
+      if (liveRef.current) return
+      liveRef.current = true
+      setPhase('live'); setSeconds(0); setError(''); setNotice('')
+    })
     call.on('disconnect', () => endedTo('Call ended.', 'notice'))
     call.on('cancel', () => endedTo('The caller hung up.', 'notice'))
     call.on('reject', () => endedTo(''))
@@ -167,15 +182,40 @@ export default function Softphone() {
     const device = deviceRef.current
     if (!device) return
     setError(''); setNotice(''); setPhase('connecting'); setWho(leadName || 'Calling…')
+
+    // ── The microphone, BEFORE the call ────────────────────────────────────
+    // This used to be left to the SDK, and the failure was silent and awful:
+    // the call connected, the customer answered, and no audio ever left the
+    // browser — Twilio waited, saw no RTP, and killed the line (error 32014,
+    // "no audio received from callee"). On screen it looked like the call
+    // "ended by itself" seconds after dialling, with nothing to act on.
+    //
+    // Asking here turns that into a sentence: the permission prompt appears
+    // before anybody's phone rings, and a refusal is reported instead of
+    // producing a call nobody can speak into.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      // Released immediately — the SDK opens its own; this was only a check.
+      stream.getTracks().forEach((t) => t.stop())
+    } catch (e) {
+      const name = (e as { name?: string })?.name ?? ''
+      endedTo(
+        name === 'NotAllowedError' || name === 'SecurityError'
+          ? 'Your browser is blocking the microphone, so nobody would hear you. Click the padlock in the address bar, allow the microphone, and try again.'
+          : name === 'NotFoundError'
+            ? 'No microphone was found. Plug one in (or connect a headset) and try again.'
+            : 'The microphone could not be opened, so the call was not placed.',
+      )
+      return
+    }
+
     try {
       // The lead id is all that is sent. The number lives on the server.
       const call = await device.connect({ params: { leadId } })
       bind(call, leadName || 'Calling…')
     } catch (e) {
       const m = e instanceof Error ? e.message : ''
-      endedTo(m.includes('Permission') || m.includes('NotAllowed')
-        ? 'Your browser blocked the microphone. Allow it and try again.'
-        : 'The call could not be started.')
+      endedTo(m ? `The call could not be started: ${m}` : 'The call could not be started.')
     }
   }), [bind, endedTo])
 
@@ -234,10 +274,10 @@ export default function Softphone() {
         </>
       )}
 
-      {(phase === 'connecting' || phase === 'live') && (
+      {(phase === 'connecting' || phase === 'ringing' || phase === 'live') && (
         <>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-            {phase === 'live' ? `On a call · ${mmss(seconds)}` : 'Connecting…'}
+            {phase === 'live' ? `On a call · ${mmss(seconds)}` : phase === 'ringing' ? 'Ringing…' : 'Connecting…'}
           </p>
           <p className="mt-0.5 truncate text-sm font-semibold text-gray-900">{who}</p>
           <div className="mt-3 flex gap-2">
