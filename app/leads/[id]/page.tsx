@@ -38,6 +38,17 @@ import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction,
 import GlobalSearch from '@/app/components/GlobalSearch'
 import { useLiveVersion } from '@/app/components/useLiveVersion'
 
+// Kept in step with lib/whatsappstatus.ts. Deliberately hedged wording: an
+// agent told "on WhatsApp" who then watches the send fail stops trusting the
+// whole indicator.
+const WA_STATE_LABEL: Record<string, string> = {
+  yes: 'On WhatsApp',
+  no: 'Not on WhatsApp',
+  maybe: 'Mobile — WhatsApp likely',
+  unlikely: 'Unlikely to have WhatsApp',
+  unknown: 'WhatsApp not checked',
+}
+
 export default function LeadRecordPage() {
   const params = useParams<{ id: string }>()
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : ''
@@ -63,6 +74,12 @@ export default function LeadRecordPage() {
   // the softphone registers a second or two after the page paints, and a button
   // whose label was decided before that would say the wrong thing all session.
   const [canCallHere, setCanCallHere] = useState(false)
+  // A file waiting to go out on WhatsApp. Held here rather than uploaded on
+  // pick, so choosing the wrong file costs nothing and Cancel leaves no orphan
+  // object in Storage.
+  const [waFile, setWaFile] = useState<File | null>(null)
+  const [waUploading, setWaUploading] = useState(false)
+  const [waChecking, setWaChecking] = useState(false)
   const [callError, setCallError] = useState('')
   // Set when the composer was opened by Reply on an inbound message; cleared on
   // close so the next plain "Email" click is a fresh message, not a stale reply.
@@ -220,22 +237,41 @@ export default function LeadRecordPage() {
 
   async function sendWhatsApp() {
     const text = waText.trim()
-    if (!text) return
+    // A file can go on its own — a voice note usually carries no words.
+    if (!text && !waFile) return
     setWaSending(true); setWaError('')
     try {
+      // The file goes STRAIGHT to Storage, not through this app: Vercel caps a
+      // request body at 4.5MB and WhatsApp allows 16MB, so proxying it would
+      // fail on exactly the files worth sending.
+      let media: { mediaPath: string; mediaName: string; mediaType: string } | null = null
+      if (waFile) {
+        setWaUploading(true)
+        const prep = await fetch(`/api/leads/${encodeURIComponent(id)}/whatsapp/upload`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: waFile.name, mime: waFile.type, size: waFile.size }),
+        })
+        const pd = await prep.json().catch(() => ({}))
+        setWaUploading(false)
+        if (!prep.ok) { setWaError(pd.error || 'That file could not be sent.'); return }
+        const put = await fetch(pd.uploadUrl, { method: 'PUT', body: waFile, headers: waFile.type ? { 'Content-Type': waFile.type } : undefined })
+        if (!put.ok) { setWaError('The file could not be uploaded.'); return }
+        media = { mediaPath: pd.path, mediaName: waFile.name, mediaType: waFile.type || '' }
+      }
       const res = await fetch(`/api/leads/${encodeURIComponent(id)}/whatsapp`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: text }),
+        body: JSON.stringify({ body: text, ...(media ?? {}) }),
       })
       const d = await res.json().catch(() => ({}))
       if (!res.ok) { setWaError(d.error || 'The message could not be sent.'); return }
       // Only cleared on success: a failed send must not lose what was typed —
       // the 24-hour rule refuses often enough that retyping would be the norm.
-      setWaText(''); setWaOpen(false)
+      setWaText(''); setWaFile(null); setWaOpen(false)
       load()
     } catch {
       setWaError('The message could not be sent.')
     } finally {
+      setWaUploading(false)
       setWaSending(false)
     }
   }
@@ -494,7 +530,7 @@ export default function LeadRecordPage() {
                   addresses the message from its own rows — the same rule the
                   email send follows. */}
               <QuickAction icon={MessageCircle} label="WhatsApp"
-                hint={record.contact.phone ? 'Message this lead on WhatsApp' : 'Add a phone number first'}
+                hint={record.whatsapp?.reason || (record.contact.phone ? 'Message this lead on WhatsApp' : 'Add a phone number first')}
                 disabled={!record.contact.phone}
                 onClick={() => setWaOpen(true)} />
               {/* Calling happens in this tab when the softphone is registered,
@@ -510,6 +546,35 @@ export default function LeadRecordPage() {
             </div>
             {callError && (
               <p role="alert" className="px-3 pb-2 text-[11px] text-red-700">{callError}</p>
+            )}
+            {/* Whether this number is even on WhatsApp. Meta offers no way to
+                test that without messaging, so the wording never claims more
+                than the evidence supports — and the Check button asks Twilio
+                for the one thing it CAN answer: is this a mobile at all. */}
+            {record.contact.phone && record.whatsapp && (
+              <div className="flex items-center gap-1.5 px-3 pb-2">
+                <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                  record.whatsapp.state === 'yes' ? 'bg-green-500'
+                    : record.whatsapp.state === 'no' ? 'bg-red-500'
+                    : record.whatsapp.state === 'unlikely' ? 'bg-amber-500' : 'bg-gray-400'}`} aria-hidden />
+                <span className="text-[11px] text-gray-600" title={record.whatsapp.reason}>
+                  {WA_STATE_LABEL[record.whatsapp.state]}
+                </span>
+                {(record.whatsapp.state === 'unknown') && (
+                  <button
+                    onClick={async () => {
+                      setWaChecking(true)
+                      try {
+                        await fetch(`/api/leads/${encodeURIComponent(id)}/whatsapp/check`, { method: 'POST' })
+                        load()
+                      } finally { setWaChecking(false) }
+                    }}
+                    disabled={waChecking}
+                    className="text-[11px] text-blue-700 hover:underline disabled:opacity-50">
+                    {waChecking ? 'checking…' : 'check'}
+                  </button>
+                )}
+              </div>
             )}
           </Card>
 
@@ -801,14 +866,39 @@ export default function LeadRecordPage() {
               {waError && <p role="alert" className="mt-2 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{waError}</p>}
               {/* Said before it bites, not after: WhatsApp refuses a free-form
                   message more than 24 hours after the customer's last one. */}
-              <p className="mt-2 text-[11px] text-gray-500">WhatsApp only allows a free reply within 24 hours of the customer&rsquo;s last message.</p>
+              <p className="mt-2 text-[11px] text-gray-500">
+                WhatsApp only allows a free reply within 24 hours of the customer&rsquo;s last message.
+                Photos, PDFs, audio and video up to 16MB.
+              </p>
             </div>
+            {waFile && (
+              <div className="mx-4 mb-1 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-100 px-2.5 py-1.5">
+                <Paperclip size={13} className="text-gray-500 shrink-0" aria-hidden />
+                <span className="text-xs text-gray-800 truncate">{waFile.name}</span>
+                <span className="text-[11px] text-gray-500 shrink-0">{Math.max(1, Math.round(waFile.size / 1024))}KB</span>
+                <button onClick={() => setWaFile(null)} aria-label="Remove the file"
+                  className="ml-auto shrink-0 rounded px-1 text-gray-500 hover:bg-gray-200 hover:text-gray-800">&times;</button>
+              </div>
+            )}
             <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-100">
-              <button onClick={sendWhatsApp} disabled={waSending || !waText.trim()}
+              <button onClick={sendWhatsApp} disabled={waSending || (!waText.trim() && !waFile)}
                 className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
-                {waSending ? 'Sending…' : 'Send'}
+                {waUploading ? 'Uploading…' : waSending ? 'Sending…' : 'Send'}
               </button>
-              <button onClick={() => setWaOpen(false)} className="text-xs text-gray-600 hover:text-gray-900 px-2 py-1.5">Cancel</button>
+              {/* Photos, PDFs, audio and video — the only things WhatsApp will
+                  carry. The accept list is the same one the server enforces, so
+                  the picker cannot offer a file the send would refuse. */}
+              <label className="text-xs text-gray-600 hover:text-gray-900 px-2 py-1.5 cursor-pointer inline-flex items-center gap-1.5">
+                <Paperclip size={13} strokeWidth={2} aria-hidden />
+                Attach
+                <input
+                  type="file"
+                  className="sr-only"
+                  accept="image/jpeg,image/png,image/webp,application/pdf,audio/*,video/mp4,video/3gpp"
+                  onChange={(e) => { setWaFile(e.target.files?.[0] ?? null); setWaError(''); e.target.value = '' }}
+                />
+              </label>
+              <button onClick={() => { setWaOpen(false); setWaFile(null) }} className="text-xs text-gray-600 hover:text-gray-900 px-2 py-1.5">Cancel</button>
             </div>
           </div>
         </div>

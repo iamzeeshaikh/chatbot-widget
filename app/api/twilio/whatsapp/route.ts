@@ -54,11 +54,21 @@ export async function POST(req: NextRequest) {
   // Media the customer attached. Twilio's URLs need the account's own auth to
   // fetch, so they are recorded and served through us later — never handed to a
   // browser as-is.
-  const media: { url: string; type: string }[] = []
+  const media: { url: string; type: string; name: string }[] = []
   const numMedia = Number(params.NumMedia ?? '0')
   for (let i = 0; i < numMedia; i++) {
     const u = params[`MediaUrl${i}`]
-    if (u) media.push({ url: u, type: params[`MediaContentType${i}`] ?? '' })
+    if (u) {
+      const type = params[`MediaContentType${i}`] ?? ''
+      // WhatsApp sends no filename, so one is derived from the type — a voice
+      // note has to read as something in the timeline, not as a blank chip.
+      const ext = (type.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '')
+      const label = type.startsWith('audio/') ? 'Voice note'
+        : type.startsWith('image/') ? 'Photo'
+        : type.startsWith('video/') ? 'Video'
+        : type === 'application/pdf' ? 'PDF' : 'File'
+      media.push({ url: u, type, name: `${label}.${ext}` })
+    }
   }
 
   // Which business was messaged — the sender number is the only evidence.

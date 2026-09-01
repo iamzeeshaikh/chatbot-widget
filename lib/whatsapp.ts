@@ -11,8 +11,14 @@ export interface WaMessage {
   from: string
   to: string
   body: string
-  /** Files the customer sent, as Twilio media URLs (fetched through us). */
-  media?: { url: string; type: string }[]
+  /** Files on the message.
+   *
+   *  INBOUND: Twilio's own media URLs, which need the account's credentials to
+   *  fetch — so they are served back through our own endpoint, never handed to
+   *  a browser as-is.
+   *  OUTBOUND: a Storage path of ours, plus the original filename, so the
+   *  timeline can show what was sent without a second round trip. */
+  media?: { url?: string; type: string; path?: string; name?: string; size?: number }[]
   at: string
   /** Set on outbound: who pressed send. */
   sentBy?: string

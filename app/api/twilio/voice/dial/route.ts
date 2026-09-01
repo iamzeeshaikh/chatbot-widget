@@ -48,11 +48,26 @@ export async function POST(req: NextRequest) {
     return new NextResponse('Bad signature', { status: 403 })
   }
 
-  // `leadId` is a custom parameter the browser passes to device.connect(); it
-  // arrives as an ordinary POST field.
+  // ── Two kinds of call arrive here ────────────────────────────────────────
+  // This is the TwiML App's Voice URL, and a TwiML App answers for BOTH the
+  // browser softphone dialling out AND — once a WhatsApp sender's voice
+  // endpoint points at it — a customer pressing Call inside a WhatsApp chat.
+  //
+  // They are told apart by `From`: the softphone arrives as `client:agent-…`,
+  // a WhatsApp caller as `whatsapp:+…`. Anything that is not one of our client
+  // identities is an INBOUND call and is handed to the inbound handler, which
+  // already knows how to ring the right workspace's agents and fall through to
+  // voicemail. Redirecting rather than duplicating that logic is deliberate:
+  // two copies of "who picks up, and what happens if nobody does" would drift.
+  const from = params.From ?? ''
   const leadId = params.leadId ?? params.LeadId ?? ''
-  const member = await memberByEmail(emailFromIdentity(params.From ?? ''))
-  if (!member) return say('This line is not recognised.')
+  const member = await memberByEmail(emailFromIdentity(from))
+  if (!member) {
+    if (!from.startsWith('client:')) {
+      return xml(`<Response><Redirect method="POST">${escapeXml(`${proto}://${host}/api/twilio/voice/incoming`)}</Redirect></Response>`)
+    }
+    return say('This line is not recognised.')
+  }
 
   const access = await guardLeadAccess(member, leadId, 'telephony')
   if (!access.ok) return say('You are not allowed to call this contact.')

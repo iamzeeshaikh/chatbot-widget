@@ -56,11 +56,16 @@ export const CRM_WA_OUT_ROLE = 'crm_wa_out'
 // other control row here.
 export const CRM_CALL_ROLE = 'crm_call'
 
+// What Twilio Lookup said about a phone number's line type. Cached on the
+// reserved zeeops-crm site because it belongs to a NUMBER, not a conversation —
+// and because the lookup costs money per call and the answer never changes.
+export const CRM_WA_LOOKUP_ROLE = 'crm_wa_lookup'
+
 export const CRM_ROLES = [
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
-  CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE,
+  CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_WA_LOOKUP_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

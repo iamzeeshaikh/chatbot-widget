@@ -32,6 +32,8 @@ import {
 } from './tasks'
 import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE } from './crm'
+import { cachedLineType, whatsAppStateFrom, type WhatsAppStatus } from './whatsappstatus'
+import { phoneKey } from './identity'
 import { parseCall, callDurationLabel, type CallEntry } from './call'
 import { parseWaMessage, waDeliveryLabel, waErrorHint, type WaMessage } from './whatsapp'
 import {
@@ -93,6 +95,10 @@ export interface LeadRecord {
   hasConversation: boolean
   contact: { name: string; email: string; phone: string }
   captured: { name: string; email: string; phone: string }
+  /** Whether this number is reachable on WhatsApp, as far as anything can tell.
+   *  WhatsApp offers no way to test a number without messaging it, so this is
+   *  assembled from what already happened — see lib/whatsappstatus.ts. */
+  whatsapp?: WhatsAppStatus
   /** True when this viewer may not see the address or number (see lib/pii.ts).
    *  The values above are already masked; this only tells the UI to stop
    *  rendering them as mailto:/tel: links nobody can use. */
@@ -731,8 +737,9 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       id: `call-${c.sid}`, at, kind: 'call', group: 'messages',
       // 'voicemail' and 'inbound' are the customer reaching US; everything
       // else is a call an agent placed.
-      actor: c.status === 'voicemail' || c.status === 'inbound' ? 'Customer' : AGENT_LABEL(c.by),
+      actor: c.status === 'voicemail' || c.status.startsWith('inbound') ? 'Customer' : AGENT_LABEL(c.by),
       title: c.status === 'voicemail' ? `Voicemail${len ? ` — ${len}` : ''}`
+        : c.status === 'inbound_whatsapp' ? `WhatsApp call${len ? ` — ${len}` : ''}`
         : c.status === 'inbound' ? `Incoming call${len ? ` — ${len}` : ''}`
         : c.status === 'ringing' ? 'Calling…'
         : answered ? `Called — ${len}`
@@ -743,7 +750,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     // message — it is us reaching the customer.
     // A voicemail is the customer reaching US, so it is deliberately not an
     // outbound touch — the same rule an inbound email follows.
-    if (answered && c.status !== 'voicemail' && c.status !== 'inbound') {
+    if (answered && c.status !== 'voicemail' && !c.status.startsWith('inbound')) {
       outboundAt.push(at)
       if (!lastContactedAt || at > lastContactedAt) lastContactedAt = at
     }
@@ -771,8 +778,19 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const openTasks = liveTasks.filter((t) => t.status === 'open').sort(byDueAsc)
   const doneTasks = liveTasks.filter((t) => t.status === 'done').sort(byCompletedDesc)
 
+  // Reads the rows already in hand plus one cached lookup — no extra query per
+  // WhatsApp row, and the lookup is per NUMBER so it is shared across leads.
+  const rawPhone = (capture.phone || contact.phone || lead?.phone || '').trim()
+  const whatsapp = whatsAppStateFrom(
+    logs.filter((r) => r.role === CRM_WA_IN_ROLE || r.role === CRM_WA_OUT_ROLE)
+      .map((r) => ({ role: r.role, message: r.message ?? '' })),
+    rawPhone ? await cachedLineType(phoneKey(rawPhone) ?? '') : null,
+    !!rawPhone,
+  )
+
   const record: LeadRecord = {
     recipientLocked: member.role !== 'admin',
+    whatsapp,
     id,
     siteId,
     siteName,

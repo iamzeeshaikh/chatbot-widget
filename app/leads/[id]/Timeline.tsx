@@ -255,6 +255,43 @@ export default function Timeline({ events, currency, leadId, onEditNote, onDelet
                       <><EmailEntry entry={e.email} /><Files files={e.files} /></>
                     ) : e.kind === 'email_in' && e.inbound ? (
                       <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} gmailId={e.inbound.gmailId} onRetryFile={onRetryFile} /></>
+                    ) : (e.kind === 'wa_out' || e.kind === 'wa_in') && e.wa?.media?.length ? (
+                      /* What actually came over WhatsApp. Everything is served
+                         through our own endpoint, which checks the file belongs
+                         to this lead: the customer's media sits behind Twilio's
+                         credentials, and ours behind Storage's. */
+                      <>
+                        {e.body && <p className="mt-1 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{e.body}</p>}
+                        {e.wa.media.map((m, i) => {
+                          const src = `/api/leads/${encodeURIComponent(leadId)}/whatsapp/media?` +
+                            (m.path ? `path=${encodeURIComponent(m.path)}` : `url=${encodeURIComponent(m.url ?? '')}`)
+                          const type = (m.type || '').toLowerCase()
+                          if (type.startsWith('audio/')) {
+                            // A voice note is the commonest thing a customer
+                            // sends here, so it plays in place rather than
+                            // downloading.
+                            return <audio key={i} controls preload="none" className="mt-1 w-full max-w-sm h-9" src={src} />
+                          }
+                          if (type.startsWith('image/')) {
+                            return (
+                              <a key={i} href={src} target="_blank" rel="noopener noreferrer" className="mt-1 block w-fit">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={src} alt={m.name || 'Photo'} className="max-h-48 rounded-lg border border-gray-200" />
+                              </a>
+                            )
+                          }
+                          if (type.startsWith('video/')) {
+                            return <video key={i} controls preload="none" className="mt-1 w-full max-w-sm rounded-lg" src={src} />
+                          }
+                          return (
+                            <a key={i} href={src} target="_blank" rel="noopener noreferrer"
+                              className="mt-1 inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-100 px-2 py-1 hover:border-gray-300 transition-colors max-w-full">
+                              <Paperclip size={13} className="text-gray-500 shrink-0" aria-hidden />
+                              <span className="text-xs text-blue-700 truncate">{m.name || 'File'}</span>
+                            </a>
+                          )
+                        })}
+                      </>
                     ) : e.kind === 'call' && e.call?.recordingSid ? (
                       /* The audio is streamed through our own endpoint, which
                          checks this recording belongs to this lead — a Twilio

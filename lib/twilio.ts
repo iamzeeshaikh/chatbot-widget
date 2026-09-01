@@ -137,13 +137,16 @@ export interface SentWhatsApp { sid: string; status: string }
  * it (wait for a reply, or use another channel).
  */
 export async function sendWhatsApp(
-  cfg: TwilioConfig, to: string, body: string, statusCallback?: string,
+  cfg: TwilioConfig, to: string, body: string, statusCallback?: string, mediaUrl?: string,
 ): Promise<SentWhatsApp> {
   const form = new URLSearchParams({
     From: cfg.whatsappFrom,
     To: `whatsapp:${to.replace(/^whatsapp:/, '')}`,
-    Body: body,
   })
+  // A media message may carry a caption or none at all; an empty Body with no
+  // media is refused earlier, so one of the two is always present here.
+  if (body) form.set('Body', body)
+  if (mediaUrl) form.set('MediaUrl', mediaUrl)
   // WHY THIS MATTERS MORE THAN IT LOOKS: a 200 from this call means Twilio
   // ACCEPTED the message, not that WhatsApp delivered it. Most real failures —
   // the 24-hour window, a number that is not on WhatsApp, a blocked sender —

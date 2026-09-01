@@ -52,15 +52,23 @@ export async function POST(req: NextRequest) {
   const duration = Number(params.DialCallDuration ?? '0') || 0
   const called = params.To || req.nextUrl.searchParams.get('to') || ''
   const workspace = workspaceForBusinessNumber(called)
+  // A call that came over WhatsApp says so on the record — the customer
+  // pressed Call inside the chat, not on a website, and that is worth knowing
+  // when somebody reads the lead later.
+  const overWhatsApp = called.startsWith('whatsapp:') || caller.startsWith('whatsapp:')
   const found = caller && workspace
-    ? await leadForCaller(caller, workspace, 'Called the phone line and spoke to the team.', { calledNumber: called })
+    ? await leadForCaller(
+        caller.replace(/^whatsapp:/, ''), workspace,
+        overWhatsApp ? 'Called on WhatsApp and spoke to the team.' : 'Called the phone line and spoke to the team.',
+        { calledNumber: called },
+      )
     : null
   if (found) {
     await supabase.from('chat_logs').insert([{
       session_id: found.sessionId, site_id: found.siteId, role: CRM_CALL_ROLE,
       message: JSON.stringify({
         sid: params.CallSid ?? '', by: '', at: new Date().toISOString(),
-        status: 'inbound', duration,
+        status: overWhatsApp ? 'inbound_whatsapp' : 'inbound', duration,
       }),
     }])
   }
