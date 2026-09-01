@@ -5,6 +5,7 @@ import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { CONTACT_ROLE, parseContact } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
 import { notALeadSessions, sessionForLead } from '@/lib/notalead'
+import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from '@/lib/crm'
 
 export const dynamic = 'force-dynamic'
 
@@ -163,6 +164,37 @@ export async function GET(req: NextRequest) {
       if ('phone' in l) l.phone = maskPhone(l.phone as string | null)
       if (typeof l.message === 'string') l.message = scrubText(l.message)
     }
+  }
+
+  // ── Which leads are waiting on a WhatsApp reply ──────────────────────────
+  // A customer's WhatsApp message lands on the record and nowhere else, so the
+  // only way to find one was to open leads at random. That is how a real
+  // enquiry sat unanswered for an hour on 1 Sep while its lead sat in this very
+  // list looking identical to the rest.
+  //
+  // The rule is the same one the record uses: the LAST WhatsApp message on the
+  // lead is the customer's. It needs no read-marking and clears itself the
+  // moment somebody replies.
+  const waSessions = new Set(
+    merged.map((l) => sessionForLead(l as { id: string; session_id?: string | null })),
+  )
+  const waWaiting = new Set<string>()
+  if (allowed.length > 0) {
+    const { data: waRows } = await supabase
+      .from('chat_logs')
+      .select('session_id, role, created_at')
+      .in('site_id', allowed)
+      .in('role', [CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE])
+      .order('created_at', { ascending: true })
+      .limit(5000)
+    for (const r of waRows ?? []) {
+      if (!waSessions.has(r.session_id)) continue
+      if (r.role === CRM_WA_IN_ROLE) waWaiting.add(r.session_id)
+      else waWaiting.delete(r.session_id)
+    }
+  }
+  for (const l of merged as Array<Record<string, unknown>>) {
+    l.waWaiting = waWaiting.has(sessionForLead(l as { id: string; session_id?: string | null }))
   }
 
   // Leads somebody has marked "not a lead" — a supplier pitching their factory

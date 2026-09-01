@@ -12,7 +12,7 @@ import {
   Trophy, Globe, Bot, BotOff, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
   ChevronRight, Repeat, Eye, Contact, UserPlus, Languages, Pin, User, FileText,
   Paperclip, Ban, Flame, AlertTriangle, ChevronUp, ChevronDown, Download,
-  CreditCard, Info, Check, X, TrendingDown, LogOut, type LucideIcon,
+  CreditCard, Info, Check, X, TrendingDown, LogOut, MessageCircle, type LucideIcon,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
@@ -101,7 +101,7 @@ const FAVICON_PACKAGING = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="
 const FAVICON_SPORTS = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#16a34a"/><path d="M35 22 Q31 50 38 62 Q44 72 50 74 Q56 72 62 62 Q69 50 65 22Z" fill="white"/><path d="M35 30 Q20 30 20 44 Q20 56 35 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M65 30 Q80 30 80 44 Q80 56 65 56" stroke="white" stroke-width="7" fill="none" stroke-linecap="round"/><rect x="44" y="74" width="12" height="10" rx="2" fill="white"/><rect x="32" y="84" width="36" height="8" rx="3" fill="white"/></svg>')}`
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -2784,6 +2784,18 @@ export default function Dashboard() {
                               <td onClick={(e) => { if (!isEmailLead) { e.stopPropagation(); openLeadConversation(lead) } }}
                                 className="px-3 py-3 whitespace-nowrap" title={!isEmailLead ? 'Open the chat conversation' : undefined}>
                                 <LeadSourceBadge message={lead.message} />
+                                {/* A customer wrote on WhatsApp and nobody has
+                                    answered. The MESSAGE column shows the lead's
+                                    FIRST message, so a WhatsApp reply arriving
+                                    later left no trace here at all — which is how
+                                    a real enquiry sat unanswered while its row sat
+                                    in this table looking like every other one. */}
+                                {lead.waWaiting && (
+                                  <span title="Waiting on a WhatsApp reply"
+                                    className="ml-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 whitespace-nowrap inline-flex items-center gap-1 text-green-700 bg-green-100 border-green-200">
+                                    <MessageCircle size={11} strokeWidth={2} aria-hidden /> WhatsApp
+                                  </span>
+                                )}
                                 {/* Who ran the conversation this lead came out of.
                                     The test is the one the Overview chart's "Picked"
                                     line already uses — a session carries an `admin`
