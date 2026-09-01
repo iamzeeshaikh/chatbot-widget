@@ -443,6 +443,17 @@ export default function LeadRecordPage() {
               {/* Marked as not a customer — a supplier pitch, a duplicate, a
                   mistake. The record is untouched; it has just stopped counting
                   in the tiles, the site cards, Billing and the report. */}
+              {/* The customer wrote last on WhatsApp and nobody has answered.
+                  Self-clearing: it disappears the moment a reply goes out, so
+                  there is nothing to mark read. */}
+              {record.waAwaitingReply && (
+                <button onClick={() => setWaOpen(true)}
+                  title="This customer's last WhatsApp message has no reply yet"
+                  className="inline-flex items-center gap-1 rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-800 hover:bg-green-100">
+                  <MessageCircle size={10} strokeWidth={2.5} aria-hidden />
+                  WhatsApp waiting
+                </button>
+              )}
               {record.notALead && (
                 <span title={`Marked by ${record.notALead.by}`}
                   className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">

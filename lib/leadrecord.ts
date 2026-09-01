@@ -97,6 +97,11 @@ export interface LeadRecord {
   hasConversation: boolean
   contact: { name: string; email: string; phone: string }
   captured: { name: string; email: string; phone: string }
+  /** True when the LAST WhatsApp message on this lead is the customer's — the
+   *  same "waiting on you" rule the conversations list uses for chats. It
+   *  clears itself the moment an agent replies, so nothing has to be marked
+   *  read. */
+  waAwaitingReply?: boolean
   /** Set when somebody has marked this "not a lead" — a supplier pitch, a
    *  duplicate, a mistake. The record still opens; it just stops counting. */
   notALead?: NotALeadMark
@@ -793,6 +798,13 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     !!rawPhone,
   )
 
+  // Rows are oldest-first, so the last WhatsApp row seen is the latest message.
+  let lastWaInbound = false
+  for (const r of logs) {
+    if (r.role === CRM_WA_IN_ROLE) lastWaInbound = true
+    else if (r.role === CRM_WA_OUT_ROLE) lastWaInbound = false
+  }
+
   // Newest row wins, so un-marking is another row rather than a delete.
   let notALead: NotALeadMark | undefined
   for (const r of logs) {
@@ -804,6 +816,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const record: LeadRecord = {
     recipientLocked: member.role !== 'admin',
     whatsapp,
+    waAwaitingReply: lastWaInbound,
     notALead,
     id,
     siteId,

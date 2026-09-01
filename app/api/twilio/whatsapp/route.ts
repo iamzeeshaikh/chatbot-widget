@@ -3,6 +3,8 @@ import { supabase } from '@/lib/supabase'
 import { twilioAuth, verifyTwilioSignature, workspaceForBusinessNumber } from '@/lib/twilio'
 import { CRM_WA_IN_ROLE } from '@/lib/crm'
 import { leadForCaller } from '@/lib/inbound'
+import { sendPushToWorkspace } from '@/lib/push'
+import { hasFeature } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
 
@@ -94,6 +96,31 @@ export async function POST(req: NextRequest) {
         }),
       }])
     }
+  }
+
+  // ── Tell somebody ────────────────────────────────────────────────────────
+  // Without this the message lands on the timeline and waits there. That is
+  // exactly what happened on 1 Sep: a customer wrote "Hi i need jerseys", the
+  // row was written correctly, and nobody knew for hours — an inbound email
+  // reply pushes a notification, and WhatsApp did not.
+  //
+  // The NAME is deliberately not in the notification for a workspace under
+  // contact privacy: a push is drawn by the OS, outside the dashboard, where
+  // none of the masking applies. The message text is the customer's own words
+  // and is fine either way; the identity is not.
+  if (sessionId) {
+    // A push is drawn by the OS, outside the dashboard, where none of the
+    // masking applies — so a workspace with contact privacy gets no name in it.
+    const hidden = hasFeature(workspace, 'contactprivacy')
+    const who = !hidden && profileName ? profileName : 'A customer'
+    await sendPushToWorkspace(workspace, {
+      title: `WhatsApp — ${who}`,
+      body: body ? body.slice(0, 140) : media.length ? 'Sent a file' : 'New message',
+      url: `/leads/${encodeURIComponent(sessionId)}`,
+      // One tag per lead, so a burst of messages updates one banner instead of
+      // stacking five.
+      tag: `wa-${sessionId}`,
+    })
   }
 
   // An empty TwiML response: received, and no automatic reply. A person answers
