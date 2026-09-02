@@ -2170,19 +2170,35 @@ export default function Dashboard() {
   const startOfWeekPktDate = new Date(nowPkt); startOfWeekPktDate.setUTCDate(startOfWeekPktDate.getUTCDate() - (dowPkt === 0 ? 6 : dowPkt - 1))
   const startOfWeekStr = startOfWeekPktDate.toISOString().slice(0, 10)
   const startOfMonthStr = `${nowPkt.getUTCFullYear()}-${String(nowPkt.getUTCMonth() + 1).padStart(2, '0')}-01`
-  const todayLeads = overviewSummaryLeads.filter(l => pktDateStr(l.captured_at) === todayStr).length
-  const thisWeekLeads = overviewSummaryLeads.filter(l => pktDateStr(l.captured_at) >= startOfWeekStr).length
+  // ONE definition of "is this lead in that date range", used by the tiles and
+  // by the table they filter.
+  //
+  // It has to be one, because Today's Leads and This Week are CLICKABLE: the
+  // number is a promise about what the table will show. They used to be
+  // counted from a different list entirely — the billing summary, which is
+  // deduped by site+email, drops checkout rows and dates by `captured_at` —
+  // while the table filtered the raw leads list by `created_at`. So the tile
+  // said one number, the click produced a different set of rows, and the
+  // filter looked broken when it was working exactly as written.
+  const inDateRange = (iso: string | null | undefined, range: typeof overviewLeadDate): boolean => {
+    if (range === 'all') return true
+    if (!iso) return false
+    const day = pktDateStr(iso)
+    if (range === 'today') return day === todayStr
+    if (range === 'yesterday') return day === yesterdayStr
+    if (range === 'week') return day >= startOfWeekStr
+    if (range === 'month') return day >= startOfMonthStr
+    return true
+  }
+  // Counted off the same rows the table shows, minus the ones marked "not a
+  // lead" — which the table hides by default, so counting them would promise
+  // rows that never appear.
+  const countedLeads = roleLeads.filter((l) => !l.notALead)
+  const todayLeads = countedLeads.filter((l) => inDateRange(l.created_at, 'today')).length
+  const thisWeekLeads = countedLeads.filter((l) => inDateRange(l.created_at, 'week')).length
 
   // Recent Leads table: site chip (from "Leads by Site") + date range, combined.
-  const dateFilteredLeads = roleLeads.filter((l) => {
-    if (!l.created_at) return overviewLeadDate === 'all'
-    const day = pktDateStr(l.created_at)
-    if (overviewLeadDate === 'today') return day === todayStr
-    if (overviewLeadDate === 'yesterday') return day === yesterdayStr
-    if (overviewLeadDate === 'week') return day >= startOfWeekStr
-    if (overviewLeadDate === 'month') return day >= startOfMonthStr
-    return true
-  })
+  const dateFilteredLeads = roleLeads.filter((l) => inDateRange(l.created_at, overviewLeadDate))
   const siteFilteredLeads = overviewLeadSite ? dateFilteredLeads.filter((l) => l.site_id === overviewLeadSite) : dateFilteredLeads
   // Leads somebody marked "not a lead" are hidden by default — that is the
   // point of marking them — but reachable, because a wrong call has to be
