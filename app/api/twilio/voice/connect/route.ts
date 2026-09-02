@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { twilioAuth, twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
 import { leadPhone, resolveLeadSite } from '@/lib/leadrecord'
 import { siteWorkspace } from '@/lib/workspaces'
+import { recordAttrs } from '@/lib/callrecording'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,9 +54,10 @@ export async function POST(req: NextRequest) {
 
   // callerId is the BUSINESS number: the customer sees the company, never the
   // agent's own line.
+  const origin = `${proto}://${host}`
   return xml(
     '<Response>'
-    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="30">`
+    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="30"${recordAttrs(origin, { leadId })}>`
     + `<Number>${escapeXml(customer)}</Number>`
     + '</Dial>'
     + '</Response>',

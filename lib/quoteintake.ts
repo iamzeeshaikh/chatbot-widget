@@ -40,10 +40,20 @@ export function isCheckoutLeadMessage(message: string | null | undefined): boole
 // these three lines and writes them verbatim, and the QUOTE_TAG requirement
 // means a visitor who happens to type "Called the phone line" into the chat
 // can never be reclassified by this.
-const CALL_LEAD_RE = /^(?:Called the phone line|Called on WhatsApp|Voicemail —)/
+// The three sentences live HERE, not next to the code that writes them, so the
+// writer (lib/inbound.ts's callers) and the reader (leadSource, below) can only
+// ever use the same string. When they were separate, a reworded sentence would
+// have silently stopped classifying calls as calls, with nothing to fail.
+export const CALL_LEAD_MESSAGE = 'Called the phone line and spoke to the team.'
+export const WHATSAPP_CALL_LEAD_MESSAGE = 'Called on WhatsApp and spoke to the team.'
+export const VOICEMAIL_LEAD_MESSAGE = 'Voicemail — the caller left a message on the phone line.'
+
+const CALL_LEAD_OPENINGS = [CALL_LEAD_MESSAGE, WHATSAPP_CALL_LEAD_MESSAGE, VOICEMAIL_LEAD_MESSAGE]
 
 export function isCallLeadMessage(message: string | null | undefined): boolean {
-  return isQuoteLeadMessage(message) && CALL_LEAD_RE.test(message!.slice(QUOTE_TAG.length))
+  if (!isQuoteLeadMessage(message)) return false
+  const body = message!.slice(QUOTE_TAG.length)
+  return CALL_LEAD_OPENINGS.some((opening) => body.startsWith(opening))
 }
 
 // Where a lead came from, for the badge in the leads table and the type filter.

@@ -5,6 +5,7 @@ import { identityFor, voiceTokenConfig } from '@/lib/voicetoken'
 import { findLeadByPhone } from '@/lib/inbound'
 import type { Workspace } from '@/lib/workspaces'
 import { voicemailTwiml } from '@/lib/voicemail'
+import { recordAttrs, RECORDING_NOTICE } from '@/lib/callrecording'
 import { HARDCODED_ACCOUNTS } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -108,10 +109,18 @@ export async function POST(req: NextRequest) {
 
   return xml(
     '<Response>'
+    // Said BEFORE the browsers are rung, so the caller hears it whether or not
+    // anybody picks up — and hears it once, rather than again on the voicemail.
+    + RECORDING_NOTICE
     // answerOnBridge: the caller hears ringing rather than silence while the
     // browsers are being tried.
     + `<Dial timeout="${RING_SECONDS}" answerOnBridge="true" callerId="${escapeXml(cfg.phoneNumber)}"`
-    + ` action="${escapeXml(after)}" method="POST">`
+    + ` action="${escapeXml(after)}" method="POST"`
+    // The lead is not known yet — an inbound caller may have no record at all
+    // until this call creates one — so the recording is filed by NUMBER, the
+    // same way the voicemail and the answered-call handler file theirs.
+    + recordAttrs(origin, { from: caller, to: params.To || '' })
+    + '>'
     + legs
     + '</Dial>'
     + '</Response>',

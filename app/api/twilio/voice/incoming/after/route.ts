@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { twilioAuth, verifyTwilioSignature, workspaceForBusinessNumber } from '@/lib/twilio'
 import { CRM_CALL_ROLE } from '@/lib/crm'
 import { leadForCaller } from '@/lib/inbound'
+import { CALL_LEAD_MESSAGE, WHATSAPP_CALL_LEAD_MESSAGE } from '@/lib/quoteintake'
 import { voicemailTwiml } from '@/lib/voicemail'
 
 export const dynamic = 'force-dynamic'
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
   const found = caller && workspace
     ? await leadForCaller(
         caller.replace(/^whatsapp:/, ''), workspace,
-        overWhatsApp ? 'Called on WhatsApp and spoke to the team.' : 'Called the phone line and spoke to the team.',
+        overWhatsApp ? WHATSAPP_CALL_LEAD_MESSAGE : CALL_LEAD_MESSAGE,
         { calledNumber: called },
       )
     : null

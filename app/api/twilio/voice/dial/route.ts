@@ -4,6 +4,7 @@ import { emailFromIdentity } from '@/lib/voicetoken'
 import { memberByEmail } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow, leadPhone } from '@/lib/leadrecord'
 import { CRM_CALL_ROLE } from '@/lib/crm'
+import { recordAttrs } from '@/lib/callrecording'
 
 export const dynamic = 'force-dynamic'
 
@@ -113,7 +114,11 @@ export async function POST(req: NextRequest) {
     // handset is not alerting, and a still-silent line means it is not.
     // It also matches how long a person actually waits before hanging up.
     + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="55"`
-    + ` action="${escapeXml(statusUrl)}" method="POST">`
+    + ` action="${escapeXml(statusUrl)}" method="POST"`
+    // The lead is known here, so the recording is filed straight onto it — no
+    // phone-number matching, and no chance of it landing on the wrong record.
+    + recordAttrs(origin, { leadId })
+    + '>'
     + `<Number>${escapeXml(customer)}</Number>`
     + '</Dial>'
     + '</Response>',

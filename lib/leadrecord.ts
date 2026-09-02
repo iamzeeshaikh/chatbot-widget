@@ -621,11 +621,27 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       continue
     }
     if (row.role === CRM_CALL_ROLE) {
-      // Two rows share a SID — one when it was dialled, one when it ended — so
-      // they are folded after the loop into a single event rather than showing
-      // the same call twice.
+      // Several rows share a SID — one when it was dialled, one when it ended,
+      // and one more when its RECORDING finished — so they are folded after the
+      // loop into a single event rather than showing the same call three times.
+      //
+      // FIELD BY FIELD, not newest-row-wins. The recording row knows the audio
+      // and nothing else: it carries no status, no duration and no agent,
+      // because Twilio's recording callback does not send them. Replacing the
+      // whole entry with it turned a finished four-minute call into a blank one
+      // the moment its recording landed. A blank field now keeps what the
+      // earlier row said; only a filled one overwrites.
       const c = parseCall(row.message)
-      if (c) calls.set(c.sid, c)
+      if (!c) continue
+      const prev = calls.get(c.sid)
+      calls.set(c.sid, !prev ? c : {
+        ...prev,
+        ...(c.by ? { by: c.by } : {}),
+        ...(c.at ? { at: c.at } : {}),
+        ...(c.status ? { status: c.status } : {}),
+        ...(c.duration !== undefined ? { duration: c.duration } : {}),
+        ...(c.recordingSid ? { recordingSid: c.recordingSid } : {}),
+      })
       continue
     }
     if (row.role === CRM_WA_OUT_ROLE || row.role === CRM_WA_IN_ROLE) {
