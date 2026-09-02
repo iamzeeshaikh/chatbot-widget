@@ -6,6 +6,7 @@ import { twilioAuth } from '@/lib/twilio'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { parseWaMessage } from '@/lib/whatsapp'
 import { WHATSAPP_MEDIA_BUCKET } from '@/lib/whatsappmedia'
+import { serveBytes } from '@/lib/httprange'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -52,12 +53,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (match.path) {
     const { data, error } = await supabase.storage.from(WHATSAPP_MEDIA_BUCKET).download(match.path)
     if (error || !data) return new NextResponse('Not available', { status: 404 })
-    return new NextResponse(await data.arrayBuffer(), {
-      headers: {
-        'Content-Type': match.type || 'application/octet-stream',
-        'Content-Disposition': `inline; filename="${(match.name || 'file').replace(/"/g, '')}"`,
-        'Cache-Control': 'private, max-age=300',
-      },
+    return serveBytes(req, new Uint8Array(await data.arrayBuffer()), {
+      type: match.type || 'application/octet-stream',
+      filename: match.name || 'file',
     })
   }
 
@@ -76,10 +74,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   })
   if (!res.ok) return new NextResponse('Not available', { status: 502 })
 
-  return new NextResponse(res.body, {
-    headers: {
-      'Content-Type': res.headers.get('content-type') || match.type || 'application/octet-stream',
-      'Cache-Control': 'private, max-age=300',
-    },
+  // Buffered rather than streamed on purpose: a voice note needs a length and
+  // a seekable range or it plays back as "0:00 / 0:00" (lib/httprange.ts).
+  return serveBytes(req, new Uint8Array(await res.arrayBuffer()), {
+    type: res.headers.get('content-type') || match.type || 'application/octet-stream',
+    filename: match.name,
   })
 }

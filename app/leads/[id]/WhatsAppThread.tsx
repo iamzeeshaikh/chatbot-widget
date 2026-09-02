@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert, Mic, Square, Trash2, Phone } from 'lucide-react'
+import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert, Mic, Square, Trash2, Phone, Loader2 } from 'lucide-react'
 import type { TimelineEvent } from '@/lib/leadrecord'
 import { formatDateTime } from '@/lib/datetime'
 
@@ -113,6 +113,12 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
 
   // Voice note recording.
   const [recording, setRecording] = useState(false)
+  // Between the click and the first byte there is real work — loading the
+  // encoder, then asking macOS for the microphone — and with no state for it
+  // the button sat there looking broken for a couple of seconds. It is not a
+  // cosmetic spinner: without it people click again, and the second click
+  // arrives while the first is still opening the device.
+  const [starting, setStarting] = useState(false)
   const [recSeconds, setRecSeconds] = useState(0)
   const recorderRef = useRef<InstanceType<typeof import('opus-recorder').default> | null>(null)
   const keepRef = useRef(true)
@@ -123,6 +129,18 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
     return () => clearInterval(t)
   }, [recording])
 
+  // Fetch the encoder and its worker as soon as the thread is on screen. This
+  // is ~390KB that used to be downloaded on the FIRST CLICK, which is most of
+  // why recording began "bohat late" — the wait was the download, not the
+  // microphone. Failures are ignored: startRecording loads it properly and
+  // reports its own errors.
+  useEffect(() => {
+    let dead = false
+    void import('opus-recorder').catch(() => {})
+    fetch(OPUS_WORKER).then((r) => r.arrayBuffer()).catch(() => {}).finally(() => { if (dead) return })
+    return () => { dead = true }
+  }, [])
+
   // Never leave the microphone open behind us.
   useEffect(() => () => {
     keepRef.current = false
@@ -130,12 +148,15 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
   }, [])
 
   async function startRecording() {
+    if (starting || recording) return
     setError('')
+    setStarting(true)
     let Recorder: typeof import('opus-recorder').default
     try {
       Recorder = (await import('opus-recorder')).default
     } catch {
       setError('The voice recorder could not be loaded. Attach an audio file instead.')
+      setStarting(false)
       return
     }
 
@@ -146,9 +167,16 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
       probe.getTracks().forEach((t) => t.stop())
     } catch (e) {
       const name = (e as { name?: string })?.name ?? ''
+      // NotFoundError / NotReadableError mean the machine has no usable input —
+      // which on a Mac is usually an iPhone still selected as the microphone
+      // after it has been unplugged. The browser is not at fault and telling
+      // somebody to check the padlock sends them to the wrong place.
       setError(name === 'NotAllowedError'
         ? 'Your browser is blocking the microphone. Allow it from the padlock in the address bar and try again.'
-        : 'The microphone could not be opened.')
+        : name === 'NotFoundError' || name === 'NotReadableError' || name === 'OverconstrainedError'
+          ? 'No working microphone. On a Mac, open System Settings → Sound → Input and pick the built-in microphone — an iPhone left selected there is the usual cause.'
+          : 'The microphone could not be opened.')
+      setStarting(false)
       return
     }
 
@@ -174,9 +202,11 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
     } catch {
       setError('Recording could not start.')
       recorderRef.current = null
+      setStarting(false)
       return
     }
     setRecSeconds(0)
+    setStarting(false)
     setRecording(true)
   }
 
@@ -391,12 +421,14 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
           {!text.trim() && !file ? (
             <button
               onClick={startRecording}
-              disabled={!canMessage}
+              disabled={!canMessage || starting}
               aria-label="Record a voice note"
-              title="Record a voice note"
-              className="shrink-0 rounded-full bg-green-600 p-2.5 text-white hover:bg-green-700 disabled:opacity-40 transition-colors"
+              title={starting ? 'Opening the microphone…' : 'Record a voice note'}
+              className="shrink-0 rounded-full bg-green-600 p-2.5 text-white hover:bg-green-700 disabled:opacity-60 transition-colors"
             >
-              <Mic size={16} strokeWidth={2.25} aria-hidden />
+              {starting
+                ? <Loader2 size={16} strokeWidth={2.25} className="animate-spin" aria-hidden />
+                : <Mic size={16} strokeWidth={2.25} aria-hidden />}
             </button>
           ) : (
             <button

@@ -5,6 +5,7 @@ import { guardLeadAccess } from '@/lib/leadrecord'
 import { twilioConfig } from '@/lib/twilio'
 import { CRM_CALL_ROLE } from '@/lib/crm'
 import { parseCall } from '@/lib/call'
+import { serveBytes } from '@/lib/httprange'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -46,10 +47,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     return NextResponse.json({ error: 'The recording could not be fetched.' }, { status: 502 })
   }
 
-  return new NextResponse(res.body, {
-    headers: {
-      'Content-Type': 'audio/mpeg',
-      'Cache-Control': 'private, max-age=300',
-    },
-  })
+  // Buffered, not streamed: without a length and range support the player
+  // shows no duration and cannot be scrubbed, which on a five-minute call
+  // means listening from the start every time (lib/httprange.ts).
+  return serveBytes(req, new Uint8Array(await res.arrayBuffer()), { type: 'audio/mpeg' })
 }

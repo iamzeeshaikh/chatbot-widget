@@ -776,6 +776,10 @@ export default function Dashboard() {
   // events, and alerting for them would train people to ignore the sound.
   const prevUnreadReplies = useRef(0)
   const unreadSeeded = useRef(false)
+  // Same pair for WhatsApp. Seeded silently on the first poll so signing in
+  // with three customers already waiting does not set off the chime.
+  const prevWaWaiting = useRef(0)
+  const waSeeded = useRef(false)
   // Identity comes from the server (validated session), never the readable
   // cookie — so a stale cookie can't show the wrong workspace/role.
   useEffect(() => {
@@ -1448,6 +1452,15 @@ export default function Dashboard() {
         prevUnreadReplies.current = nextUnread
         unreadSeeded.current = true
         setUnreadReplies(nextUnread)
+
+        // A customer writing on WhatsApp is the same kind of event as a
+        // customer replying by email, and it was the only one that made no
+        // sound at all — the message landed on a lead record and nothing in
+        // the dashboard moved. Same chime, same mute switch.
+        const nextWa = typeof d.waWaiting === 'number' ? d.waWaiting : 0
+        if (waSeeded.current && nextWa > prevWaWaiting.current) playDashSound()
+        prevWaWaiting.current = nextWa
+        waSeeded.current = true
       })
       .catch(() => {})
     pull()
