@@ -2544,7 +2544,13 @@ export default function Dashboard() {
           ) : (
             <>
               {/* Stats row. Today's Leads / This Week double as filter shortcuts
-                  for the Recent Leads table below (click again to clear). */}
+                  for the Recent Leads table below.
+                  Clicking an already-active tile does NOT clear it. It used to,
+                  and a second click — easy to make, since the tile does not
+                  visibly change on the first one until you scroll to the table —
+                  silently put every lead back in the list. That reads as the
+                  date filter being broken rather than as an undo. Clearing is
+                  the date dropdown on the table, which says what it does. */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 {[
                   { label: 'Total Sites', value: roleSites.length, icon: Trophy, color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
@@ -2559,11 +2565,15 @@ export default function Dashboard() {
                     <button key={s.label} disabled={!clickable}
                       onClick={() => {
                         if (!s.dateFilter) return
-                        setOverviewLeadDate(active ? 'all' : s.dateFilter)
+                        setOverviewLeadDate(s.dateFilter)
                         setOverviewLeadPage(0)
                         leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                       }}
-                      title={clickable ? (active ? 'Clear this date filter' : `Show ${s.label.toLowerCase()} in the leads table below`) : undefined}
+                      title={clickable
+                        ? (active
+                            ? `The leads table below is showing ${s.label.toLowerCase()}. Use the date dropdown there to clear it.`
+                            : `Show ${s.label.toLowerCase()} in the leads table below`)
+                        : undefined}
                       className={`group text-left bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${active ? 'border-gray-400 ring-2 ring-gray-300' : s.border} bg-gray-100 transition-all duration-200 ${clickable ? 'hover:-translate-y-0.5 hover:border-gray-400 hover:shadow-lg hover:shadow-black/20 cursor-pointer' : ''}`}>
                       <div className="flex items-center justify-between mb-3">
                         <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
