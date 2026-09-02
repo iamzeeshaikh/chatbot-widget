@@ -28,10 +28,30 @@ export function isCheckoutLeadMessage(message: string | null | undefined): boole
   return !!message && message.startsWith(CHECKOUT_TAG)
 }
 
+// A lead born on the PHONE — somebody rang the business number, or left a
+// voicemail, or pressed Call inside WhatsApp. lib/inbound.ts writes these with
+// QUOTE_TAG deliberately: a caller who read the number off a website is a
+// sourced lead and has to keep its place in Billing, which only ever queries
+// that tag. So the tag cannot tell a call apart from an emailed quote — and
+// until this existed, a call showed up in the dashboard badged "Quote", which
+// is simply not what happened.
+//
+// The opening sentence can tell them apart. inbound.ts is the ONLY writer of
+// these three lines and writes them verbatim, and the QUOTE_TAG requirement
+// means a visitor who happens to type "Called the phone line" into the chat
+// can never be reclassified by this.
+const CALL_LEAD_RE = /^(?:Called the phone line|Called on WhatsApp|Voicemail —)/
+
+export function isCallLeadMessage(message: string | null | undefined): boolean {
+  return isQuoteLeadMessage(message) && CALL_LEAD_RE.test(message!.slice(QUOTE_TAG.length))
+}
+
 // Where a lead came from, for the badge in the leads table and the type filter.
-export type LeadSource = 'quote' | 'checkout' | 'chat'
+export type LeadSource = 'quote' | 'checkout' | 'chat' | 'call'
 
 export function leadSource(message: string | null | undefined): LeadSource {
+  // Before the quote test: every call lead is also QUOTE_TAG'd (see above).
+  if (isCallLeadMessage(message)) return 'call'
   if (isQuoteLeadMessage(message)) return 'quote'
   if (isCheckoutLeadMessage(message)) return 'checkout'
   return 'chat'

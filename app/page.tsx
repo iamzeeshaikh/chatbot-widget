@@ -12,7 +12,7 @@ import {
   Trophy, Globe, Bot, BotOff, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
   ChevronRight, Repeat, Eye, Contact, UserPlus, Languages, Pin, User, FileText,
   Paperclip, Ban, Flame, AlertTriangle, ChevronUp, ChevronDown, Download,
-  CreditCard, Info, Check, X, TrendingDown, LogOut, MessageCircle, type LucideIcon,
+  CreditCard, Info, Check, X, TrendingDown, LogOut, MessageCircle, PhoneCall, type LucideIcon,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
@@ -411,6 +411,9 @@ const LEAD_SOURCE_BADGE: Record<LeadSource, { label: string; Icon: LucideIcon; c
   quote: { label: 'Quote', Icon: Mail, cls: 'text-amber-700 bg-amber-100 border-amber-200' },
   checkout: { label: 'Checkout', Icon: ShoppingCart, cls: 'text-purple-700 bg-purple-100 border-purple-200' },
   chat: { label: 'Chat', Icon: MessageSquare, cls: 'text-blue-700 bg-blue-100 border-blue-200' },
+  // A caller is not a quote request. These rows used to wear the Quote badge
+  // because they share its tag (lib/quoteintake.ts explains why they must).
+  call: { label: 'Call', Icon: PhoneCall, cls: 'text-emerald-700 bg-emerald-100 border-emerald-200' },
 }
 
 function LeadSourceBadge({ message, className = '' }: { message: string | null | undefined; className?: string }) {
@@ -2691,10 +2694,11 @@ export default function Dashboard() {
                     <option value="month">This month</option>
                   </select>
                   <select value={overviewLeadType} onChange={(e) => { setOverviewLeadType(e.target.value as typeof overviewLeadType); setOverviewLeadPage(0) }}
-                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : overviewLeadType === 'excluded' ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
+                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : overviewLeadType === 'call' ? 'bg-emerald-100 border-emerald-300 text-emerald-700 font-semibold' : overviewLeadType === 'excluded' ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All types</option>
                     <option value="excluded">Not a lead (excluded)</option>
                     <option value="chat">Chat only</option>
+                    <option value="call">Calls only</option>
                     <option value="quote">Quote only</option>
                     <option value="checkout">Checkout only</option>
                   </select>

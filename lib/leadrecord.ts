@@ -18,7 +18,7 @@ import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import { ASSIGNMENT_ROLE } from './assignment'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from './replyauthor'
 import { parseAttachment, type AttachmentInfo } from './attachment'
-import { isQuoteSessionId, quoteSessionId, stripQuoteTag, isQuoteLeadMessage, isCheckoutLeadMessage } from './quoteintake'
+import { isQuoteSessionId, quoteSessionId, stripQuoteTag, isCheckoutLeadMessage, isQuoteLeadMessage, leadSource } from './quoteintake'
 import { digitsOnly, samePhone } from './identity'
 import { workspaceSites, hasFeature, type WorkspaceFeature } from './workspaces'
 import {
@@ -45,7 +45,7 @@ import {
 import { signAttachments, type EmailAttachment } from './emailattach'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 
-export type LeadKind = 'chat' | 'quote' | 'checkout'
+export type LeadKind = 'chat' | 'quote' | 'checkout' | 'call'
 
 export interface TimelineEvent {
   id: string
@@ -461,7 +461,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const calls = new Map<string, CallEntry>()
   const waMessages = new Map<string, { w: WaMessage; at: string }>()
   const lead = resolved.lead
-  const kind: LeadKind = !lead ? 'chat' : isCheckoutLeadMessage(lead.message) ? 'checkout' : isQuoteLeadMessage(lead.message) ? 'quote' : 'chat'
+  const kind: LeadKind = !lead ? 'chat' : leadSource(lead.message)
 
   // Effective contact: a manual override beats the agent-entered contact row,
   // which beats what was captured automatically, which beats the leads row.
@@ -540,6 +540,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     group: 'system',
     actor: kind === 'chat' ? 'Visitor' : 'Inbox',
     title: kind === 'checkout' ? 'Checkout order received'
+      : kind === 'call' ? 'Phone call received'
       : kind === 'quote' ? 'Quote request received'
       : capturedManual ? 'Marked as a lead by an agent'
       : capturedAt ? 'Lead captured — visitor shared contact details'
@@ -822,7 +823,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     siteId,
     siteName,
     kind,
-    sourceLabel: kind === 'checkout' ? 'Checkout order (email)' : kind === 'quote' ? 'Custom quote (email)' : 'Chat widget',
+    sourceLabel: kind === 'checkout' ? 'Checkout order (email)' : kind === 'call' ? 'Phone call' : kind === 'quote' ? 'Custom quote (email)' : 'Chat widget',
     hasConversation: realMessages.length > 0,
     contact: effective,
     captured: {
@@ -1013,7 +1014,7 @@ export async function findRelatedLeads(
       id: recordId, siteId: l.site_id, siteName: siteName[l.site_id] ?? l.site_id,
       name: l.name, email: l.email, phone: l.phone,
       at: asUtcIso(l.created_at) as string,
-      kind: isCheckoutLeadMessage(l.message) ? 'checkout' : isQuoteLeadMessage(l.message) ? 'quote' : 'chat',
+      kind: leadSource(l.message),
       matchedOn,
     })
   }

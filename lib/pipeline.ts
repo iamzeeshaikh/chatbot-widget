@@ -27,7 +27,7 @@ import { asUtcIso, CONTACT_ROLE, parseContact } from './visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import { ASSIGNMENT_ROLE } from './assignment'
-import { quoteSessionId, isCheckoutLeadMessage, isQuoteLeadMessage } from './quoteintake'
+import { quoteSessionId, leadSource } from './quoteintake'
 import {
   CRM_STAGE_ROLE, CRM_VALUE_ROLE, CRM_STAGES, DEFAULT_CURRENCY,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE,
@@ -178,7 +178,7 @@ export async function loadPipeline(
 
   for (const l of leadRows) {
     const id = quoteSessionId(l.id)
-    const kind: LeadKind = isCheckoutLeadMessage(l.message) ? 'checkout' : isQuoteLeadMessage(l.message) ? 'quote' : 'chat'
+    const kind: LeadKind = leadSource(l.message)
     const card = blank(id, l.site_id, kind, asUtcIso(l.created_at))
     card.name = (l.name || l.email || l.phone || '').trim()
     card.email = l.email
