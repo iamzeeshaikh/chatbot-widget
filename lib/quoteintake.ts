@@ -56,12 +56,25 @@ export function isCallLeadMessage(message: string | null | undefined): boolean {
   return CALL_LEAD_OPENINGS.some((opening) => body.startsWith(opening))
 }
 
+/** The opening line of a lead created by an inbound WhatsApp MESSAGE. Written
+ *  by app/api/twilio/whatsapp, which imports this rather than repeating it. */
+export const WHATSAPP_LEAD_MESSAGE = 'WhatsApp enquiry'
+
+export function isWhatsAppLeadMessage(message: string | null | undefined): boolean {
+  if (!isQuoteLeadMessage(message)) return false
+  return message!.slice(QUOTE_TAG.length).startsWith(WHATSAPP_LEAD_MESSAGE)
+}
+
 // Where a lead came from, for the badge in the leads table and the type filter.
-export type LeadSource = 'quote' | 'checkout' | 'chat' | 'call'
+export type LeadSource = 'quote' | 'checkout' | 'chat' | 'call' | 'whatsapp'
 
 export function leadSource(message: string | null | undefined): LeadSource {
-  // Before the quote test: every call lead is also QUOTE_TAG'd (see above).
+  // Calls first, and it matters: a customer who pressed Call inside WhatsApp
+  // opens with "Called on WhatsApp…", which is a CALL, not a message thread.
+  // Both tests are true of it and only this order gives the right answer.
   if (isCallLeadMessage(message)) return 'call'
+  if (isWhatsAppLeadMessage(message)) return 'whatsapp'
+  // Both of the above are QUOTE_TAG'd too, so this has to come after them.
   if (isQuoteLeadMessage(message)) return 'quote'
   if (isCheckoutLeadMessage(message)) return 'checkout'
   return 'chat'

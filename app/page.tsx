@@ -414,6 +414,9 @@ const LEAD_SOURCE_BADGE: Record<LeadSource, { label: string; Icon: LucideIcon; c
   // A caller is not a quote request. These rows used to wear the Quote badge
   // because they share its tag (lib/quoteintake.ts explains why they must).
   call: { label: 'Call', Icon: PhoneCall, cls: 'text-emerald-700 bg-emerald-100 border-emerald-200' },
+  // A customer who wrote on WhatsApp. Same reason as the Call badge: these
+  // share the Quote tag (they must, for Billing) and so wore its label.
+  whatsapp: { label: 'WhatsApp', Icon: MessageCircle, cls: 'text-green-700 bg-green-100 border-green-200' },
 }
 
 function LeadSourceBadge({ message, className = '' }: { message: string | null | undefined; className?: string }) {
@@ -2707,11 +2710,12 @@ export default function Dashboard() {
                     <option value="month">This month</option>
                   </select>
                   <select value={overviewLeadType} onChange={(e) => { setOverviewLeadType(e.target.value as typeof overviewLeadType); setOverviewLeadPage(0) }}
-                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : overviewLeadType === 'call' ? 'bg-emerald-100 border-emerald-300 text-emerald-700 font-semibold' : overviewLeadType === 'excluded' ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
+                    className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : overviewLeadType === 'call' ? 'bg-emerald-100 border-emerald-300 text-emerald-700 font-semibold' : overviewLeadType === 'whatsapp' ? 'bg-green-100 border-green-300 text-green-700 font-semibold' : overviewLeadType === 'excluded' ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All types</option>
                     <option value="excluded">Not a lead (excluded)</option>
                     <option value="chat">Chat only</option>
                     <option value="call">Calls only</option>
+                    <option value="whatsapp">WhatsApp only</option>
                     <option value="quote">Quote only</option>
                     <option value="checkout">Checkout only</option>
                   </select>

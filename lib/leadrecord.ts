@@ -45,7 +45,7 @@ import {
 import { signAttachments, type EmailAttachment } from './emailattach'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 
-export type LeadKind = 'chat' | 'quote' | 'checkout' | 'call'
+export type LeadKind = 'chat' | 'quote' | 'checkout' | 'call' | 'whatsapp'
 
 export interface TimelineEvent {
   id: string
@@ -541,6 +541,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     actor: kind === 'chat' ? 'Visitor' : 'Inbox',
     title: kind === 'checkout' ? 'Checkout order received'
       : kind === 'call' ? 'Phone call received'
+      : kind === 'whatsapp' ? 'WhatsApp message received'
       : kind === 'quote' ? 'Quote request received'
       : capturedManual ? 'Marked as a lead by an agent'
       : capturedAt ? 'Lead captured — visitor shared contact details'
@@ -839,7 +840,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     siteId,
     siteName,
     kind,
-    sourceLabel: kind === 'checkout' ? 'Checkout order (email)' : kind === 'call' ? 'Phone call' : kind === 'quote' ? 'Custom quote (email)' : 'Chat widget',
+    sourceLabel: kind === 'checkout' ? 'Checkout order (email)' : kind === 'call' ? 'Phone call' : kind === 'whatsapp' ? 'WhatsApp message' : kind === 'quote' ? 'Custom quote (email)' : 'Chat widget',
     hasConversation: realMessages.length > 0,
     contact: effective,
     captured: {

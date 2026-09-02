@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { twilioAuth, verifyTwilioSignature, workspaceForBusinessNumber } from '@/lib/twilio'
 import { CRM_WA_IN_ROLE } from '@/lib/crm'
 import { leadForCaller } from '@/lib/inbound'
+import { WHATSAPP_LEAD_MESSAGE } from '@/lib/quoteintake'
 import { sendPushToWorkspace } from '@/lib/push'
 import { hasFeature } from '@/lib/workspaces'
 
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
   // Which business was messaged — the sender number is the only evidence.
   const workspace = workspaceForBusinessNumber(to)
   if (!workspace) return new NextResponse('<Response/>', { headers: { 'Content-Type': 'text/xml' } })
-  const found = await leadForCaller(from, workspace, `WhatsApp enquiry\n\n${body}`, { name: profileName, calledNumber: to })
+  const found = await leadForCaller(from, workspace, `${WHATSAPP_LEAD_MESSAGE}\n\n${body}`, { name: profileName, calledNumber: to })
   const sessionId = found?.sessionId ?? null
   const siteId = found?.siteId ?? ''
 

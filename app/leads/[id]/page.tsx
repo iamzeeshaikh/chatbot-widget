@@ -883,7 +883,7 @@ export default function LeadRecordPage() {
                         <span className="flex items-center gap-1.5">
                           <span className="text-xs font-medium text-gray-900 truncate">{r.name || r.email || r.phone || 'Lead'}</span>
                           <span className="text-[9px] px-1 rounded bg-gray-200 border border-gray-300 text-gray-600 shrink-0">
-                            {r.kind === 'chat' ? 'chat' : r.kind === 'call' ? 'call' : r.kind === 'quote' ? 'quote' : 'order'}
+                            {r.kind === 'chat' ? 'chat' : r.kind === 'call' ? 'call' : r.kind === 'whatsapp' ? 'WhatsApp' : r.kind === 'quote' ? 'quote' : 'order'}
                           </span>
                         </span>
                         <span className="block text-[10px] text-gray-500 truncate tabular-nums" title={`${r.siteName} · ${formatDateTime(r.at)}`}>
@@ -915,7 +915,7 @@ export default function LeadRecordPage() {
               setTimeout(() => { void el?.querySelector('audio')?.play().catch(() => {}) }, 400)
             }
             return (
-              <Card title={record.kind === 'checkout' ? 'Order email' : record.kind === 'call' ? 'Phone call' : 'Quote request'} icon={Inbox}>
+              <Card title={record.kind === 'checkout' ? 'Order email' : record.kind === 'call' ? 'Phone call' : record.kind === 'whatsapp' ? 'WhatsApp message' : 'Quote request'} icon={Inbox}>
                 {voicemail ? (
                   <button onClick={playVoicemail}
                     title="Play the voicemail"
