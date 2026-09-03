@@ -2693,9 +2693,32 @@ export default function Dashboard() {
                   {roleSites.map((site) => {
                     const accent = SITE_ACCENT[site.site_id] ?? site.primary_color
                     const url = SITE_URLS[site.site_id]
-                    const count = overviewSummaryLeads.filter((l) => l.site_id === site.site_id).length
+                    // Counted off the same rows the table shows, so the number
+                    // on the card is exactly what clicking it produces.
+                    const count = countedLeads.filter((l) => l.site_id === site.site_id).length
+                    const picked = overviewLeadSite === site.site_id
+                    // The whole card is the filter. It is a div with a button
+                    // role rather than a <button> because the domain link lives
+                    // inside it, and a button inside a button is invalid markup
+                    // that browsers resolve by dropping one of them.
+                    const openSite = () => {
+                      setOverviewLeadSite(site.site_id)
+                      // Cleared, so the count on the card and the rows below
+                      // agree — a card reading "23 leads" that lands you on a
+                      // list of 2 because a date filter was still on is the
+                      // same broken promise the stat tiles used to make.
+                      setOverviewLeadDate('all')
+                      setOverviewLeadType('all')
+                      setOverviewLeadPage(0)
+                      leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }
                     return (
-                      <div key={site.site_id} className="bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-lg hover:shadow-black/20 group">
+                      <div key={site.site_id}
+                        role="button" tabIndex={0}
+                        onClick={openSite}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSite() } }}
+                        title={`Show ${site.name}'s leads in the table below`}
+                        className={`bg-gray-100 rounded-2xl border overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20 group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${picked ? 'border-gray-400 ring-2 ring-gray-300' : 'border-gray-200 hover:border-gray-300'}`}>
                         <div className="h-1" style={{ backgroundColor: accent }} />
                         <div className="p-4">
                           <div className="flex items-center gap-2.5 mb-3">
@@ -2709,7 +2732,8 @@ export default function Dashboard() {
                             <span className="text-xs font-medium" style={{ color: accent }}>{count} lead{count !== 1 ? 's' : ''}</span>
                             {url ? (
                               <a href={`https://${url}`} target="_blank" rel="noopener noreferrer"
-                                className="text-[11px] text-gray-500 hover:text-blue-700 transition-colors truncate max-w-[120px]" title={url}>
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[11px] text-gray-500 hover:text-blue-700 transition-colors truncate max-w-[120px]" title={`Open ${url}`}>
                                 {url}
                               </a>
                             ) : (
