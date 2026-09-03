@@ -84,7 +84,10 @@ export const CRM_ROLES = [
 // the rank the list view sorts on. The three dead-end outcomes sit between Won
 // and Lost so every way a deal can die is grouped at the end of the funnel.
 export const CRM_STAGES = [
-  'new', 'contacted', 'quote_sent', 'follow_up', 'pending_design', 'won',
+  // on_hold sits between the working stages and Won: it is a LIVE deal that is
+  // paused — waiting on the customer's season, budget cycle, a reorder date —
+  // not a dead one, so it does not belong with the outcomes at the end.
+  'new', 'contacted', 'quote_sent', 'follow_up', 'pending_design', 'on_hold', 'won',
   'contact_not_successful', 'no_response', 'not_interested', 'lost',
 ] as const
 export type CrmStage = (typeof CRM_STAGES)[number]
@@ -99,6 +102,7 @@ export const CRM_STAGE_LABEL: Record<CrmStage, string> = {
   quote_sent: 'Quote Sent',
   follow_up: 'Follow-Up',
   pending_design: 'Pending Design',
+  on_hold: 'On Hold',
   won: 'Won',
   contact_not_successful: 'Contact Not Successful',
   no_response: 'No Response',
@@ -116,6 +120,7 @@ export const CRM_STAGE_STYLE: Record<CrmStage, string> = {
   quote_sent: 'bg-purple-100 text-purple-700 border-purple-300',
   follow_up: 'bg-amber-100 text-amber-700 border-amber-300',
   pending_design: 'bg-orange-100 text-orange-700 border-orange-300',
+  on_hold: 'bg-indigo-100 text-indigo-700 border-indigo-300',
   won: 'bg-green-100 text-green-700 border-green-300',
   // The dead ends are deliberately quiet: a dead deal should not shout louder
   // than a live one. `not_interested` shares Lost's red because it IS a stated
@@ -134,6 +139,7 @@ export const CRM_STAGE_DOT: Record<CrmStage, string> = {
   quote_sent: '#a855f7',
   follow_up: '#f59e0b',
   pending_design: '#f97316',
+  on_hold: '#6366f1',
   won: '#22c55e',
   contact_not_successful: '#64748b',
   no_response: '#eab308',
@@ -185,6 +191,9 @@ export function leadStatusForStage(stage: CrmStage): LeadStatus {
     case 'follow_up': return 'contacted'
     case 'quote_sent': return 'quoted'
     case 'pending_design': return 'quoted'
+    // The legacy statuses have no "paused" — contacted is the honest nearest:
+    // the deal is alive and somebody has spoken to them.
+    case 'on_hold': return 'contacted'
     case 'won': return 'won'
     case 'contact_not_successful': return 'lost'
     case 'no_response': return 'lost'

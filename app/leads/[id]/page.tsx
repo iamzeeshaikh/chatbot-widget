@@ -1065,9 +1065,14 @@ function StagePill({ stage }: { stage: CrmStage }) {
 function StageRail({ stage }: { stage: CrmStage }) {
   // findIndex rather than indexOf: `funnel` is narrowed to exclude the dead-end
   // stages, and `stage` may BE one — which is exactly the case handled below.
-  const funnel = CRM_STAGES.filter((s) => !isDeadStage(s))
+  //
+  // On Hold is excluded from the funnel too, but it is NOT dead: a deal that
+  // reaches Won never "passed through" On Hold, so it cannot be a step — yet
+  // greying the rail would read as a lost deal. The rail simply shows no
+  // progress position for it; the pill above already says On Hold.
+  const funnel = CRM_STAGES.filter((s) => !isDeadStage(s) && s !== 'on_hold')
   const currentIdx = funnel.findIndex((s) => s === stage)
-  const isDead = isDeadStage(stage)
+  const isDead = isDeadStage(stage) || stage === 'on_hold'
 
   return (
     <div className="flex items-center gap-1" role="img"

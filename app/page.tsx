@@ -2791,10 +2791,10 @@ export default function Dashboard() {
                 </div>
                 <div className="bg-gray-100 rounded-xl border border-gray-200 overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm min-w-[1100px]">
+                    <table className="w-full text-sm min-w-[950px]">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-100">
-                          {['Type', 'Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Budget', 'Timeline', 'Site', 'Date', ''].map((h) => (
+                          {['Type', 'Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Site', 'Date', ''].map((h) => (
                             <th key={h} className="text-left px-3 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -2818,8 +2818,6 @@ export default function Dashboard() {
                           }
                           const product = lead.product ?? msgLines['product'] ?? '-'
                           const quantity = lead.quantity ?? msgLines['quantity'] ?? '-'
-                          const budget = lead.budget ?? msgLines['budget'] ?? '-'
-                          const timeline = lead.timeline ?? msgLines['timeline'] ?? '-'
                           const score = lead.qualification_score ?? null
                           const siteName = roleSites.find((s) => s.site_id === lead.site_id)?.name ?? sites.find((s) => s.site_id === lead.site_id)?.name ?? lead.site_id
                           const isEditing = editingLeadId === lead.id
@@ -2839,7 +2837,7 @@ export default function Dashboard() {
                               <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
                               <td className="px-3 py-2"><input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-blue-700 w-full min-w-[140px] focus:outline-none focus:border-blue-500" placeholder="Email" /></td>
                               <td className="px-3 py-2"><input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-700 w-full min-w-[100px] focus:outline-none focus:border-blue-500" placeholder="Phone" /></td>
-                              <td className="px-3 py-2" colSpan={5}><input value={editForm.message} onChange={(e) => setEditForm({ ...editForm, message: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-700 w-full focus:outline-none focus:border-blue-500" placeholder="Message" /></td>
+                              <td className="px-3 py-2" colSpan={3}><input value={editForm.message} onChange={(e) => setEditForm({ ...editForm, message: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-700 w-full focus:outline-none focus:border-blue-500" placeholder="Message" /></td>
                               <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{siteName}</td>
                               <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{lead.created_at ? formatDateTime(lead.created_at) : '-'}</td>
                               <td className="px-3 py-2"><div className="flex gap-1"><button onClick={() => saveEditLead(lead.id)} disabled={savingEdit} className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded transition-colors disabled:opacity-50">{savingEdit ? '…' : 'Save'}</button><button onClick={() => setEditingLeadId(null)} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded transition-colors">Cancel</button></div></td>
@@ -2909,8 +2907,6 @@ export default function Dashboard() {
                               <td className="px-3 py-3 text-gray-500 max-w-[150px] truncate" title={cleanLeadMessage(lead.message) !== '-' ? cleanLeadMessage(lead.message) : undefined}>{cleanLeadMessage(lead.message)}</td>
                               <td className="px-3 py-3 text-gray-700 max-w-[120px] truncate" title={product !== '-' ? product : undefined}>{product}</td>
                               <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{quantity}</td>
-                              <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{budget}</td>
-                              <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{timeline}</td>
                               <td className="px-3 py-3 whitespace-nowrap">
                                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${accent}20`, color: accent }}>{siteName}</span>
                               </td>
