@@ -67,6 +67,8 @@ export default function Softphone() {
   const [error, setError] = useState('')
 
   const deviceRef = useRef<TwilioDevice | null>(null)
+  // How many reconnect attempts the current outage has cost, reset on success.
+  const retries = useRef(0)
   const callRef = useRef<TwilioCall | null>(null)
   const liveRef = useRef(false)
   // The last thing the SDK complained about on this call. Kept because a call
@@ -172,7 +174,16 @@ export default function Softphone() {
       }) as unknown as TwilioDevice
       deviceRef.current = device
 
-      device.on('registered', () => { setPhase('idle'); setSoftphoneReady(true); setError('') })
+      device.on('registered', () => {
+        setPhase('idle'); setSoftphoneReady(true); setError('')
+        // Clearing the notice here is the whole point: the SDK reconnects on
+        // its own, and without this the "Phone reconnecting…" banner stayed on
+        // screen over a phone that had been working again for hours. An agent
+        // reading a stale warning assumes the feature is broken and stops
+        // using it — which is exactly what happened.
+        setNotice('')
+        retries.current = 0
+      })
       device.on('unregistered', () => setSoftphoneReady(false))
       device.on('error', (e: unknown) => {
         const err = e as { code?: number; message?: string }
@@ -190,16 +201,30 @@ export default function Softphone() {
           setNotice('Phone reconnecting…')
           // Ask for a fresh token and register again: after a long drop the old
           // one may have expired, and re-registering with it fails silently.
+          //
+          // RETRIED, with a backoff. A single attempt that threw left the
+          // banner up and the phone unregistered with nothing scheduled to try
+          // again — no further error event arrives once the transport has
+          // given up, so it stayed that way until somebody reloaded the page.
           void (async () => {
-            try {
-              const r = await fetch('/api/twilio/voice/token')
-              if (r.ok) {
-                const j = await r.json()
-                if (j.ready && j.token) device.updateToken(j.token)
+            for (let attempt = 0; attempt < 6; attempt++) {
+              try {
+                const r = await fetch('/api/twilio/voice/token')
+                if (r.ok) {
+                  const j = await r.json()
+                  if (j.ready && j.token) device.updateToken(j.token)
+                }
+                await device.register()
+                return                      // 'registered' clears the banner
+              } catch {
+                retries.current = attempt + 1
+                await new Promise((done) => setTimeout(done, Math.min(30000, 2000 * 2 ** attempt)))
               }
-              await device.register()
-              setNotice('')
-            } catch { /* the next event tries again */ }
+            }
+            // Out of attempts: say something the agent can act on rather than
+            // leaving a spinner-ish banner that means nothing.
+            setNotice('')
+            setError('The phone could not reconnect. Reload the page to use it again.')
           })()
           return
         }
