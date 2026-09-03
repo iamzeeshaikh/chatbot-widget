@@ -51,6 +51,10 @@ export interface SiteContact {
    *  and a made-up address on outgoing mail is the kind of thing that costs a
    *  Merchant Center account. */
   address: string
+  /** An absolute https URL to the company's logo. Absolute because the email
+   *  is read outside our origin; https because a mail client will refuse a
+   *  mixed-content image and simply not draw it. */
+  logo?: string
 }
 
 const str = (v: unknown, max = 200): string =>
@@ -78,6 +82,7 @@ export function parseSiteContact(message: string | null | undefined): SiteContac
       phone: str(o.phone, 40),
       website: str(o.website, 160),
       address: str(o.address, 300),
+      logo: /^https:\/\//i.test(str(o.logo, 400)) ? str(o.logo, 400) : undefined,
     }
   } catch { return null }
 }
@@ -201,8 +206,10 @@ export function renderSignatureHtml(
     address ? row('&#128205;', `<span style="color:${BODY};">${esc(address)}</span>`) : '',
   ].filter(Boolean).join('')
 
+  const logo = site?.logo || ''
+
   // Nothing to say — no empty box, no lonely rule.
-  if (!name && !company && !rows) return ''
+  if (!name && !company && !rows && !logo) return ''
 
   // The name block. When there is no name yet the company takes its size and
   // weight rather than sitting there in small type next to a blank space.
@@ -223,6 +230,15 @@ export function renderSignatureHtml(
   return '<div style="margin-top:22px;padding-top:14px;border-top:1px solid #e5e7eb;">'
     + '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:-apple-system,Segoe UI,Arial,Helvetica,sans-serif;">'
     + '<tr>'
+    // Fixed width AND height on the img, and alt text that is the company
+    // name: most clients hide remote images until the reader asks for them, so
+    // for that first read the alt text IS the logo. Without a size the layout
+    // also jumps when the image finally loads.
+    + (logo
+        ? `<td style="padding:0 16px 0 0;vertical-align:middle;">`
+          + `<img src="${esc(logo)}" alt="${esc(company || name)}" width="52" height="52"`
+          + ' style="display:block;width:52px;height:52px;border:0;outline:none;text-decoration:none;" /></td>'
+        : '')
     + (left
         ? `<td style="padding:0 20px 0 0;border-right:3px solid ${ACCENT};vertical-align:middle;">${left}</td>`
         : '')

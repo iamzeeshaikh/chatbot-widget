@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import { PenLine, Building2, Check, Loader2 } from 'lucide-react'
 
 interface Agent { email: string; name: string; title: string; phone: string }
-interface SiteContact { siteId: string; company: string; phone: string; website: string; address: string }
+interface SiteContact { siteId: string; company: string; phone: string; website: string; address: string; logo?: string }
 
 export default function Signatures({ isAdmin, siteNames }: {
   isAdmin: boolean
@@ -202,6 +202,12 @@ export default function Signatures({ isAdmin, siteNames }: {
                       <input id={`a-${s.siteId}`} className={field} value={s.address} disabled={!isAdmin}
                         placeholder="Leave blank until you have the real one"
                         onChange={(e) => setSites(sites.map((x) => x.siteId === s.siteId ? { ...x, address: e.target.value } : x))} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className={label} htmlFor={`l-${s.siteId}`}>Logo <span className="font-normal normal-case text-gray-400">— an https address, shown at 52×52</span></label>
+                      <input id={`l-${s.siteId}`} className={field} value={s.logo ?? ''} disabled={!isAdmin}
+                        placeholder="https://example.com/logo.png"
+                        onChange={(e) => setSites(sites.map((x) => x.siteId === s.siteId ? { ...x, logo: e.target.value } : x))} />
                     </div>
                     {isAdmin && (
                       <div className="sm:col-span-2">

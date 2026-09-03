@@ -38,6 +38,10 @@ export async function POST(req: NextRequest) {
     // Left blank until somebody types a real one. An invented address on
     // outgoing mail is worse than no address at all.
     address: String(body.address ?? '').trim().slice(0, 300),
+    // https only. A mail client refuses a mixed-content image and draws
+    // nothing, which looks like a broken signature rather than a missing logo.
+    logo: /^https:\/\//i.test(String(body.logo ?? '').trim())
+      ? String(body.logo).trim().slice(0, 400) : '',
   }
   const { error } = await writeControlRow({
     sessionId: SITE_CONTACT_SESSION, siteId: REMINDER_SITE,
