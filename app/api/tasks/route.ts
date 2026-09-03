@@ -4,6 +4,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { supabase } from '@/lib/supabase'
 import { loadMemberTasks, groupTasks, applyFilters } from '@/lib/taskquery'
 import { isTaskType, type TaskType } from '@/lib/tasks'
+import { canSeeContacts, scrubText } from '@/lib/pii'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,18 @@ export async function GET(req: NextRequest) {
   const siteId = rawSite && allowed.includes(rawSite) ? rawSite : ''
 
   const all = await loadMemberTasks(member)
-  const filtered = applyFilters(all, { assignee, siteId, type })
+  // The lead label falls back to the customer's EMAIL or PHONE when no name was
+  // ever captured (lib/taskquery.ts), and titles are free text an agent may
+  // have typed a number into — so for a contact-restricted member both are
+  // scrubbed HERE, at the read edge, the same rule as every list in lib/pii.ts.
+  // This shipped as a real leak: a sports agent's task list showed a customer's
+  // gmail address as the lead name (2026-09-04).
+  const scrubbed = canSeeContacts(member) ? all : all.map((t) => ({
+    ...t,
+    title: scrubText(t.title) ?? '',
+    leadName: scrubText(t.leadName) ?? 'Lead',
+  }))
+  const filtered = applyFilters(scrubbed, { assignee, siteId, type })
 
   // Filter options come from the tasks the member can actually see, so the
   // dropdowns never advertise a site or colleague outside their scope.

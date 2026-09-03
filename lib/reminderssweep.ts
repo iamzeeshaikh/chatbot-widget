@@ -19,7 +19,8 @@
 // additionally kept apart by a short lease row.
 
 import { supabase, fetchAllPages, warnIfCapped } from './supabase'
-import { HARDCODED_ACCOUNTS } from './auth'
+import { HARDCODED_ACCOUNTS, type Role } from './auth'
+import { canSeeContacts, scrubText } from './pii'
 import { workspaceSites, siteWorkspace, hasFeature, type Workspace } from './workspaces'
 import { formatDueLabel, pktDayKey } from './datetime'
 import { CRM_TASK_ROLE, parseCrmTask, taskBucket, type CrmTaskEntry } from './tasks'
@@ -65,7 +66,7 @@ interface LedgerRow { message: string; created_at: string }
 // ── Access ───────────────────────────────────────────────────────────────────
 // Recomputed on every run, never trusted from the task: a member removed from a
 // site after a task was assigned to them must stop receiving its reminders.
-interface Access { sites: Set<string>; workspace: Workspace }
+interface Access { sites: Set<string>; workspace: Workspace; role: Role }
 
 async function loadAccess(): Promise<Map<string, Access>> {
   const out = new Map<string, Access>()
@@ -73,13 +74,14 @@ async function loadAccess(): Promise<Map<string, Access>> {
     out.set(acct.email.toLowerCase(), {
       sites: new Set(workspaceSites(acct.workspace)),
       workspace: acct.workspace,
+      role: 'admin',
     })
   }
   const { data } = await supabase.from('members').select('email, role, workspace, assigned_sites')
   for (const m of data ?? []) {
     const ws = m.workspace as Workspace
     const sites = m.role === 'admin' ? workspaceSites(ws) : (m.assigned_sites ?? [])
-    out.set(String(m.email).toLowerCase(), { sites: new Set(sites), workspace: ws })
+    out.set(String(m.email).toLowerCase(), { sites: new Set(sites), workspace: ws, role: (m.role === 'admin' ? 'admin' : 'standard') })
   }
   return out
 }
@@ -273,9 +275,14 @@ export async function runReminderSweep(
         continue
       }
 
+      // Same read-edge rule as /api/tasks: this recipient may be barred from
+      // customer contacts, and both the lead label (which falls back to an
+      // email/phone) and a hand-typed title can carry one straight into an OS
+      // notification banner.
+      const seesContacts = canSeeContacts(access.get(email.toLowerCase()) ?? { role: 'standard', workspace: ws })
       const copy = reminderCopy(d.kind, {
-        title: task.title,
-        leadName: names[leadId] ?? 'Lead',
+        title: (seesContacts ? task.title : scrubText(task.title)) ?? '',
+        leadName: (seesContacts ? names[leadId] : scrubText(names[leadId] ?? 'Lead')) ?? 'Lead',
         leadMinutes: prefs.leadMinutes,
         dueLabel: formatDueLabel(task.due_at, now),
       })
