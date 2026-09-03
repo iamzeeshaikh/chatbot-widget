@@ -902,7 +902,7 @@ export default function Dashboard() {
   const [visitorHistoryLoaded, setVisitorHistoryLoaded] = useState(false)
   const [blockedIps, setBlockedIps] = useState<string[]>([])
   // Team presence — who's on shift right now (Zendesk-style online list).
-  const [teamAgents, setTeamAgents] = useState<{ email: string; online: boolean; lastSeen: string | null }[]>([])
+  const [teamAgents, setTeamAgents] = useState<{ email: string; online: boolean; lastSeen: string | null; assignable?: boolean }[]>([])
   // Assigning straight from the lead popup. A team lead reads a quote and hands
   // it to somebody in the same breath; making them open the record first turned
   // one decision into two page loads, so most leads simply stayed unassigned.
@@ -4297,7 +4297,10 @@ export default function Dashboard() {
                         until somebody picks, and then it shows what they
                         picked. */}
                     <option value="">{assigned && assigned.id === viewOverviewLead.id && assigned.email ? 'Unassign' : 'Assign to…'}</option>
-                    {teamAgents.map((a) => (
+                    {/* Agents only. Admins and the built-in account run the
+                        system rather than working leads, and offering them made
+                        the list twice as long as the team it describes. */}
+                    {teamAgents.filter((a) => a.assignable).map((a) => (
                       <option key={a.email} value={a.email}>{a.email}</option>
                     ))}
                   </select>

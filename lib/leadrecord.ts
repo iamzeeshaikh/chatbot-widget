@@ -806,13 +806,25 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const related = await findRelatedLeads(member, { id, email: effective.email, phone: effective.phone })
 
   // ── Assignable owners ─────────────────────────────────────────────────────
+  // Who can be given this lead: the AGENTS who work this site.
+  //
+  // Two rules that were both wrong before. An empty `assigned_sites` means
+  // EVERY site in the workspace, not none (lib/auth.ts's memberSites) — and
+  // every member here has an empty list, so testing `.includes(siteId)`
+  // excluded all of them and the dropdown offered only admins. And admins were
+  // included on purpose, which is backwards: they run the system, they are not
+  // on the rota, and listing them made the list twice as long as the team.
   const wsSites = new Set(workspaceSites(member.workspace))
   const assignable = new Set<string>()
   for (const m of membersRes.data ?? []) {
-    if (m.role === 'admin' || (m.assigned_sites ?? []).includes(siteId)) assignable.add(m.email)
+    if (m.role === 'admin') continue
+    const sites = m.assigned_sites ?? []
+    if (sites.length === 0 || sites.includes(siteId)) assignable.add(m.email)
   }
-  if (wsSites.has(siteId)) assignable.add(member.email) // built-in workspace admins have no members row
+  // The current owner stays listed even if they no longer qualify, or the
+  // dropdown would silently show somebody else's lead as unassigned.
   if (owner) assignable.add(owner)
+  void wsSites
 
   const notes = Array.from(notesById.values())
     .filter((n) => !n.deleted)

@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!member) return NextResponse.json({ agents: [], onlineCount: 0 }, { status: 401 })
 
   const [{ data: memberRows }, { data: beats }] = await Promise.all([
-    supabase.from('members').select('email').eq('workspace', member.workspace),
+    supabase.from('members').select('email, role').eq('workspace', member.workspace),
     supabase.from('active_visitors').select('page_url, last_seen')
       .eq('site_id', AGENT_DUTY_SITE)
       .gte('last_seen', new Date(Date.now() - 15 * 60 * 1000).toISOString()),
@@ -23,6 +23,14 @@ export async function GET(req: NextRequest) {
   const roster = new Set<string>()
   for (const a of HARDCODED_ACCOUNTS.filter((x) => x.workspace === member.workspace)) roster.add(a.email)
   for (const m of memberRows ?? []) roster.add(m.email)
+
+  // Who actually works leads. Admins and the built-in account run the system —
+  // they are not on the rota — so anything choosing an assignee should offer
+  // the agents and no one else. Presence itself still lists everybody, because
+  // "who is online" genuinely means everybody.
+  const agentOnly = new Set(
+    (memberRows ?? []).filter((m) => m.role !== 'admin').map((m) => String(m.email)),
+  )
 
   const lastByEmail: Record<string, number> = {}
   for (const b of beats ?? []) {
@@ -36,7 +44,11 @@ export async function GET(req: NextRequest) {
   const now = Date.now()
   const agents = Array.from(roster).map((email) => {
     const ms = lastByEmail[email] || 0
-    return { email, online: ms > 0 && now - ms < ONLINE_MS, lastSeen: ms ? new Date(ms).toISOString() : null }
+    return {
+      email, online: ms > 0 && now - ms < ONLINE_MS,
+      lastSeen: ms ? new Date(ms).toISOString() : null,
+      assignable: agentOnly.has(email),
+    }
   }).sort((a, b) => (a.online === b.online ? a.email.localeCompare(b.email) : a.online ? -1 : 1))
 
   return NextResponse.json({ agents, onlineCount: agents.filter((a) => a.online).length })
