@@ -99,7 +99,7 @@ const SITE_ACCENT: Record<string, string> = {
 
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean; /** Somebody marked this "not a lead" — excluded from every count. */ notALead?: boolean }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean; /** Somebody marked this "not a lead" — excluded from every count. */ notALead?: boolean; /** Who the lead is assigned to (the assignment control row). */ owner?: string | null }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -887,6 +887,8 @@ export default function Dashboard() {
   // conversation the bot captured, and a quote-request email pulled from
   // Gmail (no chat session at all) — filterable so it's easy to see just one.
   const [overviewLeadType, setOverviewLeadType] = useState<'all' | LeadSource | 'excluded'>('all')
+  // '' = everyone, '__unassigned__' = leads nobody owns, else an agent's email.
+  const [overviewLeadAgent, setOverviewLeadAgent] = useState('')
   // A Quote-type Recent Lead has no chat session to open — clicking one pops
   // its full details here instead (mirrors the Billing tab's quote modal).
   const [viewOverviewLead, setViewOverviewLead] = useState<Lead | null>(null)
@@ -2217,9 +2219,14 @@ export default function Dashboard() {
     : overviewLeadType === 'all'
       ? siteFilteredLeads.filter((l) => !l.notALead)
       : siteFilteredLeads.filter((l) => !l.notALead && leadSource(l.message) === overviewLeadType)
-  const overviewLeadPageCount = Math.max(1, Math.ceil(overviewFilteredLeads.length / OVERVIEW_LEADS_PER_PAGE))
+  const agentFilteredLeads = overviewLeadAgent === ''
+    ? overviewFilteredLeads
+    : overviewLeadAgent === '__unassigned__'
+      ? overviewFilteredLeads.filter((l) => !l.owner)
+      : overviewFilteredLeads.filter((l) => (l.owner ?? '').toLowerCase() === overviewLeadAgent)
+  const overviewLeadPageCount = Math.max(1, Math.ceil(agentFilteredLeads.length / OVERVIEW_LEADS_PER_PAGE))
   const overviewLeadPageClamped = Math.min(overviewLeadPage, overviewLeadPageCount - 1)
-  const overviewLeadsPageRows = overviewFilteredLeads.slice(
+  const overviewLeadsPageRows = agentFilteredLeads.slice(
     overviewLeadPageClamped * OVERVIEW_LEADS_PER_PAGE, (overviewLeadPageClamped + 1) * OVERVIEW_LEADS_PER_PAGE)
 
   // ── Bar chart: leads per day last 7 days (PKT days, matching todayStr above) ──
@@ -2718,6 +2725,7 @@ export default function Dashboard() {
                       // same broken promise the stat tiles used to make.
                       setOverviewLeadDate('all')
                       setOverviewLeadType('all')
+                      setOverviewLeadAgent('')
                       setOverviewLeadPage(0)
                       leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                     }
@@ -2778,6 +2786,20 @@ export default function Dashboard() {
                     <option value="quote">Quote only</option>
                     <option value="checkout">Checkout only</option>
                   </select>
+                  {/* Which agent's leads. PACKAGING ONLY, at the owner's word —
+                      sports runs on effectively one agent, so a filter there
+                      is a control with nothing to choose. */}
+                  {workspace === 'packaging' && (
+                    <select value={overviewLeadAgent}
+                      onChange={(e) => { setOverviewLeadAgent(e.target.value); setOverviewLeadPage(0) }}
+                      className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadAgent !== '' ? 'bg-indigo-100 border-indigo-300 text-indigo-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
+                      <option value="">All agents</option>
+                      <option value="__unassigned__">Unassigned</option>
+                      {teamAgents.filter((a) => a.assignable).map((a) => (
+                        <option key={a.email} value={a.email.toLowerCase()}>{a.email.split('@')[0]}</option>
+                      ))}
+                    </select>
+                  )}
                   {overviewLeadSite && (
                     <button onClick={() => { setOverviewLeadSite(''); setOverviewLeadPage(0) }}
                       className="text-[11px] font-medium text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5 hover:bg-blue-200 transition-colors"
@@ -2785,8 +2807,8 @@ export default function Dashboard() {
                       {roleSites.find((s) => s.site_id === overviewLeadSite)?.name ?? overviewLeadSite} <X size={11} strokeWidth={2} aria-hidden />
                     </button>
                   )}
-                  {(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') && (
-                    <span className="text-[11px] text-gray-500">{overviewFilteredLeads.length} result{overviewFilteredLeads.length !== 1 ? 's' : ''}</span>
+                  {(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all' || overviewLeadAgent !== '') && (
+                    <span className="text-[11px] text-gray-500">{agentFilteredLeads.length} result{agentFilteredLeads.length !== 1 ? 's' : ''}</span>
                   )}
                 </div>
                 <div className="bg-gray-100 rounded-xl border border-gray-200 overflow-hidden">
@@ -2800,7 +2822,7 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {overviewFilteredLeads.length === 0 ? (
+                        {agentFilteredLeads.length === 0 ? (
                           <tr>
                             <td colSpan={13} className="text-center py-8">
                               <div className="flex flex-col items-center">
@@ -2960,10 +2982,10 @@ export default function Dashboard() {
                   </div>
                 </div>
                 {/* Pagination */}
-                {overviewFilteredLeads.length > OVERVIEW_LEADS_PER_PAGE && (
+                {agentFilteredLeads.length > OVERVIEW_LEADS_PER_PAGE && (
                   <div className="flex items-center justify-between mt-3">
                     <span className="text-xs text-gray-500">
-                      Showing {overviewLeadPageClamped * OVERVIEW_LEADS_PER_PAGE + 1}–{Math.min((overviewLeadPageClamped + 1) * OVERVIEW_LEADS_PER_PAGE, overviewFilteredLeads.length)} of {overviewFilteredLeads.length}
+                      Showing {overviewLeadPageClamped * OVERVIEW_LEADS_PER_PAGE + 1}–{Math.min((overviewLeadPageClamped + 1) * OVERVIEW_LEADS_PER_PAGE, agentFilteredLeads.length)} of {agentFilteredLeads.length}
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button onClick={() => setOverviewLeadPage(Math.max(0, overviewLeadPageClamped - 1))} disabled={overviewLeadPageClamped === 0}
@@ -4234,7 +4256,7 @@ export default function Dashboard() {
           filtered list currently on screen, so browsing several leads
           doesn't mean closing and reopening the modal each time. */}
       {viewOverviewLead && (() => {
-        const navList = overviewFilteredLeads
+        const navList = agentFilteredLeads
         const idx = navList.findIndex((l) => l.id === viewOverviewLead.id)
         const hasPrev = idx > 0
         const hasNext = idx !== -1 && idx < navList.length - 1

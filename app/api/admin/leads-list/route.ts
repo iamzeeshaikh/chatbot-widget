@@ -198,12 +198,18 @@ export async function GET(req: NextRequest) {
   // belongs to a colleague is not this agent's to read at all, which is the
   // opposite of the "not a lead" case just below, where hiding the row was the
   // thing that made marking a one-way trip.
+  // Every row carries its owner — the Overview's agent filter reads it, and
+  // the visibility rule below is applied from the same map, so the filter and
+  // the rule can never disagree about whose lead something is.
+  const { data: ownerRows } = await supabase.from('chat_logs')
+    .select('session_id, role, message, created_at')
+    .in('site_id', allowed).eq('role', ASSIGNMENT_ROLE)
+    .order('created_at', { ascending: true }).limit(5000)
+  const owned = deriveAssignments((ownerRows ?? []) as { session_id: string; role: string; message: string }[])
+  for (const l of merged as Array<Record<string, unknown>>) {
+    l.owner = owned[sessionForLead(l as { id: string; session_id?: string | null })] ?? null
+  }
   if (!(await canSeeAllLeads(member))) {
-    const { data: owners } = await supabase.from('chat_logs')
-      .select('session_id, role, message, created_at')
-      .in('site_id', allowed).eq('role', ASSIGNMENT_ROLE)
-      .order('created_at', { ascending: true }).limit(5000)
-    const owned = deriveAssignments((owners ?? []) as { session_id: string; role: string; message: string }[])
     for (let i = merged.length - 1; i >= 0; i--) {
       const sid = sessionForLead(merged[i] as { id: string; session_id?: string | null })
       if (!visibleToMember(owned[sid], member.email, false)) merged.splice(i, 1)
