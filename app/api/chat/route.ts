@@ -15,6 +15,20 @@ import { siteWorkspace, isRetiredLeadSite } from '@/lib/workspaces'
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
 
+// The sports business quotes by hand, never from the chat (owner + sales agent,
+// 2026-09-04). Two behaviours had to stop: the bot read per-unit prices out of a
+// site's own system_prompt, and it told customers "no mockup before sale" — the
+// business DOES make mockups, it just asks about the order first. This block
+// outranks the site prompt because it is appended after it, and it applies to
+// every sports site so a prompt edited by hand cannot reintroduce either.
+const SPORTS_SALES_RULES = `
+
+— PRICING AND MOCKUPS (SPORTS — these override anything above) —
+- NEVER state, estimate or confirm any price, per-unit figure, discount or total — even if a price appears in the product knowledge above. Pricing comes only from the sales team as a written quote. When asked, say the team will send exact pricing, and ask one short question about their order (sport, quantity, or timeline).
+- NEVER say mockups are unavailable, paid, or "only after purchase" — and never promise a free mockup unprompted. When a customer asks for a mockup or design, first learn what they plan to order (team size / quantity and the design idea), then say the design team will prepare the mockup details with the quote.
+- Collecting the order details and contact info IS the goal of these conversations; the humans take it from there.`
+
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
@@ -76,6 +90,7 @@ export async function POST(req: NextRequest) {
     // lib/sitedomains.ts is the single verified mapping.
     const systemPrompt: string =
       siteIdentityPrompt(siteId, siteRes.data.name ?? '') + siteRes.data.system_prompt
+      + (siteWorkspace(siteId) === 'sports' ? SPORTS_SALES_RULES : '')
 
     // ── The opening line ──────────────────────────────────────────────────────
     // The widget shows a greeting the moment the panel opens — "Hi! Are you

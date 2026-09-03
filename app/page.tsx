@@ -19,7 +19,6 @@ import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspace
 import { isBotOffBySchedule, isBotOffByScheduleForWorkspace } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
 import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadstatus'
-import { isClosingMessage } from '@/lib/closing'
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 import { isQuoteLeadMessage, stripQuoteTag, cleanQuoteSubject, leadSource, type LeadSource } from '@/lib/quoteintake'
@@ -727,8 +726,6 @@ function SiteBreakdown({ data, loading, error, accent, onClose }: {
 // the widget's 30-minute session gap, so ancient unanswered chats can't ring
 // forever). The cadence is deliberately aggressive: it rings continuously
 // until an agent actually messages the customer.
-const WAITING_REPEAT_MS = 3 * 1000
-const WAITING_FRESH_MS = 30 * 60 * 1000
 // Live-visitor poll: also the worst-case delay between a visitor landing on a
 // site and the arrival chime, so it's kept tight.
 const VISITOR_POLL_MS = 5 * 1000
@@ -1243,43 +1240,12 @@ export default function Dashboard() {
     } catch { /* ignore */ }
   }, [soundOn, getDashCtx])
 
-  // Re-chime while anything needs a human (see WAITING_REPEAT_MS): a chat whose
-  // latest message is the visitor's, OR a live visitor nobody has engaged yet.
-  // "Engaged" = the last message in their session is an agent's — so ringing
-  // stops when an agent replies (or proactively messages a browsing visitor),
-  // resumes when the visitor speaks again, and ends when the visitor leaves the
-  // site (they drop off the live list). State is read through refs so the
-  // repeat cadence never resets on the poll updates; playDashSound honours the
-  // mute toggle.
-  const sessionsRef = useRef<Session[]>([])
-  const visitorsRef = useRef<Visitor[]>([])
+  // The 3-second re-chime that used to live here (ring until somebody replies)
+  // was removed on the owner's ask, 2026-09-04: "beep continues wali khatam
+  // karden". A waiting chat now rings ONCE — the new-message chime and the
+  // WhatsApp bell both fire on arrival — and the visual badges carry it after
+  // that. Do not reintroduce an interval that calls playDashSound.
   const visibleTick = useVisibleTick()
-  const userSitesRef = useRef<string[]>([])
-  useEffect(() => { sessionsRef.current = sessions }, [sessions])
-  useEffect(() => { visitorsRef.current = visitors }, [visitors])
-  useEffect(() => { userSitesRef.current = userSites }, [userSites])
-  useEffect(() => {
-    const iv = setInterval(() => {
-      const scope = new Set(userSitesRef.current)
-      const now = Date.now()
-      const waitingChat = sessionsRef.current.some((s) =>
-        s.last_role === 'user' && scope.has(s.site_id) &&
-        !(s.mode === 'human' && isClosingMessage(s.preview)) &&
-        !!s.last_at && now - new Date(s.last_at).getTime() < WAITING_FRESH_MS)
-      const lastRoleBySession = new Map(sessionsRef.current.map((s) => [s.session_id, s.last_role]))
-      const unengagedVisitor = visitorsRef.current.some((v) => {
-        if (!scope.has(v.site_id)) return false
-        // Same staleness cap the live list uses — a carried-over old session
-        // pinging from a forgotten tab must not ring.
-        const created = asUtcIso(v.created_at)
-        if (created && now - new Date(created).getTime() > LIVE_MAX_ON_SITE_MS) return false
-        return lastRoleBySession.get(v.session_id) !== 'admin'
-      })
-      if (waitingChat || unengagedVisitor) playDashSound()
-    }, WAITING_REPEAT_MS)
-    return () => clearInterval(iv)
-  }, [playDashSound])
-
   useEffect(() => {
     // Refetches every time the Overview tab is (re)opened, not just once on
     // first mount — this data used to only ever load once for the whole
