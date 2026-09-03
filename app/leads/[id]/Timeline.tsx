@@ -304,7 +304,7 @@ export default function Timeline({ events, currency, leadId, onEditNote, onDelet
                         controls
                         preload="none"
                         className="mt-1 w-full max-w-sm h-9"
-                        src={`/api/leads/${encodeURIComponent(leadId)}/call/recording?sid=${encodeURIComponent(e.call.recordingSid)}`}
+                        src={`/api/leads/${encodeURIComponent(e.callLeadId ?? leadId)}/call/recording?sid=${encodeURIComponent(e.call.recordingSid)}`}
                       />
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>

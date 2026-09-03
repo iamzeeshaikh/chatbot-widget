@@ -72,6 +72,10 @@ export interface TimelineEvent {
   wa?: WaMessage
   /** Set on `call` events. */
   call?: CallEntry
+  /** Set on `call` events that live on a RELATED lead (same person, matched on
+   *  contact) — the id whose /call/recording endpoint can actually serve the
+   *  audio, since the sid is checked against that lead's own rows. */
+  callLeadId?: string
   /** True while nobody has opened this reply. */
   unread?: boolean
   /** Signed, short-lived links for files on an email event. */
@@ -650,15 +654,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       // earlier row said; only a filled one overwrites.
       const c = parseCall(row.message)
       if (!c) continue
-      const prev = calls.get(c.sid)
-      calls.set(c.sid, !prev ? c : {
-        ...prev,
-        ...(c.by ? { by: c.by } : {}),
-        ...(c.at ? { at: c.at } : {}),
-        ...(c.status ? { status: c.status } : {}),
-        ...(c.duration !== undefined ? { duration: c.duration } : {}),
-        ...(c.recordingSid ? { recordingSid: c.recordingSid } : {}),
-      })
+      calls.set(c.sid, foldCall(calls.get(c.sid), c))
       continue
     }
     if (row.role === CRM_WA_OUT_ROLE || row.role === CRM_WA_IN_ROLE) {
@@ -775,21 +771,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   for (const c of calls.values()) {
     const at = asUtcIso(c.at)
     if (!at) continue
-    const len = callDurationLabel(c.duration)
     const answered = (c.duration ?? 0) > 0
-    push({
-      id: `call-${c.sid}`, at, kind: 'call', group: 'messages',
-      // 'voicemail' and 'inbound' are the customer reaching US; everything
-      // else is a call an agent placed.
-      actor: c.status === 'voicemail' || c.status.startsWith('inbound') ? 'Customer' : AGENT_LABEL(c.by),
-      title: c.status === 'voicemail' ? `Voicemail${len ? ` — ${len}` : ''}`
-        : c.status === 'inbound_whatsapp' ? `WhatsApp call${len ? ` — ${len}` : ''}`
-        : c.status === 'inbound' ? `Incoming call${len ? ` — ${len}` : ''}`
-        : c.status === 'ringing' ? 'Calling…'
-        : answered ? `Called — ${len}`
-        : `Call not answered (${c.status})`,
-      call: c,
-    })
+    push({ id: `call-${c.sid}`, at, ...callEventShape(c) })
     // A call we placed is an outbound touch, like an email or a WhatsApp
     // message — it is us reaching the customer.
     // A voicemail is the customer reaching US, so it is deliberately not an
@@ -804,6 +787,40 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
 
   // ── Related leads (same person, any site the member can see) ───────────────
   const related = await findRelatedLeads(member, { id, email: effective.email, phone: effective.phone })
+
+  // ── Calls that live on a RELATED lead ──────────────────────────────────────
+  // A chat lead often has no phone number, so when the same person CALLS, the
+  // call files by caller-id onto their quote/call lead instead — and this
+  // record showed no trace of it (found via a real case, 2026-09-04: "call hui
+  // to kahan hai call?"). The same person's calls are surfaced here read-only:
+  // they carry callLeadId so the audio streams from the record that actually
+  // owns the sid, and they never count as THIS lead's outreach or move its
+  // lastContactedAt — the owning record keeps that.
+  if (related.length > 0) {
+    const { data: sibRows } = await supabase.from('chat_logs')
+      .select('session_id, message, created_at')
+      .in('session_id', related.map((r) => r.id)).eq('role', CRM_CALL_ROLE)
+      .order('created_at', { ascending: true }).limit(200)
+    const sibCalls = new Map<string, { c: CallEntry; leadId: string }>()
+    for (const r of sibRows ?? []) {
+      const c = parseCall(r.message)
+      if (!c) continue
+      sibCalls.set(c.sid, { c: foldCall(sibCalls.get(c.sid)?.c, c), leadId: r.session_id })
+    }
+    const labelOf = new Map(related.map((r) => [r.id, (r.name ?? '').trim() || r.siteName]))
+    for (const { c, leadId: sourceId } of sibCalls.values()) {
+      if (calls.has(c.sid)) continue
+      const at = asUtcIso(c.at)
+      if (!at) continue
+      const shape = callEventShape(c)
+      timeline.push({
+        id: `call-${c.sid}`, at, ...shape,
+        title: `${shape.title} · on related lead ${labelOf.get(sourceId) ?? ''}`.trim(),
+        callLeadId: sourceId,
+      })
+    }
+    timeline.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+  }
 
   // ── Assignable owners ─────────────────────────────────────────────────────
   // Who can be given this lead: the AGENTS who work this site.
@@ -998,6 +1015,38 @@ function referrerOf(packed: string | null): string | null {
 // Other leads from the same person — matched on email or phone, across every
 // site the member is allowed to see (never beyond: a shared email must not
 // reveal that a site they have no access to exists).
+function foldCall(prev: CallEntry | undefined, c: CallEntry): CallEntry {
+  return !prev ? c : {
+    ...prev,
+    ...(c.by ? { by: c.by } : {}),
+    ...(c.at ? { at: c.at } : {}),
+    ...(c.status ? { status: c.status } : {}),
+    ...(c.duration !== undefined ? { duration: c.duration } : {}),
+    ...(c.recordingSid ? { recordingSid: c.recordingSid } : {}),
+  }
+}
+
+// How one call renders as a timeline event — shared between this lead's own
+// calls and the ones surfaced from RELATED leads, so the two can never word
+// the same call differently.
+function callEventShape(c: CallEntry): Pick<TimelineEvent, 'kind' | 'group' | 'actor' | 'title' | 'call'> {
+  const len = callDurationLabel(c.duration)
+  const answered = (c.duration ?? 0) > 0
+  return {
+    kind: 'call', group: 'messages',
+    // 'voicemail' and 'inbound' are the customer reaching US; everything
+    // else is a call an agent placed.
+    actor: c.status === 'voicemail' || c.status.startsWith('inbound') ? 'Customer' : AGENT_LABEL(c.by),
+    title: c.status === 'voicemail' ? `Voicemail${len ? ` — ${len}` : ''}`
+      : c.status === 'inbound_whatsapp' ? `WhatsApp call${len ? ` — ${len}` : ''}`
+      : c.status === 'inbound' ? `Incoming call${len ? ` — ${len}` : ''}`
+      : c.status === 'ringing' ? 'Calling…'
+      : answered ? `Called — ${len}`
+      : `Call not answered (${c.status})`,
+    call: c,
+  }
+}
+
 export async function findRelatedLeads(
   member: Member,
   self: { id: string; email: string; phone: string },
