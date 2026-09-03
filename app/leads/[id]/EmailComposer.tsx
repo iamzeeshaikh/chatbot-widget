@@ -112,6 +112,33 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
     return () => { alive = false }
   }, [leadId])
 
+  // ── the signature ─────────────────────────────────────────────────────────
+  // Appended once, and ONLY to a body that is still empty. A restored draft
+  // already has one at the bottom, and adding a second is how a reply ends up
+  // signed twice — the failure people notice, unlike a missing signature.
+  //
+  // Rendered on the server (lib/signature.ts) rather than assembled here, so
+  // the agent's own details and the site's address cannot drift apart between
+  // this composer and anything else that sends mail.
+  const signedRef = useRef(false)
+  useEffect(() => {
+    if (signedRef.current || loading) return
+    let alive = true
+    fetch(`/api/signature?siteId=${encodeURIComponent(siteId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d?.signature) return
+        setDraft((cur) => {
+          // Somebody has started typing, or a draft came back — leave it alone.
+          if (cur.body.trim()) return cur
+          signedRef.current = true
+          return { ...cur, body: `\n\n${d.signature}` }
+        })
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [siteId, loading])
+
   useEffect(() => {
     let alive = true
     fetch('/api/google/gmail/status')

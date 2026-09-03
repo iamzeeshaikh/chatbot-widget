@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Signatures from './Signatures'
 import { useRouter } from 'next/navigation'
 import { Trophy, Package, Pencil, Trash2 } from 'lucide-react'
 
@@ -316,6 +317,13 @@ export default function MembersPage() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {/* Signatures live here rather than on their own page: this is already
+            the screen for "who is on the team and what can they do", and a job
+            title belongs next to the person it names. */}
+        {!loading && (
+          <Signatures isAdmin={isAdmin} siteNames={Object.fromEntries(sites.map((x) => [x.site_id, x.name]))} />
         )}
       </div>
 
