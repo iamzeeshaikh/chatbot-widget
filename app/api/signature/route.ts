@@ -7,7 +7,6 @@ import {
   CRM_SIGNATURE_ROLE, SIGNATURE_SESSION,
   loadAgentSignatures, loadSiteContacts, renderSignature,
 } from '@/lib/signature'
-import { storedMemberNames } from '@/lib/membername'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -31,15 +30,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Email is not enabled for this workspace' }, { status: 403 })
   }
 
-  const [agents, sites, mine, names] = await Promise.all([
-    loadAgentSignatures(), loadSiteContacts(), memberSites(member), storedMemberNames(),
+  const [agents, sites, mine] = await Promise.all([
+    loadAgentSignatures(), loadSiteContacts(), memberSites(member),
   ])
-  // ONLY a name somebody actually typed. memberDisplayName() falls back to one
-  // DERIVED from the address for the chat widget, and on these accounts that
-  // derives to a site name — which signed dev@zeecustomboxes.com's mail
-  // "Shop Cardboard Boxes / Peptides Boxes", two company names and no person.
-  // No name at all is better: the line is simply left out.
-  const displayName = names.get(member.email.trim().toLowerCase()) ?? ''
+  // THE CHAT WIDGET'S DISPLAY NAME IS NOT A FALLBACK FOR THIS, and it was one
+  // for a few minutes. That name is deliberately the BRAND — customers chatting
+  // on a site should see the company, not a stranger's name — so borrowing it
+  // here signed dev@zeecustomboxes.com's mail "Shop Cardboard Boxes" above
+  // "Peptides Boxes": two company names and no person. A signature with no name
+  // is merely incomplete; one that names the wrong company is wrong.
+  // The name comes from the signature's own field or not at all.
   const agent = agents.get(member.email.toLowerCase()) ?? null
   const siteId = req.nextUrl.searchParams.get('siteId') ?? ''
   // The address the composer is actually sending FROM, which on these sites is
@@ -67,7 +67,6 @@ export async function GET(req: NextRequest) {
     // can never disagree about what the signature looks like.
     signature: siteId && mine.includes(siteId)
       ? renderSignature(agent, sites.get(siteId), {
-          name: displayName,
           email: from || member.email,
           company: siteName,
         })
