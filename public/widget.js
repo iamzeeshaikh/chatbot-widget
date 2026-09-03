@@ -588,13 +588,13 @@
     // Auto-open after 5 seconds — but only ONCE per session, and never after the
     // visitor has closed it. Without these two guards every page load re-opened
     // the panel, so closing it appeared to do nothing at all.
-    // californiasoccer opens on EVERY page load, at the owner's explicit word
-    // (2026-09-04) and against the guard's advice: on that site, closing the
-    // panel only lasts until the next page. Everywhere else the guards stand —
-    // once per session, and never within a day of the visitor closing it,
-    // because a panel that reopens after being closed teaches visitors that
-    // closing does nothing.
-    var autoOpenEveryPage = siteId === 'californiasoccer';
+    // EVERY site opens the panel on EVERY page load — the owner's explicit
+    // word, given twice (California on 2026-09-04, then all sites the same
+    // night after a product page stayed closed). The old guards — once per
+    // session, quiet for a day after a close — are gone with it: on these
+    // sites, closing the panel now only lasts until the next page. If visitors
+    // start bouncing over it, this is the flag to flip back.
+    var autoOpenEveryPage = true;
     setTimeout(function () {
       console.log('widget auto-open timer fired, already open=' + widget.classList.contains('open'));
       if (!autoOpenEveryPage && wasDismissed()) { console.log('auto-open skipped: visitor closed the chat'); return; }
