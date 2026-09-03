@@ -7,7 +7,7 @@ import {
   CRM_SIGNATURE_ROLE, SIGNATURE_SESSION,
   loadAgentSignatures, loadSiteContacts, renderSignature,
 } from '@/lib/signature'
-import { memberDisplayName } from '@/lib/membername'
+import { storedMemberNames } from '@/lib/membername'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -31,9 +31,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Email is not enabled for this workspace' }, { status: 403 })
   }
 
-  const [agents, sites, mine, displayName] = await Promise.all([
-    loadAgentSignatures(), loadSiteContacts(), memberSites(member), memberDisplayName(member.email),
+  const [agents, sites, mine, names] = await Promise.all([
+    loadAgentSignatures(), loadSiteContacts(), memberSites(member), storedMemberNames(),
   ])
+  // ONLY a name somebody actually typed. memberDisplayName() falls back to one
+  // DERIVED from the address for the chat widget, and on these accounts that
+  // derives to a site name — which signed dev@zeecustomboxes.com's mail
+  // "Shop Cardboard Boxes / Peptides Boxes", two company names and no person.
+  // No name at all is better: the line is simply left out.
+  const displayName = names.get(member.email.trim().toLowerCase()) ?? ''
   const agent = agents.get(member.email.toLowerCase()) ?? null
   const siteId = req.nextUrl.searchParams.get('siteId') ?? ''
   // The address the composer is actually sending FROM, which on these sites is
