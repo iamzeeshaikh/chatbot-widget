@@ -286,7 +286,7 @@
 #zee-chat-widget.open { transform: scale(1) translateY(0); opacity: 1; pointer-events: all; }\
 #zee-chat-header { background: ' + primaryColor + '; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }\
 #zee-chat-header-left { display: flex; align-items: center; gap: 10px; }\
-#zee-chat-avatar { width: 36px; height: 36px; border-radius: 50%; background: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; line-height: 1; }\
+#zee-chat-avatar { width: 36px; height: 36px; border-radius: 50%; background: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; line-height: 1; position: relative; overflow: hidden; }\
 #zee-msg-author-proto { }\
 .zee-msg-author { font-size: 11px; font-weight: 600; color: #6b7280; margin: 8px 0 2px 4px; }\
 #zee-chat-title { color: white; font-weight: 600; font-size: 15px; }\
@@ -433,7 +433,7 @@
     widget.innerHTML = '\
 <div id="zee-chat-header">\
   <div id="zee-chat-header-left">\
-    <div id="zee-chat-avatar">' + escapeHtml((config.bot_name || 'A')[0].toUpperCase()) + '</div>\
+    <div id="zee-chat-avatar"><img id="zee-chat-avatar-img" alt="" src="' + baseUrl + '/api/logo/' + encodeURIComponent(siteId) + '" onerror="this.remove()" style="width:100%;height:100%;border-radius:50%;object-fit:cover;position:absolute;inset:0;" /><span>' + escapeHtml((config.bot_name || 'A')[0].toUpperCase()) + '</span></div>\
     <div><div id="zee-chat-title">' + escapeHtml(config.bot_name) + '</div><div id="zee-chat-subtitle">Online · Ready to help</div></div>\
   </div>\
   <div id="zee-chat-header-actions">\
@@ -589,10 +589,17 @@
     // Auto-open after 5 seconds — but only ONCE per session, and never after the
     // visitor has closed it. Without these two guards every page load re-opened
     // the panel, so closing it appeared to do nothing at all.
+    // californiasoccer opens on EVERY page load, at the owner's explicit word
+    // (2026-09-04) and against the guard's advice: on that site, closing the
+    // panel only lasts until the next page. Everywhere else the guards stand —
+    // once per session, and never within a day of the visitor closing it,
+    // because a panel that reopens after being closed teaches visitors that
+    // closing does nothing.
+    var autoOpenEveryPage = siteId === 'californiasoccer';
     setTimeout(function () {
       console.log('widget auto-open timer fired, already open=' + widget.classList.contains('open'));
-      if (wasDismissed()) { console.log('auto-open skipped: visitor closed the chat'); return; }
-      if (lsGet(AUTOOPEN_KEY) === sessionId) { console.log('auto-open skipped: already auto-opened this session'); return; }
+      if (!autoOpenEveryPage && wasDismissed()) { console.log('auto-open skipped: visitor closed the chat'); return; }
+      if (!autoOpenEveryPage && lsGet(AUTOOPEN_KEY) === sessionId) { console.log('auto-open skipped: already auto-opened this session'); return; }
       if (!widget.classList.contains('open')) {
         lsSet(AUTOOPEN_KEY, sessionId);
         console.log('widget auto-opening');
@@ -716,6 +723,23 @@
   // Who was named above the last bubble, so a run of replies from the same
   // person is labelled once instead of on every line.
   var lastAuthorShown = null;
+
+  // The one-time "<name> connected" line. Keyed in sessionStorage so a page
+  // navigation mid-conversation does not announce the same person again.
+  function announceAgentOnce(name) {
+    try {
+      var k = 'zee-agent-announced-' + siteId + '-' + sessionId;
+      if (sessionStorage.getItem(k) === name) return;
+      sessionStorage.setItem(k, name);
+    } catch (e) { /* storage blocked — announce anyway */ }
+    var el = document.getElementById('zee-chat-messages');
+    if (!el) return;
+    var line = document.createElement('div');
+    line.setAttribute('style', 'text-align:center;font-size:11px;color:#6b7280;margin:10px 0;');
+    line.textContent = (name || 'An agent') + ' connected';
+    el.appendChild(line);
+    scrollToBottom();
+  }
 
   // Header: "<Name> · Online" once a human is handling the chat. The site name
   // stays as the window's own title elsewhere; this line is about WHO.
@@ -911,7 +935,14 @@
           var newMsgs = data.messages || [];
           // A person is on the other end: say so in the header too, so it is
           // visible even after scrolling away from their first reply.
-          if (data.agentName) setAgentHeader(data.agentName);
+          if (data.agentName) {
+            setAgentHeader(data.agentName);
+            // Said IN the conversation too, once: the header change is easy to
+            // miss mid-scroll, and knowing a person has picked this up is what
+            // keeps a customer from walking off. Never the word "Bot" — the
+            // customer is never told which replies were automated.
+            announceAgentOnce(data.agentName);
+          }
           for (var i = 0; i < newMsgs.length; i++) {
             appendMessage('bot', newMsgs[i].message, newMsgs[i].author);
             messages.push({ role: 'assistant', content: newMsgs[i].message });
