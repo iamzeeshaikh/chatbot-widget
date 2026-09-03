@@ -16,6 +16,7 @@ import {
 } from '@/lib/crmemail'
 import { sanitizeHtml, htmlToPlain, plainToHtml } from '@/lib/richtext'
 import { loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml } from '@/lib/signature'
+import { storedMemberNames } from '@/lib/membername'
 import { supabase as db } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -153,17 +154,25 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // inline styles: the sanitiser above would strip both, and it has to, because
   // the body IS agent-authored. Doing it at send time also means a signature
   // cannot arrive half-deleted because somebody edited around it.
-  const [agentSigs, siteContacts, siteRow] = await Promise.all([
+  const [agentSigs, siteContacts, allSites, chatNames] = await Promise.all([
     loadAgentSignatures(), loadSiteContacts(),
-    db.from('sites').select('name').eq('site_id', access.siteId).maybeSingle(),
+    db.from('sites').select('site_id, name'), storedMemberNames(),
   ])
+  const siteNameOf = new Map((allSites.data ?? []).map((r) => [r.site_id, String(r.name ?? '')]))
+  // Same rule as /api/signature, and it must stay the same rule: a chat display
+  // name is the person's name for most members and a BRAND for one, so it is
+  // used unless it matches a site name. If these two ever disagree, the
+  // signature shown in the composer is not the one the customer receives.
+  const brandNames = new Set(Array.from(siteNameOf.values()).map((n) => n.toLowerCase()))
+  const chatName = chatNames.get(access.member.email.trim().toLowerCase()) ?? ''
   // Absolute, and from the configured base rather than the request host: the
   // recipient's mail client fetches this from outside, where a relative URL or
   // a preview hostname resolves to nothing.
   const base = (process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).replace(/\/$/, '')
   const sigFallback = {
+    name: brandNames.has(chatName.toLowerCase()) ? '' : chatName,
     email: from,
-    company: String(siteRow.data?.name ?? ''),
+    company: siteNameOf.get(access.siteId) ?? '',
     logoSrc: `${base}/api/logo/${encodeURIComponent(access.siteId)}`,
   }
   const mySig = agentSigs.get(access.member.email.toLowerCase()) ?? null

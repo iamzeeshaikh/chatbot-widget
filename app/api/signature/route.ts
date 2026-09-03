@@ -8,6 +8,7 @@ import {
   loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml,
 } from '@/lib/signature'
 import { supabase } from '@/lib/supabase'
+import { storedMemberNames } from '@/lib/membername'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,16 +31,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Email is not enabled for this workspace' }, { status: 403 })
   }
 
-  const [agents, sites, mine] = await Promise.all([
-    loadAgentSignatures(), loadSiteContacts(), memberSites(member),
+  const [agents, sites, mine, chatNames] = await Promise.all([
+    loadAgentSignatures(), loadSiteContacts(), memberSites(member), storedMemberNames(),
   ])
-  // THE CHAT WIDGET'S DISPLAY NAME IS NOT A FALLBACK FOR THIS, and it was one
-  // for a few minutes. That name is deliberately the BRAND — customers chatting
-  // on a site should see the company, not a stranger's name — so borrowing it
-  // here signed dev@zeecustomboxes.com's mail "Shop Cardboard Boxes" above
-  // "Peptides Boxes": two company names and no person. A signature with no name
-  // is merely incomplete; one that names the wrong company is wrong.
-  // The name comes from the signature's own field or not at all.
+  // ── the name, when the agent has not set one ──────────────────────────────
+  // The chat widget's display name is used, because for eight of the nine
+  // people here it IS their name — Samir Khan, Steve Hayes, Danny Diaz. But
+  // that field is allowed to hold a BRAND instead: dev@zeecustomboxes.com's is
+  // "Shop Cardboard Boxes", and borrowing that signed its mail with two company
+  // names and no person. So a chat name that matches one of the site names is
+  // rejected and the line is left out — better incomplete than wrong.
   const agent = agents.get(member.email.toLowerCase()) ?? null
   const siteId = req.nextUrl.searchParams.get('siteId') ?? ''
   // The address the composer is actually sending FROM, which on these sites is
@@ -51,11 +52,12 @@ export async function GET(req: NextRequest) {
   // A brand-new agent has filled nothing in, and a signature that is only an
   // email address is worse than useless. Their display name and the site's own
   // name stand in until somebody types something better.
-  let siteName = ''
-  if (siteId && mine.includes(siteId)) {
-    const { data } = await supabase.from('sites').select('name').eq('site_id', siteId).maybeSingle()
-    siteName = String(data?.name ?? '')
-  }
+  const { data: siteRows } = await supabase.from('sites').select('site_id, name')
+  const siteNames = new Map((siteRows ?? []).map((r) => [r.site_id, String(r.name ?? '')]))
+  const isCompanyName = new Set(Array.from(siteNames.values()).map((n) => n.toLowerCase()))
+  const chatName = chatNames.get(member.email.trim().toLowerCase()) ?? ''
+  const fallbackName = isCompanyName.has(chatName.toLowerCase()) ? '' : chatName
+  const siteName = siteId && mine.includes(siteId) ? (siteNames.get(siteId) ?? '') : ''
 
   return NextResponse.json({
     agent,
@@ -67,6 +69,7 @@ export async function GET(req: NextRequest) {
     // can never disagree about what the signature looks like.
     signature: siteId && mine.includes(siteId)
       ? renderSignature(agent, sites.get(siteId), {
+          name: fallbackName,
           email: from || member.email,
           company: siteName,
         })
@@ -76,6 +79,7 @@ export async function GET(req: NextRequest) {
     // a drawing of the feature rather than the feature.
     signatureHtml: siteId && mine.includes(siteId)
       ? renderSignatureHtml(agent, sites.get(siteId), {
+          name: fallbackName,
           email: from || member.email,
           company: siteName,
           logoSrc: `${req.nextUrl.origin}/api/logo/${encodeURIComponent(siteId)}`,
