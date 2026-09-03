@@ -2125,6 +2125,7 @@ export default function Dashboard() {
   const canRecords = hasFeature(workspace, 'records')
   const canPipeline = hasFeature(workspace, 'pipeline')
   const canTasks = hasFeature(workspace, 'tasks')
+  const canEmail = hasFeature(workspace, 'email')
   const canReports = hasFeature(workspace, 'reports')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
@@ -2360,6 +2361,16 @@ export default function Dashboard() {
               {roleVisitors.length > 999 ? '999+' : roleVisitors.length}
             </span>
           </button>
+          {canEmail && (
+            <a href="/inbox" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/inbox') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`}
+              title={unreadReplies > 0 ? `${unreadReplies} unread customer repl${unreadReplies === 1 ? 'y' : 'ies'}` : 'Email conversations'}>
+              <span className="truncate">Inbox</span>
+              {/* Same always-rendered pattern as the Chats count: hiding a badge
+                  that later appears widens the strip and moves every tab. */}
+              <span className={`${NAV_COUNT} ${unreadReplies > 0 ? 'bg-blue-600 text-white' : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}>{unreadReplies > 999 ? '999+' : unreadReplies}</span>
+            </a>
+          )}
           {/* Billing is the month's revenue view and it carries the CSV export
               of every lead — an owner's page, not an agent's. Admins only here,
               in the view below, and in the endpoint, so there is no address bar
