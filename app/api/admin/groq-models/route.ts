@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { siteWorkspace } from '@/lib/workspaces'
+import { SPORTS_SALES_RULES } from '@/lib/sportsbot'
 import { getMember } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { siteIdentityPrompt } from '@/lib/sitedomains'
@@ -48,7 +50,8 @@ export async function GET(req: NextRequest) {
   const started = Date.now()
   const maxTokens = Number(req.nextUrl.searchParams.get('max')) || undefined
   const effort = req.nextUrl.searchParams.get('effort') || undefined
-  const sample = await sampleReply(tryModel, siteIdentityPrompt(site, row.name ?? '') + row.system_prompt, question, { maxTokens, effort })
+  const sample = await sampleReply(tryModel, siteIdentityPrompt(site, row.name ?? '') + row.system_prompt
+    + (siteWorkspace(site) === 'sports' ? SPORTS_SALES_RULES : ''), question, { maxTokens, effort })
   return NextResponse.json({
     model: tryModel,
     siteId: site,
