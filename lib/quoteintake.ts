@@ -279,6 +279,28 @@ export function checkoutOrderNumber(bodyText: string): string | null {
   return m ? m[1] : null
 }
 
+// OUR OWN numbers. A submission carrying the company's own phone line is a
+// TEST — somebody checking a form after a migration — and never a customer: a
+// real enquiry does not type the number it is trying to reach into the phone
+// field. Four test leads reached the Overview count this way on 3 Sep alone,
+// and marking them by hand afterwards is a job that repeats forever.
+//
+// Digits only, compared on the last nine (lib/identity.ts's rule) so the same
+// line matches however it was typed: 503-358-0443, 5033580443, +1 503 358 0443.
+const OWN_NUMBERS = [
+  '5033580443',      // the old packaging line
+  '5034614788',      // the current packaging line
+  '2134493746',      // sports
+  '447458651107',    // the UK line
+]
+
+function isOwnNumber(phone: string | null | undefined): boolean {
+  const digits = String(phone ?? '').replace(/\D/g, '')
+  if (digits.length < 9) return false
+  const tail = digits.slice(-9)
+  return OWN_NUMBERS.some((n) => n.slice(-9) === tail)
+}
+
 // The telecom industry reserves 555-0100 through 555-0199 for fiction/testing
 // — a real customer's phone can never fall in this block, so a submission
 // carrying one (e.g. "416-555-0142") is someone testing the form, not a lead.
@@ -288,6 +310,7 @@ const TEST_PHONE_RE = /^\d{3}555\d{4}$/
 // ingested as checkout leads instead (see isCheckoutOrder above).
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
+  if (isOwnNumber(cleanPhone)) return true
   if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
   return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText)
     || MARKETING_PITCH_RE.test(bodyText) || SUPPLIER_PITCH_RE.test(bodyText)

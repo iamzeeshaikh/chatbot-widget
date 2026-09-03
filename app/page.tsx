@@ -903,6 +903,15 @@ export default function Dashboard() {
   const [blockedIps, setBlockedIps] = useState<string[]>([])
   // Team presence — who's on shift right now (Zendesk-style online list).
   const [teamAgents, setTeamAgents] = useState<{ email: string; online: boolean; lastSeen: string | null }[]>([])
+  // Assigning straight from the lead popup. A team lead reads a quote and hands
+  // it to somebody in the same breath; making them open the record first turned
+  // one decision into two page loads, so most leads simply stayed unassigned.
+  const [assigning, setAssigning] = useState(false)
+  // The choice is stored WITH the lead it was made on, so opening a different
+  // lead shows an empty box rather than the previous one's owner. Derived
+  // rather than reset in an effect — an effect that calls setState on every
+  // open is a re-render nobody needs.
+  const [assigned, setAssigned] = useState<{ id: string; email: string } | null>(null)
   const [showTeam, setShowTeam] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
   const [histSiteFilter, setHistSiteFilter] = useState('')
@@ -4262,6 +4271,37 @@ export default function Dashboard() {
               {leadSource(viewOverviewLead.message) === 'chat' && viewOverviewLead.session_id && (
                 <button onClick={() => { const l = viewOverviewLead; setViewOverviewLead(null); openLeadConversation(l) }}
                   className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open chat</button>
+              )}
+              {canRecords && (
+                <label className="flex items-center gap-1.5 text-xs">
+                  <span className="text-gray-500">Assign</span>
+                  <select
+                    value={assigned && assigned.id === viewOverviewLead.id ? assigned.email : ''}
+                    disabled={assigning}
+                    onChange={async (e) => {
+                      const email = e.target.value
+                      const recordId = leadRecordId(viewOverviewLead)
+                      setAssigning(true)
+                      try {
+                        const r = await fetch(`/api/leads/${encodeURIComponent(recordId)}/owner`, {
+                          method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ email }),
+                        })
+                        if (r.ok) setAssigned({ id: viewOverviewLead.id, email })
+                      } finally { setAssigning(false) }
+                    }}
+                    className="text-xs bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-gray-800 focus:outline-none focus:border-blue-500 cursor-pointer disabled:opacity-50 max-w-[190px]">
+                    {/* Not "Unassigned" — the popup does not load who owns
+                        this lead, and a box reading Unassigned over a lead that
+                        already has an owner is a lie. It is an action list
+                        until somebody picks, and then it shows what they
+                        picked. */}
+                    <option value="">{assigned && assigned.id === viewOverviewLead.id && assigned.email ? 'Unassign' : 'Assign to…'}</option>
+                    {teamAgents.map((a) => (
+                      <option key={a.email} value={a.email}>{a.email}</option>
+                    ))}
+                  </select>
+                </label>
               )}
               {canRecords && <a href={leadRecordHref(leadRecordId(viewOverviewLead))}
                 className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Open record</a>}
