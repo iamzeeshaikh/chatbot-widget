@@ -132,6 +132,9 @@ interface VisitorDetail {
   contact: VisitorContact
   tags: string[]
   stats: { visits: number; chats: number; first_seen: string | null; last_seen: string | null }
+  /** Older sessions of the SAME visitor (their persistent browser id) in which
+   *  they actually typed — openable, so an agent can read what was said before. */
+  previousChats?: { session_id: string; messages: number; last_at: string | null }[]
   path: { url: string | null; title: string | null; at: string | null }[]
   technical: {
     country: string | null; city: string | null; browser: string | null; os: string | null
@@ -3590,6 +3593,32 @@ export default function Dashboard() {
                       ))}
                     </div>
                   </section>
+
+                  {/* This visitor's earlier conversations, openable. The Chats
+                      tile above counts only THIS session; a returning customer's
+                      history lived in older sessions nobody could reach without
+                      hunting the Conversations list by eye. */}
+                  {visitorDetail?.previousChats && visitorDetail.previousChats.length > 0 && (
+                    <section>
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-2">
+                        Previous chats <span className="text-gray-500 normal-case font-normal">· {visitorDetail.previousChats.length}</span>
+                      </h3>
+                      <div className="space-y-1.5">
+                        {visitorDetail.previousChats.map((c) => (
+                          <button key={c.session_id}
+                            onClick={() => openConversationBySession({ sessionId: c.session_id, siteId: visitorDetail.site_id, preview: '', lastAt: c.last_at ?? '' })}
+                            title="Open this earlier conversation"
+                            className="w-full flex items-center justify-between gap-2 px-2.5 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                            <span className="inline-flex items-center gap-1.5 text-xs text-gray-800">
+                              <MessageSquare size={12} strokeWidth={2} className="text-gray-500 shrink-0" aria-hidden />
+                              {c.last_at ? formatDateTime(c.last_at) : 'Earlier chat'}
+                            </span>
+                            <span className="text-[10px] text-gray-500 tabular-nums shrink-0">{c.messages} msg{c.messages !== 1 ? 's' : ''}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
                   {/* Visitor path */}
                   <section>

@@ -121,9 +121,44 @@ export async function GET(req: NextRequest) {
     ? contact
     : { ...contact, email: contact.email ? HIDDEN_EMAIL : '', phone: contact.phone ? HIDDEN_PHONE : '' }
 
+  // ── Their previous conversations ──────────────────────────────────────────
+  // The widget keeps a per-browser visitor id across sessions (packed as `vid`
+  // in the visitor row), which is what ties today's session to last week's.
+  // Only sessions where the visitor actually TYPED count — an idle page view
+  // that never chatted is not a conversation anybody can open.
+  let previousChats: { session_id: string; messages: number; last_at: string | null }[] = []
+  if (packed.vid) {
+    const { data: siblings } = await supabase.from('active_visitors')
+      .select('session_id, page_url')
+      .eq('site_id', siteId)
+      .like('page_url', `%"vid":"${packed.vid}"%`)
+      .neq('session_id', sessionId)
+      .order('last_seen', { ascending: false })
+      .limit(10)
+    const ids = (siblings ?? []).map((r) => r.session_id)
+    if (ids.length > 0) {
+      const { data: msgs } = await supabase.from('chat_logs')
+        .select('session_id, created_at')
+        .in('session_id', ids).eq('role', 'user')
+        .neq('message', '(session started)')
+        .order('created_at', { ascending: true }).limit(1000)
+      const bySession = new Map<string, { messages: number; last_at: string | null }>()
+      for (const m of msgs ?? []) {
+        const cur = bySession.get(m.session_id) ?? { messages: 0, last_at: null }
+        cur.messages++; cur.last_at = m.created_at
+        bySession.set(m.session_id, cur)
+      }
+      previousChats = ids
+        .filter((id) => bySession.has(id))
+        .map((id) => ({ session_id: id, ...bySession.get(id)! }))
+        .map((c) => ({ ...c, last_at: asUtcIso(c.last_at) }))
+    }
+  }
+
   return NextResponse.json({
     detail: {
       session_id: sessionId,
+      previousChats,
       site_id: siteId,
       contact: shownContact,
       tags,
