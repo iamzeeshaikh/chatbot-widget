@@ -12,7 +12,7 @@ import {
   Trophy, Globe, Bot, BotOff, TrendingUp, Inbox, Pencil, Trash2, ChevronLeft,
   ChevronRight, Repeat, Eye, Contact, UserPlus, Languages, Pin, User, FileText,
   Paperclip, Ban, Flame, AlertTriangle, ChevronUp, ChevronDown, Download,
-  CreditCard, Info, Check, X, TrendingDown, LogOut, MessageCircle, PhoneCall, type LucideIcon,
+  CreditCard, Info, Check, X, TrendingDown, LogOut, MessageCircle, PhoneCall, ExternalLink, type LucideIcon,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
@@ -3576,7 +3576,22 @@ export default function Dashboard() {
                         {visitorDetail.path.map((p, i) => (
                           <li key={i} className="ml-3.5 relative">
                             <span className="absolute -left-[1.18rem] top-1 w-2 h-2 rounded-full" style={{ backgroundColor: accentColor }} />
-                            <p className="text-xs text-gray-800 leading-snug break-words" title={p.url ?? undefined}>{pageLabel(p)}</p>
+                            {/* The page itself, openable. An agent reading a
+                                path is usually trying to see what the customer
+                                was looking at; the URL was only in a tooltip,
+                                so getting there meant retyping it. New tab, so
+                                the conversation they are in the middle of does
+                                not go away. */}
+                            {p.url ? (
+                              <a href={p.url} target="_blank" rel="noopener noreferrer"
+                                title={`Open ${p.url}`}
+                                className="text-xs text-blue-700 hover:text-blue-900 hover:underline leading-snug break-words inline-flex items-start gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+                                <span>{pageLabel(p)}</span>
+                                <ExternalLink size={11} strokeWidth={2} className="mt-0.5 shrink-0 opacity-60" aria-hidden />
+                              </a>
+                            ) : (
+                              <p className="text-xs text-gray-800 leading-snug break-words">{pageLabel(p)}</p>
+                            )}
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-[10px] text-gray-500">{i + 1}.</span>
                               {p.at && <span className="text-[10px] text-gray-500">{formatDateTime(p.at)}</span>}
