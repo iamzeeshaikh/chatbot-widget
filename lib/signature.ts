@@ -189,7 +189,7 @@ function link(href: string, text: string): string {
 export function renderSignatureHtml(
   agent: AgentSignature | null | undefined,
   site: SiteContact | null | undefined,
-  fallback: { name?: string; email?: string; company?: string } = {},
+  fallback: { name?: string; email?: string; company?: string; logoSrc?: string } = {},
 ): string {
   const name = agent?.name || fallback.name || ''
   const company = site?.company || fallback.company || ''
@@ -206,7 +206,10 @@ export function renderSignatureHtml(
     address ? row('&#128205;', `<span style="color:${BODY};">${esc(address)}</span>`) : '',
   ].filter(Boolean).join('')
 
-  const logo = site?.logo || ''
+  // Served through our own /api/logo when the caller gives us a base, because
+  // the sites' own logos carry Cross-Origin-Resource-Policy: same-origin and a
+  // browser will not draw them anywhere else.
+  const logo = site?.logo ? (fallback.logoSrc || site.logo) : ''
 
   // Nothing to say — no empty box, no lonely rule.
   if (!name && !company && !rows && !logo) return ''

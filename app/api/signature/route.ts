@@ -78,6 +78,7 @@ export async function GET(req: NextRequest) {
       ? renderSignatureHtml(agent, sites.get(siteId), {
           email: from || member.email,
           company: siteName,
+          logoSrc: `${req.nextUrl.origin}/api/logo/${encodeURIComponent(siteId)}`,
         })
       : '',
     // Admins get everyone's, so they can fill in a new starter's details.

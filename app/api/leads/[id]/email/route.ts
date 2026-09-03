@@ -157,7 +157,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     loadAgentSignatures(), loadSiteContacts(),
     db.from('sites').select('name').eq('site_id', access.siteId).maybeSingle(),
   ])
-  const sigFallback = { email: from, company: String(siteRow.data?.name ?? '') }
+  // Absolute, and from the configured base rather than the request host: the
+  // recipient's mail client fetches this from outside, where a relative URL or
+  // a preview hostname resolves to nothing.
+  const base = (process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).replace(/\/$/, '')
+  const sigFallback = {
+    email: from,
+    company: String(siteRow.data?.name ?? ''),
+    logoSrc: `${base}/api/logo/${encodeURIComponent(access.siteId)}`,
+  }
   const mySig = agentSigs.get(access.member.email.toLowerCase()) ?? null
   const mySite = siteContacts.get(access.siteId)
   const sigText = renderSignature(mySig, mySite, sigFallback)
