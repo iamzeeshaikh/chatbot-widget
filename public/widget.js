@@ -478,8 +478,7 @@
       widget.classList.toggle('open');
       if (widget.classList.contains('open')) {
         clearDismissed(); // opening it by hand undoes an earlier "leave me alone"
-        sendBotGreeting();
-        startPolling();
+        openConversation();
       } else {
         markDismissed();
         stopPolling();
@@ -606,8 +605,7 @@
         widget.classList.add('open');
         console.log('widget open class set: ' + widget.classList.contains('open'));
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white" width="26" height="26"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
-        sendBotGreeting();
-        startPolling();
+        openConversation();
       }
     }, 5000);
   }
@@ -1133,6 +1131,48 @@
       if (t.length >= 3 && t.length <= 60) return t;
     } catch (e) {}
     return '';
+  }
+
+  // ─── Restore the conversation ─────────────────────────────────────────────
+  // The transcript used to start empty on every page, and pollSince at "now" —
+  // so anything an agent wrote while the visitor was away was never fetched at
+  // all: the dashboard showed a sent reply, the customer's widget showed a
+  // fresh greeting, and it was reported as the chat being slow. On open, the
+  // session's whole transcript is fetched once and rendered, pollSince moves
+  // to its newest row, and only a genuinely EMPTY conversation gets greeted.
+  var historyLoaded = false;
+  function openConversation() {
+    if (historyLoaded) { sendBotGreeting(); startPolling(); return; }
+    historyLoaded = true;
+    fetch(baseUrl + '/api/chat/poll?history=1&sessionId=' + encodeURIComponent(sessionId) +
+      '&siteId=' + encodeURIComponent(siteId))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var rows = (data && data.messages) || [];
+        var latestAuthor = null;
+        for (var i = 0; i < rows.length; i++) {
+          var m = rows[i];
+          if (m.message === '(session started)') continue;
+          if (m.role === 'user') {
+            appendMessage('user', m.message);
+            messages.push({ role: 'user', content: m.message });
+          } else {
+            appendMessage('bot', m.message, m.role === 'admin' ? m.author : null);
+            messages.push({ role: 'assistant', content: m.message });
+            botMessageCount++;
+          }
+          if (m.role === 'admin' && m.author) latestAuthor = m.author;
+          pollSince = m.created_at;
+        }
+        if (rows.length > 0) greetingSent = true;   // a real conversation needs no re-greeting
+        if (data && data.agentName) { setAgentHeader(data.agentName); announceAgentOnce(data.agentName); }
+        else if (latestAuthor) { setAgentHeader(latestAuthor); announceAgentOnce(latestAuthor); }
+      })
+      .catch(function () { /* offline or blocked — the greeting still greets */ })
+      .then(function () {
+        sendBotGreeting();
+        startPolling();
+      });
   }
 
   function sendBotGreeting() {

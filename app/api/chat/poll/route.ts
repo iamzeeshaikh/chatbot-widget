@@ -21,6 +21,14 @@ export async function GET(req: NextRequest) {
   const sessionId = searchParams.get('sessionId')
   const siteId = searchParams.get('siteId')
   const since = searchParams.get('since') // ISO timestamp of last seen message
+  // history=1: the WHOLE conversation for this session — what the visitor
+  // typed, what the bot answered, what an agent wrote — so a returning visitor
+  // gets their transcript back. Without it, `pollSince` started at page load
+  // and anything an agent sent while the visitor was away was simply never
+  // fetched: the dashboard showed a reply, the customer showed nothing, and it
+  // was reported as the chat "being slow". Capped, ascending, and admin-only
+  // stays the shape for the incremental poll.
+  const wantHistory = searchParams.get('history') === '1'
 
   if (!sessionId || !siteId) {
     return NextResponse.json({ error: 'Missing params' }, { status: 400, headers: corsHeaders })
@@ -29,7 +37,15 @@ export async function GET(req: NextRequest) {
   const [mode, visRes, logsRes] = await Promise.all([
     getMode(sessionId),
     supabase.from('active_visitors').select('page_url').eq('session_id', sessionId).maybeSingle(),
-    since
+    wantHistory
+      ? supabase
+          .from('chat_logs')
+          .select('id, role, message, created_at')
+          .eq('session_id', sessionId)
+          .in('role', ['user', 'assistant', 'admin'])
+          .order('created_at', { ascending: true })
+          .limit(200)
+      : since
       ? supabase
           .from('chat_logs')
           .select('id, role, message, created_at')
@@ -54,7 +70,8 @@ export async function GET(req: NextRequest) {
   // reused here rather than invented. Bot answers are not `admin` rows at all,
   // so they never pick up a name.
   const authorByAt = new Map<string, string>()
-  if (rawMessages.length > 0) {
+  const adminRows = rawMessages.filter((m) => m.role === 'admin')
+  if (adminRows.length > 0) {
     // A name an admin chose on the Members page wins over the one derived from
     // the address — that is the whole reason the field exists.
     const chosen = await storedMemberNames()
@@ -63,7 +80,7 @@ export async function GET(req: NextRequest) {
       .select('message, created_at')
       .eq('session_id', sessionId)
       .eq('role', REPLY_AUTHOR_ROLE)
-      .gte('created_at', rawMessages[0].created_at)
+      .gte('created_at', adminRows[0].created_at)
     for (const row of authors ?? []) {
       const a = parseReplyAuthor(row.message)
       if (a?.email) {
