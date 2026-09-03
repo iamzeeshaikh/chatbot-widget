@@ -402,7 +402,16 @@ function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email']> }) {
         from {entry.from}{entry.cc ? ` · cc ${entry.cc}` : ''}
       </p>
       {open ? (
-        <p className="mt-1.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{entry.body}</p>
+        // The formatted version when there is one, so the record shows what the
+        // customer actually received rather than a flattened copy of it. It is
+        // sanitised on write AND again on read (lib/crmemail.ts), which is what
+        // makes it safe to put through dangerouslySetInnerHTML here.
+        entry.html ? (
+          <div className="tl-email mt-1.5 text-xs text-gray-800 break-words leading-snug"
+            dangerouslySetInnerHTML={{ __html: entry.html }} />
+        ) : (
+          <p className="mt-1.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug">{entry.body}</p>
+        )
       ) : (
         <p className="mt-1 text-xs text-gray-700 break-words leading-snug">{entry.snippet}</p>
       )}

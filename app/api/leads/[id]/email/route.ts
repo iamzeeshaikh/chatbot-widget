@@ -14,6 +14,7 @@ import {
   CRM_EMAIL_ROLE, MAX_SUBJECT, MAX_BODY, makeSnippet, newEmailId,
   parseAddressList, type CrmEmailEntry,
 } from '@/lib/crmemail'
+import { sanitizeHtml, htmlToPlain } from '@/lib/richtext'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -47,7 +48,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const to = String(body.to ?? '').trim()
   const cc = String(body.cc ?? '').trim()
   const subject = String(body.subject ?? '').trim().slice(0, MAX_SUBJECT)
-  const text = String(body.body ?? '')
+  // The composer sends the formatted body; the plain text is derived from it
+  // here rather than trusted from the client, so the two halves of the message
+  // can never say different things.
+  const rawHtml = String(body.html ?? '')
+  const html = rawHtml.trim() ? sanitizeHtml(rawHtml) : ''
+  const text = html ? htmlToPlain(html) : String(body.body ?? '')
   // The client only ever names WHICH message it is replying to. The thread and
   // the header chain are rebuilt from our own rows below — a browser must not
   // be able to post an arbitrary threadId and drop a message into a
@@ -144,6 +150,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   try {
     sent = await sendEmail(access.member.email, cfg, {
       from, to: toList.list.join(', '), cc: ccValue || undefined, subject, body: text,
+      html: html || undefined,
       threadId: thread?.threadId,
       inReplyTo: thread?.inReplyTo,
       references: thread?.references,
@@ -167,6 +174,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     cc: ccValue || undefined,   // what was actually sent, not what was asked for
     subject,
     body: text,
+    // Kept so the timeline can show the message the way it was sent. It is
+    // already sanitised above — this is the value that gets rendered back into
+    // another agent's browser.
+    html: html || undefined,
     snippet: makeSnippet(text),
     at: new Date().toISOString(),
     gmailId: sent.id,

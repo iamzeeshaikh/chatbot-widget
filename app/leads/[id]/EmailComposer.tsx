@@ -10,6 +10,8 @@
 // lead, cleared only once the send actually succeeds.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import RichText from './RichText'
+import { plainToHtml } from '@/lib/richtext'
 import {
   X, Send, TriangleAlert, Link2, Loader2, Plus, CornerUpLeft, Paperclip, FileText, Image as ImageIcon,
 } from 'lucide-react'
@@ -33,7 +35,7 @@ export interface GmailStatus {
   replyCaptureReason?: string | null
 }
 
-interface Draft { from: string; to: string; cc: string; subject: string; body: string }
+interface Draft { from: string; to: string; cc: string; subject: string; body: string; html: string }
 
 /** Set when the composer was opened by Reply on an inbound message. */
 export interface ReplyTo { replyToGmailId: string; to: string; subject: string }
@@ -71,13 +73,12 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   // alone rather than becoming "Re: Re: Re: …" down a long thread.
   const [draft, setDraft] = useState<Draft>({
     from: '', to: replyTo?.to || leadEmail, cc: '',
-    subject: replyTo?.subject ?? '', body: '',
+    subject: replyTo?.subject ?? '', body: '', html: '',
   })
   const seeded = useRef(false)
   // CC is optional and usually unused, so it costs a permanent row for nothing.
   // It opens automatically when a restored draft already has one.
   const [showCc, setShowCc] = useState(false)
-  const bodyRef = useRef<HTMLTextAreaElement>(null)
   // Whether this is a reply is fixed for the life of the composer — it is set
   // before mount and cleared on close — so the restore effect below reads it
   // from a ref rather than taking it as a dependency and re-running.
@@ -104,6 +105,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
             cc: typeof d.cc === 'string' ? d.cc : '',
             subject: isReply.current ? cur.subject : (typeof d.subject === 'string' ? d.subject : ''),
             body: typeof d.body === 'string' ? d.body : '',
+            html: typeof d.html === 'string' ? d.html : (typeof d.body === 'string' ? plainToHtml(d.body) : ''),
           }))
           if (typeof d.cc === 'string' && d.cc.trim()) setShowCc(true)
         }
@@ -132,7 +134,8 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
           // Somebody has started typing, or a draft came back — leave it alone.
           if (cur.body.trim()) return cur
           signedRef.current = true
-          return { ...cur, body: `\n\n${d.signature}` }
+          const text = `\n\n${d.signature}`
+          return { ...cur, body: text, html: plainToHtml(text) }
         })
       })
       .catch(() => {})
@@ -262,15 +265,9 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
     }
   }
 
-  // The body grows with what is typed instead of starting as a wall of empty
-  // space: most of these are three lines, not an essay. Capped so the modal is
-  // always sized to its content and never taller than the viewport.
-  useEffect(() => {
-    const el = bodyRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 420)}px`
-  }, [draft.body, loading, status])
+  // The body used to be a textarea resized here on every keystroke. RichText
+  // grows on its own (min-height with a max-height and a scroll), so there is
+  // nothing left to measure.
 
   const connectHref = `/api/google/gmail/connect?back=${encodeURIComponent(`/leads/${leadId}`)}`
   // A subject stays REQUIRED rather than optional-with-a-warning: this is
@@ -423,14 +420,14 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                   className="w-full bg-transparent border-0 px-0 py-0 text-sm font-semibold text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:outline-none" />
               </Row>
 
-              <textarea ref={bodyRef} value={draft.body} onChange={(e) => set({ body: e.target.value })} rows={5}
-                aria-label="Message" placeholder="Write your message…"
-                onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles([...e.dataTransfer.files]) }}
-                className={`w-full min-h-[128px] bg-transparent border-0 border-t px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none resize-none leading-relaxed transition-colors ${
-                  dragging ? 'border-t-blue-400 bg-blue-50' : 'border-t-gray-200'
-                }`} />
+              <RichText
+                html={draft.html}
+                onChange={(html, text) => set({ html, body: text })}
+                placeholder="Write your message…"
+                dragging={dragging}
+                onDragStateChange={setDragging}
+                onDropFiles={(f) => addFiles(f)}
+              />
 
               {/* Attachments live inside the same block, below the body. */}
               {files.length > 0 && (

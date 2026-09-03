@@ -337,6 +337,11 @@ export interface OutgoingEmail {
   cc?: string
   subject: string
   body: string
+  /** The same message with formatting. When present it is sent ALONGSIDE
+   *  `body` as a multipart/alternative, never instead of it — a client that
+   *  cannot render HTML falls back to the plain part, and a message with only
+   *  an HTML part arrives blank in those. */
+  html?: string
   // ── threading (Phase 6) ────────────────────────────────────────────────────
   // Both halves are needed and they do different jobs. `threadId` is Gmail's
   // own grouping and is what keeps the message in the same conversation in the
@@ -389,17 +394,39 @@ function buildMime(m: OutgoingEmail, messageId: string): string {
   ]
 
   const b64 = (buf: Buffer) => buf.toString('base64').replace(/(.{76})/g, '$1\r\n')
-  const bodyPart = [
-    'Content-Type: text/plain; charset="UTF-8"',
+  const part = (mime: string, content: string) => [
+    `Content-Type: ${mime}; charset="UTF-8"`,
     'Content-Transfer-Encoding: base64',
     '',
-    b64(Buffer.from(m.body, 'utf8')),
+    b64(Buffer.from(content, 'utf8')),
   ]
 
-  // No attachments: keep the simple single-part message exactly as before, so
+  // A formatted message is multipart/alternative: the SAME message twice, plain
+  // first and HTML second. Order matters — a client shows the LAST part it can
+  // render, so plain-then-html means "use the formatting if you can".
+  let bodyPart: string[]
+  let bodyHeader: string[] = []
+  if (m.html) {
+    const alt = `zee_alt_${Date.now().toString(36)}_${randomBytes(8).toString('hex')}`
+    bodyHeader = [`Content-Type: multipart/alternative; boundary="${alt}"`]
+    bodyPart = [
+      '',
+      `--${alt}`,
+      ...part('text/plain', m.body),
+      '',
+      `--${alt}`,
+      ...part('text/html', m.html),
+      '',
+      `--${alt}--`,
+    ]
+  } else {
+    bodyPart = part('text/plain', m.body)
+  }
+
+  // No attachments: keep the message single-part (or a bare alternative), so
   // the common case gains no MIME machinery it does not need.
   if (!m.attachments?.length) {
-    return [...lines, ...bodyPart].join('\r\n')
+    return [...lines, ...bodyHeader, ...bodyPart].join('\r\n')
   }
 
   // multipart/mixed: the text first, then one part per file. The boundary is
@@ -410,6 +437,7 @@ function buildMime(m: OutgoingEmail, messageId: string): string {
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
     `--${boundary}`,
+    ...bodyHeader,
     ...bodyPart,
   ]
   for (const a of m.attachments) {

@@ -16,6 +16,7 @@
 // without a migration.
 
 import { parseEmailAttachments, type EmailAttachment } from './emailattach'
+import { sanitizeHtml } from './richtext'
 
 export const CRM_EMAIL_ROLE = 'crm_email'
 
@@ -37,6 +38,11 @@ export interface CrmEmailEntry {
   subject: string
   /** Full text, kept so the timeline can show the whole thing. */
   body: string
+  /** The formatted version, when the agent used any. ALREADY SANITISED at the
+   *  send route — it is rendered back into another agent's browser, so it must
+   *  never be stored raw. `body` stays the source of truth for search, the
+   *  snippet and any client that cannot render it. */
+  html?: string
   snippet: string
   at: string
   /** Gmail's own ids, plus the RFC Message-ID — the hooks Phase 6 threads on. */
@@ -64,6 +70,10 @@ export function parseCrmEmail(message: string | null | undefined): CrmEmailEntry
       cc: typeof o.cc === 'string' && o.cc ? o.cc : undefined,
       subject: str(o.subject),
       body: str(o.body),
+      // Sanitised when it was written; re-checked on read anyway, because rows
+      // written before the sanitiser existed are still in the table and control
+      // rows are append-only, so there is nothing to migrate.
+      html: typeof o.html === 'string' && o.html ? sanitizeHtml(o.html) : undefined,
       snippet: str(o.snippet),
       at: str(o.at),
       gmailId: str(o.gmailId),
