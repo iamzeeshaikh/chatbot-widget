@@ -331,7 +331,7 @@ export default function Timeline({ events, currency, leadId, onEditNote, onDelet
 // A customer's reply. Visually the mirror of EmailEntry — violet rather than
 // sky, and labelled with who wrote it — so the two directions never blur
 // together when you are scanning the rail.
-function InboundEntry({ entry, unread, onReply }: {
+export function InboundEntry({ entry, unread, onReply }: {
   entry: NonNullable<TimelineEvent['inbound']>
   unread: boolean
   onReply?: (ctx: ReplyContext) => void
@@ -393,7 +393,7 @@ function InboundEntry({ entry, unread, onReply }: {
   )
 }
 
-function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email']> }) {
+export function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email']> }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="mt-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5">
@@ -441,7 +441,7 @@ function describeValue(body: string, fallbackCurrency: CrmCurrency): string {
 
 // Files carried by an email, in either direction. Links are signed and expire,
 // which is why they are minted per page load rather than stored.
-function Files({ files, skipped, gmailId, onRetryFile }: {
+export function Files({ files, skipped, gmailId, onRetryFile }: {
   files?: TimelineEvent['files']
   skipped?: { name: string; why: string }[]
   gmailId?: string
