@@ -729,7 +729,7 @@
       var k = 'zee-agent-announced-' + siteId + '-' + sessionId;
       if (sessionStorage.getItem(k) === name) return;
       sessionStorage.setItem(k, name);
-    } catch (e) { /* storage blocked — announce anyway */ }
+    } catch { /* storage blocked — announce anyway */ }
     var el = document.getElementById('zee-chat-messages');
     if (!el) return;
     var line = document.createElement('div');
