@@ -4,6 +4,7 @@ import { twilioAuth, verifyTwilioSignature, workspaceForBusinessNumber } from '@
 import { CRM_WA_IN_ROLE } from '@/lib/crm'
 import { leadForCaller } from '@/lib/inbound'
 import { WHATSAPP_LEAD_MESSAGE } from '@/lib/quoteintake'
+import { harvestContact } from '@/lib/contactharvest'
 import { sendPushToWorkspace } from '@/lib/push'
 import { hasFeature } from '@/lib/workspaces'
 
@@ -96,6 +97,11 @@ export async function POST(req: NextRequest) {
           at: new Date().toISOString(), direction: 'inbound',
         }),
       }])
+      // "my email is …" in a WhatsApp message fills the record's empty Email
+      // field by itself — same as chat has always done, and only ever an EMPTY
+      // field (lib/contactharvest.ts). Inside the dedupe guard on purpose: a
+      // retried webhook must not re-run the capture either.
+      await harvestContact(sessionId, siteId, body ?? '')
     }
   }
 

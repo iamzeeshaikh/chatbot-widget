@@ -31,6 +31,7 @@ import { sendPushToMember } from './push'
 import { siteWorkspace, hasFeature } from './workspaces'
 import { currentStateForIds } from './leadstate'
 import { CRM_EMAIL_ROLE, parseCrmEmail } from './crmemail'
+import { harvestContact } from './contactharvest'
 import {
   CRM_EMAIL_IN_ROLE, parseCrmEmailIn, splitQuoted, inboundSnippet, parseFromHeader,
   MAX_INBOUND_BODY, CRM_EMAIL_SWEEP_ROLE, type CrmEmailInEntry,
@@ -374,6 +375,10 @@ export async function runEmailSweep(
               role: CRM_EMAIL_IN_ROLE, message: JSON.stringify(entry),
             })
             if (error) throw new Error(error)
+            // A reply saying "call me on …" fills the empty Phone field by
+            // itself — from the UNQUOTED body only, because the quoted chain
+            // carries OUR signature and our signature now carries our number.
+            await harvestContact(ref.sessionId, ref.siteId, entry.body ?? '')
           }
           captured.add(m.gmailId)
           res.captured++
