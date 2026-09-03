@@ -54,15 +54,18 @@ export async function GET(req: NextRequest) {
   // address and number into chat all the time — so for a member who may not see
   // contacts the message text is scrubbed, not just the lead's fields.
   const hide = !canSeeContacts(member)
-  // A file message carries a storage URL, and scrubbing text does not touch a
-  // URL — so for a member who may not see contacts the whole file message is
-  // replaced. The visitor's uploads are theirs, and a scanned order form gives
-  // up an address no regex will ever read.
-  const FILE_HIDDEN = 'Attachment (hidden)'
+  // Files are NOT hidden any more — the owner's explicit decision, 2026-09-03.
+  // They used to be, because a scanned order form carries the customer's
+  // address as pixels no regex can reach. The owner chose to accept that: in
+  // this business an attachment is nearly always the artwork or design the
+  // agent needs to quote, and hiding it meant every file went through an
+  // admin. TEXT is still scrubbed — the file marker is passed through
+  // untouched, because scrubbing its JSON would corrupt the URL and turn the
+  // bubble into raw text.
   const messages = (data ?? []).map((m) => ({
     ...m,
     message: hide
-      ? (parseAttachment(m.message) ? FILE_HIDDEN : scrubText(m.message))
+      ? (parseAttachment(m.message) ? m.message : scrubText(m.message))
       : m.message,
     author: m.role === 'admin' ? (authorByAt[m.created_at] ?? null) : null,
     created_at: asUtcIso(m.created_at),
