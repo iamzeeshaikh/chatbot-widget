@@ -140,3 +140,80 @@ export function renderSignature(
   if (lines.length === 0) return ''
   return `--\n${lines.join('\n')}`
 }
+
+// ── The designed version ─────────────────────────────────────────────────────
+//
+// Built server-side from stored FIELDS, never from anything an agent typed, so
+// it is trusted HTML and does not go through lib/richtext.ts's whitelist —
+// which would strip the table and every inline style and leave a bare list of
+// lines. It is appended at SEND time rather than inserted into the composer,
+// which also means a signature cannot be half-deleted by an agent editing
+// around it.
+//
+// Written the way email HTML has to be written, not the way a web page is:
+//   • a TABLE for layout — Outlook's renderer is Word's, and it does not do
+//     flexbox or grid at all;
+//   • every style INLINE — Gmail strips <style> blocks entirely;
+//   • text glyphs, not images or SVG, for the little icons. Gmail removes
+//     <svg>, blocks data: URIs in <img>, and hides remote images until the
+//     reader clicks "display images" — so any of those leaves four broken
+//     boxes down the side of the signature on first read.
+
+const esc = (v: string): string =>
+  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+const ACCENT = '#2563eb'
+
+function row(glyph: string, inner: string): string {
+  return `<tr><td style="padding:2px 8px 2px 0;font-size:13px;line-height:20px;color:${ACCENT};vertical-align:top;">${glyph}</td>`
+    + `<td style="padding:2px 0;font-size:13px;line-height:20px;color:#374151;vertical-align:top;">${inner}</td></tr>`
+}
+
+function link(href: string, text: string): string {
+  return `<a href="${esc(href)}" style="color:${ACCENT};text-decoration:none;">${esc(text)}</a>`
+}
+
+export function renderSignatureHtml(
+  agent: AgentSignature | null | undefined,
+  site: SiteContact | null | undefined,
+  fallback: { name?: string; email?: string; company?: string } = {},
+): string {
+  const name = agent?.name || fallback.name || ''
+  const company = site?.company || fallback.company || ''
+  const title = agent?.title || ''
+  const phone = agent?.phone || site?.phone || ''
+  const email = fallback.email || ''
+  const website = (site?.website || '').replace(/^https?:\/\//, '').replace(/\/$/, '')
+  const address = site?.address || ''
+
+  const rows = [
+    phone ? row('&#9743;', link(`tel:${phone.replace(/[^\d+]/g, '')}`, phone)) : '',
+    email ? row('&#9993;', link(`mailto:${email}`, email)) : '',
+    website ? row('&#127760;', link(`https://${website}`, website)) : '',
+    address ? row('&#128205;', `<span style="color:#374151;">${esc(address)}</span>`) : '',
+  ].filter(Boolean).join('')
+
+  // Nothing to say — no empty box, no lonely rule.
+  if (!name && !company && !rows) return ''
+
+  const left = [
+    name ? `<div style="font-size:17px;font-weight:700;color:#111827;line-height:22px;">${esc(name)}</div>` : '',
+    title ? `<div style="font-size:13px;color:#6b7280;line-height:18px;margin-top:2px;">${esc(title)}</div>` : '',
+    company ? `<div style="font-size:13px;font-weight:600;color:${ACCENT};line-height:18px;margin-top:3px;">${esc(company)}</div>` : '',
+  ].filter(Boolean).join('')
+
+  // The divider is a border on the left cell, not its own column: an empty
+  // <td> with a background collapses to nothing in several clients.
+  return '<div style="margin-top:18px;">'
+    + `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;">`
+    + '<tr>'
+    + (left
+        ? `<td style="padding:0 18px 0 0;border-right:2px solid ${ACCENT};vertical-align:top;">${left}</td>`
+        : '')
+    + (rows
+        ? `<td style="padding:0 0 0 ${left ? '18px' : '0'};vertical-align:top;">`
+          + `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rows}</table>`
+          + '</td>'
+        : '')
+    + '</tr></table></div>'
+}

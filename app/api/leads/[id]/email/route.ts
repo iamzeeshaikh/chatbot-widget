@@ -14,7 +14,9 @@ import {
   CRM_EMAIL_ROLE, MAX_SUBJECT, MAX_BODY, makeSnippet, newEmailId,
   parseAddressList, type CrmEmailEntry,
 } from '@/lib/crmemail'
-import { sanitizeHtml, htmlToPlain } from '@/lib/richtext'
+import { sanitizeHtml, htmlToPlain, plainToHtml } from '@/lib/richtext'
+import { loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml } from '@/lib/signature'
+import { supabase as db } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -145,12 +147,34 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // ── 0. resolve the thread from OUR rows, not from the request ─────────────
   const thread = replyToGmailId ? await threadContextFor(id, replyToGmailId) : null
 
+  // ── the signature ─────────────────────────────────────────────────────────
+  // Appended HERE, not in the composer. It is built from stored fields rather
+  // than from anything the agent typed, which is what lets it use a table and
+  // inline styles: the sanitiser above would strip both, and it has to, because
+  // the body IS agent-authored. Doing it at send time also means a signature
+  // cannot arrive half-deleted because somebody edited around it.
+  const [agentSigs, siteContacts, siteRow] = await Promise.all([
+    loadAgentSignatures(), loadSiteContacts(),
+    db.from('sites').select('name').eq('site_id', access.siteId).maybeSingle(),
+  ])
+  const sigFallback = { email: from, company: String(siteRow.data?.name ?? '') }
+  const mySig = agentSigs.get(access.member.email.toLowerCase()) ?? null
+  const mySite = siteContacts.get(access.siteId)
+  const sigText = renderSignature(mySig, mySite, sigFallback)
+  const sigHtml = renderSignatureHtml(mySig, mySite, sigFallback)
+
+  // The plain part gets the plain signature and the HTML part the designed one
+  // — the same information, each in the form its half of the message can show.
+  const finalText = sigText ? `${text}\n\n${sigText}` : text
+  const bodyHtml = html || plainToHtml(text)
+  const finalHtml = sigHtml ? `${bodyHtml}${sigHtml}` : (html || '')
+
   // ── 1. Gmail first ─────────────────────────────────────────────────────────
   let sent
   try {
     sent = await sendEmail(access.member.email, cfg, {
-      from, to: toList.list.join(', '), cc: ccValue || undefined, subject, body: text,
-      html: html || undefined,
+      from, to: toList.list.join(', '), cc: ccValue || undefined, subject, body: finalText,
+      html: finalHtml || undefined,
       threadId: thread?.threadId,
       inReplyTo: thread?.inReplyTo,
       references: thread?.references,
@@ -173,11 +197,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     to: toList.list.join(', '),
     cc: ccValue || undefined,   // what was actually sent, not what was asked for
     subject,
-    body: text,
-    // Kept so the timeline can show the message the way it was sent. It is
-    // already sanitised above — this is the value that gets rendered back into
-    // another agent's browser.
-    html: html || undefined,
+    body: finalText,
+    // Kept so the timeline can show the message the way it was sent. The body
+    // half is sanitised above and the signature half is ours, so what is stored
+    // is safe to render back into another agent's browser.
+    html: finalHtml || undefined,
+    // The snippet is the AGENT's words, not the signature — a preview reading
+    // "Steve Hayes Sales Executive" tells nobody what the email said.
     snippet: makeSnippet(text),
     at: new Date().toISOString(),
     gmailId: sent.id,

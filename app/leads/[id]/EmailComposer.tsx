@@ -115,32 +115,21 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   }, [leadId])
 
   // ── the signature ─────────────────────────────────────────────────────────
-  // Appended once, and ONLY to a body that is still empty. A restored draft
-  // already has one at the bottom, and adding a second is how a reply ends up
-  // signed twice — the failure people notice, unlike a missing signature.
-  //
-  // Rendered on the server (lib/signature.ts) rather than assembled here, so
-  // the agent's own details and the site's address cannot drift apart between
-  // this composer and anything else that sends mail.
-  const signedRef = useRef(false)
+  // NOT inserted into the body any more. It is appended by the send route, from
+  // stored fields, so it can be a designed block rather than four lines of text
+  // — the sanitiser that (correctly) guards agent-typed HTML would strip a
+  // table and every inline style out of it. What is fetched here is only a
+  // description of what will be added, for the line under the composer.
+  const [sigWho, setSigWho] = useState('')
   useEffect(() => {
-    if (signedRef.current || loading) return
-    // Waits for the From address: it decides which of the agent's aliases the
-    // signature names, and fetching before it is known signs the mail with the
-    // wrong one.
-    if (!draft.from) return
+    if (loading || !draft.from) return
     let alive = true
     fetch(`/api/signature?siteId=${encodeURIComponent(siteId)}&from=${encodeURIComponent(draft.from)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!alive || !d?.signature) return
-        setDraft((cur) => {
-          // Somebody has started typing, or a draft came back — leave it alone.
-          if (cur.body.trim()) return cur
-          signedRef.current = true
-          const text = `\n\n${d.signature}`
-          return { ...cur, body: text, html: plainToHtml(text) }
-        })
+        if (!alive) return
+        const a = d?.agent
+        setSigWho([a?.name, a?.title].filter(Boolean).join(' · '))
       })
       .catch(() => {})
     return () => { alive = false }
@@ -511,8 +500,16 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                 </span>
               )}
 
-              <span className="ml-auto text-[10px] text-gray-400 hidden sm:inline">
-                ⌘↵ to send · draft saved
+              {/* The signature is added on send, so it is not visible in the
+                  box above — this line is how you know it is coming, and the
+                  link is how you fix it if the name is wrong. */}
+              <span className="ml-auto flex items-center gap-2 text-[10px] text-gray-400">
+                <a href="/members" target="_blank" rel="noopener noreferrer"
+                  title="Your signature is added when this sends. Edit it on the Members page."
+                  className="hidden sm:inline text-gray-500 hover:text-blue-700 transition-colors">
+                  {sigWho ? `Signed ${sigWho}` : 'Add your signature'}
+                </a>
+                <span className="hidden sm:inline">⌘↵ to send · draft saved</span>
               </span>
             </footer>
           </>

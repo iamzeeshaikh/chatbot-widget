@@ -31,6 +31,7 @@ export default function Signatures({ isAdmin, siteNames }: {
   const [error, setError] = useState('')
   const [openSite, setOpenSite] = useState<string | null>(null)
   const [preview, setPreview] = useState('')
+  const [previewHtml, setPreviewHtml] = useState('')
 
   // State is set from the promise callback, never synchronously in the effect
   // body — the latter is what makes React re-render in a cascade.
@@ -55,7 +56,7 @@ export default function Signatures({ isAdmin, siteNames }: {
     if (!previewSite) return
     fetch(`/api/signature?siteId=${encodeURIComponent(previewSite)}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setPreview(d?.signature ?? ''))
+      .then((d) => { setPreview(d?.signature ?? ''); setPreviewHtml(d?.signatureHtml ?? '') })
       .catch(() => {})
   }, [previewSite, savedAgent, savedSite])
 
@@ -134,9 +135,23 @@ export default function Signatures({ isAdmin, siteNames }: {
           <p className="text-gray-500 text-[11px] mb-3">
             {previewSite ? <>As it will appear on mail from <span className="font-medium text-gray-700">{siteNames[previewSite] ?? previewSite}</span></> : 'Pick a site below'}
           </p>
-          <pre className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-gray-800 bg-gray-100 border border-gray-200 rounded-xl p-4 min-h-[120px]">
-            {preview || 'Nothing filled in yet.'}
-          </pre>
+          {/* The HTML the customer will actually see. It comes from the same
+              function the send route uses, and is built from stored fields
+              rather than from anything typed, so there is nothing to sanitise
+              here that was not already ours. */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 min-h-[120px] overflow-x-auto">
+            {previewHtml
+              ? <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+              : <p className="text-[13px] text-gray-400">Nothing filled in yet.</p>}
+          </div>
+          {preview && (
+            <details className="mt-2">
+              <summary className="text-[11px] text-gray-500 cursor-pointer hover:text-gray-800">
+                Plain-text version
+              </summary>
+              <pre className="mt-2 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-gray-700 bg-gray-100 border border-gray-200 rounded-lg p-3">{preview}</pre>
+            </details>
+          )}
         </div>
       </div>
 

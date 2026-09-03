@@ -5,7 +5,7 @@ import { writeControlRow } from '@/lib/leadrecord'
 import { REMINDER_SITE } from '@/lib/reminders'
 import {
   CRM_SIGNATURE_ROLE, SIGNATURE_SESSION,
-  loadAgentSignatures, loadSiteContacts, renderSignature,
+  loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml,
 } from '@/lib/signature'
 import { supabase } from '@/lib/supabase'
 
@@ -67,6 +67,15 @@ export async function GET(req: NextRequest) {
     // can never disagree about what the signature looks like.
     signature: siteId && mine.includes(siteId)
       ? renderSignature(agent, sites.get(siteId), {
+          email: from || member.email,
+          company: siteName,
+        })
+      : '',
+    // The designed block, for the Members page preview. Exactly what the send
+    // route appends, from the same function — a preview built any other way is
+    // a drawing of the feature rather than the feature.
+    signatureHtml: siteId && mine.includes(siteId)
+      ? renderSignatureHtml(agent, sites.get(siteId), {
           email: from || member.email,
           company: siteName,
         })
