@@ -7,6 +7,8 @@ import {
   CRM_SIGNATURE_ROLE, SIGNATURE_SESSION,
   loadAgentSignatures, loadSiteContacts, renderSignature,
 } from '@/lib/signature'
+import { memberDisplayName } from '@/lib/membername'
+import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,11 +31,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Email is not enabled for this workspace' }, { status: 403 })
   }
 
-  const [agents, sites, mine] = await Promise.all([
-    loadAgentSignatures(), loadSiteContacts(), memberSites(member),
+  const [agents, sites, mine, displayName] = await Promise.all([
+    loadAgentSignatures(), loadSiteContacts(), memberSites(member), memberDisplayName(member.email),
   ])
   const agent = agents.get(member.email.toLowerCase()) ?? null
   const siteId = req.nextUrl.searchParams.get('siteId') ?? ''
+  // The address the composer is actually sending FROM, which on these sites is
+  // a per-site alias — samirkhan@peptidesboxes.com, not the login. Signing a
+  // Peptides email with a Shop Cardboard Boxes address invites the customer to
+  // reply somewhere nobody is reading.
+  const from = req.nextUrl.searchParams.get('from')?.trim() ?? ''
+
+  // A brand-new agent has filled nothing in, and a signature that is only an
+  // email address is worse than useless. Their display name and the site's own
+  // name stand in until somebody types something better.
+  let siteName = ''
+  if (siteId && mine.includes(siteId)) {
+    const { data } = await supabase.from('sites').select('name').eq('site_id', siteId).maybeSingle()
+    siteName = String(data?.name ?? '')
+  }
 
   return NextResponse.json({
     agent,
@@ -44,7 +60,11 @@ export async function GET(req: NextRequest) {
     // Rendered server-side so the composer and anything else that sends mail
     // can never disagree about what the signature looks like.
     signature: siteId && mine.includes(siteId)
-      ? renderSignature(agent, sites.get(siteId), { email: member.email })
+      ? renderSignature(agent, sites.get(siteId), {
+          name: displayName,
+          email: from || member.email,
+          company: siteName,
+        })
       : '',
     // Admins get everyone's, so they can fill in a new starter's details.
     all: member.role === 'admin' ? Array.from(agents.values()) : undefined,

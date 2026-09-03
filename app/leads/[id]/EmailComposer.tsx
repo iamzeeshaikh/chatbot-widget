@@ -125,8 +125,12 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   const signedRef = useRef(false)
   useEffect(() => {
     if (signedRef.current || loading) return
+    // Waits for the From address: it decides which of the agent's aliases the
+    // signature names, and fetching before it is known signs the mail with the
+    // wrong one.
+    if (!draft.from) return
     let alive = true
-    fetch(`/api/signature?siteId=${encodeURIComponent(siteId)}`)
+    fetch(`/api/signature?siteId=${encodeURIComponent(siteId)}&from=${encodeURIComponent(draft.from)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!alive || !d?.signature) return
@@ -140,7 +144,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [siteId, loading])
+  }, [siteId, loading, draft.from])
 
   useEffect(() => {
     let alive = true
