@@ -163,14 +163,22 @@ const esc = (v: string): string =>
   v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 const ACCENT = '#2563eb'
+const INK = '#111827'
+const MUTED = '#6b7280'
+const BODY = '#374151'
 
 function row(glyph: string, inner: string): string {
-  return `<tr><td style="padding:2px 8px 2px 0;font-size:13px;line-height:20px;color:${ACCENT};vertical-align:top;">${glyph}</td>`
-    + `<td style="padding:2px 0;font-size:13px;line-height:20px;color:#374151;vertical-align:top;">${inner}</td></tr>`
+  return '<tr>'
+    // Fixed-width icon column so the four lines align down a single edge —
+    // letting it size to content staggers them, which is most of why a
+    // signature looks thrown together rather than set.
+    + `<td width="22" style="width:22px;padding:3px 0;font-size:13px;line-height:20px;color:${ACCENT};vertical-align:top;">${glyph}</td>`
+    + `<td style="padding:3px 0;font-size:13px;line-height:20px;color:${BODY};vertical-align:top;">${inner}</td>`
+    + '</tr>'
 }
 
 function link(href: string, text: string): string {
-  return `<a href="${esc(href)}" style="color:${ACCENT};text-decoration:none;">${esc(text)}</a>`
+  return `<a href="${esc(href)}" style="color:${BODY};text-decoration:none;">${esc(text)}</a>`
 }
 
 export function renderSignatureHtml(
@@ -190,29 +198,37 @@ export function renderSignatureHtml(
     phone ? row('&#9743;', link(`tel:${phone.replace(/[^\d+]/g, '')}`, phone)) : '',
     email ? row('&#9993;', link(`mailto:${email}`, email)) : '',
     website ? row('&#127760;', link(`https://${website}`, website)) : '',
-    address ? row('&#128205;', `<span style="color:#374151;">${esc(address)}</span>`) : '',
+    address ? row('&#128205;', `<span style="color:${BODY};">${esc(address)}</span>`) : '',
   ].filter(Boolean).join('')
 
   // Nothing to say — no empty box, no lonely rule.
   if (!name && !company && !rows) return ''
 
+  // The name block. When there is no name yet the company takes its size and
+  // weight rather than sitting there in small type next to a blank space.
   const left = [
-    name ? `<div style="font-size:17px;font-weight:700;color:#111827;line-height:22px;">${esc(name)}</div>` : '',
-    title ? `<div style="font-size:13px;color:#6b7280;line-height:18px;margin-top:2px;">${esc(title)}</div>` : '',
-    company ? `<div style="font-size:13px;font-weight:600;color:${ACCENT};line-height:18px;margin-top:3px;">${esc(company)}</div>` : '',
+    name
+      ? `<div style="font-size:18px;font-weight:700;color:${INK};line-height:24px;letter-spacing:-0.2px;">${esc(name)}</div>`
+      : '',
+    title ? `<div style="font-size:13px;color:${MUTED};line-height:19px;padding-top:1px;">${esc(title)}</div>` : '',
+    company
+      ? (name
+          ? `<div style="font-size:13px;font-weight:600;color:${ACCENT};line-height:19px;padding-top:4px;">${esc(company)}</div>`
+          : `<div style="font-size:18px;font-weight:700;color:${ACCENT};line-height:24px;letter-spacing:-0.2px;">${esc(company)}</div>`)
+      : '',
   ].filter(Boolean).join('')
 
-  // The divider is a border on the left cell, not its own column: an empty
-  // <td> with a background collapses to nothing in several clients.
-  return '<div style="margin-top:18px;">'
-    + `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;">`
+  // A hairline above the whole block, so it reads as a signature rather than
+  // as another paragraph of the email.
+  return '<div style="margin-top:22px;padding-top:14px;border-top:1px solid #e5e7eb;">'
+    + '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:-apple-system,Segoe UI,Arial,Helvetica,sans-serif;">'
     + '<tr>'
     + (left
-        ? `<td style="padding:0 18px 0 0;border-right:2px solid ${ACCENT};vertical-align:top;">${left}</td>`
+        ? `<td style="padding:0 20px 0 0;border-right:3px solid ${ACCENT};vertical-align:middle;">${left}</td>`
         : '')
     + (rows
-        ? `<td style="padding:0 0 0 ${left ? '18px' : '0'};vertical-align:top;">`
-          + `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rows}</table>`
+        ? `<td style="padding:0 0 0 ${left ? '20px' : '0'};vertical-align:middle;">`
+          + '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">' + rows + '</table>'
           + '</td>'
         : '')
     + '</tr></table></div>'
