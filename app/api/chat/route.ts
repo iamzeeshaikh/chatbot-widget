@@ -77,6 +77,36 @@ export async function POST(req: NextRequest) {
     const systemPrompt: string =
       siteIdentityPrompt(siteId, siteRes.data.name ?? '') + siteRes.data.system_prompt
 
+    // ── The opening line ──────────────────────────────────────────────────────
+    // The widget shows a greeting the moment the panel opens — "Hi! Are you
+    // looking for <product>?", built from the page title — and it never
+    // reached the database, because only the LAST message of each request was
+    // stored. So every transcript in the dashboard began mid-conversation with
+    // the visitor answering a question nobody could see.
+    //
+    // Written on the FIRST exchange of a session rather than when it is shown:
+    // most visitors open the widget and never type, and storing it at display
+    // time would put a row against every one of them. The text comes from the
+    // client's own message list, so it is the greeting that was actually on
+    // screen rather than one reconstructed here and possibly different.
+    // THREE, not two: the widget's array on the first send is the
+    // '(session started)' sentinel, the greeting, and what the visitor typed.
+    // A tighter bound skipped this branch every single time.
+    const firstTurn = messages.length <= 3
+    if (firstTurn) {
+      const opener = messages.find((m: { role: string; content: string }) => m.role === 'assistant')
+      const { count } = await supabase.from('chat_logs')
+        .select('id', { count: 'exact', head: true }).eq('session_id', sessionId)
+      if (!count && opener?.content) {
+        await supabase.from('chat_logs').insert({
+          site_id: siteId, session_id: sessionId, role: 'assistant', message: opener.content,
+          // A second earlier, so it sorts above the reply it prompted rather
+          // than tying with it and landing in whichever order the rows come back.
+          created_at: new Date(Date.now() - 1000).toISOString(),
+        })
+      }
+    }
+
     // Save user message
     const lastUserMessage = messages[messages.length - 1]
     await supabase.from('chat_logs').insert({
