@@ -19,6 +19,8 @@ import { ASSIGNMENT_ROLE } from './assignment'
 import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from './replyauthor'
 import { parseAttachment, type AttachmentInfo } from './attachment'
 import { isQuoteSessionId, quoteSessionId, stripQuoteTag, isCheckoutLeadMessage, isQuoteLeadMessage, leadSource } from './quoteintake'
+import { canSeeAllLeads, visibleToMember } from './teamlead'
+import { getAssignment } from './assignment'
 import { digitsOnly, samePhone } from './identity'
 import { workspaceSites, hasFeature, type WorkspaceFeature } from './workspaces'
 import {
@@ -213,6 +215,20 @@ export async function guardLeadAccess(
   const resolved = await resolveLeadSite(id)
   if (!resolved) return { ok: false, status: 404 }
   if (!canAccessSite(member, resolved.siteId)) return { ok: false, status: 403 }
+
+  // ── Whose lead is it ──────────────────────────────────────────────────────
+  // Site access says which BUSINESS a member works; this says which of its
+  // leads are theirs. An ordinary agent gets their own plus the unassigned
+  // pool; an admin or a team lead gets everything.
+  //
+  // Enforced HERE rather than only in the lists, because this guard is what
+  // every /api/leads/[id]/* route runs — reading the record, emailing, calling,
+  // WhatsApp, notes, stage. A filter applied only to a list is a filter that
+  // stops the moment somebody has the id.
+  if (!(await canSeeAllLeads(member))) {
+    const owner = await getAssignment(id)
+    if (!visibleToMember(owner, member.email, false)) return { ok: false, status: 403 }
+  }
   return { ok: true, member, siteId: resolved.siteId }
 }
 

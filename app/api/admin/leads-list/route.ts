@@ -5,6 +5,8 @@ import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { CONTACT_ROLE, parseContact } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
 import { notALeadSessions, sessionForLead } from '@/lib/notalead'
+import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
+import { ASSIGNMENT_ROLE, deriveAssignments } from '@/lib/assignment'
 import { waWaitingSessions } from '@/lib/wawaiting'
 
 export const dynamic = 'force-dynamic'
@@ -190,6 +192,24 @@ export async function GET(req: NextRequest) {
   // through the quote form, a duplicate, a mistake. They are dropped from the
   // list the Overview tiles and the site cards are computed from, so they stop
   // counting; the record itself is untouched and still opens by URL.
+  // ── whose leads this member may see ───────────────────────────────────────
+  // Their own plus the unassigned pool, unless they are an admin or a team
+  // lead. Removed from the response entirely rather than flagged: a lead that
+  // belongs to a colleague is not this agent's to read at all, which is the
+  // opposite of the "not a lead" case just below, where hiding the row was the
+  // thing that made marking a one-way trip.
+  if (!(await canSeeAllLeads(member))) {
+    const { data: owners } = await supabase.from('chat_logs')
+      .select('session_id, role, message, created_at')
+      .in('site_id', allowed).eq('role', ASSIGNMENT_ROLE)
+      .order('created_at', { ascending: true }).limit(5000)
+    const owned = deriveAssignments((owners ?? []) as { session_id: string; role: string; message: string }[])
+    for (let i = merged.length - 1; i >= 0; i--) {
+      const sid = sessionForLead(merged[i] as { id: string; session_id?: string | null })
+      if (!visibleToMember(owned[sid], member.email, false)) merged.splice(i, 1)
+    }
+  }
+
   const excluded = await notALeadSessions(allowed)
   // Marked leads are flagged, not deleted from the response. Dropping them
   // outright made marking a one-way trip: the row vanished from every list and

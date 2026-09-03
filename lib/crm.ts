@@ -20,6 +20,7 @@ import { CRM_PREFS_ROLE, CRM_REMINDER_ROLE } from './reminders'
 import { CRM_EMAIL_ROLE } from './crmemail'
 import { CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE } from './emailreply'
 import { CRM_SIGNATURE_ROLE, CRM_SITE_CONTACT_ROLE } from './signature'
+import { CRM_TEAM_LEAD_ROLE } from './teamlead'
 
 export { CRM_TASK_ROLE, CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE }
 export { CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE }
@@ -75,7 +76,7 @@ export const CRM_ROLES = [
   CRM_NOT_A_LEAD_ROLE,
   // Both live on the reserved zeeops-crm site, not on a lead — but registered
   // here anyway, as the second line of defence the reserved site is the first.
-  CRM_SIGNATURE_ROLE, CRM_SITE_CONTACT_ROLE,
+  CRM_SIGNATURE_ROLE, CRM_SITE_CONTACT_ROLE, CRM_TEAM_LEAD_ROLE,
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

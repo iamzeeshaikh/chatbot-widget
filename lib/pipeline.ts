@@ -27,6 +27,7 @@ import { asUtcIso, CONTACT_ROLE, parseContact } from './visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import { ASSIGNMENT_ROLE } from './assignment'
+import { canSeeAllLeads, visibleToMember } from './teamlead'
 import { quoteSessionId, leadSource } from './quoteintake'
 import {
   CRM_STAGE_ROLE, CRM_VALUE_ROLE, CRM_STAGES, DEFAULT_CURRENCY,
@@ -294,6 +295,15 @@ export async function loadPipeline(
 
   // ── filters that can only be applied once a card is whole ──────────────────
   let list = Array.from(cards.values())
+
+  // Whose board is this. An ordinary agent sees their own cards and the
+  // unassigned pool; an admin or team lead sees the workspace. Applied before
+  // any other filter so the column totals and the owner dropdown below are
+  // built from what this member can actually see, rather than counting cards
+  // they will never be shown.
+  const seesAll = await canSeeAllLeads(member)
+  if (!seesAll) list = list.filter((c) => visibleToMember(c.owner, member.email, false))
+
   if (until) list = list.filter((c) => !c.createdAt || c.createdAt <= until)
   if (filters.owner) {
     list = filters.owner === '__unassigned__'

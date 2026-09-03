@@ -30,6 +30,9 @@ export default function MembersPage() {
 
   const [members, setMembers] = useState<Member[]>([])
   const [sites, setSites] = useState<Site[]>([])
+  // Who may see every lead without being an admin (lib/teamlead.ts).
+  const [leads, setLeads] = useState<string[]>([])
+  const [leadBusy, setLeadBusy] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -72,6 +75,28 @@ export default function MembersPage() {
   useEffect(() => { if (isAdmin) load() }, [isAdmin, load])
 
   const siteName = (id: string) => sites.find((s) => s.site_id === id)?.name ?? id
+
+  useEffect(() => {
+    let alive = true
+    fetch('/api/admin/team-lead')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d?.leads) setLeads(d.leads.map((e: string) => e.toLowerCase())) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  async function toggleLead(email: string, lead: boolean) {
+    setLeadBusy(email); setError('')
+    const r = await fetch('/api/admin/team-lead', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, lead }),
+    })
+    const j = await r.json().catch(() => ({}))
+    setLeadBusy(null)
+    if (!r.ok) { setError(j.error || 'Could not change that.'); return }
+    const e = email.toLowerCase()
+    setLeads((cur) => (lead ? [...cur, e] : cur.filter((x) => x !== e)))
+  }
 
   async function addMember(e: React.FormEvent) {
     e.preventDefault()
@@ -274,6 +299,26 @@ export default function MembersPage() {
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${m.role === 'admin' ? 'bg-purple-100 text-purple-700 border border-purple-300' : 'bg-gray-200 text-gray-700 border border-gray-300'}`}>
                           {m.role === 'admin' ? 'Admin' : 'Standard'}
                         </span>
+                        {/* Team lead is not a role in the members table — there
+                            is no DDL access to add one — so it is shown next to
+                            the role rather than instead of it. */}
+                        {m.role !== 'admin' && (
+                          leads.includes(m.email.toLowerCase()) ? (
+                            <button disabled={!isAdmin || leadBusy === m.email}
+                              onClick={() => toggleLead(m.email, false)}
+                              title={isAdmin ? 'Sees every lead in the workspace. Click to remove.' : 'Sees every lead in the workspace'}
+                              className="block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 disabled:opacity-60">
+                              Team lead
+                            </button>
+                          ) : isAdmin ? (
+                            <button disabled={leadBusy === m.email}
+                              onClick={() => toggleLead(m.email, true)}
+                              title="Let this member see every lead in the workspace, without admin powers"
+                              className="block mt-1 text-[10px] text-gray-500 hover:text-amber-800 underline decoration-dotted disabled:opacity-60">
+                              make team lead
+                            </button>
+                          ) : null
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {m.role === 'admin' ? (
