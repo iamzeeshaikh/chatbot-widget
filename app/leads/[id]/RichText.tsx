@@ -159,7 +159,7 @@ export default function RichText({ html, onChange, placeholder, onDropFiles, dra
         onDragOver={(e) => { e.preventDefault(); onDragStateChange?.(true) }}
         onDragLeave={() => onDragStateChange?.(false)}
         onDrop={(e) => { e.preventDefault(); onDragStateChange?.(false); onDropFiles?.([...e.dataTransfer.files]) }}
-        className="rt-body w-full min-h-[128px] max-h-[420px] overflow-y-auto bg-transparent px-3 py-2.5 text-xs text-gray-900 focus:outline-none leading-relaxed"
+        className="rt-body w-full min-h-[220px] max-h-[46vh] overflow-y-auto bg-transparent px-3 py-2.5 text-xs text-gray-900 focus:outline-none leading-relaxed"
       />
       <style>{`
         .rt-body:empty:before { content: attr(data-placeholder); color: #9ca3af; }

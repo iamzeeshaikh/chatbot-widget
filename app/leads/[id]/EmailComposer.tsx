@@ -121,6 +121,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   // table and every inline style out of it. What is fetched here is only a
   // description of what will be added, for the line under the composer.
   const [sigWho, setSigWho] = useState('')
+  const [sigHtml, setSigHtml] = useState('')
   useEffect(() => {
     if (loading || !draft.from) return
     let alive = true
@@ -130,6 +131,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
         if (!alive) return
         const a = d?.agent
         setSigWho([a?.name, a?.title].filter(Boolean).join(' · '))
+        setSigHtml(d?.signatureHtml ?? '')
       })
       .catch(() => {})
     return () => { alive = false }
@@ -284,7 +286,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       {/* max-h caps it; the content decides the actual height, so a three-line
           reply is a small dialog rather than a full screen of empty textarea. */}
-      <div className="bg-white border border-gray-300 rounded-2xl shadow-2xl ring-1 ring-black/5 w-full max-w-xl animate-in flex flex-col max-h-[85vh]"
+      <div className="bg-white border border-gray-300 rounded-2xl shadow-2xl ring-1 ring-black/5 w-full max-w-3xl animate-in flex flex-col max-h-[88vh]"
         onKeyDown={(e) => {
           // Cmd/Ctrl+Enter sends from anywhere in the form; Esc closes and the
           // draft is already in localStorage, so nothing typed is lost.
@@ -421,6 +423,20 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
                 onDragStateChange={setDragging}
                 onDropFiles={(f) => addFiles(f)}
               />
+
+              {/* The signature, shown but NOT editable. It is added by the send
+                  route from stored fields — that is what lets it keep a table
+                  and inline styles, which the sanitiser applied to the body
+                  above would strip. Showing it here means you can see exactly
+                  what goes out without being able to half-delete it. */}
+              {sigHtml && (
+                <div className="border-t border-gray-200 px-3 py-3 bg-gray-50/60">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-2">Signature</p>
+                  <div className="pointer-events-none select-none opacity-95 overflow-x-auto"
+                    aria-label="Your signature, added when this is sent"
+                    dangerouslySetInnerHTML={{ __html: sigHtml }} />
+                </div>
+              )}
 
               {/* Attachments live inside the same block, below the body. */}
               {files.length > 0 && (
