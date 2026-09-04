@@ -61,7 +61,12 @@ export async function GET(req: NextRequest) {
   }
 
   if (!summaryRes.error && Array.isArray(summaryRes.data)) {
-    return NextResponse.json(out(await fastPath(summaryRes.data, scope, SINCE, member.workspace)))
+    // `quote-<leadId>` is a synthetic RECORD id, never a chat: since 2026-09-04
+    // the quote intake stores form ARTWORK as {"__file":…} `user` rows on that
+    // session, which would otherwise surface here as a one-message conversation
+    // whose preview is raw file JSON.
+    const chats = summaryRes.data.filter((r: { session_id?: string }) => !String(r.session_id ?? '').startsWith('quote-'))
+    return NextResponse.json(out(await fastPath(chats, scope, SINCE, member.workspace)))
   }
   console.warn('[conversations] session_message_summaries RPC unavailable, using legacy scan:', summaryRes.error?.message)
   return NextResponse.json(out(await legacyPath(scope, SINCE, member.workspace)))
@@ -255,6 +260,8 @@ async function legacyPath(scope: Set<string> | null, since: string, ws: Workspac
   const emailToSession: Record<string, string> = {}
 
   for (const log of logs) {
+    // Synthetic quote-record sessions carry intake artwork rows, never a chat.
+    if (log.session_id.startsWith('quote-')) continue
     if (log.role === TAGS_ROLE) { tagsBySession[log.session_id] = parseTags(log.message); continue }
     if (log.role === LEAD_CAPTURE_ROLE) {
       const cap = parseLeadCapture(log.message)

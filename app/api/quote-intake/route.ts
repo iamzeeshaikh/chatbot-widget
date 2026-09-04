@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllowedMime, parseAttachment, uniqueAttachmentPath, type AttachmentInfo } from '@/lib/attachment'
 import { supabase } from '@/lib/supabase'
 import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody } from '@/lib/quoteintake'
 import { isRetiredLeadSite } from '@/lib/workspaces'
@@ -10,6 +11,60 @@ export const dynamic = 'force-dynamic'
 // the user's own Gmail; this endpoint never touches Gmail itself, it only
 // accepts already-parsed fields over a shared secret. Never used by the
 // widget or any browser — server-to-server only.
+// The quote form's ARTWORK file used to die in the Gmail inbox: the Apps
+// Script forwarded only the text, so the record said "(attached)" about a file
+// nobody in ZeeOps could open (found via a real lead, 2026-09-04). The script
+// now sends the attachments base64-encoded alongside, and they are stored
+// EXACTLY as a chat upload is — same bucket, same {"__file":…} row on the
+// lead's session — so the record's Files panel and timeline need no new code.
+//
+// Deduped by name+size against the rows already on the session, because the
+// same form is routinely submitted twice with the same artwork, and the
+// same-day merge path deliberately funnels those into one lead.
+const MAX_INTAKE_FILES = 5
+
+interface IntakeFile { name: string; mime: string; bytes: Buffer }
+
+function parseIntakeAttachments(raw: unknown): IntakeFile[] {
+  if (!Array.isArray(raw)) return []
+  const out: IntakeFile[] = []
+  for (const a of raw.slice(0, MAX_INTAKE_FILES)) {
+    const name = typeof a?.name === 'string' ? a.name.slice(0, 200) : ''
+    const mime = typeof a?.mime === 'string' ? a.mime : ''
+    const data = typeof a?.data === 'string' ? a.data : ''
+    if (!name || !data || !isAllowedMime(mime)) continue
+    let bytes: Buffer
+    try { bytes = Buffer.from(data, 'base64') } catch { continue }
+    if (bytes.length === 0 || bytes.length > MAX_ATTACHMENT_BYTES) continue
+    out.push({ name, mime, bytes })
+  }
+  return out
+}
+
+async function storeIntakeAttachments(siteId: string, leadId: string, files: IntakeFile[], createdAt: string): Promise<void> {
+  if (files.length === 0) return
+  const sessionId = `quote-${leadId}`
+  const { data: existing } = await supabase.from('chat_logs')
+    .select('message').eq('session_id', sessionId).eq('role', 'user').limit(200)
+  const have = new Set((existing ?? [])
+    .map((r) => parseAttachment(r.message))
+    .filter((f): f is AttachmentInfo => !!f)
+    .map((f) => `${f.name}|${f.size}`))
+  for (const f of files) {
+    if (have.has(`${f.name}|${f.bytes.length}`)) continue
+    const path = uniqueAttachmentPath(siteId, sessionId, f.mime, f.name)
+    const { error: upErr } = await supabase.storage.from(ATTACHMENT_BUCKET)
+      .upload(path, f.bytes, { contentType: f.mime, upsert: false })
+    if (upErr) { console.error('[quote-intake] attachment upload failed:', upErr.message); continue }
+    const { data: pub } = supabase.storage.from(ATTACHMENT_BUCKET).getPublicUrl(path)
+    await supabase.from('chat_logs').insert([{
+      session_id: sessionId, site_id: siteId, role: 'user',
+      message: buildAttachmentMessage({ url: pub.publicUrl, name: f.name, mime: f.mime, size: f.bytes.length }),
+      created_at: createdAt,
+    }])
+  }
+}
+
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-quote-secret')
   if (!secret || secret !== process.env.QUOTE_INTAKE_SECRET) {
@@ -37,6 +92,7 @@ export async function POST(req: NextRequest) {
   }
 
   const bodyText = typeof message === 'string' ? message.trim() : ''
+  const files = parseIntakeAttachments(body.attachments)
   const createdAt = typeof receivedAt === 'string' && !isNaN(new Date(receivedAt).getTime())
     ? receivedAt : new Date().toISOString()
 
@@ -132,11 +188,12 @@ export async function POST(req: NextRequest) {
       if (incoming.length > (existing.message?.length ?? 0)) {
         await supabase.from('leads').update({ message: incoming }).eq('id', existing.id)
       }
+      await storeIntakeAttachments(siteId, existing.id, files, createdAt)
       return NextResponse.json({ success: true, deduped: true })
     }
   }
 
-  const { error } = await supabase.from('leads').insert([{
+  const { data: inserted, error } = await supabase.from('leads').insert([{
     site_id: siteId,
     name: typeof name === 'string' ? name.trim() || null : null,
     email: cleanEmail || null,
@@ -144,11 +201,12 @@ export async function POST(req: NextRequest) {
     message: `${tag}${bodyText}`,
     product: typeof product === 'string' ? product.trim() || null : null,
     created_at: createdAt,
-  }])
+  }]).select('id').single()
 
   if (error) {
     console.error('[quote-intake] insert failed:', error.message)
     return NextResponse.json({ error: 'Insert failed' }, { status: 500 })
   }
+  if (inserted?.id) await storeIntakeAttachments(siteId, inserted.id, files, createdAt)
   return NextResponse.json({ success: true })
 }

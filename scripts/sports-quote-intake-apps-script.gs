@@ -448,7 +448,7 @@ function processQuoteLeadsBackfill() {
         var msg = messages[m];
         var parsed = parseLeadBody_(msg.getPlainBody());
         if (!parsed.email && !parsed.phone) continue;
-        if (postLead_(code, parsed, msg.getDate())) { sent++; handledAny = true; }
+        if (postLead_(code, parsed, msg.getDate(), msg)) { sent++; handledAny = true; }
       }
       if (handledAny) thread.addLabel(processedLabel);
       else { thread.addLabel(skippedLabel); skipped++; }
@@ -590,7 +590,7 @@ function processQuoteLeads() {
         if (!ucode) continue;
         var uparsed = parseLeadBody_(ubody);
         if (!uparsed.email && !uparsed.phone) continue;
-        if (postLead_(ucode, uparsed, umsgs[um].getDate())) {
+        if (postLead_(ucode, uparsed, umsgs[um].getDate(), umsgs[um])) {
           sent++; noLabel++; fbAny = true;
           noLabelHits.push(ucode + '  ' +
             Utilities.formatDate(umsgs[um].getDate(), 'UTC', 'yyyy-MM-dd') + '  ' +
@@ -638,7 +638,7 @@ function processQuoteLeads() {
       considered++;
       var parsed = parseLeadBody_(msg.getPlainBody());
       if (!parsed.email && !parsed.phone) continue;
-      if (postLead_(code, parsed, msg.getDate())) { sent++; handledAny = true; }
+      if (postLead_(code, parsed, msg.getDate(), msg)) { sent++; handledAny = true; }
       // On failure, leave the watermark alone so a later run retries it.
     }
     // Nothing new in this thread — leave its labels exactly as they are, or an
@@ -836,7 +836,7 @@ function retryUnmatched() {
     for (var m = 0; m < messages.length; m++) {
       var parsed = parseLeadBody_(messages[m].getPlainBody());
       if (!parsed.email && !parsed.phone) continue;
-      if (postLead_(code, parsed, messages[m].getDate())) { sent++; handledAny = true; }
+      if (postLead_(code, parsed, messages[m].getDate(), messages[m])) { sent++; handledAny = true; }
     }
     if (handledAny) { thread.removeLabel(skippedLabel); thread.addLabel(processedLabel); }
     else stillStuck++;
@@ -1066,7 +1066,7 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max, deep) {
       if (!code) continue;
       var parsed = parseLeadBody_(messages[m].getPlainBody());
       if (!parsed.email && !parsed.phone) continue;
-      if (postLead_(code, parsed, messages[m].getDate())) { out.sent++; handledAny = true; }
+      if (postLead_(code, parsed, messages[m].getDate(), messages[m])) { out.sent++; handledAny = true; }
     }
     if (considered === 0) continue;
     if (handledAny) addLabel_(thread, processedLabel);
@@ -1637,7 +1637,35 @@ function parseLeadBody_(body) {
   };
 }
 
-function postLead_(siteCode, parsed, receivedDate) {
+// The ARTWORK the form attached, base64 for the webhook. Only types the
+// dashboard can store (lib/attachment.ts's list), at most 5 files / 10MB each
+// / 20MB together — bigger ones stay in Gmail rather than failing the post.
+// Costs Gmail calls ONLY on a message that is actually being posted as a lead,
+// so it cannot touch the quota story (§CLAUDE.md) for ordinary sweep runs.
+var ATTACH_MIMES = { 'image/jpeg': 1, 'image/jpg': 1, 'image/png': 1, 'image/gif': 1, 'image/webp': 1, 'image/svg+xml': 1, 'application/pdf': 1 };
+function attachmentsFor_(msg) {
+  if (!msg) return [];
+  var out = [];
+  var total = 0;
+  try {
+    var atts = msg.getAttachments();
+    for (var i = 0; i < atts.length && out.length < 5; i++) {
+      var a = atts[i];
+      var mime = String(a.getContentType() || '').toLowerCase().split(';')[0];
+      var size = a.getSize();
+      if (!ATTACH_MIMES[mime]) continue;
+      if (size <= 0 || size > 10 * 1024 * 1024) continue;
+      if (total + size > 20 * 1024 * 1024) break;
+      total += size;
+      out.push({ name: a.getName(), mime: mime, data: Utilities.base64Encode(a.getBytes()) });
+    }
+  } catch (err) {
+    Logger.log('attachmentsFor_ error (lead still posted without files): ' + err);
+  }
+  return out;
+}
+
+function postLead_(siteCode, parsed, receivedDate, msg) {
   try {
     var res = UrlFetchApp.fetch(WEBHOOK_URL, {
       method: 'post',
@@ -1651,6 +1679,7 @@ function postLead_(siteCode, parsed, receivedDate) {
         product: parsed.product,
         message: parsed.message,
         receivedAt: receivedDate.toISOString(),
+        attachments: attachmentsFor_(msg),
       }),
       muteHttpExceptions: true,
     });
