@@ -223,16 +223,22 @@ function ThreadView({ thread, onChanged }: { thread: Thread; onChanged: () => vo
   }, [state, events.length])
 
   const latestInbound = [...events].reverse().find((e) => e.kind === 'email_in' && e.inbound)
+  const latestSent = [...events].reverse().find((e) => e.kind === 'email' && e.email?.gmailId)
+  const reify = (subject: string) => (/^re:/i.test(subject) ? subject : `Re: ${subject}`)
   const openReply = (ctx: ReplyContext | null) => {
     // Replying without picking a message answers the latest thing the
     // customer said — the Gmail default.
     if (!ctx && latestInbound?.inbound) {
       const inb = latestInbound.inbound
-      ctx = {
-        replyToGmailId: inb.gmailId,
-        to: inb.from,
-        subject: /^re:/i.test(inb.subject) ? inb.subject : `Re: ${inb.subject}`,
-      }
+      ctx = { replyToGmailId: inb.gmailId, to: inb.from, subject: reify(inb.subject) }
+    }
+    // No customer reply yet — a follow-up on OUR last send, still in the same
+    // Gmail thread. Without this, Reply opened a blank unthreaded "New email"
+    // (a real complaint, 2026-09-04): threadContextFor resolves a SENT
+    // message's gmailId too, so the headers chain exactly as Gmail would.
+    if (!ctx && latestSent?.email) {
+      const out = latestSent.email
+      ctx = { replyToGmailId: out.gmailId, to: out.to, subject: reify(out.subject) }
     }
     setReplyTo(ctx)
     setComposing(true)

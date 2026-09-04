@@ -207,7 +207,14 @@ export default function Softphone() {
           // again — no further error event arrives once the transport has
           // given up, so it stayed that way until somebody reloaded the page.
           void (async () => {
-            for (let attempt = 0; attempt < 6; attempt++) {
+            // NEVER give up, and never turn into a red toast: an agent on a
+            // flaky connection was shown "reload the page" while reading the
+            // leads table (2026-09-04) — a scary interruption about a phone
+            // they were not even using. The banner quietens after the fast
+            // attempts and the retry drops to once a minute, forever; the
+            // moment the network returns, 'registered' clears everything.
+            for (let attempt = 0; ; attempt++) {
+              if (cancelled) return         // the dashboard unmounted this phone
               try {
                 const r = await fetch('/api/twilio/voice/token')
                 if (r.ok) {
@@ -218,13 +225,10 @@ export default function Softphone() {
                 return                      // 'registered' clears the banner
               } catch {
                 retries.current = attempt + 1
-                await new Promise((done) => setTimeout(done, Math.min(30000, 2000 * 2 ** attempt)))
+                if (attempt === 5) setNotice('')   // stop nagging; keep trying quietly
+                await new Promise((done) => setTimeout(done, attempt < 6 ? Math.min(30000, 2000 * 2 ** attempt) : 60000))
               }
             }
-            // Out of attempts: say something the agent can act on rather than
-            // leaving a spinner-ish banner that means nothing.
-            setNotice('')
-            setError('The phone could not reconnect. Reload the page to use it again.')
           })()
           return
         }
