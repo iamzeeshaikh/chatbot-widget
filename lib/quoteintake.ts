@@ -308,10 +308,21 @@ const TEST_PHONE_RE = /^\d{3}555\d{4}$/
 
 // WooCommerce orders are deliberately NOT treated as spam any more — they are
 // ingested as checkout leads instead (see isCheckoutOrder above).
+// A security PROBE, not a customer. One of these became a real lead on
+// 2026-09-05: every field "poc", email poc@lab.local, and a shell.php webshell
+// attached through the live WP form. Reserved, non-routable domains
+// (RFC 2606/6761) only ever appear in testing, and no buyer attaches server
+// code to a quote — but the executable check is deliberately confined to an
+// attachment/artwork LINE, because a forwarded old-site body can legitimately
+// carry ".php" inside a Page URL.
+const RESERVED_EMAIL_DOMAIN_RE = /@[A-Za-z0-9.-]*\.(?:local|test|invalid|example)\b|@localhost\b/i
+const EXPLOIT_ATTACHMENT_RE = /^.*\b(?:attachment|attached|artwork|file)\b.*\.(?:php\d?|phtml|phar|asp|aspx|jsp|cgi|exe|bat)\b/im
+
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
   if (isOwnNumber(cleanPhone)) return true
   if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
+  if (RESERVED_EMAIL_DOMAIN_RE.test(bodyText) || EXPLOIT_ATTACHMENT_RE.test(bodyText)) return true
   return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText)
     || MARKETING_PITCH_RE.test(bodyText) || SUPPLIER_PITCH_RE.test(bodyText)
 }
