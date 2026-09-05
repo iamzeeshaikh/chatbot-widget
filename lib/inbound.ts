@@ -17,6 +17,7 @@
 //     keeps having to fix.
 
 import { supabase } from './supabase'
+import { SITE_DOMAINS } from './sitedomains'
 import { phoneKey } from './identity'
 import { quoteSessionId, QUOTE_TAG } from './quoteintake'
 import { SPORTS_SITES, PACKAGING_SITES, type Workspace } from './workspaces'
@@ -86,6 +87,18 @@ export async function findLeadByPhone(phone: string, workspace: Workspace): Prom
   return { leadId: match.id, sessionId: quoteSessionId(match.id), siteId: match.site_id, name: match.name ?? '' }
 }
 
+
+// Which of this workspace's sites a free-text message claims, by DOMAIN.
+export function siteFromMessageText(text: string, workspace: Workspace): string | null {
+  const hay = String(text || '').toLowerCase()
+  if (!hay) return null
+  for (const siteId of sitesOf(workspace)) {
+    const domain = SITE_DOMAINS[siteId]
+    if (domain && hay.includes(domain.toLowerCase())) return siteId
+  }
+  return null
+}
+
 export async function leadForCaller(
   phone: string,
   workspace: Workspace,
@@ -99,6 +112,12 @@ export async function leadForCaller(
   if (match) return { sessionId: match.sessionId, siteId: match.siteId, created: false }
 
   const known = siteForCalledNumber(extra?.calledNumber, workspace)
+    // Every site's WhatsApp button prefills "Hi <site>! … https://<domain>/",
+    // so the FIRST message usually names its own site — a lead about vial
+    // boxes was filed on Shop Cardboard Boxes before this read it (owner,
+    // 2026-09-05). The domain is matched, never the site's display name:
+    // names appear in ordinary sentences, domains do not.
+    ?? siteFromMessageText(newLeadMessage, workspace)
   const siteId = known ?? sitesOf(workspace)[0]
   if (!siteId) return null
   // Said on the record rather than left to be discovered. Without this line the
