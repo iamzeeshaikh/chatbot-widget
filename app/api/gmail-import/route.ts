@@ -1,54 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { siteWorkspace, isLeadTracked, type Workspace } from '@/lib/workspaces'
+import { workspaceSites, type Workspace } from '@/lib/workspaces'
 import { CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE } from '@/lib/crm'
 import { makeSnippet, newEmailId } from '@/lib/crmemail'
 import { splitQuoted, inboundSnippet, MAX_INBOUND_BODY } from '@/lib/emailreply'
 import { QUOTE_TAG, quoteSessionId } from '@/lib/quoteintake'
-import { siteIdForImportAddress } from '@/lib/gmailimport'
+import { workspaceForImportAddress, siteForDomain } from '@/lib/gmailimport'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-// ONE-TIME import of a mailbox's OLD customer conversations into the CRM.
+// ONE-TIME import of an agent mailbox's OLD customer conversations into the CRM,
+// so a lead's record shows the whole email history — the way Gmail shows it,
+// not only what was sent from the dashboard.
 //
-// WHY THIS IS A SEPARATE, SECRET ENDPOINT and not part of the Phase-6 sweep:
-// the sweep is forbidden from ever seeing the wider inbox — it only reads
-// threads WE started (CLAUDE.md §"poll threads we started, never the mailbox").
-// That restriction is the whole safety story of the Gmail integration and must
-// not be weakened. Bulk history import genuinely needs to read arbitrary old
-// threads, so it lives OUTSIDE that guarantee: an Apps Script running in the
-// agent's OWN mailbox (where the access already belongs to them, not to us)
-// does the reading and POSTs the extracted messages here. This server never
-// gains a way to list or search anyone's inbox — it only ingests what the
-// script hands it, exactly like /api/quote-intake.
+// WHY A SEPARATE, SECRET ENDPOINT and not the Phase-6 sweep: the sweep is
+// forbidden from ever listing a mailbox (CLAUDE.md §"poll threads we started,
+// never the mailbox") — that boundary is the whole safety story of the Gmail
+// integration and stays. Bulk history genuinely needs to read old threads, so
+// it uses the OTHER trust model, the quote-intake one: an Apps Script running
+// in the agent's OWN mailbox does the reading and POSTs the extracted messages
+// here. This server never gains a way to list or search anyone's inbox.
 //
-// Protected by GMAIL_IMPORT_SECRET, and every message is deduped on Gmail's
-// immutable id, so the import is safe to run twice or resume after a stop.
+// One mailbox serves the WHOLE portfolio through send-as aliases, so a thread's
+// SITE is resolved per conversation:
+//   1. the existing lead for that customer's email anywhere in the workspace
+//      (leads already exist — this is the common case and the most reliable);
+//   2. else the alias domain the mail used (info@peptidesboxes.com → that site);
+//   3. else the site named in the subject ("… - The Paper Cups");
+//   4. else skipped and reported — never filed on a guessed site.
 //
-// A THREAD becomes a lead, matched to an existing one by the customer's email
-// (any site the address already has a lead on), else a new email-only lead on
-// the site the importing address serves. Nothing here backdates a customer
-// reply's unread state — these are historical, already-handled, so they are
-// imported as READ (a crm_email_read row per inbound id) and never ring a bell.
+// Rows are the EXACT shapes the record page and Inbox already render, deduped on
+// Gmail's id, and inbound history arrives READ (a crm_email_read row) so a
+// 2½-month backlog never rings a single bell.
 
 interface ImportMessage {
   gmailId: string
   threadId: string
   messageId?: string
   inReplyTo?: string | null
-  from: string          // "Name <addr>" or just addr
-  fromEmail: string     // bare address, lower-cased by the script
+  fromEmail: string
   fromName?: string
   to?: string
   subject?: string
   body: string
-  at?: string           // ISO
-  outbound: boolean     // true = the agent/company sent it
-  customerEmail: string // the OTHER party's address — the lead's identity
+  at?: string
+  outbound: boolean
+  customerEmail: string
+  ourAliasDomain?: string   // the our-side domain this mail used (site hint)
 }
 
-const MAX_MESSAGES = 200
+const MAX_MESSAGES = 120
 
 function bad(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status })
@@ -56,27 +58,28 @@ function bad(msg: string, status = 400) {
 
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-import-secret')
-  if (!secret || secret !== process.env.GMAIL_IMPORT_SECRET) {
-    return bad('Unauthorized', 401)
-  }
+  if (!secret || secret !== process.env.GMAIL_IMPORT_SECRET) return bad('Unauthorized', 401)
 
   const body = await req.json().catch(() => null)
   if (!body) return bad('Invalid JSON')
 
-  // Which mailbox is importing — decides the fallback site and the workspace a
-  // matched lead is allowed to live in.
   const importAddress = String(body.importAddress ?? '').trim().toLowerCase()
-  const fallbackSite = siteIdForImportAddress(importAddress)
-  if (!fallbackSite || !isLeadTracked(fallbackSite)) {
-    return bad(`This mailbox (${importAddress || 'unset'}) is not mapped to a site — add it to lib/gmailimport.ts first.`)
-  }
-  const workspace = siteWorkspace(fallbackSite)
-  if (!workspace) return bad(`No workspace for ${fallbackSite}`)
+  const workspace = workspaceForImportAddress(importAddress)
+  if (!workspace) return bad(`This mailbox (${importAddress || 'unset'}) is not an allowed import address — add it to lib/gmailimport.ts.`)
 
   const messages: ImportMessage[] = Array.isArray(body.messages) ? body.messages.slice(0, MAX_MESSAGES) : []
-  if (messages.length === 0) return NextResponse.json({ ok: true, imported: 0, skipped: 0 })
+  if (messages.length === 0) return NextResponse.json({ ok: true, imported: 0, skipped: 0, unresolved: 0 })
 
-  // ── group by customer, resolve each to a lead ONCE ─────────────────────────
+  // Site-name → site id, for the subject fallback ("… - The Paper Cups").
+  const sites = workspaceSites(workspace)
+  const { data: siteRows } = await supabase.from('sites').select('site_id, name').in('site_id', sites)
+  const nameToSite = new Map<string, string>()
+  for (const s of siteRows ?? []) {
+    const n = String(s.name ?? '').trim().toLowerCase()
+    if (n) nameToSite.set(n, s.site_id)
+  }
+
+  // ── group by customer ──────────────────────────────────────────────────────
   const byCustomer = new Map<string, ImportMessage[]>()
   for (const m of messages) {
     const key = String(m.customerEmail ?? '').trim().toLowerCase()
@@ -85,15 +88,16 @@ export async function POST(req: NextRequest) {
     byCustomer.get(key)!.push(m)
   }
 
-  let imported = 0
-  let skipped = 0
-  const leads: string[] = []
+  let imported = 0, skipped = 0, unresolved = 0
+  const leadIds = new Set<string>()
 
   for (const [customerEmail, msgs] of byCustomer) {
-    const sessionId = await resolveLeadSession(customerEmail, fallbackSite, workspace, msgs[0])
-    if (!sessionId) { skipped += msgs.length; continue }
+    const resolved = await resolveLead(customerEmail, workspace, msgs, nameToSite)
+    if (!resolved) { unresolved += msgs.length; continue }
+    const { sessionId, siteId } = resolved
+    leadIds.add(sessionId)
 
-    // What is already on this session, so a re-run adds nothing twice.
+    // What this session already carries, so a re-run adds nothing twice.
     const { data: existing } = await supabase.from('chat_logs')
       .select('message').eq('session_id', sessionId)
       .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE]).limit(1000)
@@ -102,7 +106,6 @@ export async function POST(req: NextRequest) {
       try { const g = JSON.parse(r.message ?? '{}').gmailId; if (g) have.add(String(g)) } catch { /* skip */ }
     }
 
-    const siteId = sessionId.startsWith('quote-') ? fallbackSite : fallbackSite
     for (const m of msgs) {
       if (!m.gmailId || have.has(m.gmailId)) { skipped++; continue }
       const at = safeIso(m.at)
@@ -110,8 +113,7 @@ export async function POST(req: NextRequest) {
         const entry = {
           id: newEmailId(), sentBy: importAddress, from: importAddress,
           to: m.to || customerEmail, subject: m.subject || '(no subject)',
-          body: m.body.slice(0, MAX_INBOUND_BODY),
-          snippet: makeSnippet(m.body), at,
+          body: m.body.slice(0, MAX_INBOUND_BODY), snippet: makeSnippet(m.body), at,
           gmailId: m.gmailId, threadId: m.threadId, messageId: m.messageId || '',
           direction: 'outbound' as const, imported: true,
         }
@@ -137,8 +139,7 @@ export async function POST(req: NextRequest) {
           message: JSON.stringify(entry), created_at: at,
         }])
         if (error) { skipped++; continue }
-        // Imported history is already handled — mark it read so it never lights
-        // the unread badge or rings a bell.
+        // Already-handled history — mark read so it lights no unread badge.
         await supabase.from('chat_logs').insert([{
           session_id: sessionId, site_id: siteId, role: 'crm_email_read',
           message: JSON.stringify({ gmailId: m.gmailId, by: importAddress, at }),
@@ -146,38 +147,52 @@ export async function POST(req: NextRequest) {
       }
       imported++
     }
-    if (!leads.includes(sessionId)) leads.push(sessionId)
   }
 
-  return NextResponse.json({ ok: true, imported, skipped, leads: leads.length })
+  return NextResponse.json({ ok: true, imported, skipped, unresolved, leads: leadIds.size })
 }
 
-// The lead a customer's history belongs to: their existing lead on the
-// importing mailbox's site if one exists (matched on email), otherwise a new
-// email-only lead — the same `quote-<id>` shape the quote intake and Billing
-// already use, so /leads/<id> and the Inbox render it with no special case.
-async function resolveLeadSession(
+// The lead this customer's history belongs to. Existing lead first (any site in
+// the workspace — leads are already loaded), then a new email-only lead on the
+// site the conversation itself names.
+async function resolveLead(
   customerEmail: string,
-  fallbackSite: string,
   workspace: Workspace,
-  first: ImportMessage,
-): Promise<string | null> {
-  const { data: found } = await supabase.from('leads')
-    .select('id, site_id').eq('site_id', fallbackSite).ilike('email', customerEmail)
-    .order('created_at', { ascending: true }).limit(1)
-  if (found && found[0]) return quoteSessionId(found[0].id)
+  msgs: ImportMessage[],
+  nameToSite: Map<string, string>,
+): Promise<{ sessionId: string; siteId: string } | null> {
+  const sites = workspaceSites(workspace)
 
-  // No lead yet — create an email-only one, tagged like a quote so it counts
-  // and dedupes the same way, its message naming the source.
-  const name = (first.fromName && !first.outbound) ? first.fromName : ''
+  // 1. an existing lead for this address, anywhere in the workspace.
+  const { data: found } = await supabase.from('leads')
+    .select('id, site_id').ilike('email', customerEmail).in('site_id', sites)
+    .order('created_at', { ascending: true }).limit(1)
+  if (found && found[0]) return { sessionId: quoteSessionId(found[0].id), siteId: found[0].site_id }
+
+  // 2. the site the conversation names — an alias domain, then the subject.
+  let siteId: string | null = null
+  for (const m of msgs) {
+    if (m.ourAliasDomain) { siteId = siteForDomain(m.ourAliasDomain, workspace); if (siteId) break }
+  }
+  if (!siteId) {
+    for (const m of msgs) {
+      const subj = String(m.subject ?? '').toLowerCase()
+      for (const [name, id] of nameToSite) {
+        if (name.length >= 4 && subj.includes(name)) { siteId = id; break }
+      }
+      if (siteId) break
+    }
+  }
+  if (!siteId) return null   // unresolved — reported, never guessed onto a site
+
+  const first = msgs.slice().sort((a, b) => safeIso(a.at).localeCompare(safeIso(b.at)))[0]
+  const name = (!first.outbound && first.fromName) ? first.fromName : ''
   const { data: created } = await supabase.from('leads').insert([{
-    site_id: fallbackSite,
-    name: name || null,
-    email: customerEmail,
+    site_id: siteId, name: name || null, email: customerEmail,
     message: `${QUOTE_TAG}Imported email conversation\n\nFirst subject: ${first.subject || '(no subject)'}\nImported from Gmail history on ${new Date().toISOString().slice(0, 10)}.`,
     created_at: safeIso(first.at),
   }]).select('id').maybeSingle()
-  return created?.id ? quoteSessionId(created.id) : null
+  return created?.id ? { sessionId: quoteSessionId(created.id), siteId } : null
 }
 
 function safeIso(v: unknown): string {
