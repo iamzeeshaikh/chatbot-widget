@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
     leadId: string; siteId: string
     subject: string; from: string; snippet: string; at: string
     direction: 'in' | 'out'
-    messages: number; unread: number
+    messages: number; unread: number; hasAttachments: boolean
     inboundIds: string[]
   }
   const threads = new Map<string, Thread>()
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     }
     let t = threads.get(r.session_id)
     if (!t) {
-      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, inboundIds: [] }
+      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [] }
       threads.set(r.session_id, t)
     }
     if (r.role === CRM_EMAIL_IN_ROLE) {
@@ -80,6 +80,7 @@ export async function GET(req: NextRequest) {
       if (!e) continue
       t.messages++
       t.inboundIds.push(e.gmailId)
+      if (e.attachments?.length) t.hasAttachments = true
       const at = e.at || r.created_at
       if (at >= t.at) {
         t.at = at; t.direction = 'in'
@@ -91,6 +92,7 @@ export async function GET(req: NextRequest) {
       const e = parseCrmEmail(r.message)
       if (!e) continue
       t.messages++
+      if (e.attachments?.length) t.hasAttachments = true
       const at = e.at || r.created_at
       if (at >= t.at) {
         t.at = at; t.direction = 'out'
@@ -119,6 +121,7 @@ export async function GET(req: NextRequest) {
       at: asUtcIso(t.at),
       direction: t.direction,
       messages: t.messages,
+      hasAttachments: t.hasAttachments,
       unread: t.inboundIds.filter((id) => !read.has(id)).length,
       owner: owner.get(t.leadId) ?? null,
     }))

@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, ExternalLink, Inbox as InboxIcon, Mail, PenLine, RefreshCw, Reply } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Inbox as InboxIcon, Mail, Paperclip, PenLine, RefreshCw, Reply } from 'lucide-react'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
 import GlobalSearch from '@/app/components/GlobalSearch'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
@@ -28,7 +28,7 @@ interface Thread {
   leadId: string; siteId: string; siteName: string
   subject: string; from: string; snippet: string
   at: string | null; direction: 'in' | 'out'
-  messages: number; unread: number; owner: string | null
+  messages: number; unread: number; hasAttachments?: boolean; owner: string | null
 }
 
 export default function InboxPage() {
@@ -152,6 +152,7 @@ export default function InboxPage() {
                       <span className={`text-sm truncate ${unread ? 'font-bold text-gray-900' : 'font-medium text-gray-800'}`}>{t.from || '(no sender)'}</span>
                       {unread && <span className="text-[10px] font-bold text-white bg-blue-600 rounded-full px-1.5 py-px tabular-nums shrink-0">{t.unread}</span>}
                       <span className="text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 py-px truncate max-w-[130px] shrink-0">{t.siteName}</span>
+                      {t.hasAttachments && <Paperclip size={11} className="text-gray-400 shrink-0" aria-label="Has attachments" />}
                     </span>
                     <span className="block text-xs text-gray-700 truncate mt-0.5">
                       <span className={unread ? 'font-semibold' : ''}>{t.subject || '(no subject)'}</span>
