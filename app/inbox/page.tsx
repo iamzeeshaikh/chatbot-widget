@@ -17,8 +17,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, ExternalLink, Inbox as InboxIcon, Mail, Paperclip, PenLine, RefreshCw, Reply } from 'lucide-react'
-import { formatDateTime, timeAgo } from '@/lib/datetime'
+import { ArrowLeft, ExternalLink, FileText, Image as ImageIcon, Inbox as InboxIcon, Mail, Paperclip, PenLine, RefreshCw, Reply, Send, type LucideIcon } from 'lucide-react'
+import { formatDateTime, formatShortDate, formatTime, pktDayKey, timeAgo } from '@/lib/datetime'
 import GlobalSearch from '@/app/components/GlobalSearch'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import { EmailEntry, InboundEntry, Files, type ReplyContext } from '@/app/leads/[id]/Timeline'
@@ -29,13 +29,19 @@ interface Thread {
   subject: string; from: string; snippet: string
   at: string | null; direction: 'in' | 'out'
   messages: number; unread: number; hasAttachments?: boolean; owner: string | null
+  participants: string[]; files: { name: string; mime: string }[]; lastOutAt: string | null
 }
 
 export default function InboxPage() {
   const [threads, setThreads] = useState<Thread[] | null>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'unavailable' | 'error'>('loading')
+  const [folder, setFolder] = useState<'inbox' | 'sent' | 'drafts'>('inbox')
   const [onlyUnread, setOnlyUnread] = useState(false)
   const [open, setOpen] = useState<Thread | null>(null)
+  const [composeNew, setComposeNew] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [pick, setPick] = useState('')
+  const [drafts, setDrafts] = useState<{ leadId: string; subject: string; body: string }[]>([])
 
   const load = useCallback(() => fetch('/api/inbox')
     .then(async (r) => {
@@ -53,8 +59,45 @@ export default function InboxPage() {
     return () => clearInterval(iv)
   }, [load])
 
-  const list = (threads ?? []).filter((t) => !onlyUnread || t.unread > 0)
-  const unreadTotal = (threads ?? []).reduce((n, t) => n + t.unread, 0)
+  // Drafts live where the composer keeps them: localStorage, one per lead.
+  const readDrafts = useCallback(() => {
+    const out: { leadId: string; subject: string; body: string }[] = []
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || ''
+        if (!k.startsWith('zee-email-draft-')) continue
+        const d = JSON.parse(localStorage.getItem(k) || '{}')
+        const body = String(d.html || d.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+        if (!String(d.subject || '').trim() && !body) continue
+        out.push({ leadId: k.slice('zee-email-draft-'.length), subject: String(d.subject || ''), body })
+      }
+    } catch { /* storage blocked */ }
+    setDrafts(out)
+  }, [])
+  useEffect(() => { void Promise.resolve().then(readDrafts) }, [readDrafts, open, folder])
+
+  const all = threads ?? []
+  const unreadTotal = all.reduce((n, t) => n + t.unread, 0)
+  const sent = all.filter((t) => t.lastOutAt).sort((a, b) => String(b.lastOutAt).localeCompare(String(a.lastOutAt)))
+  const list = folder === 'inbox' ? all.filter((t) => !onlyUnread || t.unread > 0)
+    : folder === 'sent' ? sent
+    : []
+  const byLead = new Map(all.map((t) => [t.leadId, t]))
+  const pickList = pick.trim()
+    ? all.filter((t) => `${t.from} ${t.subject} ${t.siteName}`.toLowerCase().includes(pick.trim().toLowerCase())).slice(0, 12)
+    : all.slice(0, 12)
+
+  const openThread = (t: Thread, compose = false) => { setComposeNew(compose); setOpen(t); setPicking(false); setPick('') }
+
+  const NAV = (key: typeof folder, label: string, Icon: LucideIcon, count?: number) => (
+    <button onClick={() => { setFolder(key); setOpen(null) }}
+      className={`w-full flex items-center gap-3 px-4 py-1.5 rounded-r-full text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+        folder === key && !open ? 'bg-blue-100 text-blue-900 font-bold' : 'text-gray-700 hover:bg-gray-200'}`}>
+      <Icon size={16} strokeWidth={folder === key ? 2.2 : 1.8} aria-hidden />
+      <span className="flex-1 text-left">{label}</span>
+      {count !== undefined && count > 0 && <span className="text-xs font-bold tabular-nums">{count}</span>}
+    </button>
+  )
 
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900">
@@ -63,7 +106,7 @@ export default function InboxPage() {
           {open ? (
             <button onClick={() => setOpen(null)}
               className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-              <ArrowLeft size={13} strokeWidth={2} aria-hidden /> Inbox
+              <ArrowLeft size={13} strokeWidth={2} aria-hidden /> Back
             </button>
           ) : (
             <Link href="/" className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors inline-flex items-center gap-1">
@@ -73,22 +116,17 @@ export default function InboxPage() {
           <div className="min-w-0">
             <h1 className="text-base font-bold text-gray-900 leading-tight flex items-center gap-2 truncate">
               <InboxIcon size={15} strokeWidth={2} className="shrink-0" aria-hidden />
-              <span className="truncate">{open ? (open.subject || '(no subject)') : 'Inbox'}</span>
+              <span className="truncate">{open ? (open.subject || '(no subject)') : 'Mail'}</span>
             </h1>
             <p className="text-gray-500 text-[11px] truncate">
-              {open
-                ? `${open.from || 'Conversation'} · ${open.siteName}`
-                : status === 'ok'
-                  ? unreadTotal > 0
-                    ? `${unreadTotal} unread repl${unreadTotal === 1 ? 'y' : 'ies'} from customers`
-                    : 'Nothing unread — all caught up'
-                  : ' '}
+              {open ? `${open.participants.join(', ') || open.from || 'Conversation'} · ${open.siteName}`
+                : status === 'ok' ? (unreadTotal > 0 ? `${unreadTotal} unread` : 'All caught up') : ' '}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <GlobalSearch />
-          {!open && (
+          {!open && folder === 'inbox' && (
             <button onClick={() => setOnlyUnread((v) => !v)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${onlyUnread ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
               Unread only
@@ -97,89 +135,172 @@ export default function InboxPage() {
         </div>
       </div>
 
-      {open ? (
-        <ThreadView thread={open} onChanged={load} />
-      ) : (
-      <div className="p-4 sm:p-6 max-w-5xl mx-auto">
-        {status === 'loading' && (
-          <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-16 bg-gray-200/60 rounded-xl animate-pulse" />
-          ))}</div>
-        )}
-
-        {status === 'unavailable' && (
-          <div className="text-center py-20">
-            <Mail size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
-            <p className="text-sm font-medium text-gray-700">Email is not enabled for this workspace</p>
-          </div>
-        )}
-        {status === 'error' && (
-          <div className="text-center py-20">
-            <p className="text-sm font-medium text-gray-700">The inbox could not be loaded.</p>
-            <button onClick={() => location.reload()} className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
-              <RefreshCw size={12} strokeWidth={2} aria-hidden /> Try again
+      <div className="flex">
+        {/* ── Gmail's left rail ─────────────────────────────────────────── */}
+        <aside className="hidden sm:block w-56 shrink-0 pt-4 pr-2">
+          <div className="px-3 mb-3">
+            <button onClick={() => { setPicking(true); setOpen(null) }}
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-blue-100 hover:bg-blue-200 text-blue-900 text-sm font-semibold shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+              <PenLine size={16} strokeWidth={2} aria-hidden /> Compose
             </button>
           </div>
-        )}
+          {NAV('inbox', 'Inbox', InboxIcon, unreadTotal)}
+          {NAV('sent', 'Sent', Send)}
+          {NAV('drafts', 'Drafts', FileText, drafts.length)}
+        </aside>
 
-        {status === 'ok' && list.length === 0 && (
-          <div className="text-center py-20">
-            <InboxIcon size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
-            <p className="text-sm font-medium text-gray-700">{onlyUnread ? 'Nothing unread' : 'No email conversations yet'}</p>
-            <p className="text-xs text-gray-500 mt-1">{onlyUnread ? 'Every customer reply has been read.' : 'Email a lead from their record and the thread will appear here.'}</p>
-          </div>
-        )}
+        <main className="flex-1 min-w-0">
+          {open ? (
+            <ThreadView thread={open} composeNew={composeNew} onChanged={load} />
+          ) : (
+          <div className="p-2 sm:p-4 sm:pl-0">
+            {/* Compose: pick who it is to — a lead — then the composer opens on their thread. */}
+            {picking && (
+              <div className="mb-3 bg-white rounded-2xl border border-gray-200 p-3">
+                <div className="flex items-center gap-2">
+                  <PenLine size={14} className="text-gray-500 shrink-0" aria-hidden />
+                  <input autoFocus value={pick} onChange={(e) => setPick(e.target.value)} placeholder="To — type a name, email or site…"
+                    className="flex-1 text-sm bg-transparent focus:outline-none" />
+                  <button onClick={() => { setPicking(false); setPick('') }} className="text-xs text-gray-500 hover:text-gray-900">Cancel</button>
+                </div>
+                <div className="mt-2 divide-y divide-gray-100 max-h-72 overflow-y-auto">
+                  {pickList.map((t) => (
+                    <button key={t.leadId} onClick={() => openThread(t, true)}
+                      className="w-full text-left px-2 py-1.5 text-sm hover:bg-gray-100 rounded flex items-center gap-2">
+                      <span className="font-medium truncate">{t.from || '(no name)'}</span>
+                      <span className="text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 shrink-0">{t.siteName}</span>
+                      <span className="text-xs text-gray-500 truncate">{t.subject}</span>
+                    </button>
+                  ))}
+                  {pickList.length === 0 && <p className="text-xs text-gray-500 px-2 py-2">No matching lead. Open the lead from the dashboard to email them.</p>}
+                </div>
+              </div>
+            )}
 
-        {status === 'ok' && list.length > 0 && (
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
-            {list.map((t) => {
-              const unread = t.unread > 0
-              return (
-                /* A real link (middle-click opens the record in a tab), but a
-                   plain click opens the thread HERE, like Gmail. */
-                <a key={t.leadId} href={`/leads/${encodeURIComponent(t.leadId)}`}
-                  onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey) return
-                    e.preventDefault()
-                    setOpen(t)
-                  }}
-                  className={`flex items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${unread ? 'bg-blue-50/40' : ''}`}>
-                  {/* The unread dot is the row's anchor: scanning the left edge
-                      answers "what needs me" without reading a word. */}
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${unread ? 'bg-blue-600' : 'bg-transparent'}`} aria-hidden />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span className={`text-sm truncate ${unread ? 'font-bold text-gray-900' : 'font-medium text-gray-800'}`}>{t.from || '(no sender)'}</span>
-                      {unread && <span className="text-[10px] font-bold text-white bg-blue-600 rounded-full px-1.5 py-px tabular-nums shrink-0">{t.unread}</span>}
-                      <span className="text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 py-px truncate max-w-[130px] shrink-0">{t.siteName}</span>
-                      {t.hasAttachments && <Paperclip size={11} className="text-gray-400 shrink-0" aria-label="Has attachments" />}
-                    </span>
-                    <span className="block text-xs text-gray-700 truncate mt-0.5">
-                      <span className={unread ? 'font-semibold' : ''}>{t.subject || '(no subject)'}</span>
-                      {t.snippet && <span className="text-gray-500"> — {t.direction === 'out' && <Reply size={10} className="inline -mt-px mr-0.5" aria-hidden />}{t.snippet}</span>}
-                    </span>
-                  </span>
-                  <span className="text-[11px] text-gray-500 shrink-0 tabular-nums" title={t.at ? formatDateTime(t.at) : undefined}>
-                    {t.at ? timeAgo(t.at) : ''}
-                  </span>
-                </a>
-              )
-            })}
+            {/* Mobile folder switch — the rail is hidden below sm */}
+            <div className="sm:hidden flex gap-1 mb-2">
+              {(['inbox', 'sent', 'drafts'] as const).map((f) => (
+                <button key={f} onClick={() => setFolder(f)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium ${folder === f ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200 text-gray-700'}`}>
+                  {f[0].toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {status === 'loading' && (
+              <div className="space-y-2">{Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-12 bg-gray-200/60 rounded-xl animate-pulse" />
+              ))}</div>
+            )}
+            {status === 'unavailable' && (
+              <div className="text-center py-20">
+                <Mail size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
+                <p className="text-sm font-medium text-gray-700">Email is not enabled for this workspace</p>
+              </div>
+            )}
+            {status === 'error' && (
+              <div className="text-center py-20">
+                <p className="text-sm font-medium text-gray-700">The inbox could not be loaded.</p>
+                <button onClick={() => location.reload()} className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
+                  <RefreshCw size={12} strokeWidth={2} aria-hidden /> Try again
+                </button>
+              </div>
+            )}
+
+            {status === 'ok' && folder === 'drafts' && (
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
+                {drafts.length === 0 && <p className="text-sm text-gray-500 text-center py-16">No drafts.</p>}
+                {drafts.map((d) => {
+                  const t = byLead.get(d.leadId)
+                  return (
+                    <button key={d.leadId} onClick={() => { if (t) openThread(t, true) }}
+                      className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100 transition-colors">
+                      <span className="w-44 shrink-0 text-sm text-red-700 font-medium truncate">Draft{t ? ` · ${t.from}` : ''}</span>
+                      <span className="min-w-0 flex-1 text-sm truncate"><span className="text-gray-900">{d.subject || '(no subject)'}</span><span className="text-gray-500"> - {d.body}</span></span>
+                      {t && <span className="text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 shrink-0">{t.siteName}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {status === 'ok' && folder !== 'drafts' && list.length === 0 && (
+              <div className="text-center py-20">
+                <InboxIcon size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
+                <p className="text-sm font-medium text-gray-700">{folder === 'sent' ? 'Nothing sent yet' : onlyUnread ? 'Nothing unread' : 'No email conversations yet'}</p>
+              </div>
+            )}
+
+            {status === 'ok' && folder !== 'drafts' && list.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
+                {list.map((t) => {
+                  const unread = t.unread > 0
+                  const when = folder === 'sent' ? t.lastOutAt : t.at
+                  const who = t.participants.length ? t.participants.join(', ') : (t.from || '(no sender)')
+                  return (
+                    /* A real link (middle-click opens the record), a plain click opens the thread here. */
+                    <a key={t.leadId} href={`/leads/${encodeURIComponent(t.leadId)}`}
+                      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openThread(t) }}
+                      className={`block px-3 sm:px-4 py-2 transition-colors hover:shadow-[inset_0_-1px_0_0_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.12)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${unread ? 'bg-white' : 'bg-gray-50/70'}`}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${unread ? 'bg-blue-600' : 'bg-transparent'}`} aria-hidden />
+                        {/* Gmail's participants column: "Samir, Damaria 10" */}
+                        <span className={`w-40 sm:w-48 shrink-0 text-sm truncate ${unread ? 'font-bold text-gray-900' : 'text-gray-800'}`} title={who}>
+                          {who}{t.messages > 1 && <span className="ml-1 text-xs font-normal text-gray-500 tabular-nums">{t.messages}</span>}
+                        </span>
+                        <span className="min-w-0 flex-1 text-sm truncate">
+                          <span className={unread ? 'font-bold text-gray-900' : 'text-gray-900'}>{t.subject || '(no subject)'}</span>
+                          {t.snippet && <span className="text-gray-500"> - {t.snippet}</span>}
+                        </span>
+                        <span className="hidden md:inline text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 py-px truncate max-w-[120px] shrink-0">{t.siteName}</span>
+                        <span className={`text-xs shrink-0 tabular-nums w-16 text-right ${unread ? 'font-bold text-gray-900' : 'text-gray-500'}`} title={when ? formatDateTime(when) : undefined}>
+                          {gmailDate(when)}
+                        </span>
+                      </div>
+                      {t.files.length > 0 && (
+                        <div className="mt-1 ml-5 sm:ml-[13.25rem] flex items-center gap-1.5 flex-wrap">
+                          {t.files.slice(0, 3).map((f, i) => (
+                            <span key={i} className="inline-flex items-center gap-1 text-xs text-gray-700 border border-gray-300 rounded-full px-2 py-0.5 max-w-[150px]">
+                              <FileIcon mime={f.mime} />
+                              <span className="truncate">{f.name}</span>
+                            </span>
+                          ))}
+                          {t.files.length > 3 && <span className="text-xs text-gray-600 border border-gray-300 rounded-full px-2 py-0.5">+{t.files.length - 3}</span>}
+                        </div>
+                      )}
+                    </a>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        )}
+          )}
+        </main>
       </div>
-      )}
     </div>
   )
+}
+
+// Gmail's date column: the time today, the short date otherwise.
+function gmailDate(at: string | null | undefined): string {
+  if (!at) return ''
+  return pktDayKey(at) === pktDayKey(new Date()) ? formatTime(at) : formatShortDate(at)
+}
+
+function FileIcon({ mime }: { mime: string }) {
+  const m = (mime || '').toLowerCase()
+  if (m.startsWith('image/')) return <ImageIcon size={12} className="text-red-500 shrink-0" aria-hidden />
+  if (m.includes('pdf')) return <FileText size={12} className="text-red-600 shrink-0" aria-hidden />
+  return <Paperclip size={12} className="text-gray-500 shrink-0" aria-hidden />
 }
 
 // One conversation, Gmail-style: the record's own email events in order,
 // oldest first, with the record's own composer for the reply. The record IS
 // the storage — this view adds nothing the record page will not also show.
-function ThreadView({ thread, onChanged }: { thread: Thread; onChanged: () => void }) {
+function ThreadView({ thread, onChanged, composeNew = false }: { thread: Thread; onChanged: () => void; composeNew?: boolean }) {
   const [record, setRecord] = useState<LeadRecord | null>(null)
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
-  const [composing, setComposing] = useState(false)
+  const [composing, setComposing] = useState(composeNew)
   const [replyTo, setReplyTo] = useState<ReplyContext | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const markedRef = useRef(false)

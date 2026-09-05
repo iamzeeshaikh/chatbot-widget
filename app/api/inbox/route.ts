@@ -8,6 +8,8 @@ import { ASSIGNMENT_ROLE } from '@/lib/assignment'
 import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
 import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
 import { asUtcIso } from '@/lib/visitor'
+import { storedMemberNames } from '@/lib/membername'
+import { agentDisplayName } from '@/lib/agentname'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,6 +57,12 @@ export async function GET(req: NextRequest) {
     direction: 'in' | 'out'
     messages: number; unread: number; hasAttachments: boolean
     inboundIds: string[]
+    /** Gmail's "Samir, Damaria" — distinct parties in first-appearance order. */
+    participants: string[]
+    /** Every file on the thread, for the chips under the row. */
+    files: { name: string; mime: string }[]
+    /** When WE last wrote — the Sent folder sorts on this. */
+    lastOutAt: string
   }
   const threads = new Map<string, Thread>()
   const read = new Set<string>()
@@ -72,7 +80,7 @@ export async function GET(req: NextRequest) {
     }
     let t = threads.get(r.session_id)
     if (!t) {
-      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [] }
+      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '' }
       threads.set(r.session_id, t)
     }
     if (r.role === CRM_EMAIL_IN_ROLE) {
@@ -80,7 +88,8 @@ export async function GET(req: NextRequest) {
       if (!e) continue
       t.messages++
       t.inboundIds.push(e.gmailId)
-      if (e.attachments?.length) t.hasAttachments = true
+      if (e.attachments?.length) { t.hasAttachments = true; for (const a of e.attachments) t.files.push({ name: a.name, mime: a.mime }) }
+      t.participants.push(`c:${e.fromName || ''}|${e.from || ''}`)
       const at = e.at || r.created_at
       if (at >= t.at) {
         t.at = at; t.direction = 'in'
@@ -92,7 +101,10 @@ export async function GET(req: NextRequest) {
       const e = parseCrmEmail(r.message)
       if (!e) continue
       t.messages++
-      if (e.attachments?.length) t.hasAttachments = true
+      if (e.attachments?.length) { t.hasAttachments = true; for (const a of e.attachments) t.files.push({ name: a.name, mime: a.mime }) }
+      t.participants.push(`a:${e.sentBy || e.from || ''}`)
+      const oAt = e.at || r.created_at
+      if (oAt > t.lastOutAt) t.lastOutAt = oAt
       const at = e.at || r.created_at
       if (at >= t.at) {
         t.at = at; t.direction = 'out'
@@ -102,6 +114,15 @@ export async function GET(req: NextRequest) {
       }
     }
   }
+
+  const names = await storedMemberNames()
+  const shortAgent = (email: string) => {
+    const e = String(email || '').toLowerCase()
+    if (e === member.email.toLowerCase()) return 'me'
+    return (names.get(e) || agentDisplayName(e)).split(/\s+/)[0]
+  }
+  const shortCustomer = (name: string, addr: string) => (name || addr.split('@')[0] || 'Customer').split(/\s+/)[0]
+  const addParty = (t: Thread, who: string) => { if (who && !t.participants.includes(who)) t.participants.push(who) }
 
   const seesAll = await canSeeAllLeads(member)
   const hideContactsHere = !canSeeContacts(member)
@@ -122,6 +143,16 @@ export async function GET(req: NextRequest) {
       direction: t.direction,
       messages: t.messages,
       hasAttachments: t.hasAttachments,
+      participants: (() => {
+        const out: Thread = { ...t, participants: [] }
+        for (const tag of t.participants) {
+          if (tag.startsWith('a:')) addParty(out, shortAgent(tag.slice(2)))
+          else { const [n, a] = tag.slice(2).split('|'); addParty(out, hideContactsHere && !n ? 'Customer' : shortCustomer(n, a)) }
+        }
+        return out.participants
+      })(),
+      files: (hideContactsHere ? t.files.map((f) => ({ ...f, name: scrubText(f.name) ?? 'file' })) : t.files).slice(0, 12),
+      lastOutAt: t.lastOutAt ? asUtcIso(t.lastOutAt) : null,
       unread: t.inboundIds.filter((id) => !read.has(id)).length,
       owner: owner.get(t.leadId) ?? null,
     }))

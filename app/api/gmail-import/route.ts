@@ -6,6 +6,7 @@ import { makeSnippet, newEmailId } from '@/lib/crmemail'
 import { splitQuoted, inboundSnippet, MAX_INBOUND_BODY } from '@/lib/emailreply'
 import { QUOTE_TAG, quoteSessionId } from '@/lib/quoteintake'
 import { workspaceForImportAddress, siteForDomain } from '@/lib/gmailimport'
+import { EMAIL_ATTACHMENT_BUCKET, MAX_INBOUND_ATTACHMENT_BYTES, attachmentPath, type EmailAttachment } from '@/lib/emailattach'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -48,6 +49,30 @@ interface ImportMessage {
   outbound: boolean
   customerEmail: string
   ourAliasDomain?: string   // the our-side domain this mail used (site hint)
+  /** base64 files, capped by the script — stored into the private email bucket
+   *  exactly as the live sweep stores inbound ones, so the Files panel, the
+   *  timeline and the Inbox chips render them with no new code. */
+  attachments?: { name: string; mime: string; data: string }[]
+}
+
+const MAX_IMPORT_FILES = 6
+
+async function storeFiles(siteId: string, sessionId: string, dir: 'in' | 'out', raw: ImportMessage['attachments']): Promise<EmailAttachment[]> {
+  const out: EmailAttachment[] = []
+  for (const a of (raw ?? []).slice(0, MAX_IMPORT_FILES)) {
+    const name = String(a?.name ?? '').slice(0, 200)
+    const mime = String(a?.mime ?? '').split(';')[0].trim().toLowerCase()
+    if (!name || !mime || typeof a?.data !== 'string' || !a.data) continue
+    let bytes: Buffer
+    try { bytes = Buffer.from(a.data, 'base64') } catch { continue }
+    if (bytes.length === 0 || bytes.length > MAX_INBOUND_ATTACHMENT_BYTES) continue
+    const path = attachmentPath(siteId, sessionId, dir, name)
+    const { error } = await supabase.storage.from(EMAIL_ATTACHMENT_BUCKET)
+      .upload(path, bytes, { contentType: mime, upsert: false })
+    if (error) continue
+    out.push({ path, name, mime, size: bytes.length })
+  }
+  return out
 }
 
 const MAX_MESSAGES = 120
@@ -99,15 +124,36 @@ export async function POST(req: NextRequest) {
 
     // What this session already carries, so a re-run adds nothing twice.
     const { data: existing } = await supabase.from('chat_logs')
-      .select('message').eq('session_id', sessionId)
+      .select('id, message').eq('session_id', sessionId)
       .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE]).limit(1000)
-    const have = new Set<string>()
+    // gmailId → { rowId, entry } for rows this import wrote and can still enrich
+    const have = new Map<string, { rowId: string; entry: Record<string, unknown>; imported: boolean }>()
     for (const r of existing ?? []) {
-      try { const g = JSON.parse(r.message ?? '{}').gmailId; if (g) have.add(String(g)) } catch { /* skip */ }
+      try {
+        const o = JSON.parse(r.message ?? '{}')
+        if (o?.gmailId) have.set(String(o.gmailId), { rowId: String(r.id), entry: o, imported: o.imported === true })
+      } catch { /* skip */ }
     }
 
     for (const m of msgs) {
-      if (!m.gmailId || have.has(m.gmailId)) { skipped++; continue }
+      if (!m.gmailId) { skipped++; continue }
+      const prior = have.get(m.gmailId)
+      if (prior) {
+        // Already here. A re-run that now carries files for an imported row
+        // that has none fills them in — the one legitimate in-place edit,
+        // because the first pass ran before attachments were sent at all.
+        const hadFiles = Array.isArray(prior.entry.attachments) && (prior.entry.attachments as unknown[]).length > 0
+        if (prior.imported && !hadFiles && m.attachments?.length) {
+          const files = await storeFiles(siteId, sessionId, m.outbound ? 'out' : 'in', m.attachments)
+          if (files.length) {
+            await supabase.from('chat_logs').update({ message: JSON.stringify({ ...prior.entry, attachments: files }) }).eq('id', prior.rowId)
+            imported++
+            continue
+          }
+        }
+        skipped++
+        continue
+      }
       const at = safeIso(m.at)
       if (m.outbound) {
         const entry = {
@@ -116,6 +162,7 @@ export async function POST(req: NextRequest) {
           body: m.body.slice(0, MAX_INBOUND_BODY), snippet: makeSnippet(m.body), at,
           gmailId: m.gmailId, threadId: m.threadId, messageId: m.messageId || '',
           direction: 'outbound' as const, imported: true,
+          attachments: await storeFiles(siteId, sessionId, 'out', m.attachments),
         }
         const { error } = await supabase.from('chat_logs').insert([{
           session_id: sessionId, site_id: siteId, role: CRM_EMAIL_ROLE,
@@ -133,6 +180,7 @@ export async function POST(req: NextRequest) {
           quoted: split.quoted ? split.quoted.slice(0, MAX_INBOUND_BODY) : null,
           snippet: inboundSnippet(split.visible), at,
           direction: 'inbound' as const, imported: true,
+          attachments: await storeFiles(siteId, sessionId, 'in', m.attachments),
         }
         const { error } = await supabase.from('chat_logs').insert([{
           session_id: sessionId, site_id: siteId, role: CRM_EMAIL_IN_ROLE,
