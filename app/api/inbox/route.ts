@@ -23,6 +23,15 @@ export const dynamic = 'force-dynamic'
 // what is waiting.
 
 const WINDOW_DAYS = 60
+const HAY_CAP = 40000
+
+function excerpt(body: string, q: string): string {
+  const i = body.toLowerCase().indexOf(q)
+  if (i < 0) return ''
+  const start = Math.max(0, i - 60)
+  const end = Math.min(body.length, i + q.length + 90)
+  return `${start > 0 ? '…' : ''}${body.slice(start, end).replace(/\s+/g, ' ').trim()}${end < body.length ? '…' : ''}`
+}
 
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
@@ -31,6 +40,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Email is not enabled for this workspace' }, { status: 403 })
   }
 
+  // Gmail-style mail search: ?q= matches subject, every message body, sender
+  // names/addresses and attachment names — across the same 60-day window the
+  // list shows. Threads carry a lowercase haystack for it, built in the fold.
+  const q = (req.nextUrl.searchParams.get('q') ?? '').trim().toLowerCase().slice(0, 100)
   const sites = memberSites(member)
   if (sites.length === 0) return NextResponse.json({ threads: [] })
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString()
@@ -63,6 +76,14 @@ export async function GET(req: NextRequest) {
     files: { name: string; mime: string }[]
     /** When WE last wrote — the Sent folder sorts on this. */
     lastOutAt: string
+    /** Everything searchable, lower-cased, capped — subject/bodies/names/files. */
+    hay: string
+    /** For a search hit: the first body passage around the term. */
+    hit: string
+  }
+  const feed = (t: Thread, text: string, body: string) => {
+    if (t.hay.length < HAY_CAP) t.hay += ' ' + text.toLowerCase().slice(0, HAY_CAP - t.hay.length)
+    if (q && !t.hit) t.hit = excerpt(body, q)
   }
   const threads = new Map<string, Thread>()
   const read = new Set<string>()
@@ -80,7 +101,7 @@ export async function GET(req: NextRequest) {
     }
     let t = threads.get(r.session_id)
     if (!t) {
-      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '' }
+      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '', hay: '', hit: '' }
       threads.set(r.session_id, t)
     }
     if (r.role === CRM_EMAIL_IN_ROLE) {
@@ -90,6 +111,7 @@ export async function GET(req: NextRequest) {
       t.inboundIds.push(e.gmailId)
       if (e.attachments?.length) { t.hasAttachments = true; for (const a of e.attachments) t.files.push({ name: a.name, mime: a.mime }) }
       t.participants.push(`c:${e.fromName || ''}|${e.from || ''}`)
+      feed(t, `${e.subject} ${e.fromName ?? ''} ${e.from} ${(e.attachments ?? []).map((a) => a.name).join(' ')} ${e.body}`, e.body)
       const at = e.at || r.created_at
       if (at >= t.at) {
         t.at = at; t.direction = 'in'
@@ -103,6 +125,7 @@ export async function GET(req: NextRequest) {
       t.messages++
       if (e.attachments?.length) { t.hasAttachments = true; for (const a of e.attachments) t.files.push({ name: a.name, mime: a.mime }) }
       t.participants.push(`a:${e.sentBy || e.from || ''}`)
+      feed(t, `${e.subject} ${e.to} ${(e.attachments ?? []).map((a) => a.name).join(' ')} ${e.body}`, e.body)
       const oAt = e.at || r.created_at
       if (oAt > t.lastOutAt) t.lastOutAt = oAt
       const at = e.at || r.created_at
@@ -131,6 +154,7 @@ export async function GET(req: NextRequest) {
 
   const out = Array.from(threads.values())
     .filter((t) => t.messages > 0)
+    .filter((t) => !q || t.hay.includes(q))
     .filter((t) => visibleToMember(owner.get(t.leadId), member.email, seesAll))
     .map((t) => ({
       leadId: t.leadId,
@@ -138,7 +162,7 @@ export async function GET(req: NextRequest) {
       siteName: siteName.get(t.siteId) ?? t.siteId,
       subject: hideContactsHere ? (scrubText(t.subject) ?? '') : t.subject,
       from: hideContactsHere && /@/.test(t.from) ? HIDDEN_EMAIL : (hideContactsHere ? (scrubText(t.from) ?? '') : t.from),
-      snippet: hideContactsHere ? (scrubText(t.snippet) ?? '') : t.snippet,
+      snippet: hideContactsHere ? (scrubText(q && t.hit ? t.hit : t.snippet) ?? '') : (q && t.hit ? t.hit : t.snippet),
       at: asUtcIso(t.at),
       direction: t.direction,
       messages: t.messages,
@@ -159,5 +183,5 @@ export async function GET(req: NextRequest) {
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
     .slice(0, 200)
 
-  return NextResponse.json({ threads: out })
+  return NextResponse.json({ threads: out, q })
 }

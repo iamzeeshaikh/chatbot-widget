@@ -15,9 +15,9 @@
 // numbers and lucide icons at one stroke weight, in the light Tailwind
 // utilities globals.css remaps for dark mode.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, ExternalLink, FileText, Image as ImageIcon, Inbox as InboxIcon, Mail, Paperclip, PenLine, RefreshCw, Reply, Send, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileText, Image as ImageIcon, Inbox as InboxIcon, Mail, Paperclip, PenLine, RefreshCw, Reply, Search, Send, X, type LucideIcon } from 'lucide-react'
 import { formatDateTime, formatShortDate, formatTime, pktDayKey, timeAgo } from '@/lib/datetime'
 import GlobalSearch from '@/app/components/GlobalSearch'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
@@ -42,8 +42,13 @@ export default function InboxPage() {
   const [picking, setPicking] = useState(false)
   const [pick, setPick] = useState('')
   const [drafts, setDrafts] = useState<{ leadId: string; subject: string; body: string }[]>([])
+  // Gmail-style mail search: the term the list is filtered on (server-side,
+  // across subject / bodies / senders / attachment names).
+  const [q, setQ] = useState('')
+  const [typed, setTyped] = useState('')
+  useEffect(() => { const id = setTimeout(() => setQ(typed.trim()), 300); return () => clearTimeout(id) }, [typed])
 
-  const load = useCallback(() => fetch('/api/inbox')
+  const load = useCallback(() => fetch(q ? `/api/inbox?q=${encodeURIComponent(q)}` : '/api/inbox')
     .then(async (r) => {
       if (r.status === 403) { setStatus('unavailable'); return }
       if (!r.ok) { setStatus('error'); return }
@@ -51,7 +56,7 @@ export default function InboxPage() {
       setThreads(d.threads ?? [])
       setStatus('ok')
     })
-    .catch(() => setStatus('error')), [])
+    .catch(() => setStatus('error')), [q])
 
   useEffect(() => {
     load()
@@ -79,7 +84,8 @@ export default function InboxPage() {
   const all = threads ?? []
   const unreadTotal = all.reduce((n, t) => n + t.unread, 0)
   const sent = all.filter((t) => t.lastOutAt).sort((a, b) => String(b.lastOutAt).localeCompare(String(a.lastOutAt)))
-  const list = folder === 'inbox' ? all.filter((t) => !onlyUnread || t.unread > 0)
+  const list = q ? all
+    : folder === 'inbox' ? all.filter((t) => !onlyUnread || t.unread > 0)
     : folder === 'sent' ? sent
     : []
   const byLead = new Map(all.map((t) => [t.leadId, t]))
@@ -125,8 +131,20 @@ export default function InboxPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <GlobalSearch />
-          {!open && folder === 'inbox' && (
+          {!open && (
+            <label className="relative flex items-center">
+              <Search size={14} className="absolute left-3 text-gray-500 pointer-events-none" aria-hidden />
+              <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search mail"
+                aria-label="Search mail"
+                className="w-44 sm:w-72 pl-9 pr-8 py-1.5 text-sm bg-gray-100 border border-transparent focus:bg-white focus:border-blue-500 rounded-full focus:outline-none transition-colors" />
+              {typed && (
+                <button onClick={() => { setTyped(''); setQ('') }} aria-label="Clear search"
+                  className="absolute right-2 text-gray-500 hover:text-gray-900"><X size={14} aria-hidden /></button>
+              )}
+            </label>
+          )}
+          <GlobalSearch compact />
+          {!open && folder === 'inbox' && !q && (
             <button onClick={() => setOnlyUnread((v) => !v)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${onlyUnread ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
               Unread only
@@ -207,7 +225,7 @@ export default function InboxPage() {
               </div>
             )}
 
-            {status === 'ok' && folder === 'drafts' && (
+            {status === 'ok' && folder === 'drafts' && !q && (
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
                 {drafts.length === 0 && <p className="text-sm text-gray-500 text-center py-16">No drafts.</p>}
                 {drafts.map((d) => {
@@ -224,14 +242,19 @@ export default function InboxPage() {
               </div>
             )}
 
-            {status === 'ok' && folder !== 'drafts' && list.length === 0 && (
+            {status === 'ok' && q && (
+              <p className="text-xs text-gray-500 px-2 pb-2">
+                {list.length === 0 ? 'No mail matches' : `${list.length} result${list.length === 1 ? '' : 's'} for`} <span className="font-semibold text-gray-800">“{q}”</span>
+              </p>
+            )}
+            {status === 'ok' && (folder !== 'drafts' || q) && list.length === 0 && (
               <div className="text-center py-20">
                 <InboxIcon size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
                 <p className="text-sm font-medium text-gray-700">{folder === 'sent' ? 'Nothing sent yet' : onlyUnread ? 'Nothing unread' : 'No email conversations yet'}</p>
               </div>
             )}
 
-            {status === 'ok' && folder !== 'drafts' && list.length > 0 && (
+            {status === 'ok' && (folder !== 'drafts' || q) && list.length > 0 && (
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
                 {list.map((t) => {
                   const unread = t.unread > 0
@@ -249,8 +272,8 @@ export default function InboxPage() {
                           {who}{t.messages > 1 && <span className="ml-1 text-xs font-normal text-gray-500 tabular-nums">{t.messages}</span>}
                         </span>
                         <span className="min-w-0 flex-1 text-sm truncate">
-                          <span className={unread ? 'font-bold text-gray-900' : 'text-gray-900'}>{t.subject || '(no subject)'}</span>
-                          {t.snippet && <span className="text-gray-500"> - {t.snippet}</span>}
+                          <span className={unread ? 'font-bold text-gray-900' : 'text-gray-900'}>{hl(t.subject || '(no subject)', q)}</span>
+                          {t.snippet && <span className="text-gray-500"> - {hl(t.snippet, q)}</span>}
                         </span>
                         <span className="hidden md:inline text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 py-px truncate max-w-[120px] shrink-0">{t.siteName}</span>
                         <span className={`text-xs shrink-0 tabular-nums w-16 text-right ${unread ? 'font-bold text-gray-900' : 'text-gray-500'}`} title={when ? formatDateTime(when) : undefined}>
@@ -279,6 +302,21 @@ export default function InboxPage() {
       </div>
     </div>
   )
+}
+
+// Gmail's yellow highlight on the searched term.
+function hl(text: string, q: string): ReactNode {
+  if (!q) return text
+  const parts: ReactNode[] = []
+  const lower = text.toLowerCase()
+  let i = 0
+  for (;;) {
+    const j = lower.indexOf(q, i)
+    if (j < 0) { parts.push(text.slice(i)); break }
+    parts.push(text.slice(i, j), <mark key={j} className="bg-yellow-200 text-inherit rounded-sm px-px">{text.slice(j, j + q.length)}</mark>)
+    i = j + q.length
+  }
+  return parts
 }
 
 // Gmail's date column: the time today, the short date otherwise.
