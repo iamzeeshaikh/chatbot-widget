@@ -18,6 +18,7 @@
 
 import { supabase } from './supabase'
 import { SITE_DOMAINS } from './sitedomains'
+import { siteFromRecentTap } from './callintent'
 import { phoneKey } from './identity'
 import { quoteSessionId, QUOTE_TAG } from './quoteintake'
 import { SPORTS_SITES, PACKAGING_SITES, type Workspace } from './workspaces'
@@ -118,11 +119,19 @@ export async function leadForCaller(
     // 2026-09-05). The domain is matched, never the site's display name:
     // names appear in ordinary sentences, domains do not.
     ?? siteFromMessageText(newLeadMessage, workspace)
-  const siteId = known ?? sitesOf(workspace)[0]
+  // Still unknown (a CALL carries no text): did somebody tap a tel: link on one
+  // of our sites in the last few minutes? A single tap is a good guess and is
+  // LABELLED as one; competing taps assert nothing and name the candidates.
+  const tap = known ? null : await siteFromRecentTap(workspace)
+  const guessed = tap?.sure ? tap.siteId : null
+  const siteId = known ?? guessed ?? sitesOf(workspace)[0]
   if (!siteId) return null
   // Said on the record rather than left to be discovered. Without this line the
   // lead asserts a site nobody chose.
-  const caveat = known ? '' : '\n\nSite not identified — this phone line is shared by every site in this workspace, so it was filed here as a placeholder. Please set the right one.'
+  const caveat = known ? ''
+    : guessed ? `\n\nSite is a BEST GUESS: the ${guessed} site's phone number was tapped moments before this arrived. Please confirm.`
+    : tap && tap.candidates.length > 1 ? `\n\nSite not identified — the number was tapped on more than one site around this time (${tap.candidates.join(', ')}), so nothing was assumed and this is a placeholder. Please set the right one.`
+    : '\n\nSite not identified — this phone line is shared by every site in this workspace, so it was filed here as a placeholder. Please set the right one.'
   const { data: created } = await supabase.from('leads').insert([{
     site_id: siteId,
     name: extra?.name || null,

@@ -29,6 +29,23 @@
 
   var baseUrl = 'https://chat.zeeops.dev';
 
+  // A tap on any tel: link is reported (site id + page only): every site shares
+  // one phone number, so this ten-minute breadcrumb is the only way the CRM can
+  // guess which site an inbound call belongs to (lib/callintent.ts). sendBeacon
+  // so the report survives the page being torn down by the dialler opening.
+  document.addEventListener('click', function (ev) {
+    var a = ev.target && ev.target.closest ? ev.target.closest('a[href^="tel:"]') : null;
+    if (!a) return;
+    try {
+      var payload = JSON.stringify({ siteId: siteId, page: location.pathname });
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(baseUrl + '/api/call-intent', new Blob([payload], { type: 'text/plain' }));
+      } else {
+        fetch(baseUrl + '/api/call-intent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+      }
+    } catch { /* attribution is best-effort */ }
+  }, { passive: true });
+
   function genUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
       var r = (Math.random() * 16) | 0;

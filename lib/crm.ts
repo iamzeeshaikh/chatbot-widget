@@ -77,6 +77,9 @@ export const CRM_ROLES = [
   // Both live on the reserved zeeops-crm site, not on a lead — but registered
   // here anyway, as the second line of defence the reserved site is the first.
   CRM_SIGNATURE_ROLE, CRM_SITE_CONTACT_ROLE, CRM_TEAM_LEAD_ROLE,
+  // "Somebody tapped the phone number on <site>" (lib/callintent.ts) — also on
+  // the reserved site only.
+  'call_intent',
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────
