@@ -181,7 +181,7 @@ export async function GET(req: NextRequest) {
       owner: owner.get(t.leadId) ?? null,
     }))
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
-    .slice(0, 200)
+    .slice(0, 500)   // 200 clipped the list once the history import passed it
 
   return NextResponse.json({ threads: out, q })
 }
