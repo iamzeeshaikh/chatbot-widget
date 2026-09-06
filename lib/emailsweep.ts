@@ -375,14 +375,21 @@ export async function runEmailSweep(
               role: CRM_EMAIL_IN_ROLE, message: JSON.stringify(entry),
             })
             if (error) throw new Error(error)
-            // A reply saying "call me on …" fills the empty Phone field by
-            // itself — from the UNQUOTED body only, because the quoted chain
-            // carries OUR signature and our signature now carries our number.
-            await harvestContact(ref.sessionId, ref.siteId, entry.body ?? '')
+            if (isNoiseSender(from.email)) {
+              await writeControlRow({
+                sessionId: ref.sessionId, siteId: ref.siteId, role: CRM_EMAIL_READ_ROLE,
+                message: JSON.stringify({ gmailId: m.gmailId, by: 'system:noise', at: ranAt }),
+              })
+            } else {
+              // A reply saying "call me on …" fills the empty Phone field by
+              // itself — from the UNQUOTED body only, because the quoted chain
+              // carries OUR signature and our signature now carries our number.
+              await harvestContact(ref.sessionId, ref.siteId, entry.body ?? '')
+            }
           }
           captured.add(m.gmailId)
           res.captured++
-          if (!dryRun) fresh.push({ entry, sessionId: ref.sessionId, siteId: ref.siteId, agent })
+          if (!dryRun && !isNoiseSender(from.email)) fresh.push({ entry, sessionId: ref.sessionId, siteId: ref.siteId, agent })
         }
       }
     }
@@ -459,6 +466,20 @@ export interface ThreadContext {
  * Returns null when the id is not one of this lead's messages, in which case
  * the caller sends a fresh (unthreaded) email rather than guessing.
  */
+
+// A bounce, an auto-responder or one of OUR OWN addresses replying inside a
+// customer thread is worth keeping on the timeline — but it is not a customer
+// waiting on us. Recorded, then marked read at once, and never pushed: fourteen
+// "unread replies" on 2026-09-06 were mailer-daemon notices and internal forwards.
+const NOISE_SENDERS = ['mailer-daemon', 'postmaster', 'noreply', 'no-reply', 'shanimazhar82@gmail.com']
+const NOISE_DOMAINS = ['shopcardboardboxes.com', 'zeecustomboxes.com']
+export function isNoiseSender(email: string): boolean {
+  const e = (email || '').toLowerCase()
+  if (NOISE_SENDERS.some((n) => e.includes(n))) return true
+  const d = e.split('@')[1] ?? ''
+  return NOISE_DOMAINS.includes(d)
+}
+
 export async function threadContextFor(sessionId: string, replyToGmailId: string): Promise<ThreadContext | null> {
   const { data } = await supabase
     .from('chat_logs')
