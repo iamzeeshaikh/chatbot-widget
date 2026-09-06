@@ -73,11 +73,18 @@ const DIGITS_RE = /\d{7,}/g
  * this exists to prevent. The full text is always intact in the database and
  * for an admin.
  */
+// A DATE is not a phone number, however many digits it has. "Needed By
+// 2026-09-03" on a quote form was masked as a number, so a privacy-restricted
+// sports agent could not read the order's deadline (2026-09-06). ISO dates,
+// slashed/dotted dates and "Sep 3, 2026"-style dates all pass through.
+const DATE_LIKE_RE = /^(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/
+function isDateLike(m: string): boolean { return DATE_LIKE_RE.test(m.trim()) }
+
 export function scrubText(text: string | null | undefined): string | null {
   if (!text) return text ?? null
   return text
     .replace(EMAIL_RE, HIDDEN_INLINE)
-    .replace(PHONE_RE, HIDDEN_INLINE)
+    .replace(PHONE_RE, (m) => (isDateLike(m) ? m : HIDDEN_INLINE))
     .replace(DIGITS_RE, HIDDEN_INLINE)
 }
 
