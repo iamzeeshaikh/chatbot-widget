@@ -2766,10 +2766,9 @@ export default function Dashboard() {
                     <option value="quote">Quote only</option>
                     <option value="checkout">Checkout only</option>
                   </select>
-                  {/* Which agent's leads. PACKAGING ONLY, at the owner's word —
-                      sports runs on effectively one agent, so a filter there
-                      is a control with nothing to choose. */}
-                  {workspace === 'packaging' && (
+                  {/* Which agent's leads. Both workspaces since 2026-09-06 —
+                      it began packaging-only while sports ran on one agent. */}
+                  {(
                     <select value={overviewLeadAgent}
                       onChange={(e) => { setOverviewLeadAgent(e.target.value); setOverviewLeadPage(0) }}
                       className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadAgent !== '' ? 'bg-indigo-100 border-indigo-300 text-indigo-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
