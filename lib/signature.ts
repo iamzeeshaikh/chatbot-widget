@@ -133,7 +133,10 @@ export function renderSignature(
   const lines: string[] = []
 
   if (name) lines.push(name)
-  const role = [agent?.title, company].filter(Boolean).join(' · ')
+  // Sports signs as the site, so name and company can be the same words —
+  // said once, as the name, never repeated on the role line.
+  const sameAsName = !!name && name.trim().toLowerCase() === company.trim().toLowerCase()
+  const role = [agent?.title, sameAsName ? '' : company].filter(Boolean).join(' · ')
   if (role) lines.push(role)
 
   const phone = agent?.phone || site?.phone || ''
@@ -221,7 +224,7 @@ export function renderSignatureHtml(
       ? `<div style="font-size:18px;font-weight:700;color:${INK};line-height:24px;letter-spacing:-0.2px;">${esc(name)}</div>`
       : '',
     title ? `<div style="font-size:13px;color:${MUTED};line-height:19px;padding-top:1px;">${esc(title)}</div>` : '',
-    company
+    company && !(name && name.trim().toLowerCase() === company.trim().toLowerCase())
       ? (name
           ? `<div style="font-size:13px;font-weight:600;color:${ACCENT};line-height:19px;padding-top:4px;">${esc(company)}</div>`
           : `<div style="font-size:18px;font-weight:700;color:${ACCENT};line-height:24px;letter-spacing:-0.2px;">${esc(company)}</div>`)
