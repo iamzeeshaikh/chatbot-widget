@@ -49,28 +49,46 @@ interface ImportMessage {
   outbound: boolean
   customerEmail: string
   ourAliasDomain?: string   // the our-side domain this mail used (site hint)
-  /** base64 files, capped by the script — stored into the private email bucket
-   *  exactly as the live sweep stores inbound ones, so the Files panel, the
-   *  timeline and the Inbox chips render them with no new code. */
-  attachments?: { name: string; mime: string; data: string }[]
+  /** Files the script has ALREADY PUT into the private email bucket through a
+   *  signed upload URL (the `sign` action below) — references only. A serverless
+   *  function's body is capped at 4.5MB, so the bytes never come through here;
+   *  the composer's own uploads take the same road. Stored in the exact shape
+   *  the sweep writes, so the Files panel, timeline and Inbox chips need no
+   *  new code. */
+  attachments?: { path: string; name: string; mime: string; size: number }[]
 }
 
-const MAX_IMPORT_FILES = 6
+const MAX_IMPORT_FILES = 8
+const IMPORT_PREFIX = 'gmail-import/'
 
-async function storeFiles(siteId: string, sessionId: string, dir: 'in' | 'out', raw: ImportMessage['attachments']): Promise<EmailAttachment[]> {
+function keepFiles(raw: ImportMessage['attachments']): EmailAttachment[] {
   const out: EmailAttachment[] = []
   for (const a of (raw ?? []).slice(0, MAX_IMPORT_FILES)) {
+    const path = String(a?.path ?? '')
     const name = String(a?.name ?? '').slice(0, 200)
     const mime = String(a?.mime ?? '').split(';')[0].trim().toLowerCase()
-    if (!name || !mime || typeof a?.data !== 'string' || !a.data) continue
-    let bytes: Buffer
-    try { bytes = Buffer.from(a.data, 'base64') } catch { continue }
-    if (bytes.length === 0 || bytes.length > MAX_INBOUND_ATTACHMENT_BYTES) continue
-    const path = attachmentPath(siteId, sessionId, dir, name)
-    const { error } = await supabase.storage.from(EMAIL_ATTACHMENT_BUCKET)
-      .upload(path, bytes, { contentType: mime, upsert: false })
-    if (error) continue
-    out.push({ path, name, mime, size: bytes.length })
+    const size = Number(a?.size ?? 0)
+    // Only paths THIS endpoint minted — a message cannot point at another lead's file.
+    if (!path.startsWith(IMPORT_PREFIX) || path.includes('..') || !name || !mime || !(size > 0) || size > MAX_INBOUND_ATTACHMENT_BYTES) continue
+    out.push({ path, name, mime, size })
+  }
+  return out
+}
+
+// `sign`: mint signed upload URLs so the script can PUT file bytes straight into
+// the bucket. The path is chosen here (never by the caller) and carries the
+// import prefix keepFiles() insists on.
+async function signUploads(importAddress: string, files: unknown): Promise<{ name: string; path: string; uploadUrl: string; token: string }[]> {
+  const out: { name: string; path: string; uploadUrl: string; token: string }[] = []
+  const list = Array.isArray(files) ? files.slice(0, 20) : []
+  const who = importAddress.replace(/[^a-z0-9]/gi, '').slice(0, 40) || 'mailbox'
+  for (const f of list) {
+    const name = String((f as { name?: unknown })?.name ?? '').slice(0, 200)
+    if (!name) continue
+    const path = `${IMPORT_PREFIX}${who}/${attachmentPath('import', 'gmail', 'in', name).split('/').pop()}`
+    const { data, error } = await supabase.storage.from(EMAIL_ATTACHMENT_BUCKET).createSignedUploadUrl(path)
+    if (error || !data) continue
+    out.push({ name, path, uploadUrl: data.signedUrl, token: data.token })
   }
   return out
 }
@@ -91,6 +109,10 @@ export async function POST(req: NextRequest) {
   const importAddress = String(body.importAddress ?? '').trim().toLowerCase()
   const workspace = workspaceForImportAddress(importAddress)
   if (!workspace) return bad(`This mailbox (${importAddress || 'unset'}) is not an allowed import address — add it to lib/gmailimport.ts.`)
+
+  if (body.action === 'sign') {
+    return NextResponse.json({ ok: true, uploads: await signUploads(importAddress, body.files) })
+  }
 
   const messages: ImportMessage[] = Array.isArray(body.messages) ? body.messages.slice(0, MAX_MESSAGES) : []
   if (messages.length === 0) return NextResponse.json({ ok: true, imported: 0, skipped: 0, unresolved: 0 })
@@ -144,7 +166,7 @@ export async function POST(req: NextRequest) {
         // because the first pass ran before attachments were sent at all.
         const hadFiles = Array.isArray(prior.entry.attachments) && (prior.entry.attachments as unknown[]).length > 0
         if (prior.imported && !hadFiles && m.attachments?.length) {
-          const files = await storeFiles(siteId, sessionId, m.outbound ? 'out' : 'in', m.attachments)
+          const files = keepFiles(m.attachments)
           if (files.length) {
             await supabase.from('chat_logs').update({ message: JSON.stringify({ ...prior.entry, attachments: files }) }).eq('id', prior.rowId)
             imported++
@@ -162,7 +184,7 @@ export async function POST(req: NextRequest) {
           body: m.body.slice(0, MAX_INBOUND_BODY), snippet: makeSnippet(m.body), at,
           gmailId: m.gmailId, threadId: m.threadId, messageId: m.messageId || '',
           direction: 'outbound' as const, imported: true,
-          attachments: await storeFiles(siteId, sessionId, 'out', m.attachments),
+          attachments: keepFiles(m.attachments),
         }
         const { error } = await supabase.from('chat_logs').insert([{
           session_id: sessionId, site_id: siteId, role: CRM_EMAIL_ROLE,
@@ -180,7 +202,7 @@ export async function POST(req: NextRequest) {
           quoted: split.quoted ? split.quoted.slice(0, MAX_INBOUND_BODY) : null,
           snippet: inboundSnippet(split.visible), at,
           direction: 'inbound' as const, imported: true,
-          attachments: await storeFiles(siteId, sessionId, 'in', m.attachments),
+          attachments: keepFiles(m.attachments),
         }
         const { error } = await supabase.from('chat_logs').insert([{
           session_id: sessionId, site_id: siteId, role: CRM_EMAIL_IN_ROLE,
