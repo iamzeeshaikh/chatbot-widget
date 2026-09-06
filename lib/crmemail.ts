@@ -16,6 +16,7 @@
 // without a migration.
 
 import { parseEmailAttachments, type EmailAttachment } from './emailattach'
+import { stripImagePlaceholders } from './emailreply'
 import { sanitizeHtml } from './richtext'
 
 export const CRM_EMAIL_ROLE = 'crm_email'
@@ -69,12 +70,12 @@ export function parseCrmEmail(message: string | null | undefined): CrmEmailEntry
       to: str(o.to),
       cc: typeof o.cc === 'string' && o.cc ? o.cc : undefined,
       subject: str(o.subject),
-      body: str(o.body),
+      body: stripImagePlaceholders(str(o.body)),
       // Sanitised when it was written; re-checked on read anyway, because rows
       // written before the sanitiser existed are still in the table and control
       // rows are append-only, so there is nothing to migrate.
       html: typeof o.html === 'string' && o.html ? sanitizeHtml(o.html) : undefined,
-      snippet: str(o.snippet),
+      snippet: stripImagePlaceholders(str(o.snippet)),
       at: str(o.at),
       gmailId: str(o.gmailId),
       threadId: str(o.threadId),

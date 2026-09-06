@@ -23,6 +23,17 @@ export const CRM_EMAIL_IN_ROLE = 'crm_email_in'
 export const CRM_EMAIL_READ_ROLE = 'crm_email_read'
 
 export const MAX_INBOUND_BODY = 40000
+
+// Gmail's plain-text rendering turns every image in an HTML signature into a
+// "[image: emailAddress]" line — and imported history is plain text. Those
+// placeholders carry no information (the icon is gone either way), so they are
+// stripped on READ, which repairs rows already stored as well as new ones.
+export function stripImagePlaceholders(text: string): string {
+  return text
+    .replace(/^[ \t]*\[image:[^\]]*\][ \t]*\r?\n/gm, '')
+    .replace(/\[image:[^\]]*\]/g, '')
+}
+
 /** Where the sweep records its last run. Lives on the reserved zeeops-crm site,
  *  and is registered in CRM_ROLES anyway as a second line of defence. */
 export const CRM_EMAIL_SWEEP_ROLE = 'crm_email_sweep'
@@ -68,8 +79,8 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
     // but quoted history. Move it where it belongs so the "show history" toggle
     // still reveals it, rather than leaving it stranded on a field we no longer
     // render.
-    let body = str(o.body)
-    let quoted = typeof o.quoted === 'string' && o.quoted ? o.quoted : null
+    let body = stripImagePlaceholders(str(o.body))
+    let quoted = typeof o.quoted === 'string' && o.quoted ? stripImagePlaceholders(o.quoted) : null
     const textless = o.textless === true || isAllQuote(body)
     if (textless && body) { quoted = quoted ? `${body}\n${quoted}` : body; body = '' }
 
@@ -85,7 +96,7 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
       body,
       quoted,
       textless,
-      snippet: str(o.snippet),
+      snippet: stripImagePlaceholders(str(o.snippet)),
       at: str(o.at),
       direction: 'inbound',
       attachments: parseEmailAttachments(o.attachments),
