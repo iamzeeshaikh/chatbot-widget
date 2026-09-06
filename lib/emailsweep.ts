@@ -34,8 +34,7 @@ import { CRM_EMAIL_ROLE, parseCrmEmail } from './crmemail'
 import { harvestContact } from './contactharvest'
 import {
   CRM_EMAIL_IN_ROLE, parseCrmEmailIn, splitQuoted, inboundSnippet, parseFromHeader,
-  MAX_INBOUND_BODY, CRM_EMAIL_SWEEP_ROLE, type CrmEmailInEntry,
-} from './emailreply'
+  MAX_INBOUND_BODY, CRM_EMAIL_SWEEP_ROLE, type CrmEmailInEntry, CRM_EMAIL_READ_ROLE } from './emailreply'
 import {
   googleConfig, fetchThread, fetchAttachment, connectionFor, GmailAuthError, GmailScopeError,
   type GoogleConfig, type InboundMessage,
