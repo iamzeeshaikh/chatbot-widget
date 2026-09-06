@@ -22,7 +22,7 @@ import { isQuoteSessionId, quoteSessionId, stripQuoteTag, isCheckoutLeadMessage,
 import { canSeeAllLeads, visibleToMember } from './teamlead'
 import { getAssignment } from './assignment'
 import { digitsOnly, samePhone } from './identity'
-import { workspaceSites, hasFeature, type WorkspaceFeature } from './workspaces'
+import { workspaceSites, hasFeature, type WorkspaceFeature, defaultOwnerForSite } from './workspaces'
 import {
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE,
   parseCrmStage, parseCrmNote, parseCrmField, parseCrmValue,
@@ -230,7 +230,7 @@ export async function guardLeadAccess(
   // WhatsApp, notes, stage. A filter applied only to a list is a filter that
   // stops the moment somebody has the id.
   if (!(await canSeeAllLeads(member))) {
-    const owner = await getAssignment(id)
+    const owner = (await getAssignment(id)) ?? defaultOwnerForSite(resolved.siteId)
     if (!visibleToMember(owner, member.email, false)) return { ok: false, status: 403 }
   }
   return { ok: true, member, siteId: resolved.siteId }
@@ -894,7 +894,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       phone: capture.phone || contact.phone || lead?.phone || '',
     },
     overriddenFields: Array.from(overrides.keys()),
-    owner,
+    owner: owner ?? defaultOwnerForSite(siteId),
     stage: stage ?? 'new',
     stageBy,
     stageAt: asUtcIso(stageAt),

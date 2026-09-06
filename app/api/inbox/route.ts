@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, memberSites } from '@/lib/auth'
-import { hasFeature } from '@/lib/workspaces'
+import { hasFeature, defaultOwnerForSite } from '@/lib/workspaces'
 import { CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead } from '@/lib/emailreply'
 import { CRM_EMAIL_ROLE, parseCrmEmail } from '@/lib/crmemail'
 import { ASSIGNMENT_ROLE } from '@/lib/assignment'
@@ -155,7 +155,7 @@ export async function GET(req: NextRequest) {
   const out = Array.from(threads.values())
     .filter((t) => t.messages > 0)
     .filter((t) => !q || t.hay.includes(q))
-    .filter((t) => visibleToMember(owner.get(t.leadId), member.email, seesAll))
+    .filter((t) => visibleToMember(owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId), member.email, seesAll))
     .map((t) => ({
       leadId: t.leadId,
       siteId: t.siteId,
@@ -178,7 +178,7 @@ export async function GET(req: NextRequest) {
       files: (hideContactsHere ? t.files.map((f) => ({ ...f, name: scrubText(f.name) ?? 'file' })) : t.files).slice(0, 12),
       lastOutAt: t.lastOutAt ? asUtcIso(t.lastOutAt) : null,
       unread: t.inboundIds.filter((id) => !read.has(id)).length,
-      owner: owner.get(t.leadId) ?? null,
+      owner: owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId),
     }))
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
     .slice(0, 500)   // 200 clipped the list once the history import passed it

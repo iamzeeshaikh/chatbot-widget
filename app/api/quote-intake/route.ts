@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllowedMime, parseAttachment, uniqueAttachmentPath, type AttachmentInfo } from '@/lib/attachment'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody } from '@/lib/quoteintake'
 import { isRetiredLeadSite } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
@@ -92,6 +92,12 @@ export async function POST(req: NextRequest) {
   }
 
   const bodyText = typeof message === 'string' ? message.trim() : ''
+  // A name that is one of OUR site names is the intake script mis-reading the
+  // mail's heading; the customer's real name is on the form's own Name line.
+  const { data: siteNameRows } = await supabase.from('sites').select('name')
+  const brandNames = new Set((siteNameRows ?? []).map((r) => String(r.name ?? '').trim().toLowerCase()).filter(Boolean))
+  const rawName = typeof name === 'string' ? name.trim() : ''
+  const leadName = (!rawName || brandNames.has(rawName.toLowerCase())) ? (customerNameFromBody(bodyText) ?? (brandNames.has(rawName.toLowerCase()) ? '' : rawName)) : rawName
   const files = parseIntakeAttachments(body.attachments)
   const createdAt = typeof receivedAt === 'string' && !isNaN(new Date(receivedAt).getTime())
     ? receivedAt : new Date().toISOString()
@@ -195,7 +201,7 @@ export async function POST(req: NextRequest) {
 
   const { data: inserted, error } = await supabase.from('leads').insert([{
     site_id: siteId,
-    name: typeof name === 'string' ? name.trim() || null : null,
+    name: leadName || null,
     email: cleanEmail || null,
     phone: cleanPhone || null,
     message: `${tag}${bodyText}`,

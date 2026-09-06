@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { defaultOwnerForSite } from '@/lib/workspaces'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
@@ -207,12 +208,12 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: true }).limit(5000)
   const owned = deriveAssignments((ownerRows ?? []) as { session_id: string; role: string; message: string }[])
   for (const l of merged as Array<Record<string, unknown>>) {
-    l.owner = owned[sessionForLead(l as { id: string; session_id?: string | null })] ?? null
+    l.owner = owned[sessionForLead(l as { id: string; session_id?: string | null })] ?? defaultOwnerForSite(String(l.site_id ?? ''))
   }
   if (!(await canSeeAllLeads(member))) {
     for (let i = merged.length - 1; i >= 0; i--) {
       const sid = sessionForLead(merged[i] as { id: string; session_id?: string | null })
-      if (!visibleToMember(owned[sid], member.email, false)) merged.splice(i, 1)
+      if (!visibleToMember(owned[sid] ?? defaultOwnerForSite(String((merged[i] as { site_id?: unknown }).site_id ?? '')), member.email, false)) merged.splice(i, 1)
     }
   }
 

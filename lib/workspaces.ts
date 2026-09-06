@@ -145,6 +145,19 @@ export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {
   return WORKSPACE_FEATURES[ws]?.has(feature) ?? false
 }
 
+// Who a lead belongs to when nobody has assigned it. Sports runs on ONE shared
+// mailbox, so every sports lead is info@'s by default (owner, 2026-09-06) —
+// applied at the read edge, so existing leads need no backfill and an explicit
+// assignment still wins. Packaging keeps "unassigned" as a real state.
+export const DEFAULT_LEAD_OWNER: Record<Workspace, string | null> = {
+  packaging: null,
+  sports: 'info@thebaseballjerseys.com',
+}
+export function defaultOwnerForSite(siteId: string): string | null {
+  const ws = siteWorkspace(siteId)
+  return ws ? DEFAULT_LEAD_OWNER[ws] : null
+}
+
 export function siteWorkspace(siteId: string): Workspace | null {
   if (SPORTS_SITES.includes(siteId)) return 'sports'
   if (PACKAGING_SITES.includes(siteId)) return 'packaging'

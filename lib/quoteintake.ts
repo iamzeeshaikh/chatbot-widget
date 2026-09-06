@@ -382,3 +382,14 @@ export function quoteSessionId(leadId: string): string {
 export function isQuoteSessionId(sessionId: string | null | undefined): boolean {
   return !!sessionId && sessionId.startsWith('quote-')
 }
+
+
+// The customer's own name from a form body — "Full Name Kaija" / "Name: Kaija".
+// The sports intake script took the mail's first line (the SITE's name) as the
+// lead name, so records read "The Volleyball Uniforms" where "Kaija" belonged.
+export function customerNameFromBody(body: string): string | null {
+  const m = String(body || '').match(/^\s*(?:Full\s+)?Name:?\s+(.+?)\s*$/im)
+  const v = m?.[1]?.trim() ?? ''
+  if (!v || v.length > 80 || /@/.test(v)) return null
+  return v
+}
