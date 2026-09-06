@@ -29,7 +29,7 @@ interface Thread {
   subject: string; from: string; snippet: string
   at: string | null; direction: 'in' | 'out'
   messages: number; unread: number; hasAttachments?: boolean; owner: string | null
-  participants: string[]; files: { name: string; mime: string }[]; lastOutAt: string | null
+  participants: string[]; files: { name: string; mime: string }[]; lastOutAt: string | null; lastOutOpened?: boolean
 }
 
 export default function InboxPage() {
@@ -275,6 +275,7 @@ export default function InboxPage() {
                           <span className={unread ? 'font-bold text-gray-900' : 'text-gray-900'}>{hl(t.subject || '(no subject)', q)}</span>
                           {t.snippet && <span className="text-gray-500"> - {hl(t.snippet, q)}</span>}
                         </span>
+                        {t.lastOutOpened && <span className="hidden sm:inline text-[10px] font-semibold text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-full px-1.5 py-px shrink-0" title="The customer opened our latest email">Opened</span>}
                         <span className="hidden md:inline text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 py-px truncate max-w-[120px] shrink-0">{t.siteName}</span>
                         <span className={`text-xs shrink-0 tabular-nums w-16 text-right ${unread ? 'font-bold text-gray-900' : 'text-gray-500'}`} title={when ? formatDateTime(when) : undefined}>
                           {gmailDate(when)}

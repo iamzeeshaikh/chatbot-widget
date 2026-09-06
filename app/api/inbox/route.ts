@@ -5,6 +5,7 @@ import { hasFeature, defaultOwnerForSite } from '@/lib/workspaces'
 import { CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead } from '@/lib/emailreply'
 import { CRM_EMAIL_ROLE, parseCrmEmail } from '@/lib/crmemail'
 import { ASSIGNMENT_ROLE } from '@/lib/assignment'
+import { CRM_EMAIL_OPEN_ROLE, parseCrmEmailOpen } from '@/lib/emailtrack'
 import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
 import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
 import { asUtcIso } from '@/lib/visitor'
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
     const { data: page } = await supabase.from('chat_logs')
       .select('session_id, site_id, role, message, created_at')
       .in('site_id', sites)
-      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, ASSIGNMENT_ROLE])
+      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, ASSIGNMENT_ROLE, CRM_EMAIL_OPEN_ROLE])
       .gte('created_at', since)
       .order('created_at', { ascending: true })
       .range(from, from + 999)
@@ -76,6 +77,9 @@ export async function GET(req: NextRequest) {
     files: { name: string; mime: string }[]
     /** When WE last wrote — the Sent folder sorts on this. */
     lastOutAt: string
+    lastOutId: string
+    /** Whether the customer opened our latest send (open pixel). */
+    lastOutOpened: boolean
     /** Everything searchable, lower-cased, capped — subject/bodies/names/files. */
     hay: string
     /** For a search hit: the first body passage around the term. */
@@ -88,6 +92,7 @@ export async function GET(req: NextRequest) {
   const threads = new Map<string, Thread>()
   const read = new Set<string>()
   const owner = new Map<string, string | null>()
+  const opened = new Set<string>()   // email ids the customer opened
 
   for (const r of rows) {
     if (r.role === CRM_EMAIL_READ_ROLE) {
@@ -99,9 +104,14 @@ export async function GET(req: NextRequest) {
       owner.set(r.session_id, (r.message ?? '').trim() || null)   // ascending → last wins
       continue
     }
+    if (r.role === CRM_EMAIL_OPEN_ROLE) {
+      const o = parseCrmEmailOpen(r.message)
+      if (o) opened.add(o.emailId)
+      continue
+    }
     let t = threads.get(r.session_id)
     if (!t) {
-      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '', hay: '', hit: '' }
+      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '', lastOutId: '', lastOutOpened: false, hay: '', hit: '' }
       threads.set(r.session_id, t)
     }
     if (r.role === CRM_EMAIL_IN_ROLE) {
@@ -127,7 +137,7 @@ export async function GET(req: NextRequest) {
       t.participants.push(`a:${e.sentBy || e.from || ''}`)
       feed(t, `${e.subject} ${e.to} ${(e.attachments ?? []).map((a) => a.name).join(' ')} ${e.body}`, e.body)
       const oAt = e.at || r.created_at
-      if (oAt > t.lastOutAt) t.lastOutAt = oAt
+      if (oAt > t.lastOutAt) { t.lastOutAt = oAt; t.lastOutId = e.id }
       const at = e.at || r.created_at
       if (at >= t.at) {
         t.at = at; t.direction = 'out'
@@ -177,6 +187,7 @@ export async function GET(req: NextRequest) {
       })(),
       files: (hideContactsHere ? t.files.map((f) => ({ ...f, name: scrubText(f.name) ?? 'file' })) : t.files).slice(0, 12),
       lastOutAt: t.lastOutAt ? asUtcIso(t.lastOutAt) : null,
+      lastOutOpened: !!t.lastOutId && opened.has(t.lastOutId),
       unread: t.inboundIds.filter((id) => !read.has(id)).length,
       owner: owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId),
     }))

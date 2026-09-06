@@ -39,6 +39,9 @@ export interface CrmEmailEntry {
   subject: string
   /** Full text, kept so the timeline can show the whole thing. */
   body: string
+  /** Filled at READ time from crm_email_open rows — first open, and how many. */
+  openedAt?: string
+  opens?: number
   /** The formatted version, when the agent used any. ALREADY SANITISED at the
    *  send route — it is rendered back into another agent's browser, so it must
    *  never be stored raw. `body` stays the source of truth for search, the

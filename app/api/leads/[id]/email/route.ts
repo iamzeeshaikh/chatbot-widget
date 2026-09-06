@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { openPixelHtml } from '@/lib/emailtrack'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
 import { leadRecipient, markThreadRepliesRead } from '@/lib/leadrecord'
@@ -187,7 +188,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // — the same information, each in the form its half of the message can show.
   const finalText = sigText ? `${text}\n\n${sigText}` : text
   const bodyHtml = html || plainToHtml(text)
-  const finalHtml = sigHtml ? `${bodyHtml}${sigHtml}` : (html || '')
+  // The id is minted BEFORE the HTML so the open pixel can carry it; the same
+  // id then names the stored row, which is how an open finds its email.
+  const emailId = newEmailId()
+  const trackBase = (process.env.NEXT_PUBLIC_BASE_URL || `${req.nextUrl.protocol}//${req.nextUrl.host}`).replace(/\/$/, '')
+  const finalHtml = `${sigHtml ? `${bodyHtml}${sigHtml}` : (html || bodyHtml)}${openPixelHtml(trackBase, id, emailId)}`
 
   // ── 1. Gmail first ─────────────────────────────────────────────────────────
   let sent
@@ -211,7 +216,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   // ── 2. only now, the timeline row ──────────────────────────────────────────
   const entry: CrmEmailEntry = {
-    id: newEmailId(),
+    id: emailId,
     sentBy: access.member.email,
     from,
     to: toList.list.join(', '),

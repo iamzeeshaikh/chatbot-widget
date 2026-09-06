@@ -21,7 +21,7 @@ import {
   Inbox, Quote, Reply, FileText, Image as ImageIcon, TriangleAlert, RefreshCw, Loader2,
   MessageCircle, MessageCircleReply, PhoneCall, type LucideIcon,
 } from 'lucide-react'
-import { dateDividerLabel, formatTime, timeAgo } from '@/lib/datetime'
+import { dateDividerLabel, formatTime, timeAgo, formatDateTime } from '@/lib/datetime'
 import { CRM_STAGE_LABEL, CRM_STAGE_DOT, CRM_STAGE_STYLE, formatMoney, type CrmCurrency } from '@/lib/crm'
 import { TASK_TYPE_LABEL, TASK_TYPE_STYLE } from '@/lib/tasks'
 import { isImageMime } from '@/lib/attachment'
@@ -400,6 +400,12 @@ export function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email'
       <p className="text-xs font-semibold text-gray-900 break-words">{entry.subject}</p>
       <p className="text-[10px] text-gray-500 mt-0.5 break-words">
         from {entry.from}{entry.cc ? ` · cc ${entry.cc}` : ''}
+      </p>
+      {/* Open tracking. Worded carefully: "not opened yet" means no signal,
+          which a client that blocks images also produces. */}
+      <p className={`text-[10px] mt-0.5 ${entry.openedAt ? 'text-emerald-700 font-medium' : 'text-gray-400'}`}
+        title={entry.openedAt ? `First opened ${formatDateTime(entry.openedAt)}${(entry.opens ?? 0) > 1 ? ` · opened ${entry.opens} times` : ''}` : 'No open recorded yet — some mail apps hide images, so this can stay blank even if it was read'}>
+        {entry.openedAt ? `✓ Opened ${timeAgo(entry.openedAt)}${(entry.opens ?? 0) > 1 ? ` · ${entry.opens}×` : ''}` : 'Not opened yet'}
       </p>
       {open ? (
         // The formatted version when there is one, so the record shows what the

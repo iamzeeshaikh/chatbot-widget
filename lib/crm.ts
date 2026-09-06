@@ -80,6 +80,8 @@ export const CRM_ROLES = [
   // "Somebody tapped the phone number on <site>" (lib/callintent.ts) — also on
   // the reserved site only.
   'call_intent',
+  // Customer opened an email we sent (lib/emailtrack.ts) — lives on the lead.
+  'crm_email_open',
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ import {
 } from './tasks'
 import { CRM_EMAIL_ROLE, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE } from './crm'
+import { CRM_EMAIL_OPEN_ROLE, parseCrmEmailOpen } from './emailtrack'
 import { cachedLineType, whatsAppStateFrom, type WhatsAppStatus } from './whatsappstatus'
 import { parseNotALead, type NotALeadMark } from './notalead'
 import { CRM_NOT_A_LEAD_ROLE } from './crm'
@@ -384,6 +385,15 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const notesById = new Map<string, CrmNoteEntry>()
   const tasksById = new Map<string, CrmTaskEntry>()
   const emailsSent: CrmEmailEntry[] = []
+  // emailId → first open + count, folded before the sent rows are read.
+  const opens = new Map<string, { at: string; n: number }>()
+  for (const row of logs) {
+    if (row.role !== CRM_EMAIL_OPEN_ROLE) continue
+    const o = parseCrmEmailOpen(row.message)
+    if (!o) continue
+    const prev = opens.get(o.emailId)
+    opens.set(o.emailId, { at: prev && prev.at < o.at ? prev.at : o.at, n: (prev?.n ?? 0) + 1 })
+  }
   const emailsIn = new Map<string, CrmEmailInEntry>()   // gmailId -> reply
   const readIds = new Set<string>()
   const authorByAt = new Map<string, string>()
@@ -628,6 +638,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     if (row.role === CRM_EMAIL_ROLE) {
       const e = parseCrmEmail(row.message)
       if (e) {
+        const op = opens.get(e.id)
+        if (op) { e.openedAt = asUtcIso(op.at) ?? op.at; e.opens = op.n }
         push({
           id: `email-${row.id ?? at}`, at, kind: 'email', group: 'messages',
           actor: AGENT_LABEL(e.sentBy), title: `Emailed ${e.to}`,
