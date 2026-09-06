@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic'
 // place. Clicking through opens that record; this endpoint only has to say
 // what is waiting.
 
-const WINDOW_DAYS = 60
+const WINDOW_DAYS = 90   // the Gmail history import reaches back 75 days; the list must show all of it
 const HAY_CAP = 40000
 
 function excerpt(body: string, q: string): string {
