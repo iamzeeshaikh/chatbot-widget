@@ -304,7 +304,13 @@ function isOwnNumber(phone: string | null | undefined): boolean {
 // The telecom industry reserves 555-0100 through 555-0199 for fiction/testing
 // — a real customer's phone can never fall in this block, so a submission
 // carrying one (e.g. "416-555-0142") is someone testing the form, not a lead.
-const TEST_PHONE_RE = /^\d{3}555\d{4}$/
+// NANP's fictional exchange (NNN-555-XXXX), in ANY format — the old anchored
+// regex missed "+12025550139", so two bot submissions with the same mail.ru
+// address and made-up 202-555 numbers became leads on 2026-09-06.
+const TEST_PHONE_RE = /^(?:1)?\d{3}555\d{4}$/
+// The same bot's template: "I would like more information. Please contact me
+// by email — <site name>." — a form-filler that pastes the site's own name.
+const FORM_BOT_TEMPLATE_RE = /i would like more information\.?\s*please contact me by email\s*[—–-]/i
 
 // WooCommerce orders are deliberately NOT treated as spam any more — they are
 // ingested as checkout leads instead (see isCheckoutOrder above).
@@ -321,7 +327,9 @@ const EXPLOIT_ATTACHMENT_RE = /^.*\b(?:attachment|attached|artwork|file)\b.*\.(?
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
   if (isOwnNumber(cleanPhone)) return true
-  if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(cleanPhone))) return true
+  const digits = (cleanPhone ?? '').replace(/\D/g, '')
+  if (cleanPhone && (BOT_PHONE_RE.test(cleanPhone) || TEST_PHONE_RE.test(digits))) return true
+  if (FORM_BOT_TEMPLATE_RE.test(bodyText)) return true
   if (RESERVED_EMAIL_DOMAIN_RE.test(bodyText) || EXPLOIT_ATTACHMENT_RE.test(bodyText)) return true
   return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText)
     || MARKETING_PITCH_RE.test(bodyText) || SUPPLIER_PITCH_RE.test(bodyText)
