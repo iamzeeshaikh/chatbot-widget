@@ -170,7 +170,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // a preview hostname resolves to nothing.
   const base = (process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).replace(/\/$/, '')
   const sigFallback = {
-    name: brandNames.has(chatName.toLowerCase()) ? '' : chatName,
+    // Same rule as /api/signature: sports signs as the site when the agent has
+    // no name of their own; a brand-named chat display name never counts.
+    name: (brandNames.has(chatName.toLowerCase()) ? '' : chatName)
+      || (access.member.workspace === 'sports' ? (siteNameOf.get(access.siteId) ?? '') : ''),
     email: from,
     company: siteNameOf.get(access.siteId) ?? '',
     logoSrc: `${base}/api/logo/${encodeURIComponent(access.siteId)}`,

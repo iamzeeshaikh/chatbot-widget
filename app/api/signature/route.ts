@@ -58,6 +58,10 @@ export async function GET(req: NextRequest) {
   const chatName = chatNames.get(member.email.trim().toLowerCase()) ?? ''
   const fallbackName = isCompanyName.has(chatName.toLowerCase()) ? '' : chatName
   const siteName = siteId && mine.includes(siteId) ? (siteNames.get(siteId) ?? '') : ''
+  // Sports signs as the SITE (owner, 2026-09-06): one shared mailbox works
+  // every sports site, so the name slot carries the website's own name unless
+  // the agent has typed a name of their own. Packaging agents keep their names.
+  const signAs = fallbackName || (member.workspace === 'sports' ? siteName : '')
 
   return NextResponse.json({
     agent,
@@ -69,7 +73,7 @@ export async function GET(req: NextRequest) {
     // can never disagree about what the signature looks like.
     signature: siteId && mine.includes(siteId)
       ? renderSignature(agent, sites.get(siteId), {
-          name: fallbackName,
+          name: signAs,
           email: from || member.email,
           company: siteName,
         })
@@ -79,7 +83,7 @@ export async function GET(req: NextRequest) {
     // a drawing of the feature rather than the feature.
     signatureHtml: siteId && mine.includes(siteId)
       ? renderSignatureHtml(agent, sites.get(siteId), {
-          name: fallbackName,
+          name: signAs,
           email: from || member.email,
           company: siteName,
           logoSrc: `${req.nextUrl.origin}/api/logo/${encodeURIComponent(siteId)}`,
