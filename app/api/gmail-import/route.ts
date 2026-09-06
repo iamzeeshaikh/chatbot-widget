@@ -4,7 +4,7 @@ import { workspaceSites, type Workspace } from '@/lib/workspaces'
 import { CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE } from '@/lib/crm'
 import { makeSnippet, newEmailId } from '@/lib/crmemail'
 import { splitQuoted, inboundSnippet, MAX_INBOUND_BODY } from '@/lib/emailreply'
-import { QUOTE_TAG, quoteSessionId } from '@/lib/quoteintake'
+import { QUOTE_TAG, quoteSessionId, isLikelySpamQuote } from '@/lib/quoteintake'
 import { workspaceForImportAddress, siteForDomain } from '@/lib/gmailimport'
 import { EMAIL_ATTACHMENT_BUCKET, MAX_INBOUND_ATTACHMENT_BYTES, attachmentPath, type EmailAttachment } from '@/lib/emailattach'
 
@@ -256,6 +256,12 @@ async function resolveLead(
   if (!siteId) return null   // unresolved — reported, never guessed onto a site
 
   const first = msgs.slice().sort((a, b) => safeIso(a.at).localeCompare(safeIso(b.at)))[0]
+  // A thread that would CREATE a lead gets the quote-intake spam test on the
+  // customer's own first words: a supplier pitch ("Premium Sportswear &
+  // Teamwear Sourcing") became a sports lead on the first sports import.
+  // Threads that match an EXISTING lead are never judged here.
+  const firstInbound = msgs.filter((m) => !m.outbound).sort((a, b) => safeIso(a.at).localeCompare(safeIso(b.at)))[0]
+  if (firstInbound && isLikelySpamQuote(`${firstInbound.subject ?? ''}\n${firstInbound.body}`)) return null
   const name = (!first.outbound && first.fromName) ? first.fromName : ''
   const { data: created } = await supabase.from('leads').insert([{
     site_id: siteId, name: name || null, email: customerEmail,
