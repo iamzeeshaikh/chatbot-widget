@@ -55,6 +55,9 @@ export default function PipelinePage() {
   const [me, setMe] = useState('')   // the signed-in member, for "assign to me"
   const [total, setTotal] = useState(0)
   const [truncated, setTruncated] = useState(false)
+  // Leads left off the board for being marked "not a lead". Said out loud, so
+  // a smaller number than yesterday reads as a decision rather than a bug.
+  const [excluded, setExcluded] = useState(0)
   const [status, setStatus] = useState<'loading' | 'ok' | 'error' | 'unavailable'>('loading')
   const [movingId, setMovingId] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState<CrmStage | null>(null)
@@ -131,6 +134,7 @@ export default function PipelinePage() {
         setMe(d.me ?? '')
         setTotal(d.total ?? 0)
         setTruncated(!!d.truncated)
+        setExcluded(Number(d.excluded) || 0)
         setStatus('ok')
       })
       .catch(() => setStatus('error'))
@@ -359,7 +363,14 @@ export default function PipelinePage() {
             <div className="min-w-0">
               <h1 className="text-lg font-bold text-gray-900 leading-tight">Pipeline</h1>
               <p className="text-[11px] text-gray-500 leading-tight tabular-nums">
-                {status === 'loading' ? 'Loading…' : `${total} lead${total === 1 ? '' : 's'} matching`}
+                {status === 'loading'
+                  ? 'Loading…'
+                  : `${total} lead${total === 1 ? '' : 's'} matching`}
+                {status !== 'loading' && excluded > 0 && (
+                  <span title="Marked as spam, a duplicate or an automated notification. They are excluded from every count in the app.">
+                    {' · '}{excluded} not counted
+                  </span>
+                )}
               </p>
             </div>
 

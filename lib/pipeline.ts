@@ -25,6 +25,7 @@ import { supabase, fetchAllPages } from './supabase'
 import { memberSites, type Member } from './auth'
 import { asUtcIso, CONTACT_ROLE, parseContact } from './visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
+import { notALeadSessions } from './notalead'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import { ASSIGNMENT_ROLE } from './assignment'
 import { canSeeAllLeads, visibleToMember } from './teamlead'
@@ -102,6 +103,9 @@ export interface PipelineResult {
   }
   /** True when the row caps were hit — the page says so rather than lying. */
   truncated: boolean
+  /** How many leads were left off the board for being marked "not a lead".
+   *  Reported rather than silently subtracted, the same as every other count. */
+  excluded: number
 }
 
 interface ControlRow { session_id: string; site_id: string; role: string; message: string; created_at: string }
@@ -119,7 +123,7 @@ export async function loadPipeline(
   const allowed = memberSites(member)
   const empty = (): PipelineResult => ({
     columns: CRM_STAGES.map((stage) => ({ stage, count: 0, totals: [], unvalued: 0, cards: [], hasMore: false })),
-    total: 0, options: { sites: [], owners: [] }, truncated: false,
+    total: 0, options: { sites: [], owners: [] }, truncated: false, excluded: 0,
   })
   if (allowed.length === 0) return empty()
 
@@ -128,7 +132,11 @@ export async function loadPipeline(
   const since = filters.from ?? new Date(Date.now() - 90 * 86_400_000).toISOString()
   const until = filters.to ?? null
 
-  const [captureRows, leadRows, controlRows, siteRes] = await Promise.all([
+  // Leads somebody has marked "not a lead" — spam, a duplicate, an automated
+  // notification. They are subtracted from every other count in the app; the
+  // board was the one place that still showed them, so T-Mobile's billing
+  // notices sat in New alongside real customers.
+  const [captureRows, leadRows, controlRows, siteRes, excludedSessions] = await Promise.all([
     // Chat leads: one lead_capture row per captured session.
     fetchAllPages<ControlRow>(
       () => supabase.from('chat_logs')
@@ -153,6 +161,7 @@ export async function loadPipeline(
         .gte('created_at', since).order('created_at', { ascending: true }),
       CONTROL_ROW_CAP),
     supabase.from('sites').select('site_id, name'),
+    notALeadSessions(sites),
   ])
 
   const truncated = captureRows.length >= LEAD_ROW_CAP || controlRows.length >= CONTROL_ROW_CAP
@@ -184,6 +193,13 @@ export async function loadPipeline(
     card.name = (l.name || l.email || l.phone || '').trim()
     card.email = l.email
     cards.set(id, card)
+  }
+
+  // Drop the marked ones before anything is folded onto them, so a card that
+  // is not going to be shown never costs any work.
+  let excluded = 0
+  for (const id of excludedSessions) {
+    if (cards.delete(id)) excluded++
   }
 
   // ── fold control rows onto the cards ───────────────────────────────────────
@@ -368,7 +384,7 @@ export async function loadPipeline(
     .map((id) => ({ siteId: id, name: siteName[id] ?? id }))
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  return { columns, total: list.length, options: { sites: siteOptions, owners }, truncated }
+  return { columns, total: list.length, options: { sites: siteOptions, owners }, truncated, excluded }
 }
 
 // ── Display helpers (client-safe) ────────────────────────────────────────────
