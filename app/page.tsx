@@ -1917,6 +1917,23 @@ export default function Dashboard() {
   // tab already gives them.
   const leadRecordId = (lead: Lead) => lead.session_id || `quote-${lead.id}`
 
+  // What to put in the Name column when there is no name.
+  //
+  // A bare "-" reads as a broken row, and it was the first thing an agent asked
+  // about. Some leads genuinely have no name anywhere — a voicemail from a
+  // caller who did not give one, an imported thread where nobody was ever
+  // addressed by name — so the honest answer is to show the identifier we DO
+  // have, marked as a stand-in rather than dressed up as a real name.
+  const displayName = (lead: { name?: string | null; email?: string | null; phone?: string | null }) => {
+    const name = (lead.name ?? '').trim()
+    if (name) return { text: name, real: true }
+    const email = (lead.email ?? '').trim()
+    if (email) return { text: email.split('@')[0], real: false }
+    const phone = (lead.phone ?? '').trim()
+    if (phone) return { text: phone, real: false }
+    return { text: 'No name on file', real: false }
+  }
+
   // Block / unblock a visitor IP (admin only); optimistic UI update.
   async function toggleIpBlock(ip: string, block: boolean) {
     setBlockedIps((prev) => block ? Array.from(new Set([...prev, ip])).sort() : prev.filter((x) => x !== ip))
@@ -2896,10 +2913,15 @@ export default function Dashboard() {
               {/* A plain anchor: normal click, middle-click and cmd-click all
                   behave the way the browser intends, with nothing intercepted. */}
                               <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">
-                                {canRecords ? (
-                                  <a href={leadRecordHref(leadRecordId(lead))} onClick={(e) => e.stopPropagation()}
-                                    className="hover:underline">{lead.name || '-'}</a>
-                                ) : (lead.name || '-')}
+                                {(() => {
+                                  const d = displayName(lead)
+                                  const inner = <span className={d.real ? '' : 'italic text-gray-500 font-normal'}
+                                    title={d.real ? undefined : 'No name was captured for this lead'}>{d.text}</span>
+                                  return canRecords ? (
+                                    <a href={leadRecordHref(leadRecordId(lead))} onClick={(e) => e.stopPropagation()}
+                                      className="hover:underline">{inner}</a>
+                                  ) : inner
+                                })()}
                               </td>
                               <td className="px-3 py-3 text-blue-600 whitespace-nowrap">{lead.email || '-'}</td>
                               <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{lead.phone || '-'}</td>
@@ -4161,7 +4183,7 @@ export default function Dashboard() {
                                 </a>
                               ) : (l.email ?? <span className="text-gray-500 italic">Marked as lead</span>)}
                             </td>
-                            <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
+                            <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{(() => { const d = displayName(l); return <span className={d.real ? '' : 'italic text-gray-500'}>{d.text}</span> })()}</td>
                             <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
                             <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
                             <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap" title={l.referrer ?? 'Direct'}>
@@ -4212,7 +4234,7 @@ export default function Dashboard() {
                             <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <a href={`mailto:${l.email}`} className="text-blue-700 hover:underline">{l.email}</a>
                             </td>
-                            <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{l.name || <span className="text-gray-500">—</span>}</td>
+                            <td className="px-4 py-3 text-gray-800 whitespace-nowrap">{(() => { const d = displayName(l); return <span className={d.real ? '' : 'italic text-gray-500'}>{d.text}</span> })()}</td>
                             <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{l.phone || <span className="text-gray-500">—</span>}</td>
                             <td className="px-4 py-3 whitespace-nowrap"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 border border-gray-300 text-gray-700">{l.site_name}</span></td>
                             {/* The row opens the record now; the full-message
