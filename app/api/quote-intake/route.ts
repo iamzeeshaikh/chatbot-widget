@@ -3,6 +3,7 @@ import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllo
 import { supabase } from '@/lib/supabase'
 import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody } from '@/lib/quoteintake'
 import { isRetiredLeadSite } from '@/lib/workspaces'
+import { recordIntakeDrop } from '@/lib/intakedrop'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,6 +83,14 @@ export async function POST(req: NextRequest) {
   // as the spam path — the Apps Script has already labeled the thread
   // Processed and must not retry. Existing leads are untouched.
   if (isRetiredLeadSite(siteId)) {
+    await recordIntakeDrop({
+      siteId, reason: 'retired',
+      name: typeof name === 'string' ? name : undefined,
+      email: typeof email === 'string' ? email : undefined,
+      phone: typeof phone === 'string' ? phone : undefined,
+      product: typeof product === 'string' ? product : undefined,
+      excerpt: typeof message === 'string' ? message : undefined,
+    })
     return NextResponse.json({ success: true, retired: true })
   }
 
@@ -108,6 +117,16 @@ export async function POST(req: NextRequest) {
   // Silently accept without inserting — the Script already labeled it
   // Processed, so it won't retry.
   if (isLikelySpamQuote(bodyText, cleanPhone)) {
+    // Recorded, not vanished. The filter is deliberately aggressive and a
+    // genuine customer can trip it; this row is the only way anybody would
+    // ever find out.
+    await recordIntakeDrop({
+      siteId, reason: 'spam', at: createdAt,
+      name: leadName || undefined, email: cleanEmail || undefined,
+      phone: cleanPhone || undefined,
+      product: typeof product === 'string' ? product : undefined,
+      excerpt: bodyText,
+    })
     return NextResponse.json({ success: true, spam: true })
   }
 
@@ -144,6 +163,12 @@ export async function POST(req: NextRequest) {
       .ilike('message', `%${needle}%`)
       .limit(1)
     if (sameOrder && sameOrder.length > 0) {
+      await recordIntakeDrop({
+        siteId, reason: 'duplicate', at: createdAt, detail: `same order ${orderNo}`,
+        name: leadName || undefined, email: cleanEmail || undefined,
+        phone: cleanPhone || undefined, excerpt: bodyText,
+        mergedInto: sameOrder[0].id,
+      })
       return NextResponse.json({ success: true, deduped: true })
     }
   }
@@ -156,8 +181,13 @@ export async function POST(req: NextRequest) {
       .eq('site_id', siteId)
       .ilike('email', cleanEmail)
       .ilike('message', `${tag}%`)
-    const isDupe = (candidates ?? []).some((c) => isSameQuoteBody(normalizeQuoteBody(c.message ?? ''), normalized))
-    if (isDupe) {
+    const dupe = (candidates ?? []).find((c) => isSameQuoteBody(normalizeQuoteBody(c.message ?? ''), normalized))
+    if (dupe) {
+      await recordIntakeDrop({
+        siteId, reason: 'duplicate', at: createdAt, detail: 'identical body already stored',
+        name: leadName || undefined, email: cleanEmail || undefined,
+        phone: cleanPhone || undefined, excerpt: bodyText, mergedInto: dupe.id,
+      })
       return NextResponse.json({ success: true, deduped: true })
     }
   }
@@ -195,6 +225,11 @@ export async function POST(req: NextRequest) {
         await supabase.from('leads').update({ message: incoming }).eq('id', existing.id)
       }
       await storeIntakeAttachments(siteId, existing.id, files, createdAt)
+      await recordIntakeDrop({
+        siteId, reason: 'duplicate', at: createdAt, detail: 'same customer, same site, same day',
+        name: leadName || undefined, email: cleanEmail || undefined,
+        phone: cleanPhone || undefined, excerpt: bodyText, mergedInto: existing.id,
+      })
       return NextResponse.json({ success: true, deduped: true })
     }
   }
