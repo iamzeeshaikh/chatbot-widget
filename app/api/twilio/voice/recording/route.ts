@@ -73,6 +73,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (!from) return new NextResponse('', { status: 204 })
+  // A voicemail under four seconds is a hang-up or silence, not a message —
+  // it must not create a lead. (An answered call's recording is never this
+  // short and takes the other branch anyway.)
+  if (!isCall && duration < 4) return new NextResponse('', { status: 204 })
 
   // Whose call this is. Without it the recording could be filed on the other
   // business's lead list, which is the one thing these two must never do.

@@ -108,6 +108,12 @@ export async function leadForCaller(
 ): Promise<InboundLead | null> {
   const from = String(phone || '').trim()
   if (!from) return null
+  // No number, no lead. A blocked caller arrives as "Anonymous"/"Restricted"
+  // or Twilio's +266696687 placeholder ("ANONYMOUS" on a keypad) — a record
+  // with a phone of "Anonymous" and a 3-second voicemail is noise, not a lead
+  // (2026-09-07). Nothing here can ever be called back.
+  const digits = from.replace(/\D/g, '')
+  if (digits.length < 7 || digits === '266696687' || /anonymous|restricted|unknown|private/i.test(from)) return null
 
   const match = await findLeadByPhone(from, workspace)
   if (match) return { sessionId: match.sessionId, siteId: match.siteId, created: false }
