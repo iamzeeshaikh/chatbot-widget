@@ -4,7 +4,7 @@ import { workspaceSites, type Workspace } from '@/lib/workspaces'
 import { CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE } from '@/lib/crm'
 import { makeSnippet, newEmailId } from '@/lib/crmemail'
 import { splitQuoted, inboundSnippet, MAX_INBOUND_BODY } from '@/lib/emailreply'
-import { QUOTE_TAG, quoteSessionId, isLikelySpamQuote } from '@/lib/quoteintake'
+import { QUOTE_TAG, quoteSessionId, isLikelySpamQuote, customerNameFromBody } from '@/lib/quoteintake'
 import { workspaceForImportAddress, siteForDomain } from '@/lib/gmailimport'
 import { EMAIL_ATTACHMENT_BUCKET, MAX_INBOUND_ATTACHMENT_BYTES, attachmentPath, type EmailAttachment } from '@/lib/emailattach'
 
@@ -222,6 +222,40 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, imported, skipped, unresolved, leads: leadIds.size })
 }
 
+// The customer's own name, from whichever part of the thread actually carries
+// it. Returns '' rather than guessing — a lead with no name reads better than
+// a lead with the wrong one.
+function customerNameForImport(customerEmail: string, msgs: ImportMessage[]): string {
+  const target = customerEmail.trim().toLowerCase()
+  const byDate = msgs.slice().sort((a, b) => safeIso(a.at).localeCompare(safeIso(b.at)))
+
+  // 1. A message genuinely sent BY the customer carries their own display name.
+  for (const m of byDate) {
+    if (m.outbound) continue
+    if ((m.fromEmail ?? '').trim().toLowerCase() !== target) continue
+    const n = (m.fromName ?? '').trim()
+    if (n && !n.includes('@')) return n.slice(0, 80)
+  }
+
+  // 2. The form body the owner forwarded: "Name: Nash Crawley".
+  for (const m of byDate) {
+    const n = customerNameFromBody(m.body ?? '')
+    if (n) return n
+  }
+
+  // 3. The subject the form wrote: "[Contact Form] Nash Crawley",
+  //    "[Quote Request] Edwin Flores — Blank Soccer Jerseys".
+  for (const m of byDate) {
+    const subj = String(m.subject ?? '')
+    const bracket = subj.match(/\][\s-]*([^\u2014|\-]+)/)
+    const n = (bracket?.[1] ?? '').trim().replace(/\s+/g, ' ')
+    if (n && n.length >= 3 && n.length <= 60 && !n.includes('@') && /[A-Za-z]/.test(n)) {
+      return n
+    }
+  }
+  return ''
+}
+
 // The lead this customer's history belongs to. Existing lead first (any site in
 // the workspace — leads are already loaded), then a new email-only lead on the
 // site the conversation itself names.
@@ -262,7 +296,13 @@ async function resolveLead(
   // Threads that match an EXISTING lead are never judged here.
   const firstInbound = msgs.filter((m) => !m.outbound).sort((a, b) => safeIso(a.at).localeCompare(safeIso(b.at)))[0]
   if (firstInbound && isLikelySpamQuote(`${firstInbound.subject ?? ''}\n${firstInbound.body}`)) return null
-  const name = (!first.outbound && first.fromName) ? first.fromName : ''
+  // The display name on the first inbound message is only the CUSTOMER's when
+  // that message actually came from them. A thread the owner forwarded into the
+  // mailbox has the FORWARDER's name on it, and taking it produced a lead
+  // called "zeeshan shaikh" holding twenty-four real customers' conversations.
+  // So: use the display name only when the sender IS the customer, and
+  // otherwise read the customer out of the form body or the subject line.
+  const name = customerNameForImport(customerEmail, msgs) 
   const { data: created } = await supabase.from('leads').insert([{
     site_id: siteId, name: name || null, email: customerEmail,
     message: `${QUOTE_TAG}Imported email conversation\n\nFirst subject: ${first.subject || '(no subject)'}\nImported from Gmail history on ${new Date().toISOString().slice(0, 10)}.`,
