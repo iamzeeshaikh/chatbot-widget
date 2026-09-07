@@ -1089,7 +1089,11 @@ function cutAtGutter(body: string): { visible: string; quoted: string } | null {
     while (end < lines.length && (/^\s*>/.test(lines[end]) || !lines[end].trim())) end++
     const tail = lines.slice(end).join('\n').trim()
     const head = lines.slice(0, end).join('\n').trim()
-    return tail && head ? { visible: tail, quoted: head } : null
+    if (!tail || !head) return null
+    // The words under the wall may themselves be followed by more quoting
+    // (an interleaved reply): fold that too, keeping only the prose visible.
+    const again = cutAtGutter(tail)
+    return again ? { visible: again.visible, quoted: `${head}\n\n${again.quoted}` } : { visible: tail, quoted: head }
   }
   let k = cut - 1
   while (k >= 0 && !lines[k].trim()) k--
