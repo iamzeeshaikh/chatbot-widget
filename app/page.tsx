@@ -898,6 +898,7 @@ export default function Dashboard() {
   // …and click a day's Picked-up count to see which agent took how many.
   const [viewDayAgents, setViewDayAgents] = useState<PerfDaily | null>(null)
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
+  const sitesPanelRef = useRef<HTMLDivElement | null>(null)
   const OVERVIEW_LEADS_PER_PAGE = 40
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
   const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
@@ -2556,38 +2557,84 @@ export default function Dashboard() {
             <OverviewSkeleton />
           ) : (
             <>
-              {/* Stats row. Today's Leads / This Week double as filter shortcuts
-                  for the Recent Leads table below.
-                  Clicking an already-active tile does NOT clear it. It used to,
-                  and a second click — easy to make, since the tile does not
+              {/* Stats row. EVERY tile does something — three of them used to be
+                  dead numbers, which is a strange thing to put next to two that
+                  respond to a click: you cannot tell by looking which is which,
+                  so the two that work read as broken too.
+                  Today's Leads and This Week filter the table by date; Total
+                  Leads clears every filter and shows all of them; Total Sites
+                  jumps to the per-site breakdown; Active Bots opens the
+                  conversations those bots produced.
+                  Clicking an already-active date tile does NOT clear it. It used
+                  to, and a second click — easy to make, since the tile does not
                   visibly change on the first one until you scroll to the table —
                   silently put every lead back in the list. That reads as the
                   date filter being broken rather than as an undo. Clearing is
                   the date dropdown on the table, which says what it does. */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 {[
-                  { label: 'Total Sites', value: roleSites.length, icon: Trophy, color: 'from-blue-100 to-blue-50', border: 'border-blue-200', dateFilter: undefined },
-                  { label: 'Total Leads', value: overviewSummaryLeads.length, icon: Users, color: 'from-green-100 to-green-50', border: 'border-green-200', dateFilter: undefined },
-                  { label: botOffNow ? 'Active Sites' : 'Active Bots', value: roleSites.length, icon: botOffNow ? Globe : Bot, color: 'from-purple-100 to-purple-50', border: 'border-purple-200', dateFilter: undefined },
-                  { label: "Today's Leads", value: todayLeads, icon: Sun, color: 'from-orange-100 to-orange-50', border: 'border-orange-200', dateFilter: 'today' as const },
-                  { label: "This Week", value: thisWeekLeads, icon: TrendingUp, color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20', dateFilter: 'week' as const },
+                  {
+                    label: 'Total Sites', value: roleSites.length, icon: Trophy,
+                    color: 'from-blue-100 to-blue-50', border: 'border-blue-200',
+                    dateFilter: undefined,
+                    hint: 'Jump to the site-by-site breakdown',
+                    act: () => {
+                      setOverviewLeadSite('')
+                      setOverviewLeadPage(0)
+                      sitesPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    },
+                  },
+                  {
+                    label: 'Total Leads', value: overviewSummaryLeads.length, icon: Users,
+                    color: 'from-green-100 to-green-50', border: 'border-green-200',
+                    dateFilter: 'all' as const,
+                    hint: 'Show every lead in the table below, with no filters',
+                    act: () => {
+                      setOverviewLeadDate('all')
+                      setOverviewLeadSite('')
+                      setOverviewLeadPage(0)
+                      leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    },
+                  },
+                  {
+                    label: botOffNow ? 'Active Sites' : 'Active Bots', value: roleSites.length,
+                    icon: botOffNow ? Globe : Bot,
+                    color: 'from-purple-100 to-purple-50', border: 'border-purple-200',
+                    dateFilter: undefined,
+                    hint: 'Open the conversations these bots have had',
+                    act: () => setTab('conversations'),
+                  },
+                  {
+                    label: "Today's Leads", value: todayLeads, icon: Sun,
+                    color: 'from-orange-100 to-orange-50', border: 'border-orange-200',
+                    dateFilter: 'today' as const,
+                    hint: 'Show today’s leads in the table below',
+                    act: () => {
+                      setOverviewLeadDate('today')
+                      setOverviewLeadPage(0)
+                      leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    },
+                  },
+                  {
+                    label: 'This Week', value: thisWeekLeads, icon: TrendingUp,
+                    color: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cyan-500/20',
+                    dateFilter: 'week' as const,
+                    hint: 'Show this week’s leads in the table below',
+                    act: () => {
+                      setOverviewLeadDate('week')
+                      setOverviewLeadPage(0)
+                      leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    },
+                  },
                 ].map((s) => {
-                  const clickable = s.dateFilter !== undefined
-                  const active = clickable && overviewLeadDate === s.dateFilter
+                  const active = s.dateFilter !== undefined && overviewLeadDate === s.dateFilter
                   return (
-                    <button key={s.label} disabled={!clickable}
-                      onClick={() => {
-                        if (!s.dateFilter) return
-                        setOverviewLeadDate(s.dateFilter)
-                        setOverviewLeadPage(0)
-                        leadsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                      }}
-                      title={clickable
-                        ? (active
-                            ? `The leads table below is showing ${s.label.toLowerCase()}. Use the date dropdown there to clear it.`
-                            : `Show ${s.label.toLowerCase()} in the leads table below`)
-                        : undefined}
-                      className={`group text-left bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${active ? 'border-gray-400 ring-2 ring-gray-300' : s.border} bg-gray-100 transition-all duration-200 ${clickable ? 'hover:-translate-y-0.5 hover:border-gray-400 hover:shadow-lg hover:shadow-black/20 cursor-pointer' : ''}`}>
+                    <button key={s.label}
+                      onClick={s.act}
+                      title={active
+                        ? `The leads table below is showing ${s.label.toLowerCase()}. Use the date dropdown there to change it.`
+                        : s.hint}
+                      className={`group text-left bg-gradient-to-br ${s.color} rounded-2xl p-5 border ${active ? 'border-gray-400 ring-2 ring-gray-300' : s.border} bg-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-400 hover:shadow-lg hover:shadow-black/20 cursor-pointer`}>
                       <div className="flex items-center justify-between mb-3">
                         <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{s.label}</p>
                         <span className="text-gray-500 opacity-80 group-hover:opacity-100 transition-opacity"><s.icon size={18} strokeWidth={2} aria-hidden /></span>
@@ -2666,7 +2713,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Quick stats per site */}
-                <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                <div ref={sitesPanelRef} className="bg-gray-100 rounded-xl border border-gray-200 p-5 scroll-mt-4">
                   <h2 className="text-sm font-semibold text-gray-900 mb-4">Leads by Site</h2>
                   <div className="space-y-2.5">
                     {roleSites.length === 0 ? (

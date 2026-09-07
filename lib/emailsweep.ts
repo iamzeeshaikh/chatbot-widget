@@ -62,22 +62,37 @@ export const THREAD_ACTIVE_DAYS = 30
  * budget, so even 300 fetches is ~2% of it; the DB side is one paginated read.
  * What actually runs out is the 60s maxDuration, and only because the fetches
  * used to be sequential. They now run THREAD_CONCURRENCY at a time, so 240
- * threads cost roughly 240/5 x ~300ms = 15s of the budget.
+ * threads cost roughly 60/2 x ~300ms = 9s of the budget.
  */
-export const MAX_THREADS_PER_RUN = 240
+// Was 240, which was more than the number of threads that exist — so the
+// rotation below never rotated and every thread was re-read from Gmail every
+// five minutes, forever, whether anything had changed in it or not. 215 live
+// threads x 10 units x 12 runs an hour is 25,800 units an hour spent proving
+// that nothing happened.
+//
+// At 60 the rotation does its job: anything active in the last three hours is
+// still checked on EVERY run (see FRESH_ACTIVITY_MS), and a quiet thread comes
+// round roughly every fourth run instead. A reply to a months-old thread now
+// appears within about twenty minutes rather than five — which is the right
+// trade for a quarter of the quota and an agent who can send.
+export const MAX_THREADS_PER_RUN = 60
 
 /**
  * Parallel Gmail fetches.
  *
- * Was 8, and the per-minute budget above is not the binding constraint: Gmail
- * ALSO enforces ~250 quota units per user per second. Eight concurrent
- * threads.get at 10 units each, returning in ~300ms, is ~266 units/second —
- * just over the line. The sweep would trip its own limit and, worse, leave no
- * headroom for the agent trying to send a reply in the same minute, who was
- * then told their Gmail needed reconnecting. Five keeps the sweep near
- * ~165 units/second and leaves room for real work.
+ * Was 8, then 5, now 2 — and the reason is worth stating plainly, because it
+ * was costing agents their replies.
+ *
+ * Gmail enforces ~250 quota units per user per SECOND, and the sweep shares
+ * that budget with whatever the same person is doing in the composer. A
+ * threads.get costs 10 units and a messages.send costs 100. At five concurrent
+ * fetches returning in ~300ms the sweep sustains ~165 units/second, which
+ * leaves 85 — not enough for a send, so an agent hitting Send during a sweep
+ * burst was refused. At two it sustains ~66 and a send fits alongside it.
+ *
+ * The sweep can afford to be slow. The person waiting on a composer cannot.
  */
-export const THREAD_CONCURRENCY = 5
+export const THREAD_CONCURRENCY = 2
 
 /**
  * A thread with activity this recent is checked on EVERY run regardless of

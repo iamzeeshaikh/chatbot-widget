@@ -304,13 +304,19 @@ export function isRateLimited(status: number, j: GoogleError): boolean {
   return /quota exceeded|rate limit|too many requests/i.test(String(j?.error?.message ?? ''))
 }
 
+// Background work gives up quickly and tries again on the next run. A send is
+// somebody sitting in front of a composer, so it waits: five attempts spread
+// over roughly twenty seconds, which is longer than the sweep's own burst and
+// therefore long enough to outlive the thing that is starving it.
 const RATE_RETRIES = 3
+const SEND_RATE_RETRIES = 5
 
-function backoffMs(attempt: number, retryAfter: string | null): number {
+function backoffMs(attempt: number, retryAfter: string | null, patient = false): number {
   const hinted = Number(retryAfter)
-  if (Number.isFinite(hinted) && hinted > 0) return Math.min(hinted * 1000, 8000)
-  // Jittered, so eight concurrent sweep fetches do not all come back at once.
-  return Math.min(400 * 2 ** attempt, 4000) + Math.floor(Math.random() * 250)
+  if (Number.isFinite(hinted) && hinted > 0) return Math.min(hinted * 1000, patient ? 15000 : 8000)
+  const cap = patient ? 8000 : 4000
+  // Jittered, so concurrent sweep fetches do not all come back at once.
+  return Math.min(400 * 2 ** attempt, cap) + Math.floor(Math.random() * (patient ? 600 : 250))
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -323,21 +329,22 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * returned untouched for the caller to interpret.
  */
 async function gapi(
-  url: string, init: RequestInit, what: string,
+  url: string, init: RequestInit, what: string, patient = false,
 ): Promise<{ res: Response; json: GoogleError & Record<string, unknown> }> {
+  const limit = patient ? SEND_RATE_RETRIES : RATE_RETRIES
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, init)
     const json = res.status === 204
       ? {}
       : await res.json().catch(() => ({})) as GoogleError & Record<string, unknown>
     if (!isRateLimited(res.status, json)) return { res, json }
-    if (attempt >= RATE_RETRIES) {
+    if (attempt >= limit) {
       throw new GmailRateError(
         `Gmail is rate-limiting this mailbox at the moment, so ${what} did not go through. ` +
-        'The connection is fine — wait a few seconds and try again.',
+        'The connection is fine — wait a minute and try again.',
       )
     }
-    await sleep(backoffMs(attempt, res.headers.get('retry-after')))
+    await sleep(backoffMs(attempt, res.headers.get('retry-after'), patient))
   }
 }
 
@@ -437,7 +444,7 @@ export async function verifiedAliases(email: string, cfg: GoogleConfig): Promise
   const token = await accessTokenFor(email, cfg)
   const { res, json: j } = await gapi(
     `${API}/settings/sendAs`, { headers: { Authorization: `Bearer ${token}` } },
-    'your send-as addresses could not be read',
+    'your send-as addresses could not be read', true,
   )
   if (res.status === 401 || res.status === 403) {
     forgetAccessToken(email)
@@ -614,7 +621,7 @@ export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: Outgoi
     // threadId here is what makes Gmail file it in the existing conversation
     // rather than starting a new one.
     body: JSON.stringify(m.threadId ? { raw, threadId: m.threadId } : { raw }),
-  }, 'your email')
+  }, 'your email', true)
   if (res.status === 401 || res.status === 403) {
     forgetAccessToken(agentEmail)
     throw new GmailAuthError(j.error?.message || 'Gmail refused to send. Reconnect Gmail and try again.')
