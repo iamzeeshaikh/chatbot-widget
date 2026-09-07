@@ -645,6 +645,22 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
         if (!e.html && !e.quoted) {
           const split = splitQuoted(e.body)
           if (split.quoted && split.visible.trim()) { e.body = split.visible; e.quoted = split.quoted }
+          else {
+            // splitQuoted is deliberately cautious on inbound mail. A SENT mail is
+            // different: the agent's own words never begin with ">", so the first
+            // ">"-gutter line is the boundary — taking the "On … wrote:" line just
+            // above it along. (Imported bodies also arrive with CRLF.)
+            const lines = e.body.replace(/\r\n?/g, '\n').split('\n')
+            let cut = lines.findIndex((l) => /^\s*>/.test(l))
+            if (cut > 0) {
+              let k = cut - 1
+              while (k >= 0 && !lines[k].trim()) k--
+              if (k >= 0 && /wrote:\s*$/.test(lines[k])) { cut = k; if (k > 0 && /^On\b/.test(lines[k - 1]) && !/wrote:/.test(lines[k - 1])) cut = k - 1 }
+              const visible = lines.slice(0, cut).join('\n').trim()
+              const quoted = lines.slice(cut).join('\n').trim()
+              if (visible && quoted) { e.body = visible; e.quoted = quoted }
+            }
+          }
         }
         push({
           id: `email-${row.id ?? at}`, at, kind: 'email', group: 'messages',
