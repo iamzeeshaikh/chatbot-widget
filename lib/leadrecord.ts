@@ -1081,7 +1081,16 @@ function callEventShape(c: CallEntry): Pick<TimelineEvent, 'kind' | 'group' | 'a
 function cutAtGutter(body: string): { visible: string; quoted: string } | null {
   const lines = body.replace(/\r\n?/g, '\n').split('\n')
   let cut = lines.findIndex((l) => /^\s*>/.test(l))
-  if (cut <= 0) return null
+  if (cut < 0) return null
+  if (cut === 0) {
+    // Bottom-posted: the gutter wall comes FIRST and the new words sit under
+    // it. The wall folds; whatever follows it is the message.
+    let end = 0
+    while (end < lines.length && (/^\s*>/.test(lines[end]) || !lines[end].trim())) end++
+    const tail = lines.slice(end).join('\n').trim()
+    const head = lines.slice(0, end).join('\n').trim()
+    return tail && head ? { visible: tail, quoted: head } : null
+  }
   let k = cut - 1
   while (k >= 0 && !lines[k].trim()) k--
   if (k >= 0 && /wrote:\s*$/.test(lines[k])) { cut = k; if (k > 0 && /^On\b/.test(lines[k - 1]) && !/wrote:/.test(lines[k - 1])) cut = k - 1 }
