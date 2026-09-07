@@ -647,7 +647,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
           if (split.quoted && split.visible.trim()) { e.body = split.visible; e.quoted = split.quoted }
           else {
             const g = cutAtGutter(e.body)
-            if (g) { e.body = g.visible; e.quoted = g.quoted }
+            if (g && g.visible) { e.body = g.visible; e.quoted = g.quoted }
           }
         }
         push({
@@ -737,7 +737,11 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     if (!at) continue
     if (/^\s*>/m.test(e.body)) {
       const g = cutAtGutter(e.body)
-      if (g) { e.quoted = e.quoted ? `${g.quoted}\n${e.quoted}` : g.quoted; e.body = g.visible }
+      if (g) {
+        e.quoted = e.quoted ? `${g.quoted}\n${e.quoted}` : g.quoted
+        e.body = g.visible
+        if (!g.visible) e.textless = true   // nothing but quoted history — "see the attachment"
+      }
     }
     push({
       id: `email-in-${e.gmailId}`, at, kind: 'email_in', group: 'messages',
@@ -1100,7 +1104,9 @@ function cutAtGutter(body: string): { visible: string; quoted: string } | null {
   if (k >= 0 && /wrote:\s*$/.test(lines[k])) { cut = k; if (k > 0 && /^On\b/.test(lines[k - 1]) && !/wrote:/.test(lines[k - 1])) cut = k - 1 }
   const visible = lines.slice(0, cut).join('\n').trim()
   const quoted = lines.slice(cut).join('\n').trim()
-  return visible && quoted ? { visible, quoted } : null
+  // visible may be EMPTY: an "On … wrote:" line straight into the wall is a
+  // reply with no words of its own (an attachment on its own, usually).
+  return quoted ? { visible, quoted } : null
 }
 
 export async function findRelatedLeads(
