@@ -646,20 +646,8 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
           const split = splitQuoted(e.body)
           if (split.quoted && split.visible.trim()) { e.body = split.visible; e.quoted = split.quoted }
           else {
-            // splitQuoted is deliberately cautious on inbound mail. A SENT mail is
-            // different: the agent's own words never begin with ">", so the first
-            // ">"-gutter line is the boundary — taking the "On … wrote:" line just
-            // above it along. (Imported bodies also arrive with CRLF.)
-            const lines = e.body.replace(/\r\n?/g, '\n').split('\n')
-            let cut = lines.findIndex((l) => /^\s*>/.test(l))
-            if (cut > 0) {
-              let k = cut - 1
-              while (k >= 0 && !lines[k].trim()) k--
-              if (k >= 0 && /wrote:\s*$/.test(lines[k])) { cut = k; if (k > 0 && /^On\b/.test(lines[k - 1]) && !/wrote:/.test(lines[k - 1])) cut = k - 1 }
-              const visible = lines.slice(0, cut).join('\n').trim()
-              const quoted = lines.slice(cut).join('\n').trim()
-              if (visible && quoted) { e.body = visible; e.quoted = quoted }
-            }
+            const g = cutAtGutter(e.body)
+            if (g) { e.body = g.visible; e.quoted = g.quoted }
           }
         }
         push({
@@ -747,6 +735,10 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   for (const e of emailsIn.values()) {
     const at = asUtcIso(e.at)
     if (!at) continue
+    if (/^\s*>/m.test(e.body)) {
+      const g = cutAtGutter(e.body)
+      if (g) { e.quoted = e.quoted ? `${g.quoted}\n${e.quoted}` : g.quoted; e.body = g.visible }
+    }
     push({
       id: `email-in-${e.gmailId}`, at, kind: 'email_in', group: 'messages',
       actor: e.fromName || e.from, title: 'Replied by email',
@@ -1079,6 +1071,23 @@ function callEventShape(c: CallEntry): Pick<TimelineEvent, 'kind' | 'group' | 'a
       : `Call not answered (${c.status})`,
     call: c,
   }
+}
+
+// The ">"-gutter boundary. splitQuoted is deliberately cautious (it abandons an
+// inferred boundary when prose sits below it), which is right for a reply
+// pasted inline — but a wall of ">>>>>>>>>>>>" lines is never the new
+// message. Cut at the first gutter line, taking the "On … wrote:" line just
+// above it along; only when real words precede it. Bodies arrive with CRLF.
+function cutAtGutter(body: string): { visible: string; quoted: string } | null {
+  const lines = body.replace(/\r\n?/g, '\n').split('\n')
+  let cut = lines.findIndex((l) => /^\s*>/.test(l))
+  if (cut <= 0) return null
+  let k = cut - 1
+  while (k >= 0 && !lines[k].trim()) k--
+  if (k >= 0 && /wrote:\s*$/.test(lines[k])) { cut = k; if (k > 0 && /^On\b/.test(lines[k - 1]) && !/wrote:/.test(lines[k - 1])) cut = k - 1 }
+  const visible = lines.slice(0, cut).join('\n').trim()
+  const quoted = lines.slice(cut).join('\n').trim()
+  return visible && quoted ? { visible, quoted } : null
 }
 
 export async function findRelatedLeads(

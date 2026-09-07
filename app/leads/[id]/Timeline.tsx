@@ -331,13 +331,15 @@ export default function Timeline({ events, currency, leadId, onEditNote, onDelet
 // A customer's reply. Visually the mirror of EmailEntry — violet rather than
 // sky, and labelled with who wrote it — so the two directions never blur
 // together when you are scanning the rail.
-export function InboundEntry({ entry, unread, onReply }: {
+export function InboundEntry({ entry, unread, onReply, flat = false }: {
   entry: NonNullable<TimelineEvent['inbound']>
   unread: boolean
   onReply?: (ctx: ReplyContext) => void
+  /** The mail thread view: no tinted box — the card around it is the frame. */
+  flat?: boolean
 }) {
   return (
-    <div className={`mt-1 rounded-lg border px-2.5 py-1.5 ${
+    <div className={flat ? 'mt-1' : `mt-1 rounded-lg border px-2.5 py-1.5 ${
       unread ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-300' : 'border-violet-200 bg-violet-50'
     }`}>
       <div className="flex items-baseline gap-1.5 flex-wrap">
@@ -377,10 +379,10 @@ export function InboundEntry({ entry, unread, onReply }: {
   )
 }
 
-export function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email']> }) {
+export function EmailEntry({ entry, flat = false }: { entry: NonNullable<TimelineEvent['email']>; flat?: boolean }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="mt-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5">
+    <div className={flat ? 'mt-1' : 'mt-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5'}>
       <p className="text-xs font-semibold text-gray-900 break-words">{entry.subject}</p>
       <p className="text-[10px] text-gray-500 mt-0.5 break-words">
         from {entry.from}{entry.cc ? ` · cc ${entry.cc}` : ''}

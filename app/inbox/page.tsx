@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, ExternalLink, FileText, Image as ImageIcon, Inbox as InboxIcon, Mail, Paperclip, PenLine, RefreshCw, Reply, Search, Send, X, type LucideIcon } from 'lucide-react'
-import { formatDateTime, formatShortDate, formatTime, pktDayKey, timeAgo } from '@/lib/datetime'
+import { formatDateTime, formatShortDate, formatTime, pktDayKey } from '@/lib/datetime'
 import GlobalSearch from '@/app/components/GlobalSearch'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import { EmailEntry, InboundEntry, Files, type ReplyContext } from '@/app/leads/[id]/Timeline'
@@ -344,7 +344,6 @@ function ThreadView({ thread, onChanged, composeNew = false }: { thread: Thread;
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
   const [composing, setComposing] = useState(composeNew)
   const [replyTo, setReplyTo] = useState<ReplyContext | null>(null)
-  const endRef = useRef<HTMLDivElement>(null)
   const markedRef = useRef(false)
 
   const loadRecord = useCallback(async () => {
@@ -381,10 +380,6 @@ function ThreadView({ thread, onChanged, composeNew = false }: { thread: Thread;
     .filter((e) => (e.kind === 'email' && e.email) || (e.kind === 'email_in' && e.inbound))
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
 
-  // The newest message is what you came to read.
-  useEffect(() => {
-    if (state === 'ok' && events.length > 0) endRef.current?.scrollIntoView({ block: 'end' })
-  }, [state, events.length])
 
   const latestInbound = [...events].reverse().find((e) => e.kind === 'email_in' && e.inbound)
   const latestSent = [...events].reverse().find((e) => e.kind === 'email' && e.email?.gmailId)
@@ -459,7 +454,6 @@ function ThreadView({ thread, onChanged, composeNew = false }: { thread: Thread;
                 }} />
             ))}
           </div>
-          <div ref={endRef} />
 
           {/* The reply lives at the bottom of the thread, where Gmail puts it. */}
           <div className="mt-4 flex items-center gap-2">
@@ -508,25 +502,29 @@ function MessageCard({ e, onReply, onRetryFile }: {
     ? (e.inbound!.fromName || e.inbound!.from || 'Customer')
     : e.actor
   const initial = (who.replace(/[^A-Za-z0-9]/g, '') || '?').charAt(0).toUpperCase()
+  const addr = inbound ? (e.inbound!.from || '') : (e.email?.to || '')
   return (
-    <div className={`bg-white rounded-2xl border px-4 py-3 ${inbound && e.unread ? 'border-violet-300 ring-1 ring-violet-200' : 'border-gray-200'}`}>
-      <div className="flex items-center gap-2.5">
-        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${inbound ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`} aria-hidden>
+    <div className={`bg-white rounded-2xl border shadow-sm px-5 py-4 ${inbound && e.unread ? 'border-violet-300 ring-1 ring-violet-200' : 'border-gray-200'}`}>
+      <div className="flex items-start gap-3">
+        <span className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${inbound ? 'bg-violet-600 text-white' : 'bg-blue-600 text-white'}`} aria-hidden>
           {initial}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold text-gray-900 truncate">{who}</p>
-          <p className="text-[10px] text-gray-500">{inbound ? 'Customer' : 'Sent by us'}</p>
+          <p className="text-sm font-semibold text-gray-900 truncate">
+            {who}
+            {addr && <span className="ml-1.5 text-xs font-normal text-gray-500">&lt;{addr}&gt;</span>}
+          </p>
+          <p className="text-xs text-gray-500">{inbound ? 'to us' : `to ${e.email?.to || 'customer'}`}</p>
         </div>
-        <span className="text-[11px] text-gray-500 shrink-0 tabular-nums" title={formatDateTime(e.at)}>{timeAgo(e.at)}</span>
+        <span className="text-xs text-gray-500 shrink-0 tabular-nums" title={formatDateTime(e.at)}>{formatDateTime(e.at)}</span>
       </div>
       {/* The record's own message components, read at mail size here: the
           rail is a feed, this is a letter. */}
-      <div className="mail-thread">
+      <div className="mail-thread mt-3 pl-0 sm:pl-13">
         {inbound && e.inbound ? (
-          <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} gmailId={e.inbound.gmailId} onRetryFile={onRetryFile} /></>
+          <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} flat /><Files files={e.files} skipped={e.inbound.skippedAttachments} gmailId={e.inbound.gmailId} onRetryFile={onRetryFile} /></>
         ) : e.email ? (
-          <><EmailEntry entry={e.email} /><Files files={e.files} /></>
+          <><EmailEntry entry={e.email} flat /><Files files={e.files} /></>
         ) : null}
       </div>
     </div>
