@@ -167,6 +167,7 @@ export async function connectionFor(email: string): Promise<GmailConnection | nu
 
 export async function saveConnection(email: string, refreshToken: string, scope: string): Promise<void> {
   await writeToken({ email, enc: seal(refreshToken), connectedAt: new Date().toISOString(), scope })
+  forgetAccessToken(email)
 }
 
 export async function markRevoked(email: string, reason: string): Promise<void> {
@@ -179,6 +180,7 @@ export async function markRevoked(email: string, reason: string): Promise<void> 
     revoked: true,
     revokedReason: reason,
   })
+  forgetAccessToken(email)
 }
 
 export async function disconnect(email: string): Promise<void> {
@@ -266,8 +268,104 @@ export class GmailAuthError extends Error {
   constructor(message: string) { super(message); this.name = 'GmailAuthError' }
 }
 
+/**
+ * Gmail said "too many requests", not "I don't know who you are".
+ *
+ * Google reports a rate limit as a 429 AND, confusingly, as a 403 whose reason
+ * is rateLimitExceeded / userRateLimitExceeded / quotaExceeded — the
+ * "Quota exceeded for quota metric 'Total Query Cost'" message. We used to
+ * treat every 403 as an auth failure, so an agent whose reply landed in a busy
+ * minute was told to "Reconnect Gmail". Reconnecting fixes nothing here.
+ * Waiting does, which is why this is its own error and why the calls below
+ * retry before ever surfacing it.
+ */
+export class GmailRateError extends Error {
+  retryAfterMs: number
+  constructor(message: string, retryAfterMs = 0) {
+    super(message); this.name = 'GmailRateError'; this.retryAfterMs = retryAfterMs
+  }
+}
+
+const RATE_REASONS = new Set([
+  'ratelimitexceeded', 'userratelimitexceeded', 'quotaexceeded', 'dailylimitexceeded',
+])
+
+type GoogleError = { error?: { message?: string; status?: string; errors?: { reason?: string }[] } }
+
+/** Is this response Google throttling us, rather than refusing us? */
+export function isRateLimited(status: number, j: GoogleError): boolean {
+  if (status === 429) return true
+  if (status !== 403) return false
+  for (const e of j?.error?.errors ?? []) {
+    if (RATE_REASONS.has(String(e?.reason ?? '').toLowerCase())) return true
+  }
+  if (String(j?.error?.status ?? '').toUpperCase() === 'RESOURCE_EXHAUSTED') return true
+  // The Cloud quota system phrases it in prose and supplies no `reason` at all.
+  return /quota exceeded|rate limit|too many requests/i.test(String(j?.error?.message ?? ''))
+}
+
+const RATE_RETRIES = 3
+
+function backoffMs(attempt: number, retryAfter: string | null): number {
+  const hinted = Number(retryAfter)
+  if (Number.isFinite(hinted) && hinted > 0) return Math.min(hinted * 1000, 8000)
+  // Jittered, so eight concurrent sweep fetches do not all come back at once.
+  return Math.min(400 * 2 ** attempt, 4000) + Math.floor(Math.random() * 250)
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * One Gmail API call, retried through a throttle.
+ *
+ * A rate-limited request is refused before Gmail acts on it, so retrying a send
+ * cannot deliver the message twice. Anything that is not a rate limit is
+ * returned untouched for the caller to interpret.
+ */
+async function gapi(
+  url: string, init: RequestInit, what: string,
+): Promise<{ res: Response; json: GoogleError & Record<string, unknown> }> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init)
+    const json = res.status === 204
+      ? {}
+      : await res.json().catch(() => ({})) as GoogleError & Record<string, unknown>
+    if (!isRateLimited(res.status, json)) return { res, json }
+    if (attempt >= RATE_RETRIES) {
+      throw new GmailRateError(
+        `Gmail is rate-limiting this mailbox at the moment, so ${what} did not go through. ` +
+        'The connection is fine — wait a few seconds and try again.',
+      )
+    }
+    await sleep(backoffMs(attempt, res.headers.get('retry-after')))
+  }
+}
+
+// ── caches ───────────────────────────────────────────────────────────────────
+// A Google access token is valid for an hour, yet every Gmail call used to mint
+// a fresh one: a 240-thread sweep meant 240 token POSTs and 240 database reads
+// on top of the 240 Gmail calls, and that burst is what starved an agent's own
+// reply of quota. Held in memory only, per instance, and dropped the moment a
+// connection changes or Gmail answers 401.
+const tokenCache = new Map<string, { token: string; expires: number }>()
+// Well under the token's own hour, so a connection revoked elsewhere stops
+// working here within minutes rather than within the hour.
+const TOKEN_CACHE_MAX_MS = 10 * 60 * 1000
+
+export function forgetAccessToken(email: string): void {
+  tokenCache.delete(email.toLowerCase())
+  aliasCache.delete(email.toLowerCase())
+}
+
+const aliasCache = new Map<string, { at: number; list: SendAsAlias[] }>()
+const ALIAS_CACHE_MS = 5 * 60 * 1000
+
 /** Fresh access token for an agent, or a clear error saying to reconnect. */
 export async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<string> {
+  const key = email.toLowerCase()
+  const hit = tokenCache.get(key)
+  if (hit && hit.expires > Date.now()) return hit.token
+
   const t = await readToken(email)
   if (!t) throw new GmailAuthError('Gmail is not connected for this account. Connect it to send email.')
   if (t.revoked) throw new GmailAuthError(t.revokedReason || 'Gmail access was revoked. Reconnect to send email.')
@@ -286,15 +384,35 @@ export async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<
   })
   const j = await res.json().catch(() => ({}))
   if (!res.ok) {
-    // invalid_grant means the user revoked access or changed their password.
-    // Record it so the UI can say "reconnect" instead of retrying forever.
-    const reason = j.error === 'invalid_grant'
-      ? 'Google has revoked this Gmail connection (access withdrawn or password changed). Reconnect to send email.'
-      : `Google refused to refresh the Gmail token: ${j.error_description || j.error || res.status}`
-    await markRevoked(email, reason)
-    throw new GmailAuthError(reason)
+    // invalid_grant means the user really did revoke access or change their
+    // password. Record THAT, so the UI can say "reconnect" instead of retrying
+    // forever.
+    if (j.error === 'invalid_grant') {
+      const reason = 'Google has revoked this Gmail connection (access withdrawn or password changed). Reconnect to send email.'
+      await markRevoked(email, reason)
+      throw new GmailAuthError(reason)
+    }
+    // Anything else — Google throttling the token endpoint, a 5xx, a network
+    // blip — is temporary. Marking it revoked here was a bug: one bad minute
+    // permanently flagged a working connection and forced a needless reconnect.
+    if (res.status === 429 || res.status >= 500 || j.error === 'slow_down') {
+      throw new GmailRateError(
+        'Google is throttling this account\u2019s sign-in right now. The connection is fine \u2014 try again in a few seconds.',
+      )
+    }
+    throw new GmailAuthError(
+      `Google refused to refresh the Gmail token: ${j.error_description || j.error || res.status}`,
+    )
   }
-  return j.access_token as string
+
+  const token = j.access_token as string
+  const lifetimeMs = (Number(j.expires_in) || 3600) * 1000
+  tokenCache.set(key, {
+    token,
+    // A minute of headroom, so a token never expires mid-flight.
+    expires: Date.now() + Math.min(lifetimeMs - 60_000, TOKEN_CACHE_MAX_MS),
+  })
+  return token
 }
 
 // ── verified aliases ─────────────────────────────────────────────────────────
@@ -309,14 +427,25 @@ export interface SendAsAlias {
 // this: a from-address is checked against THIS list at send time, so an agent
 // cannot spoof an address Google has not confirmed they own.
 export async function verifiedAliases(email: string, cfg: GoogleConfig): Promise<SendAsAlias[]> {
+  // Verified aliases change about once a year. Re-reading them on every single
+  // send spent a Gmail call — and the quota that went with it — proving
+  // something that had not moved since the last message.
+  const key = email.toLowerCase()
+  const cached = aliasCache.get(key)
+  if (cached && Date.now() - cached.at < ALIAS_CACHE_MS) return cached.list
+
   const token = await accessTokenFor(email, cfg)
-  const res = await fetch(`${API}/settings/sendAs`, { headers: { Authorization: `Bearer ${token}` } })
+  const { res, json: j } = await gapi(
+    `${API}/settings/sendAs`, { headers: { Authorization: `Bearer ${token}` } },
+    'your send-as addresses could not be read',
+  )
   if (res.status === 401 || res.status === 403) {
+    forgetAccessToken(email)
     throw new GmailAuthError('Gmail refused the request. Reconnect Gmail and grant the alias permission.')
   }
   if (!res.ok) throw new Error(`Could not read your Gmail aliases (${res.status})`)
-  const j = await res.json()
-  return (j.sendAs ?? [])
+  type RawAlias = { sendAsEmail: string; displayName?: string; isPrimary?: boolean; isDefault?: boolean; verificationStatus?: string }
+  const list: SendAsAlias[] = ((j.sendAs as RawAlias[]) ?? [])
     .filter((a: { verificationStatus?: string; isPrimary?: boolean }) =>
       // The primary address needs no verification; every alias must be
       // 'accepted' before Google will let it be used as a From.
@@ -327,6 +456,8 @@ export async function verifiedAliases(email: string, cfg: GoogleConfig): Promise
       isPrimary: a.isPrimary === true,
       isDefault: a.isDefault === true,
     }))
+  aliasCache.set(key, { at: Date.now(), list })
+  return list
 }
 
 // ── sending ──────────────────────────────────────────────────────────────────
@@ -475,21 +606,23 @@ export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: Outgoi
   const raw = Buffer.from(buildMime({ ...m, fromName: m.fromName || match.displayName }, messageId), 'utf8')
     .toString('base64url')
 
-  const res = await fetch(`${API}/messages/send`, {
+  // A throttled send is refused before Gmail acts on it, so the retry inside
+  // gapi() cannot deliver the same message twice.
+  const { res, json: j } = await gapi(`${API}/messages/send`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     // threadId here is what makes Gmail file it in the existing conversation
     // rather than starting a new one.
     body: JSON.stringify(m.threadId ? { raw, threadId: m.threadId } : { raw }),
-  })
-  const j = await res.json().catch(() => ({}))
+  }, 'your email')
   if (res.status === 401 || res.status === 403) {
+    forgetAccessToken(agentEmail)
     throw new GmailAuthError(j.error?.message || 'Gmail refused to send. Reconnect Gmail and try again.')
   }
   if (!res.ok) throw new Error(j.error?.message || `Gmail rejected the message (${res.status})`)
   if (!j.id) throw new Error('Gmail did not confirm the send.')
 
-  return { id: j.id, threadId: j.threadId ?? j.id, messageId }
+  return { id: j.id as string, threadId: (j.threadId as string) ?? (j.id as string), messageId }
 }
 
 // ── reading replies (Phase 6) ────────────────────────────────────────────────
@@ -577,12 +710,12 @@ export async function fetchAttachment(
   agentEmail: string, cfg: GoogleConfig, gmailId: string, attachmentId: string,
 ): Promise<Uint8Array | null> {
   const token = await accessTokenFor(agentEmail, cfg)
-  const res = await fetch(
+  const { res, json: j } = await gapi(
     `${API}/messages/${encodeURIComponent(gmailId)}/attachments/${encodeURIComponent(attachmentId)}`,
     { headers: { Authorization: `Bearer ${token}` } },
+    'an attachment could not be downloaded',
   )
   if (!res.ok) return null
-  const j = await res.json()
   if (typeof j.data !== 'string') return null
   return new Uint8Array(Buffer.from(j.data, 'base64url'))
 }
@@ -607,20 +740,28 @@ export class GmailScopeError extends Error {
 /** Every message in one thread we started. Throws rather than returning []. */
 export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadId: string): Promise<InboundMessage[]> {
   const token = await accessTokenFor(agentEmail, cfg)
-  const res = await fetch(`${API}/threads/${encodeURIComponent(threadId)}?format=full`, {
+  const { res, json: j } = await gapi(`${API}/threads/${encodeURIComponent(threadId)}?format=full`, {
     headers: { Authorization: `Bearer ${token}` },
-  })
+  }, 'the reply could not be read')
+  // Not a rate limit — gapi() has already ruled that out — so a 403 here really
+  // is the missing read scope.
   if (res.status === 403) {
     // Sending works, reading does not — the connection predates the read scope.
     throw new GmailScopeError('Gmail replies need the read permission. Reconnect Gmail to enable reply capture.')
   }
-  if (res.status === 401) throw new GmailAuthError('Gmail refused the request. Reconnect Gmail.')
+  if (res.status === 401) {
+    forgetAccessToken(agentEmail)
+    throw new GmailAuthError('Gmail refused the request. Reconnect Gmail.')
+  }
   // A thread the agent deleted permanently: not an error worth alarming about.
   if (res.status === 404) return []
   if (!res.ok) throw new Error(`Could not read the Gmail thread (${res.status})`)
 
-  const j = await res.json()
-  return (j.messages ?? []).map((m: {
+  type RawMessage = {
+    id: string; threadId: string; internalDate?: string; labelIds?: string[]
+    payload?: { headers?: { name: string; value: string }[] }
+  }
+  return ((j.messages as RawMessage[]) ?? []).map((m: {
     id: string; threadId: string; internalDate?: string; labelIds?: string[]
     payload?: { headers?: { name: string; value: string }[] }
   }) => {

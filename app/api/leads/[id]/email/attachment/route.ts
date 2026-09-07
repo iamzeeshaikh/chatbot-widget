@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
 import { supabase } from '@/lib/supabase'
-import { googleConfig, fetchThread, fetchAttachment, GmailAuthError, GmailScopeError } from '@/lib/gmail'
+import { googleConfig, fetchThread, fetchAttachment, GmailAuthError, GmailScopeError, GmailRateError } from '@/lib/gmail'
 import { CRM_EMAIL_IN_ROLE, parseCrmEmailIn } from '@/lib/emailreply'
 import {
   EMAIL_ATTACHMENT_BUCKET, MAX_INBOUND_ATTACHMENT_BYTES, isAllowedEmailAttachment,
@@ -96,6 +96,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     })
     return NextResponse.json({ ok: true, name: ref.name, size: bytes.byteLength })
   } catch (e) {
+    // A throttle is temporary and needs no reconnect — only another try.
+    if (e instanceof GmailRateError) {
+      return NextResponse.json({ error: e.message, retryable: true }, { status: 429 })
+    }
     const authy = e instanceof GmailAuthError || e instanceof GmailScopeError
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Could not fetch the file.', needsReconnect: authy },

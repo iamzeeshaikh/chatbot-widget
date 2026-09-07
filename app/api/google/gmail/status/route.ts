@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
-import { googleConfig, connectionFor, verifiedAliases, configProblem, GmailAuthError } from '@/lib/gmail'
+import { googleConfig, connectionFor, verifiedAliases, configProblem, GmailAuthError, GmailRateError } from '@/lib/gmail'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +47,17 @@ export async function GET(req: NextRequest) {
         : 'This Gmail connection was made before reply capture existed, so customer replies will not appear on the record. Reconnect to switch it on — sending keeps working either way.',
     })
   } catch (e) {
+    // Being throttled says nothing about the connection. Reporting it as
+    // `connected: false` put a "Connect Gmail" button in front of an agent
+    // whose Gmail was connected perfectly well.
+    if (e instanceof GmailRateError) {
+      return NextResponse.json({
+        connected: true, configured: true, connectedAt: conn.connectedAt, aliases: [],
+        canReadReplies: conn.canRead,
+        rateLimited: true,
+        reason: e.message,
+      })
+    }
     // An expired or withdrawn token surfaces as a clear "reconnect", never as
     // an empty dropdown with no explanation.
     const authy = e instanceof GmailAuthError

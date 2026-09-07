@@ -4,7 +4,7 @@ import { getMember } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow } from '@/lib/leadrecord'
 import { leadRecipient, markThreadRepliesRead } from '@/lib/leadrecord'
 import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
-import { googleConfig, sendEmail, GmailAuthError, configProblem } from '@/lib/gmail'
+import { googleConfig, sendEmail, GmailAuthError, GmailRateError, configProblem } from '@/lib/gmail'
 import { threadContextFor } from '@/lib/emailsweep'
 import { supabase } from '@/lib/supabase'
 import {
@@ -206,6 +206,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       attachments: files,
     })
   } catch (e) {
+    if (e instanceof GmailRateError) {
+      // Gmail was busy, not broken. This used to arrive as a 403 and be read as
+      // an auth failure, so an agent mid-reply was told to reconnect Gmail —
+      // advice that fixed nothing and cost them the draft's confidence. The
+      // send has already been retried a few times behind this; all that is left
+      // is to say so plainly and let them press Send again.
+      return NextResponse.json({ error: e.message, retryable: true }, { status: 429 })
+    }
     if (e instanceof GmailAuthError) {
       // Expired / revoked: a specific, actionable message and a flag the UI uses
       // to offer the reconnect button, never a silent failure.

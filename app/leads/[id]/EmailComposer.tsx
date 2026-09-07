@@ -33,6 +33,8 @@ export interface GmailStatus {
   /** False when the consent predates reply capture — sending still works. */
   canReadReplies?: boolean
   replyCaptureReason?: string | null
+  /** Gmail was throttling us when we asked. Connected, just busy. */
+  rateLimited?: boolean
 }
 
 interface Draft { from: string; to: string; cc: string; subject: string; body: string; html: string }
@@ -68,6 +70,9 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [needsReconnect, setNeedsReconnect] = useState(false)
+  // Gmail throttled the send. Separate from needsReconnect on purpose: the
+  // remedy is another press of Send, not a trip through the consent screen.
+  const [retryable, setRetryable] = useState(false)
   // A reply seeds the recipient and the subject up front, so neither has to be
   // retyped. "Re:" is added once — a subject that already carries it is left
   // alone rather than becoming "Re: Re: Re: …" down a long thread.
@@ -233,6 +238,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   async function send() {
     if (sending) return
     setError('')
+    setRetryable(false)
     setSending(true)
     try {
       const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/email`, {
@@ -247,6 +253,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
       const j = await res.json().catch(() => ({}))
       if (!res.ok) {
         if (j.needsReconnect) setNeedsReconnect(true)
+        if (j.retryable) setRetryable(true)
         throw new Error(j.error || 'Could not send the email.')
       }
       // Only now is the draft safe to discard.
@@ -338,6 +345,23 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
           </div>
         ) : (
           <>
+            {/* Connected, but Gmail was throttling us when we asked for the
+                send-as list, so the From dropdown came back empty. Say that
+                rather than showing a composer that quietly cannot send. */}
+            {status.rateLimited && (
+              <div className="mx-3 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2">
+                <p className="flex items-start gap-1.5 text-[11px] text-amber-900">
+                  <TriangleAlert size={12} strokeWidth={2} className="shrink-0 mt-px" aria-hidden />
+                  <span>
+                    <b>Gmail is busy right now.</b>{' '}
+                    {status.reason ?? 'Your connection is fine — this passes in a few seconds.'}{' '}
+                    <button type="button" onClick={() => window.location.reload()} className="underline font-semibold">
+                      Reload
+                    </button>.
+                  </span>
+                </p>
+              </div>
+            )}
             {/* Connected, but the consent cannot read replies. Sending is fine,
                 so this warns rather than blocking — the old behaviour showed a
                 wholly healthy composer while replies silently never arrived. */}
@@ -467,11 +491,23 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
               </div>
 
               {error && (
-                <p role="alert" className="flex items-start gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
+                /* Amber, not red, when it is only a throttle: the draft is
+                   intact and the next press usually goes through. */
+                <p role="alert" className={`flex items-start gap-1.5 text-[11px] rounded-md px-2 py-1.5 border ${
+                  retryable
+                    ? 'text-amber-800 bg-amber-50 border-amber-200'
+                    : 'text-red-700 bg-red-50 border-red-200'
+                }`}>
                   <TriangleAlert size={12} strokeWidth={2} className="shrink-0 mt-px" aria-hidden />
                   <span>
                     {error}
-                    {needsReconnect && (
+                    {retryable && (
+                      <> <button type="button" onClick={send} disabled={sending}
+                        className="underline font-semibold disabled:no-underline disabled:opacity-60">
+                        Try again
+                      </button>.</>
+                    )}
+                    {needsReconnect && !retryable && (
                       <> <a href={connectHref} className="underline font-semibold">Reconnect Gmail</a>.</>
                     )}
                   </span>

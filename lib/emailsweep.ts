@@ -37,6 +37,7 @@ import {
   MAX_INBOUND_BODY, CRM_EMAIL_SWEEP_ROLE, type CrmEmailInEntry, CRM_EMAIL_READ_ROLE } from './emailreply'
 import {
   googleConfig, fetchThread, fetchAttachment, connectionFor, GmailAuthError, GmailScopeError,
+  GmailRateError,
   type GoogleConfig, type InboundMessage,
 } from './gmail'
 import {
@@ -61,12 +62,22 @@ export const THREAD_ACTIVE_DAYS = 30
  * budget, so even 300 fetches is ~2% of it; the DB side is one paginated read.
  * What actually runs out is the 60s maxDuration, and only because the fetches
  * used to be sequential. They now run THREAD_CONCURRENCY at a time, so 240
- * threads cost roughly 240/8 x ~300ms = 9s of the budget.
+ * threads cost roughly 240/5 x ~300ms = 15s of the budget.
  */
 export const MAX_THREADS_PER_RUN = 240
 
-/** Parallel Gmail fetches. Same reasoning as BULK_CONCURRENCY in lib/bulk.ts. */
-export const THREAD_CONCURRENCY = 8
+/**
+ * Parallel Gmail fetches.
+ *
+ * Was 8, and the per-minute budget above is not the binding constraint: Gmail
+ * ALSO enforces ~250 quota units per user per second. Eight concurrent
+ * threads.get at 10 units each, returning in ~300ms, is ~266 units/second —
+ * just over the line. The sweep would trip its own limit and, worse, leave no
+ * headroom for the agent trying to send a reply in the same minute, who was
+ * then told their Gmail needed reconnecting. Five keeps the sweep near
+ * ~165 units/second and leaves room for real work.
+ */
+export const THREAD_CONCURRENCY = 5
 
 /**
  * A thread with activity this recent is checked on EVERY run regardless of
@@ -81,6 +92,8 @@ export interface SweepAgentResult {
   captured: number
   error?: string
   needsReconnect?: boolean
+  /** Gmail throttled us. Nothing is broken; the next run retries. */
+  rateLimited?: boolean
 }
 
 export interface SweepResult {
@@ -317,11 +330,18 @@ export async function runEmailSweep(
           const e = outcome.reason
           const scopey = e instanceof GmailScopeError
           const authy = e instanceof GmailAuthError
+          const ratey = e instanceof GmailRateError
           res.error = e instanceof Error ? e.message : 'Could not read Gmail.'
+          // A throttle is NOT a broken connection. Saying so here put a
+          // "reconnect Gmail" warning in front of agents whose only problem was
+          // a busy minute.
           res.needsReconnect = scopey || authy
-          // A dead token or missing scope will fail identically for every other
-          // thread, so stop this agent rather than hammering the API.
-          if (scopey || authy) stop = true
+          res.rateLimited = ratey
+          // A dead token, a missing scope or an exhausted quota will fail
+          // identically for every other thread this run, so stop this agent
+          // rather than hammering the API. The cursor is untouched, so the next
+          // run picks these threads up where this one left off.
+          if (scopey || authy || ratey) stop = true
           continue
         }
         const { ref, messages } = outcome.value
