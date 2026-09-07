@@ -882,7 +882,12 @@ export default function Dashboard() {
   // Recent Leads table. Date filter has no 'yesterday' stat tile, so it's a
   // dropdown; 'today'/'week' can also be set by clicking their tiles.
   const [overviewLeadSite, setOverviewLeadSite] = useState('')
-  const [overviewLeadDate, setOverviewLeadDate] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all')
+  const [overviewLeadDate, setOverviewLeadDate] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'>('all')
+  // A pair of dates for the 'custom' range, in the PKT calendar the rest of
+  // this tab counts in (see pktDateStr). Empty means open-ended on that side,
+  // so "from 1 Sep" with no end is a valid, useful filter on its own.
+  const [overviewLeadFrom, setOverviewLeadFrom] = useState('')
+  const [overviewLeadTo, setOverviewLeadTo] = useState('')
   const [overviewLeadPage, setOverviewLeadPage] = useState(0)
   // Recent Leads mixes two very different kinds of row — a real chat
   // conversation the bot captured, and a quote-request email pulled from
@@ -2214,6 +2219,14 @@ export default function Dashboard() {
     if (range === 'yesterday') return day === yesterdayStr
     if (range === 'week') return day >= startOfWeekStr
     if (range === 'month') return day >= startOfMonthStr
+    if (range === 'custom') {
+      // Both bounds inclusive, and either may be left blank. Comparing the
+      // yyyy-mm-dd strings directly is safe and keeps this on the same PKT
+      // calendar day as everything else on the tab.
+      if (overviewLeadFrom && day < overviewLeadFrom) return false
+      if (overviewLeadTo && day > overviewLeadTo) return false
+      return true
+    }
     return true
   }
   // Counted off the same rows the table shows, minus the ones marked "not a
@@ -2839,14 +2852,49 @@ export default function Dashboard() {
               <div ref={leadsTableRef}>
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <h2 className="text-sm font-semibold text-gray-900">Recent Leads</h2>
-                  <select value={overviewLeadDate} onChange={(e) => { setOverviewLeadDate(e.target.value as typeof overviewLeadDate); setOverviewLeadPage(0) }}
+                  <select value={overviewLeadDate}
+                    onChange={(e) => {
+                      const v = e.target.value as typeof overviewLeadDate
+                      setOverviewLeadDate(v)
+                      setOverviewLeadPage(0)
+                      // Open the custom range on today so it is never an empty
+                      // pair of boxes that appear to have filtered nothing.
+                      if (v === 'custom' && !overviewLeadFrom && !overviewLeadTo) {
+                        setOverviewLeadFrom(todayStr)
+                        setOverviewLeadTo(todayStr)
+                      }
+                    }}
                     className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadDate !== 'all' ? 'bg-orange-100 border-orange-300 text-orange-700 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All time</option>
                     <option value="today">Today</option>
                     <option value="yesterday">Yesterday</option>
                     <option value="week">This week</option>
                     <option value="month">This month</option>
+                    <option value="custom">Pick dates…</option>
                   </select>
+                  {/* The two date boxes only exist while the custom range is
+                      chosen — a permanent pair of empty inputs beside four
+                      presets is four extra things to read on every visit. */}
+                  {overviewLeadDate === 'custom' && (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                      <input type="date" value={overviewLeadFrom} max={overviewLeadTo || undefined}
+                        onChange={(e) => { setOverviewLeadFrom(e.target.value); setOverviewLeadPage(0) }}
+                        aria-label="Leads from this date"
+                        className="text-xs rounded-full border border-orange-300 bg-orange-50 px-2.5 py-1 text-orange-800 font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" />
+                      <span className="text-gray-500">to</span>
+                      <input type="date" value={overviewLeadTo} min={overviewLeadFrom || undefined}
+                        onChange={(e) => { setOverviewLeadTo(e.target.value); setOverviewLeadPage(0) }}
+                        aria-label="Leads up to this date"
+                        className="text-xs rounded-full border border-orange-300 bg-orange-50 px-2.5 py-1 text-orange-800 font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" />
+                      {(overviewLeadFrom || overviewLeadTo) && (
+                        <button onClick={() => { setOverviewLeadFrom(''); setOverviewLeadTo(''); setOverviewLeadPage(0) }}
+                          title="Clear both dates — the range becomes open-ended"
+                          className="text-gray-500 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+                          <X size={12} strokeWidth={2} aria-hidden />
+                        </button>
+                      )}
+                    </span>
+                  )}
                   <select value={overviewLeadType} onChange={(e) => { setOverviewLeadType(e.target.value as typeof overviewLeadType); setOverviewLeadPage(0) }}
                     className={`text-xs rounded-full px-2.5 py-1 border focus:outline-none cursor-pointer ${overviewLeadType === 'quote' ? 'bg-amber-100 border-amber-300 text-amber-700 font-semibold' : overviewLeadType === 'checkout' ? 'bg-purple-100 border-purple-300 text-purple-700 font-semibold' : overviewLeadType === 'chat' ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : overviewLeadType === 'call' ? 'bg-emerald-100 border-emerald-300 text-emerald-700 font-semibold' : overviewLeadType === 'whatsapp' ? 'bg-green-100 border-green-300 text-green-700 font-semibold' : overviewLeadType === 'excluded' ? 'bg-amber-50 border-amber-300 text-amber-800 font-semibold' : 'bg-white border-gray-300 text-gray-700'}`}>
                     <option value="all">All types</option>
@@ -2990,9 +3038,15 @@ export default function Dashboard() {
                                   </span>
                                 )}
                                 {lead.waWaiting && (
-                                  <span title="Waiting on a WhatsApp reply"
+                                  // On a lead that ALREADY came in over WhatsApp
+                                  // this badge sat next to an identical one and
+                                  // the row read "WhatsApp WhatsApp", which says
+                                  // the channel twice and the actual news — that
+                                  // nobody has replied — not at all. Say the news.
+                                  <span title="The customer's WhatsApp message is the latest one and nobody has replied"
                                     className="ml-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 whitespace-nowrap inline-flex items-center gap-1 text-green-700 bg-green-100 border-green-200">
-                                    <MessageCircle size={11} strokeWidth={2} aria-hidden /> WhatsApp
+                                    <MessageCircle size={11} strokeWidth={2} aria-hidden />
+                                    {leadSource(lead.message) === 'whatsapp' ? 'Unanswered' : 'WhatsApp'}
                                   </span>
                                 )}
                                 {/* Who ran the conversation this lead came out of.
