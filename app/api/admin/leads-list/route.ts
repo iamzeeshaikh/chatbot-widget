@@ -6,6 +6,7 @@ import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { CONTACT_ROLE, parseContact } from '@/lib/visitor'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
 import { notALeadSessions, sessionForLead } from '@/lib/notalead'
+import { CRM_STAGE_ROLE, isCrmStage } from '@/lib/crm'
 import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
 import { ASSIGNMENT_ROLE, deriveAssignments } from '@/lib/assignment'
 import { waWaitingSessions } from '@/lib/wawaiting'
@@ -215,6 +216,25 @@ export async function GET(req: NextRequest) {
       const sid = sessionForLead(merged[i] as { id: string; session_id?: string | null })
       if (!visibleToMember(owned[sid] ?? defaultOwnerForSite(String((merged[i] as { site_id?: unknown }).site_id ?? '')), member.email, false)) merged.splice(i, 1)
     }
+  }
+
+  // The deal stage each lead is at. The pipeline board already derives this
+  // from the same control rows; the Recent Leads table had no idea a stage
+  // existed, so an agent scanning it could not tell who had been spoken to and
+  // who had not without opening every record.
+  const { data: stageRows } = await supabase.from('chat_logs')
+    .select('session_id, message, created_at')
+    .in('site_id', allowed).eq('role', CRM_STAGE_ROLE)
+    .order('created_at', { ascending: true }).limit(20000)
+  const stageOf: Record<string, string> = {}
+  for (const r of stageRows ?? []) {
+    try {
+      const v = JSON.parse(r.message)?.stage
+      if (isCrmStage(v)) stageOf[r.session_id] = v      // ascending → the last one wins
+    } catch { /* not a stage row we understand */ }
+  }
+  for (const l of merged as Array<Record<string, unknown>>) {
+    l.stage = stageOf[sessionForLead(l as { id: string; session_id?: string | null })] ?? 'new'
   }
 
   const excluded = await notALeadSessions(allowed)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGES, type CrmStage } from '@/lib/crm'
 import { useRouter } from 'next/navigation'
 import GlobalSearch from '@/app/components/GlobalSearch'
 // Same icon set, stroke weight and sizing the CRM pages use, so the dashboard
@@ -98,7 +99,7 @@ const SITE_ACCENT: Record<string, string> = {
 
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean; /** Somebody marked this "not a lead" — excluded from every count. */ notALead?: boolean; /** Who the lead is assigned to (the assignment control row). */ owner?: string | null }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean; /** Somebody marked this "not a lead" — excluded from every count. */ notALead?: boolean; /** Who the lead is assigned to (the assignment control row). */ owner?: string | null; /** Where the deal has got to. Same value the pipeline board uses. */ stage?: CrmStage }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -993,6 +994,8 @@ export default function Dashboard() {
   const [confirmLeadDeleteId, setConfirmLeadDeleteId] = useState<string | null>(null)
   const [deletingLead, setDeletingLead] = useState(false)
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
+  /** The lead whose stage is mid-flight, so its checkbox and dropdown lock. */
+  const [stagingLeadId, setStagingLeadId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', message: '' })
   const [savingEdit, setSavingEdit] = useState(false)
   const [visitors, setVisitors] = useState<Visitor[]>([])
@@ -2037,6 +2040,30 @@ export default function Dashboard() {
     setEditForm({ name: lead.name ?? '', email: lead.email ?? '', phone: lead.phone ?? '', message: cleanLeadMessage(lead.message) })
   }
 
+  // Move a lead to a stage, from the checkbox or the dropdown.
+  //
+  // Optimistic: the row changes immediately and rolls back if the write fails,
+  // because a checkbox that waits a second before ticking gets clicked twice.
+  // It posts to the SAME endpoint the pipeline board drags onto, so a stage set
+  // here and a stage set there are one act with one audit trail.
+  async function setLeadStage(lead: Lead, stage: CrmStage) {
+    const previous = lead.stage ?? 'new'
+    if (previous === stage) return
+    setStagingLeadId(lead.id)
+    setLeads((prev) => prev.map((l) => l.id === lead.id ? { ...l, stage } : l))
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(leadRecordId(lead))}/stage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage, previous }),
+      })
+      if (!res.ok) throw new Error(String(res.status))
+    } catch {
+      setLeads((prev) => prev.map((l) => l.id === lead.id ? { ...l, stage: previous } : l))
+    } finally {
+      setStagingLeadId(null)
+    }
+  }
+
   async function saveEditLead(id: string) {
     setSavingEdit(true)
     await fetch('/api/admin/edit-lead', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...editForm }) })
@@ -2859,7 +2886,11 @@ export default function Dashboard() {
                     <table className="w-full text-sm min-w-[950px]">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-100">
-                          {['Type', 'Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Site', 'Date', ''].map((h) => (
+                          {/* "Done" is the contact checkbox and "Stage" is the
+                              deal stage — an agent scanning this table could not
+                              previously tell who had been spoken to without
+                              opening every record. */}
+                          {['Type', 'Done', 'Stage', 'Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Site', 'Date', ''].map((h) => (
                             <th key={h} className="text-left px-3 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -2867,7 +2898,7 @@ export default function Dashboard() {
                       <tbody>
                         {agentFilteredLeads.length === 0 ? (
                           <tr>
-                            <td colSpan={13} className="text-center py-8">
+                            <td colSpan={15} className="text-center py-8">
                               <div className="flex flex-col items-center">
                                 <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 text-gray-500"><Inbox size={18} strokeWidth={2} aria-hidden /></div>
                                 <p className="text-gray-700 text-sm font-medium">{(overviewLeadSite || overviewLeadDate !== 'all' || overviewLeadType !== 'all') ? 'No leads match this filter' : 'No leads captured yet'}</p>
@@ -2898,6 +2929,12 @@ export default function Dashboard() {
                               <td className="px-3 py-2 whitespace-nowrap">
                                 <LeadSourceBadge message={lead.message} />
                               </td>
+                              {/* Done and Stage are not editable here — they are
+                                  changed by the checkbox and the dropdown on the
+                                  normal row, so the edit form leaves them alone
+                                  rather than offering a second way to set them. */}
+                              <td className="px-3 py-2" />
+                              <td className="px-3 py-2" />
                               <td className="px-3 py-2">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
                               <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
                               <td className="px-3 py-2"><input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-blue-700 w-full min-w-[140px] focus:outline-none focus:border-blue-500" placeholder="Email" /></td>
@@ -2956,6 +2993,49 @@ export default function Dashboard() {
                                   </span>
                                 )}
                               </td>
+
+                              {/* Contacted? One tick.
+                                  It is not a second flag beside the stage — a
+                                  separate "contacted" boolean would drift from
+                                  the Stage column sitting right next to it
+                                  within a day. Ticking moves a New lead to
+                                  Contacted; a lead already further along shows
+                                  as ticked and cannot be un-ticked here, because
+                                  undoing "Quote Sent" from a checkbox is not
+                                  something anybody means to do. */}
+                              <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                                {(() => {
+                                  const stage = lead.stage ?? 'new'
+                                  const done = stage !== 'new'
+                                  const beyond = done && stage !== 'contacted'
+                                  const busy = stagingLeadId === lead.id
+                                  return (
+                                    <input type="checkbox" checked={done} disabled={beyond || busy}
+                                      onChange={() => setLeadStage(lead, done ? 'new' : 'contacted')}
+                                      aria-label={done ? `${lead.name || 'This lead'} has been contacted` : `Mark ${lead.name || 'this lead'} as contacted`}
+                                      title={beyond
+                                        ? `Already at ${CRM_STAGE_LABEL[stage]} — change it in the Stage column`
+                                        : done ? 'Contacted. Untick to put it back to New.' : 'Tick when you have contacted this customer'}
+                                      className={`h-4 w-4 rounded border-gray-400 accent-green-600 ${beyond || busy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`} />
+                                  )
+                                })()}
+                              </td>
+
+                              {/* Where the deal has got to. The same value and
+                                  the same vocabulary as the pipeline board, so
+                                  the two can never disagree. */}
+                              <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                <select value={lead.stage ?? 'new'}
+                                  disabled={stagingLeadId === lead.id}
+                                  onChange={(e) => setLeadStage(lead, e.target.value as CrmStage)}
+                                  aria-label="Deal stage"
+                                  className={`text-[11px] font-semibold border rounded-full px-2 py-0.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${CRM_STAGE_STYLE[lead.stage ?? 'new']}`}>
+                                  {CRM_STAGES.map((st) => (
+                                    <option key={st} value={st}>{CRM_STAGE_LABEL[st]}</option>
+                                  ))}
+                                </select>
+                              </td>
+
                               <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
               {/* A plain anchor: normal click, middle-click and cmd-click all
                   behave the way the browser intends, with nothing intercepted. */}
