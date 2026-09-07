@@ -24,7 +24,6 @@ export const dynamic = 'force-dynamic'
 // what is waiting.
 
 const WINDOW_DAYS = 90   // the Gmail history import reaches back 75 days; the list must show all of it
-const HAY_CAP = 40000
 
 function excerpt(body: string, q: string): string {
   const i = body.toLowerCase().indexOf(q)
@@ -80,14 +79,18 @@ export async function GET(req: NextRequest) {
     lastOutId: string
     /** Whether the customer opened our latest send (open pixel). */
     lastOutOpened: boolean
-    /** Everything searchable, lower-cased, capped — subject/bodies/names/files. */
-    hay: string
+    /** Search: did ANY message of this thread contain the term. */
+    matched: boolean
     /** For a search hit: the first body passage around the term. */
     hit: string
   }
+  // Matched PER MESSAGE, not against a capped per-thread haystack: a 95-message
+  // thread carried "invoice" past the old 40k cap and never matched, while
+  // Gmail found it. Quoted history counts too, as it does in Gmail.
   const feed = (t: Thread, text: string, body: string) => {
-    if (t.hay.length < HAY_CAP) t.hay += ' ' + text.toLowerCase().slice(0, HAY_CAP - t.hay.length)
-    if (q && !t.hit) t.hit = excerpt(body, q)
+    if (!q) return
+    if (!t.matched && text.toLowerCase().includes(q)) t.matched = true
+    if (!t.hit) t.hit = excerpt(body, q)
   }
   const threads = new Map<string, Thread>()
   const read = new Set<string>()
@@ -111,7 +114,7 @@ export async function GET(req: NextRequest) {
     }
     let t = threads.get(r.session_id)
     if (!t) {
-      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '', lastOutId: '', lastOutOpened: false, hay: '', hit: '' }
+      t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '', lastOutId: '', lastOutOpened: false, matched: false, hit: '' }
       threads.set(r.session_id, t)
     }
     if (r.role === CRM_EMAIL_IN_ROLE) {
@@ -121,7 +124,7 @@ export async function GET(req: NextRequest) {
       t.inboundIds.push(e.gmailId)
       if (e.attachments?.length) { t.hasAttachments = true; for (const a of e.attachments) t.files.push({ name: a.name, mime: a.mime }) }
       t.participants.push(`c:${e.fromName || ''}|${e.from || ''}`)
-      feed(t, `${e.subject} ${e.fromName ?? ''} ${e.from} ${(e.attachments ?? []).map((a) => a.name).join(' ')} ${e.body}`, e.body)
+      feed(t, `${e.subject} ${e.fromName ?? ''} ${e.from} ${(e.attachments ?? []).map((a) => a.name).join(' ')} ${e.body} ${e.quoted ?? ''}`, e.body || e.quoted || '')
       const at = e.at || r.created_at
       if (at >= t.at) {
         t.at = at; t.direction = 'in'
@@ -164,7 +167,7 @@ export async function GET(req: NextRequest) {
 
   const out = Array.from(threads.values())
     .filter((t) => t.messages > 0)
-    .filter((t) => !q || t.hay.includes(q))
+    .filter((t) => !q || t.matched)
     .filter((t) => visibleToMember(owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId), member.email, seesAll))
     .map((t) => ({
       leadId: t.leadId,
