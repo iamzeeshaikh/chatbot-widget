@@ -343,6 +343,14 @@ export function isLikelySpamQuote(bodyText: string, phone?: string | null): bool
 const HEADER_LINE_RE = /^(From|To|Cc|Bcc|Date|Subject|Sent):/i
 const FWD_MARKER_RE = /^-+\s*Forwarded message\s*-+$/i
 
+// The same form arrives twice in two shapes. Submitted straight to us, the
+// mail's SUBJECT is repeated as the first line of the body ("[Contact Form]
+// Nash Crawley"). Forwarded by hand, that same text is a "Subject:" header and
+// gets stripped a few lines above. The two therefore differed at character
+// zero and neither was a prefix of the other, so the duplicate check missed
+// them completely — Nash Crawley ended up as three leads and Max D as two.
+const SUBJECT_ECHO_RE = /^\[[^\]]{2,40}\]/
+
 export function normalizeQuoteBody(raw: string): string {
   const body = stripQuoteTag(raw)
   const out: string[] = []
@@ -350,6 +358,9 @@ export function normalizeQuoteBody(raw: string): string {
     const line = rawLine.trim()
     if (line === '---') break
     if (!line || HEADER_LINE_RE.test(line) || FWD_MARKER_RE.test(line)) continue
+    // Only the FIRST content line can be the echoed subject; a bracketed line
+    // further down is part of what the customer wrote.
+    if (out.length === 0 && SUBJECT_ECHO_RE.test(line)) continue
     out.push(line.toLowerCase())
   }
   return out.join(' ')
@@ -372,7 +383,12 @@ export function isSameQuoteBody(a: string, b: string): boolean {
   if (a === b) return true
   const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a]
   if (shorter.length < MIN_PREFIX_MATCH) return false
-  return longer.startsWith(shorter)
+  // A prefix match catches a copy with something appended (a footer, a later
+  // reply). An ENDS-with match catches the mirror image — a copy with a line
+  // removed from the FRONT, which is exactly what stripping a forwarded
+  // header does. Both sides still have to clear MIN_PREFIX_MATCH, so a short
+  // coincidence cannot merge two real enquiries.
+  return longer.startsWith(shorter) || longer.endsWith(shorter)
 }
 
 export function quoteSessionId(leadId: string): string {
