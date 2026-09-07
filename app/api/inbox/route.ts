@@ -33,6 +33,55 @@ function excerpt(body: string, q: string): string {
   return `${start > 0 ? '…' : ''}${body.slice(start, end).replace(/\s+/g, ' ').trim()}${end < body.length ? '…' : ''}`
 }
 
+
+type Row = { session_id: string; site_id: string; role: string; message: string; created_at: string }
+
+// The mail rows for a site set, held for a minute. Every open Inbox tab polls
+// this endpoint every 60s, and each poll used to page ~1,500 email rows (~9MB)
+// out of Postgres and JSON-parse them — 18 seconds, measured. Now a warm
+// instance answers from memory; a cold one loads once. Rows are append-only,
+// and a minute is the poll interval, so nothing is ever more than a poll stale.
+const ROW_CACHE = new Map<string, { at: number; rows: Row[] }>()
+const ROW_CACHE_MS = 60_000
+
+async function emailRows(sites: string[], since: string): Promise<Row[]> {
+  const key = `${sites.slice().sort().join(',')}|${since.slice(0, 10)}`
+  const hit = ROW_CACHE.get(key)
+  if (hit && Date.now() - hit.at < ROW_CACHE_MS) return hit.rows
+  // Paged with range(), not .limit() — PostgREST caps any single response at
+  // 1000 rows, and ascending order means a cap eats the NEWEST rows (the bug
+  // lib/unread.ts documents; same shape, same cure).
+  const rows: Row[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data: page } = await supabase.from('chat_logs')
+      .select('session_id, site_id, role, message, created_at')
+      .in('site_id', sites)
+      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_OPEN_ROLE])
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999)
+    rows.push(...(page ?? []))
+    if (!page || page.length < 1000) break
+  }
+  ROW_CACHE.set(key, { at: Date.now(), rows })
+  return rows
+}
+
+// Owners for exactly the leads on the list — NOT a scan of every assignment
+// row in the window (15,435 of them, one per chat reply: 16 pages, the bulk
+// of the 18 seconds). Only an agent who cannot see every lead needs this.
+async function ownersFor(leadIds: string[]): Promise<Map<string, string | null>> {
+  const owner = new Map<string, string | null>()
+  for (let i = 0; i < leadIds.length; i += 100) {
+    const { data } = await supabase.from('chat_logs')
+      .select('session_id, message, created_at')
+      .in('session_id', leadIds.slice(i, i + 100)).eq('role', ASSIGNMENT_ROLE)
+      .order('created_at', { ascending: true }).limit(2000)
+    for (const r of data ?? []) owner.set(r.session_id, (r.message ?? '').trim() || null)   // ascending → last wins
+  }
+  return owner
+}
+
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -48,21 +97,7 @@ export async function GET(req: NextRequest) {
   if (sites.length === 0) return NextResponse.json({ threads: [] })
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString()
 
-  // Paged with range(), not .limit() — PostgREST caps any single response at
-  // 1000 rows, and ascending order means a cap eats the NEWEST rows (the bug
-  // lib/unread.ts documents; same shape, same cure).
-  const rows: { session_id: string; site_id: string; role: string; message: string; created_at: string }[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data: page } = await supabase.from('chat_logs')
-      .select('session_id, site_id, role, message, created_at')
-      .in('site_id', sites)
-      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, ASSIGNMENT_ROLE, CRM_EMAIL_OPEN_ROLE])
-      .gte('created_at', since)
-      .order('created_at', { ascending: true })
-      .range(from, from + 999)
-    rows.push(...(page ?? []))
-    if (!page || page.length < 1000) break
-  }
+  const rows = await emailRows(sites, since)
 
   interface Thread {
     leadId: string; siteId: string
@@ -94,17 +129,12 @@ export async function GET(req: NextRequest) {
   }
   const threads = new Map<string, Thread>()
   const read = new Set<string>()
-  const owner = new Map<string, string | null>()
   const opened = new Set<string>()   // email ids the customer opened
 
   for (const r of rows) {
     if (r.role === CRM_EMAIL_READ_ROLE) {
       const e = parseCrmEmailRead(r.message)
       if (e) read.add(e.gmailId)
-      continue
-    }
-    if (r.role === ASSIGNMENT_ROLE) {
-      owner.set(r.session_id, (r.message ?? '').trim() || null)   // ascending → last wins
       continue
     }
     if (r.role === CRM_EMAIL_OPEN_ROLE) {
@@ -161,6 +191,7 @@ export async function GET(req: NextRequest) {
   const addParty = (t: Thread, who: string) => { if (who && !t.participants.includes(who)) t.participants.push(who) }
 
   const seesAll = await canSeeAllLeads(member)
+  const owner = seesAll ? new Map<string, string | null>() : await ownersFor(Array.from(threads.keys()))
   const hideContactsHere = !canSeeContacts(member)
   const { data: siteRows } = await supabase.from('sites').select('site_id, name')
   const siteName = new Map((siteRows ?? []).map((s) => [s.site_id, String(s.name ?? '')]))

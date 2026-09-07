@@ -47,6 +47,9 @@ export default function InboxPage() {
   const [q, setQ] = useState('')
   const [typed, setTyped] = useState('')
   useEffect(() => { const id = setTimeout(() => setQ(typed.trim()), 300); return () => clearTimeout(id) }, [typed])
+  // A new term means a new list is on its way — show the skeleton, not the
+  // previous results under the new heading.
+  useEffect(() => { void Promise.resolve().then(() => setStatus('loading')) }, [q])
 
   const load = useCallback(() => fetch(q ? `/api/inbox?q=${encodeURIComponent(q)}` : '/api/inbox')
     .then(async (r) => {
