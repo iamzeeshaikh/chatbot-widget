@@ -39,6 +39,9 @@ export interface CrmEmailEntry {
   subject: string
   /** Full text, kept so the timeline can show the whole thing. */
   body: string
+  /** True for mail the Gmail history import brought in — sent from Gmail, not
+   *  the CRM, so it carries the agent's Gmail signature, not the designed one. */
+  imported?: boolean
   /** Filled at READ time: the quoted chain a sent (imported) mail carried under
    *  the agent's own words, split off so it can fold away like it does in Gmail. */
   quoted?: string
@@ -84,6 +87,7 @@ export function parseCrmEmail(message: string | null | undefined): CrmEmailEntry
       snippet: stripImagePlaceholders(str(o.snippet)),
       at: str(o.at),
       gmailId: str(o.gmailId),
+      imported: o.imported === true,
       threadId: str(o.threadId),
       messageId: str(o.messageId),
       direction: 'outbound',

@@ -386,13 +386,19 @@ export function EmailEntry({ entry, flat = false }: { entry: NonNullable<Timelin
       <p className="text-xs font-semibold text-gray-900 break-words">{entry.subject}</p>
       <p className="text-[10px] text-gray-500 mt-0.5 break-words">
         from {entry.from}{entry.cc ? ` · cc ${entry.cc}` : ''}
+        {entry.imported && (
+          <span className="ml-1.5 inline-block rounded-full border border-gray-300 bg-gray-100 px-1.5 text-[9px] font-medium text-gray-600 align-middle"
+            title="Sent from Gmail directly (brought in by the history import) — it carries the Gmail signature, not the CRM's designed one, and has no open tracking">
+            sent from Gmail
+          </span>
+        )}
       </p>
       {/* Open tracking. Worded carefully: "not opened yet" means no signal,
           which a client that blocks images also produces. */}
-      <p className={`text-[10px] mt-0.5 ${entry.openedAt ? 'text-emerald-700 font-medium' : 'text-gray-400'}`}
+      {!entry.imported && <p className={`text-[10px] mt-0.5 ${entry.openedAt ? 'text-emerald-700 font-medium' : 'text-gray-400'}`}
         title={entry.openedAt ? `First opened ${formatDateTime(entry.openedAt)}${(entry.opens ?? 0) > 1 ? ` · opened ${entry.opens} times` : ''}` : 'No open recorded yet — some mail apps hide images, so this can stay blank even if it was read'}>
         {entry.openedAt ? `✓ Opened ${timeAgo(entry.openedAt)}${(entry.opens ?? 0) > 1 ? ` · ${entry.opens}×` : ''}` : 'Not opened yet'}
-      </p>
+      </p>}
       {open ? (
         // The formatted version when there is one, so the record shows what the
         // customer actually received rather than a flattened copy of it. It is
