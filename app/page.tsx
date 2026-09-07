@@ -2890,7 +2890,7 @@ export default function Dashboard() {
                               deal stage — an agent scanning this table could not
                               previously tell who had been spoken to without
                               opening every record. */}
-                          {['Type', 'Done', 'Stage', 'Score', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Site', 'Date', ''].map((h) => (
+                          {['Type', 'Done', 'Stage', 'Details', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Site', 'Date', ''].map((h) => (
                             <th key={h} className="text-left px-3 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -2914,7 +2914,27 @@ export default function Dashboard() {
                           }
                           const product = lead.product ?? msgLines['product'] ?? '-'
                           const quantity = lead.quantity ?? msgLines['quantity'] ?? '-'
-                          const score = lead.qualification_score ?? null
+                          // How complete this lead is: how many of the details
+                          // an agent needs before they can quote are actually on
+                          // it.
+                          //
+                          // It used to read `qualification_score` off the row,
+                          // which is why every row said 0/7. That column is only
+                          // ever written by one path — the bot extracting all
+                          // SEVEN of name/email/phone/product/quantity/budget/
+                          // timeline from a chat — and it has never fired: budget
+                          // and timeline are on zero leads of a thousand, because
+                          // no form asks for them. Everything else (a quote form,
+                          // a forwarded email, WhatsApp, a call) leaves the column
+                          // at its database default of 0. A score of 0/7 on every
+                          // row for a year is worse than no column.
+                          //
+                          // So it is counted here, from what the row is already
+                          // showing, out of the five things we genuinely collect.
+                          const scoreParts = [lead.name, lead.email, lead.phone,
+                            product !== '-' ? product : '', quantity !== '-' ? quantity : '']
+                          const score = scoreParts.filter((v) => String(v ?? '').trim()).length
+                          const SCORE_OUT_OF = scoreParts.length
                           const siteName = roleSites.find((s) => s.site_id === lead.site_id)?.name ?? sites.find((s) => s.site_id === lead.site_id)?.name ?? lead.site_id
                           const isEditing = editingLeadId === lead.id
                           const isConfirmingDelete = confirmLeadDeleteId === lead.id
@@ -2935,7 +2955,8 @@ export default function Dashboard() {
                                   rather than offering a second way to set them. */}
                               <td className="px-3 py-2" />
                               <td className="px-3 py-2" />
-                              <td className="px-3 py-2">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
+                              <td className="px-3 py-2"><span title={`We have ${score} of the ${SCORE_OUT_OF} details needed to quote: name, email, phone, product, quantity`}
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= SCORE_OUT_OF ? 'bg-green-100 text-green-600 border border-green-200' : score >= 3 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/{SCORE_OUT_OF}</span></td>
                               <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
                               <td className="px-3 py-2"><input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-blue-700 w-full min-w-[140px] focus:outline-none focus:border-blue-500" placeholder="Email" /></td>
                               <td className="px-3 py-2"><input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-700 w-full min-w-[100px] focus:outline-none focus:border-blue-500" placeholder="Phone" /></td>
@@ -3029,14 +3050,16 @@ export default function Dashboard() {
                                   disabled={stagingLeadId === lead.id}
                                   onChange={(e) => setLeadStage(lead, e.target.value as CrmStage)}
                                   aria-label="Deal stage"
-                                  className={`text-[11px] font-semibold border rounded-full px-2 py-0.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${CRM_STAGE_STYLE[lead.stage ?? 'new']}`}>
+                                  title={CRM_STAGE_LABEL[lead.stage ?? 'new']}
+                                  className={`max-w-[8.5rem] text-[11px] font-semibold border rounded-full px-2 py-0.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${CRM_STAGE_STYLE[lead.stage ?? 'new']}`}>
                                   {CRM_STAGES.map((st) => (
                                     <option key={st} value={st}>{CRM_STAGE_LABEL[st]}</option>
                                   ))}
                                 </select>
                               </td>
 
-                              <td className="px-3 py-3">{score !== null ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= 7 ? 'bg-green-100 text-green-600 border border-green-200' : score >= 4 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/7</span> : <span className="text-gray-500 text-xs">-</span>}</td>
+                              <td className="px-3 py-3"><span title={`We have ${score} of the ${SCORE_OUT_OF} details needed to quote: name, email, phone, product, quantity`}
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= SCORE_OUT_OF ? 'bg-green-100 text-green-600 border border-green-200' : score >= 3 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/{SCORE_OUT_OF}</span></td>
               {/* A plain anchor: normal click, middle-click and cmd-click all
                   behave the way the browser intends, with nothing intercepted. */}
                               <td className="px-3 py-3 text-gray-900 font-medium whitespace-nowrap">
