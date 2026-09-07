@@ -43,8 +43,7 @@ import { parseCall, callDurationLabel, type CallEntry } from './call'
 import { parseWaMessage, waDeliveryLabel, waErrorHint, type WaMessage } from './whatsapp'
 import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
-  type CrmEmailInEntry,
-} from './emailreply'
+  type CrmEmailInEntry, splitQuoted } from './emailreply'
 import { signAttachments, type EmailAttachment } from './emailattach'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 
@@ -640,6 +639,13 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
       if (e) {
         const op = opens.get(e.id)
         if (op) { e.openedAt = asUtcIso(op.at) ?? op.at; e.opens = op.n }
+        // Imported sends carry the whole quoted chain inside `body` (the
+        // composer's own sends never do). Split it off the way inbound mail is,
+        // so the record shows the agent's words and folds the history away.
+        if (!e.html && !e.quoted) {
+          const split = splitQuoted(e.body)
+          if (split.quoted && split.visible.trim()) { e.body = split.visible; e.quoted = split.quoted }
+        }
         push({
           id: `email-${row.id ?? at}`, at, kind: 'email', group: 'messages',
           actor: AGENT_LABEL(e.sentBy), title: `Emailed ${e.to}`,

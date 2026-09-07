@@ -336,7 +336,6 @@ export function InboundEntry({ entry, unread, onReply }: {
   unread: boolean
   onReply?: (ctx: ReplyContext) => void
 }) {
-  const [showQuoted, setShowQuoted] = useState(false)
   return (
     <div className={`mt-1 rounded-lg border px-2.5 py-1.5 ${
       unread ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-300' : 'border-violet-200 bg-violet-50'
@@ -373,22 +372,7 @@ export function InboundEntry({ entry, unread, onReply }: {
           <Reply size={9} strokeWidth={2.5} aria-hidden /> Reply
         </button>
       )}
-      {entry.quoted && (
-        <>
-          <button onClick={() => setShowQuoted((v) => !v)}
-            title="The quoted conversation history underneath this reply"
-            className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-violet-700 hover:text-violet-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
-            {showQuoted ? <ChevronDown size={9} strokeWidth={2.5} aria-hidden /> : <ChevronRight size={9} strokeWidth={2.5} aria-hidden />}
-            <Quote size={9} strokeWidth={2.5} aria-hidden />
-            {showQuoted ? 'Hide quoted text' : 'Show quoted text'}
-          </button>
-          {showQuoted && (
-            <p className="mt-1 text-[11px] text-gray-500 whitespace-pre-wrap break-words leading-snug border-l-2 border-violet-200 pl-2">
-              {entry.quoted}
-            </p>
-          )}
-        </>
-      )}
+      {entry.quoted && <QuotedFold text={entry.quoted} tone="violet" />}
     </div>
   )
 }
@@ -428,7 +412,29 @@ export function EmailEntry({ entry }: { entry: NonNullable<TimelineEvent['email'
           {open ? 'Hide full email' : 'Show full email'}
         </button>
       )}
+      {entry.quoted && <QuotedFold text={entry.quoted} tone="sky" />}
     </div>
+  )
+}
+
+// Gmail's "trimmed content": the quoted chain under a message, folded away
+// behind one control and shown WITHOUT the ">" gutters when opened.
+function QuotedFold({ text, tone }: { text: string; tone: 'sky' | 'violet' }) {
+  const [show, setShow] = useState(false)
+  const clean = text.replace(/^[ \t]*(?:>[ \t]?)+/gm, '').replace(/\n{3,}/g, '\n\n').trim()
+  const c = tone === 'sky' ? { btn: 'text-sky-700 hover:text-sky-900', bar: 'border-sky-200' } : { btn: 'text-violet-700 hover:text-violet-900', bar: 'border-violet-200' }
+  return (
+    <>
+      <button onClick={() => setShow((v) => !v)} title="The earlier messages quoted underneath this one"
+        className={`mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium ${c.btn} focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded`}>
+        {show ? <ChevronDown size={9} strokeWidth={2.5} aria-hidden /> : <ChevronRight size={9} strokeWidth={2.5} aria-hidden />}
+        <Quote size={9} strokeWidth={2.5} aria-hidden />
+        {show ? 'Hide quoted text' : 'Show quoted text'}
+      </button>
+      {show && (
+        <p className={`mt-1 text-[11px] text-gray-500 whitespace-pre-wrap break-words leading-snug border-l-2 ${c.bar} pl-2`}>{clean}</p>
+      )}
+    </>
   )
 }
 
@@ -457,6 +463,17 @@ export function Files({ files, skipped, gmailId, onRetryFile }: {
   return (
     <div className="mt-1 flex flex-wrap gap-1">
       {(files ?? []).map((f) => (
+        f.url && f.mime.startsWith('image/') && !f.mime.includes('svg') ? (
+          /* A picture is shown as a picture, the way Gmail does — artwork is
+             what most of these are, and a filename says nothing about it. */
+          <a key={f.name + f.size} href={f.url} target="_blank" rel="noopener noreferrer"
+            title={`${f.name} · ${humanSize(f.size)}`}
+            className="block rounded-lg border border-gray-300 bg-white overflow-hidden hover:border-blue-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={f.url} alt={f.name} loading="lazy" className="h-28 max-w-[220px] object-cover" />
+            <span className="block px-1.5 py-0.5 text-[10px] text-gray-600 truncate max-w-[220px]">{f.name} <span className="text-gray-500 tabular-nums">{humanSize(f.size)}</span></span>
+          </a>
+        ) : (
         <a key={f.name + f.size} href={f.url ?? undefined} target="_blank" rel="noopener noreferrer"
           title={f.url ? `${f.name} · ${humanSize(f.size)}` : 'This link has expired — reload the page'}
           className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md border transition-colors ${
@@ -468,6 +485,7 @@ export function Files({ files, skipped, gmailId, onRetryFile }: {
           <span className="truncate max-w-[160px]">{f.name}</span>
           <span className="text-gray-500 tabular-nums">{humanSize(f.size)}</span>
         </a>
+        )
       ))}
       {(skipped ?? []).map((sk) => (
         <SkippedFile key={sk.name} skip={sk} gmailId={gmailId} onRetry={onRetryFile} />

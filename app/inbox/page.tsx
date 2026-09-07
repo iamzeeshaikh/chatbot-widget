@@ -520,11 +520,15 @@ function MessageCard({ e, onReply, onRetryFile }: {
         </div>
         <span className="text-[11px] text-gray-500 shrink-0 tabular-nums" title={formatDateTime(e.at)}>{timeAgo(e.at)}</span>
       </div>
-      {inbound && e.inbound ? (
-        <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} gmailId={e.inbound.gmailId} onRetryFile={onRetryFile} /></>
-      ) : e.email ? (
-        <><EmailEntry entry={e.email} /><Files files={e.files} /></>
-      ) : null}
+      {/* The record's own message components, read at mail size here: the
+          rail is a feed, this is a letter. */}
+      <div className="mail-thread">
+        {inbound && e.inbound ? (
+          <><InboundEntry entry={e.inbound} unread={!!e.unread} onReply={onReply} /><Files files={e.files} skipped={e.inbound.skippedAttachments} gmailId={e.inbound.gmailId} onRetryFile={onRetryFile} /></>
+        ) : e.email ? (
+          <><EmailEntry entry={e.email} /><Files files={e.files} /></>
+        ) : null}
+      </div>
     </div>
   )
 }

@@ -39,6 +39,9 @@ export interface CrmEmailEntry {
   subject: string
   /** Full text, kept so the timeline can show the whole thing. */
   body: string
+  /** Filled at READ time: the quoted chain a sent (imported) mail carried under
+   *  the agent's own words, split off so it can fold away like it does in Gmail. */
+  quoted?: string
   /** Filled at READ time from crm_email_open rows — first open, and how many. */
   openedAt?: string
   opens?: number

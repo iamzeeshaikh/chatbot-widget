@@ -302,3 +302,10 @@ html.dark[data-ws="sports"] .to-blue-50 { --tw-gradient-to: rgba(34, 197, 94, 0.
 .tl-email ol { list-style: decimal; padding-left: 1.1rem; margin: 0.2rem 0; }
 .tl-email a { color: #1d4ed8; text-decoration: underline; }
 .tl-email blockquote { border-left: 2px solid #cbd5e1; padding-left: 0.6rem; color: #475569; margin: 0.3rem 0; }
+
+
+/* Inbox thread view: the record's message components at reading size. */
+.mail-thread .text-xs { font-size: 0.9375rem; line-height: 1.5; }
+.mail-thread .text-\[11px\] { font-size: 0.875rem; line-height: 1.5; }
+.mail-thread .text-\[10px\] { font-size: 0.8125rem; line-height: 1.4; }
+.mail-thread .leading-snug { line-height: 1.55; }
