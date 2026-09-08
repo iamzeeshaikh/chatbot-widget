@@ -82,6 +82,9 @@ export const CRM_ROLES = [
   'call_intent',
   // Customer opened an email we sent (lib/emailtrack.ts) — lives on the lead.
   'crm_email_open',
+  // Billing details the customer filled in themselves (lib/billing.ts) — lives
+  // on the lead, and must never appear in a transcript or a preview.
+  'crm_billing',
 ] as const
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────

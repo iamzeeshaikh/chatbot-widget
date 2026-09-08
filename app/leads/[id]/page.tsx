@@ -34,6 +34,7 @@ import WhatsAppThread from './WhatsAppThread'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
+import Billing from './Billing'
 import EmailComposer, { type ReplyTo } from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
@@ -733,6 +734,11 @@ export default function LeadRecordPage() {
             onDelete={deleteTask}
             onReassign={reassignTask}
           />
+
+          {/* Under Tasks and above the Deal: by the time somebody is asking
+              for billing details the deal is being won, and this is the panel
+              they open next. */}
+          <Billing leadId={record.id} />
 
           <Card title="Deal" icon={Target}>
             <div className="px-3 py-2.5 space-y-2">
