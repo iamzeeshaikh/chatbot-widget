@@ -32,7 +32,11 @@ export const PACKAGING_SITES = [
   // 2026-08-29: thefoodtrays.com got the widget.
   'thefoodtrays',
 ]
-export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys']
+// zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
+// site for ZEE Sports Wear itself, linking down to the five specialist sites.
+// Its quote form mails the same inbox as the rest of sports, so its leads belong
+// in the same workspace and the same counts.
+export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys', 'zeesportswear']
 
 // Sites whose leads are counted (auto lead detection + the Billing tab and the
 // Overview tiles, which are computed from the same lead_capture dataset).

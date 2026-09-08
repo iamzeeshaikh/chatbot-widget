@@ -162,6 +162,8 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   CSJ: 'californiasoccer',
   FBJ: 'floridabasketball',
   TBJ: 'baseballjerseys',
+  // The parent brand's own site, live 2026-09-08.
+  ZSW: 'zeesportswear',
 }
 
 export function siteIdFromQuoteCode(code: string): string | null {

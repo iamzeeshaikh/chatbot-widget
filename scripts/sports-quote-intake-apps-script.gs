@@ -105,7 +105,7 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // matched by LEAF name (the part after the last "/"), so the parent folder is
 // free to be anything. These five must also exist in QUOTE_SITE_CODES on the
 // server; a code the server does not know comes back as a 400 in the run log.
-var SITE_CODES = ['TFU', 'TVU', 'CSJ', 'FBJ', 'TBJ'];
+var SITE_CODES = ['TFU', 'TVU', 'CSJ', 'FBJ', 'TBJ', 'ZSW'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -182,6 +182,7 @@ var SITE_DOMAINS = {
   CSJ: 'californiasoccerjerseys.com',
   FBJ: 'floridabasketballjerseys.com',
   TBJ: 'thebaseballjerseys.com',
+  ZSW: 'zeesportswear.com',
 };
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
