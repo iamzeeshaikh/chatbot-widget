@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { supabase } from './supabase'
 import { writeControlRow } from './leadrecord'
+import { appSecret } from './auth'
 
 /**
  * Billing details for an invoice, collected from the customer rather than typed
@@ -56,14 +57,10 @@ export const BLANK_BILLING: BillingDetails = {
  * over the id makes the link unguessable and lets the server reject a tampered
  * one without a database round trip.
  */
-function secret(): string {
-  const s = process.env.AUTH_SECRET
-  if (!s) throw new Error('AUTH_SECRET is required to sign billing links')
-  return s
-}
-
 export function billingToken(leadId: string): string {
-  const sig = crypto.createHmac('sha256', secret()).update(`billing:${leadId}`).digest('base64url').slice(0, 24)
+  // Domain-separated by the `billing:` prefix, so a signature minted here can
+  // never be replayed as a session token and vice versa.
+  const sig = crypto.createHmac('sha256', appSecret()).update(`billing:${leadId}`).digest('base64url').slice(0, 24)
   return `${Buffer.from(leadId).toString('base64url')}.${sig}`
 }
 

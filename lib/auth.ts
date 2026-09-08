@@ -41,8 +41,23 @@ export const HARDCODED_ACCOUNTS: { email: string; password: string; workspace: W
 // is what makes a password change able to kill sessions that already exist.
 type SessionPayload = ({ t: 'h'; e: string } | { t: 'm'; uid: string }) & { iat?: number }
 
-function secret(): string {
+/**
+ * The root key everything in this app signs with.
+ *
+ * Exported because lib/billing.ts signs its customer links with it too, and a
+ * second copy of this fallback chain is a second thing to keep in step —
+ * AUTH_SECRET is NOT set in production here, so anything that demands it
+ * throws while the session cookie quietly carries on working.
+ *
+ * Callers must domain-separate their own use (billing links prefix the signed
+ * message), so a token minted for one purpose cannot be replayed as another.
+ */
+export function appSecret(): string {
   return process.env.AUTH_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'dev-secret'
+}
+
+function secret(): string {
+  return appSecret()
 }
 
 function b64url(input: Buffer | string): string {
