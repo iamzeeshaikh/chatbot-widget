@@ -745,14 +745,54 @@ const VISITOR_POLL_MS = 5 * 1000
 // Deliberately NOT gated: the 60-second attendance heartbeat (an agent working
 // in another tab is still on duty and must not read as offline) and the
 // waiting-chat alarm, which touches no network at all.
-const whenVisible = (fn: () => void) => () => {
-  if (typeof document === 'undefined' || !document.hidden) fn()
+// ── while the tab is hidden ──────────────────────────────────────────────────
+// It used to skip the poll entirely, which is why an agent working in another
+// tab found out about a new chat only on coming back: the dashboard had not
+// looked. Nothing could beep because nothing had been seen.
+//
+// It now polls on a slower beat instead of not at all — every fourth tick, so a
+// 15s poll becomes a minute in the background — and `awayAlert` below turns
+// what it finds into something that reaches the agent wherever they are.
+const whenVisible = (fn: () => void, hiddenEvery = 4) => {
+  let missed = 0
+  return () => {
+    if (typeof document === 'undefined' || !document.hidden) { missed = 0; fn(); return }
+    if (++missed >= hiddenEvery) { missed = 0; fn() }
+  }
+}
+
+// What an agent on another tab actually notices.
+//
+// A sound is useless in a background tab, and a browser will not play one there
+// anyway. A desktop notification is drawn by the OS over whatever they are
+// looking at, and the count in the tab title is the fallback for when
+// permission was never granted — a tab reading "(2) ZeeOps" is visible in the
+// tab strip without leaving the page they are on.
+let awayUnread = 0
+let awayBaseTitle = ''
+const awayAlert = (title: string, body: string, url?: string) => {
+  if (typeof document === 'undefined' || !document.hidden) return
+  awayUnread += 1
+  if (!awayBaseTitle) awayBaseTitle = document.title.replace(/^\(\d+\)\s*/, '')
+  document.title = `(${awayUnread}) ${awayBaseTitle}`
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      // `tag` collapses a burst into one notification rather than stacking six.
+      const n = new Notification(title, { body, tag: 'zeeops-away', icon: '/icon.svg' })
+      n.onclick = () => { window.focus(); if (url) window.location.href = url; n.close() }
+    }
+  } catch { /* a browser that refuses is not worth breaking the poll over */ }
+}
+const awayClear = () => {
+  if (typeof document === 'undefined') return
+  awayUnread = 0
+  if (awayBaseTitle) document.title = awayBaseTitle
 }
 
 function useVisibleTick(): number {
   const [tick, setTick] = useState(0)
   useEffect(() => {
-    const onChange = () => { if (!document.hidden) setTick((n) => n + 1) }
+    const onChange = () => { if (!document.hidden) { awayClear(); setTick((n) => n + 1) } }
     document.addEventListener('visibilitychange', onChange)
     return () => document.removeEventListener('visibilitychange', onChange)
   }, [])
@@ -1391,7 +1431,13 @@ export default function Dashboard() {
       }
     }
     lastUserMsgAt.current = nextMap
-    if (hasNew) playDashSound()
+    if (hasNew) {
+      playDashSound()
+      const who = incoming.find((x) => x.last_role === 'user')
+      awayAlert('New message from a customer',
+        who ? `${who.lead?.name || who.lead?.email || 'A visitor'} · ${who.site_name}` : 'Someone is waiting for a reply',
+        '/?tab=conversations')
+    }
     dashSoundReady.current = true
 
     setSessions(incoming)
@@ -1440,7 +1486,11 @@ export default function Dashboard() {
         // noticing a small number change in the corner, so a reply sat unseen
         // unless somebody happened to refresh — which is exactly how it was
         // reported. Same chime as a waiting chat, through the same mute switch.
-        if (unreadSeeded.current && nextUnread > prevUnreadReplies.current) playDashSound()
+        if (unreadSeeded.current && nextUnread > prevUnreadReplies.current) {
+          playDashSound()
+          awayAlert('A customer replied by email',
+            `${nextUnread} repl${nextUnread === 1 ? 'y' : 'ies'} waiting on you`, '/inbox')
+        }
         prevUnreadReplies.current = nextUnread
         unreadSeeded.current = true
         setUnreadReplies(nextUnread)
@@ -1450,7 +1500,11 @@ export default function Dashboard() {
         // sound at all — the message landed on a lead record and nothing in
         // the dashboard moved. Same chime, same mute switch.
         const nextWa = typeof d.waWaiting === 'number' ? d.waWaiting : 0
-        if (waSeeded.current && nextWa > prevWaWaiting.current) playDashSound()
+        if (waSeeded.current && nextWa > prevWaWaiting.current) {
+          playDashSound()
+          awayAlert('A customer wrote on WhatsApp',
+            `${nextWa} conversation${nextWa === 1 ? '' : 's'} waiting on a reply`)
+        }
         prevWaWaiting.current = nextWa
         waSeeded.current = true
       })
@@ -1485,8 +1539,13 @@ export default function Dashboard() {
     // it was usually silent — and its prev.size>0 guard skipped the 0→1 visitor
     // case entirely.) Seeded silently on the first fetch so a dashboard load
     // doesn't alert for visitors already known.
-    if (visitorsSeeded.current && incoming.some((v) => !prevVisitorIds.current.has(v.session_id))) {
+    const arrivals = incoming.filter((v) => !prevVisitorIds.current.has(v.session_id))
+    if (visitorsSeeded.current && arrivals.length > 0) {
       playDashSound()
+      awayAlert(
+        arrivals.length === 1 ? 'Someone is on the site' : `${arrivals.length} visitors are on the site`,
+        arrivals[0].site_name || 'A visitor just arrived',
+      )
     }
     visitorsSeeded.current = true
     prevVisitorIds.current = incomingIds
