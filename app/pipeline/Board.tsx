@@ -206,6 +206,16 @@ function BoardCard({ card, moving, onDragStart, onDragEnd, onMove }: {
       <p className="flex items-center gap-1 mt-0.5 text-[9px] text-gray-500 min-w-0">
         <Building2 size={8} strokeWidth={2} className="shrink-0" aria-hidden />
         <span className="truncate" title={card.siteName}>{card.siteName}</span>
+        {/* This customer reached the site more than once — a chat and the quote
+            form, say. One card, and moving it moves all of them; the badge is
+            there so a merged card is never mistaken for a missing one. */}
+        {card.mergedCount > 1 && (
+          <span
+            title={`${card.mergedCount} records from this customer, shown as one card. Changing the stage changes all of them.`}
+            className="shrink-0 rounded-full border border-gray-300 bg-gray-100 px-1 text-[8px] font-semibold text-gray-600">
+            {card.mergedCount} records
+          </span>
+        )}
       </p>
 
       <div className="flex items-center gap-1 mt-0.5 min-w-0">

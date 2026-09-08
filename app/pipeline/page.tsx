@@ -202,16 +202,25 @@ export default function PipelinePage() {
     }))
 
     try {
-      const res = await fetch(`/api/leads/${encodeURIComponent(card.id)}/stage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: to, previous: from }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(res.status === 403
-          ? 'You don’t have access to that lead’s site.'
-          : body.error || 'Could not move that lead')
+      // A card can stand for more than one record — the same customer who
+      // chatted and then filled in the quote form. Moving the card moves ALL of
+      // them, because leaving the other one behind in New is exactly the drift
+      // the merge was introduced to stop. Sequential rather than parallel: the
+      // stage endpoint writes two rows per call and a burst of them against the
+      // same session is not worth the millisecond it saves.
+      const ids = card.mergedIds?.length ? card.mergedIds : [card.id]
+      for (const id of ids) {
+        const res = await fetch(`/api/leads/${encodeURIComponent(id)}/stage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: to, previous: from }),
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(res.status === 403
+            ? 'You don’t have access to that lead’s site.'
+            : body.error || 'Could not move that lead')
+        }
       }
       // Re-fetch so the totals are the server's, not the optimistic arithmetic.
       await load()
@@ -291,10 +300,18 @@ export default function PipelinePage() {
     setBulkBusy(true)
     setError('')
     try {
+      // Selection holds card ids, and a card can stand for several records of
+      // the same customer. Expand to the records before sending, or a bulk
+      // stage change would move the card the agent can see and leave its
+      // twin behind — the same drift a merged card exists to prevent.
+      const byId = new Map(allCards.map((c) => [c.id, c]))
+      const ids = Array.from(new Set(
+        Array.from(selected).flatMap((id) => byId.get(id)?.mergedIds ?? [id]),
+      ))
       const res = await fetch('/api/pipeline/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, ids: Array.from(selected) }),
+        body: JSON.stringify({ ...body, ids }),
       })
       const d = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(d.error || 'The bulk update failed')
@@ -309,7 +326,7 @@ export default function PipelinePage() {
     } finally {
       setBulkBusy(false)
     }
-  }, [selected, clearSelection, load])
+  }, [selected, allCards, clearSelection, load])
 
   // Undo is a compensating write, not a rollback: it posts the per-lead
   // previous values the server handed back.

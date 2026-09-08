@@ -47,7 +47,18 @@ const LEAD_ROW_CAP = 20000
 export const CARDS_PER_COLUMN = 12
 
 export interface PipelineCard {
+  /** The record this card opens — the earliest of the ones merged into it. */
   id: string
+  /**
+   * Every record this card stands for. One customer often reaches a site twice
+   * — a chat and then the quote form, or the form twice — and each of those is
+   * its own row. The board used to show one card per ROW, so an agent worked
+   * one and left the other behind at the stage it started in.
+   *
+   * A stage change writes to all of these, which is what keeps them from ever
+   * disagreeing again.
+   */
+  mergedIds: string[]
   name: string
   email: string | null
   siteId: string
@@ -62,6 +73,8 @@ export interface PipelineCard {
   lastActivityAt: string | null
   openTasks: number
   overdueTasks: number
+  /** How many records this card covers. 1 for most; 2+ means it was merged. */
+  mergedCount: number
   /** Customer replies nobody has opened — "this lead is waiting on you". */
   unreadReplies: number
 }
@@ -115,6 +128,38 @@ interface LeadRow {
 }
 
 // ── Load ─────────────────────────────────────────────────────────────────────
+// Fold two records of the same customer into one card.
+//
+// The rules are chosen so that nothing an agent has already done is lost:
+//  • the card OPENS the earliest record, which is where the history starts;
+//  • the stage is the furthest one reached, because a customer who has had a
+//    quote sent has had a quote sent whichever row records it;
+//  • tasks and unread replies ADD UP — they are work, and work does not merge
+//    away;
+//  • the owner is whoever was actually assigned, not nobody.
+function mergeCards(a: PipelineCard, b: PipelineCard): PipelineCard {
+  const earlier = (a.createdAt ?? '') <= (b.createdAt ?? '') ? a : b
+  const later = earlier === a ? b : a
+  const furthest = CRM_STAGES.indexOf(a.stage) >= CRM_STAGES.indexOf(b.stage) ? a : b
+  return {
+    ...earlier,
+    mergedIds: [...earlier.mergedIds, ...later.mergedIds],
+    mergedCount: earlier.mergedCount + later.mergedCount,
+    // A quote row carries the enquiry text; prefer its label over "chat".
+    kind: a.kind === 'chat' ? b.kind : a.kind,
+    name: earlier.name || later.name,
+    stage: furthest.stage,
+    value: Math.max(a.value ?? 0, b.value ?? 0) || (a.value ?? b.value),
+    currency: (a.value ?? 0) >= (b.value ?? 0) ? a.currency : b.currency,
+    owner: a.owner ?? b.owner,
+    createdAt: earlier.createdAt,
+    lastActivityAt: (a.lastActivityAt ?? '') >= (b.lastActivityAt ?? '') ? a.lastActivityAt : b.lastActivityAt,
+    openTasks: a.openTasks + b.openTasks,
+    overdueTasks: a.overdueTasks + b.overdueTasks,
+    unreadReplies: a.unreadReplies + b.unreadReplies,
+  }
+}
+
 export async function loadPipeline(
   member: Member,
   filters: PipelineFilters,
@@ -173,7 +218,8 @@ export async function loadPipeline(
   const cards = new Map<string, PipelineCard>()
 
   const blank = (id: string, siteId: string, kind: LeadKind, createdAt: string | null): PipelineCard => ({
-    id, name: '', email: null, siteId, siteName: siteName[siteId] ?? siteId, kind,
+    id, mergedIds: [id], mergedCount: 1,
+    name: '', email: null, siteId, siteName: siteName[siteId] ?? siteId, kind,
     stage: 'new', value: null, currency: DEFAULT_CURRENCY, owner: null,
     createdAt, lastActivityAt: createdAt, openTasks: 0, overdueTasks: 0, unreadReplies: 0,
   })
@@ -309,8 +355,29 @@ export async function loadPipeline(
     }
   }
 
-  // ── filters that can only be applied once a card is whole ──────────────────
-  let list = Array.from(cards.values())
+  // ── one customer, one card ─────────────────────────────────────────────────
+  //
+  // A person who chats and then fills in the quote form is two rows in two
+  // tables, and the board showed both. On the packaging workspace that was 823
+  // cards for 606 people: a quarter of the board was the same customers twice,
+  // and an agent moving one card left the other sitting in New — two records
+  // for one conversation, drifting apart from the moment either was touched.
+  //
+  // Merged on site + email, because an email is the only identifier both
+  // channels reliably carry, and never ACROSS sites: the same person enquiring
+  // at two of our brands is two deals. A card with no email cannot be matched
+  // to anything and stays on its own.
+  const merged = new Map<string, PipelineCard>()
+  const loose: PipelineCard[] = []
+  for (const c of cards.values()) {
+    const email = (c.email ?? '').trim().toLowerCase()
+    if (!email) { loose.push(c); continue }
+    const key = `${c.siteId}|${email}`
+    const first = merged.get(key)
+    if (!first) { merged.set(key, c); continue }
+    merged.set(key, mergeCards(first, c))
+  }
+  let list = [...merged.values(), ...loose]
 
   // Whose board is this. An ordinary agent sees their own cards and the
   // unassigned pool; an admin or team lead sees the workspace. Applied before
