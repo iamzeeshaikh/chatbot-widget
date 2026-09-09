@@ -1013,6 +1013,12 @@ function hideContacts(rec: LeadRecord): LeadRecord {
     })),
     timeline: rec.timeline.map((e) => ({
       ...e,
+      // An inbound reply's actor is `fromName || from`, so a customer who
+      // sends mail with no display name put their whole address on the
+      // timeline as the event's byline — the one field on this record that was
+      // never scrubbed. scrubText masks addresses and leaves agent labels and
+      // human names alone, which is exactly what a byline needs.
+      actor: scrubText(e.actor) ?? '',
       title: scrubText(e.title) ?? '',
       body: e.body === undefined ? undefined : (scrubText(e.body) ?? ''),
       email: e.email && {
@@ -1021,6 +1027,14 @@ function hideContacts(rec: LeadRecord): LeadRecord {
         cc: e.email.cc ? HIDDEN_EMAIL : e.email.cc,
         subject: scrubText(e.email.subject) ?? '',
         body: scrubText(e.email.body) ?? '',
+        // The quoted chain, same as on the inbound branch below — and this is
+        // where it actually leaked. A reply we send quotes the customer's own
+        // message, headers and all, so `quoted` on an OUTBOUND email carries
+        // "From: Name <address>" verbatim. The inbound branch had this from the
+        // start; the outbound one did not, and three copies of a live
+        // customer's address were being served to an agent whose `contact.email`
+        // field said "hidden".
+        quoted: scrubText(e.email.quoted) ?? undefined,
         snippet: scrubText(e.email.snippet) ?? '',
       },
       files: e.files?.map(openFile),
