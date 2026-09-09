@@ -22,6 +22,7 @@
 
 import { supabase } from './supabase'
 import { memberSites, type Member } from './auth'
+import { canSeeContacts, maskEmail, maskPhone, scrubText } from './pii'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
 import { asUtcIso } from './visitor'
 import {
@@ -213,9 +214,28 @@ export async function searchLeads(member: Member, rawTerm: string): Promise<{
   const truncated = hits.length > RESULT_CAP
   const top = hits.slice(0, RESULT_CAP)
 
+  // Grouping first, masking second. groupSameParty matches on the real address
+  // and the real number, so masking before it would put every hit in its own
+  // group and quietly break Related Leads.
   const groups = groupSameParty(top)
+  const hide = !canSeeContacts(member)
   return {
-    hits: top.map((h, i) => ({ ...h, group: groups[i] })),
+    hits: top.map((h, i) => {
+      const hit = { ...h, group: groups[i] }
+      if (!hide) return hit
+      return {
+        ...hit,
+        // Search had no masking at all: a member who cannot see an address on
+        // the record could type a name into the palette and read it straight
+        // back. `name` matters as much as `email` here — it falls back to the
+        // address when a lead has no name — and `snippet` is the enquiry text,
+        // which is where a customer types their own details.
+        name: scrubText(hit.name) ?? '',
+        email: maskEmail(hit.email),
+        phone: maskPhone(hit.phone),
+        snippet: scrubText(hit.snippet),
+      }
+    }),
     truncated,
     tookMs: Date.now() - started,
   }
