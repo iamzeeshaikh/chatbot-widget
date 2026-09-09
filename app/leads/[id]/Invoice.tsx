@@ -6,10 +6,12 @@
 // somebody has to turn that into a name, an address, a quantity and an amount
 // to type into a payment page. This is where that assembly happens once.
 //
-// What it reads out of the conversation it OFFERS rather than fills in. "8
-// sets" in a thread might be what was ordered or what was first asked about,
-// and only a person knows which — so a suggestion is a button, and clicking it
-// is the decision.
+// It reads the conversation and fills the blanks: quantities, amounts, street
+// addresses and what was being discussed, newest first. A value that came from
+// the thread is labelled with where it was said and the panel opens unsaved,
+// because "8 sets" in a message might be what was ordered or what was first
+// asked about — the fill is a draft for a person to confirm, not an answer.
+// Anything already typed always wins; alternatives stay as buttons underneath.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Receipt, Copy, Check, RefreshCw, Sparkles } from 'lucide-react'
@@ -24,13 +26,16 @@ interface Draft {
   shipTo: string
   notes: string
 }
-interface Sheet extends Draft { name: string; email: string; phone: string; gaps: string[] }
+interface Sheet extends Draft {
+  name: string; email: string; phone: string; gaps: string[]
+  autofilled: string[]; sources: Record<string, string>
+}
 interface Suggestion { value: string; from: string; at: string }
 interface Payload {
   sheet: Sheet
   text: string
   draft: Draft | null
-  suggestions: { quantity: Suggestion[]; amount: Suggestion[]; address: Suggestion[] }
+  suggestions: { item: Suggestion[]; quantity: Suggestion[]; amount: Suggestion[]; address: Suggestion[] }
   contactsHidden: boolean
 }
 
@@ -56,8 +61,20 @@ export default function Invoice({ leadId }: { leadId: string }) {
       if (!res.ok) { setError(String(j.error || 'Could not load the invoice sheet.')); return }
       setError('')
       setData(j)
-      setV({ ...BLANK, ...(j.draft ?? {}) })
-      setDirty(false)
+      // Open with what the sheet resolved, not with the bare draft: an empty
+      // field that the conversation could fill is shown filled, so saving is a
+      // confirmation rather than a retype. `autofilled` says which ones those
+      // are, and the panel labels them.
+      const d = j.draft ?? {}
+      setV({
+        ...BLANK, ...d,
+        item: d.item || j.sheet.item || '',
+        quantity: d.quantity || j.sheet.quantity || '',
+        amount: d.amount || j.sheet.amount || '',
+        shipTo: d.shipTo || j.sheet.shipTo || '',
+        currency: d.currency || j.sheet.currency || 'USD',
+      })
+      setDirty((j.sheet.autofilled?.length ?? 0) > 0)
     } catch {
       setError('Could not load the invoice sheet.')
     } finally {
@@ -144,12 +161,15 @@ export default function Invoice({ leadId }: { leadId: string }) {
                 <label className={LABEL} htmlFor="inv-item">What was sold</label>
                 <input id="inv-item" className={INPUT} value={v.item} onChange={set('item')}
                   placeholder="Thunder soccer uniforms" />
+                <From sheet={data.sheet} field="item" />
+                <Suggest list={sug?.item} onPick={(x) => take('item', x)} />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={LABEL} htmlFor="inv-qty">Quantity</label>
                   <input id="inv-qty" className={INPUT} value={v.quantity} onChange={set('quantity')} placeholder="8 sets" />
+                  <From sheet={data.sheet} field="quantity" />
                   <Suggest list={sug?.quantity} onPick={(x) => take('quantity', x)} />
                 </div>
                 <div>
@@ -158,6 +178,7 @@ export default function Invoice({ leadId }: { leadId: string }) {
                     <input className={`${INPUT} mt-0 w-16`} value={v.currency} onChange={set('currency')} aria-label="Currency" />
                     <input id="inv-amt" className={`${INPUT} mt-0 flex-1`} value={v.amount} onChange={set('amount')} placeholder="429.00" />
                   </div>
+                  <From sheet={data.sheet} field="amount" />
                   <Suggest list={sug?.amount} onPick={(x) => take('amount', x.replace(/^\$/, ''))} />
                 </div>
               </div>
@@ -171,6 +192,7 @@ export default function Invoice({ leadId }: { leadId: string }) {
               <div>
                 <label className={LABEL} htmlFor="inv-ship">Shipping address</label>
                 <textarea id="inv-ship" rows={2} className={INPUT} value={v.shipTo} onChange={set('shipTo')} />
+                <From sheet={data.sheet} field="shipTo" />
                 <Suggest list={sug?.address} onPick={(x) => take('shipTo', x)} />
               </div>
 
@@ -203,6 +225,16 @@ export default function Invoice({ leadId }: { leadId: string }) {
         )}
       </div>
     </Card>
+  )
+}
+
+/** Says a value came out of the conversation rather than from a person. */
+function From({ sheet, field }: { sheet: Sheet; field: string }) {
+  if (!sheet.autofilled?.includes(field)) return null
+  return (
+    <p className="mt-1 text-[10px] text-amber-700">
+      Read from the {sheet.sources?.[field] ?? 'thread'} — check it before saving.
+    </p>
   )
 }
 

@@ -32,7 +32,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if ('error' in c) return c.error
 
   const draft = await readInvoice(id)
-  const sheet = buildSheet(c.record, draft)
+  const suggestions = suggestFromTimeline(c.record.timeline ?? [])
+  const sheet = buildSheet(c.record, draft, suggestions)
   return NextResponse.json({
     ok: true,
     sheet,
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     draft: draft ?? null,
     // Read out of the conversation and offered, never applied: "8 sets" in a
     // thread might be what was ordered or what was first asked about.
-    suggestions: suggestFromTimeline(c.record.timeline ?? []),
+    suggestions,
     contactsHidden: Boolean(c.record.contactsHidden),
   })
 }
@@ -58,6 +59,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { error } = await writeInvoice(id, c.access.siteId, draft)
   if (error) return NextResponse.json({ error: 'That did not save.' }, { status: 500 })
 
-  const sheet = buildSheet(c.record, draft)
+  const sheet = buildSheet(c.record, draft, suggestFromTimeline(c.record.timeline ?? []))
   return NextResponse.json({ ok: true, sheet, text: sheetToText(sheet), draft })
 }

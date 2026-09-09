@@ -735,11 +735,6 @@ export default function LeadRecordPage() {
             onReassign={reassignTask}
           />
 
-          {/* Under the deal is too late: by the time somebody wants these
-              details the sale is already agreed and they are being copied into
-              a payment page. */}
-          <Invoice leadId={record.id} />
-
           <Card title="Deal" icon={Target}>
             <div className="px-3 py-2.5 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
@@ -846,6 +841,11 @@ export default function LeadRecordPage() {
             column on any real lead, so pinning it keeps the right-hand side
             useful instead of leaving a tall empty gutter while you scroll. */}
         <div className="space-y-3 min-w-0 lg:sticky lg:top-[60px] lg:max-h-[calc(100vh-72px)] lg:overflow-y-auto">
+          {/* First in the right column: on a deal that is being closed this is
+              the panel somebody opens the record for, and it stays in view
+              while they scroll the thread it was assembled from. */}
+          <Invoice leadId={record.id} />
+
           <Card title="Attachments" icon={Paperclip} tone="muted"
             action={<span className="text-[10px] text-gray-500 tabular-nums">{record.attachments.length}</span>}>
             {record.attachments.length === 0 ? (

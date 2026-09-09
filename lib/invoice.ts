@@ -93,20 +93,41 @@ export interface Suggestion {
 }
 
 export interface InvoiceSuggestions {
+  item: Suggestion[]
   quantity: Suggestion[]
   amount: Suggestion[]
   address: Suggestion[]
 }
 
 const CUSTOMER_KINDS = new Set(['message', 'email_in', 'wa_in', 'note', 'email', 'wa_out'])
+/**
+ * Where a SHIPPING address may be read from.
+ *
+ * Only what the customer said, plus notes an agent wrote. Never our own
+ * outbound email: every one of those carries the site's address in its
+ * signature, so an outbound message is guaranteed to offer the factory's
+ * address as the place to ship to.
+ */
+const ADDRESS_KINDS = new Set(['message', 'email_in', 'wa_in', 'note'])
 
 /** "8 sets", "24 jerseys", "qty 30", "x 12" — how a quantity is actually written. */
 const QTY = /\b(?:qty\.?|quantity)\s*[:=]?\s*(\d{1,4})\b|\b(\d{1,4})\s*(sets?|pcs?|pieces?|jerseys?|uniforms?|shirts?|kits?|units?)\b/gi
 /** A currency amount, with or without a symbol. Bare integers are ignored on
  *  purpose — "24 jerseys" is not $24. */
 const AMOUNT = /(?:\$|usd\s*)\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+\.\d{2})\b/gi
-/** A US-shaped address line: number, street, and something after it. */
-const ADDRESS = /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s*,\s*[A-Za-z .'-]{2,},?\s*(?:[A-Z]{2}\s*\d{5}(?:-\d{4})?)?/g
+/**
+ * A US-shaped address: number, street, a street type, then a locality — and it
+ * must end in a state or a ZIP.
+ *
+ * The loose version matched "80 total. If required within 15 days, customer
+ * must increase order to at least" out of a note, and, worse, matched OUR OWN
+ * address out of the email signature on every message we send. A shipping
+ * address that is the factory's address is the kind of mistake that only shows
+ * up when a parcel comes back.
+ */
+const ADDRESS = /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,4}\s+(?:st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|ct|court|pl|place|pkwy|parkway|hwy|highway|cir|circle|ter|terrace)\b[.,]?(?:\s*(?:apt|apartment|suite|ste|unit|#)\s*[\w-]+[.,]?)?(?:\s*,?\s*[A-Za-z .'-]{2,30})?\s*,?\s*(?:[A-Z]{2}\b\s*\d{5}(?:-\d{4})?|\d{5}(?:-\d{4})?|[A-Z]{2}\b)/gi
+/** What was being talked about: "custom soccer uniforms", "baseball jerseys". */
+const ITEM = /\b((?:custom|sublimated|reversible|blank|youth|team)?\s*(?:football|soccer|basketball|baseball|softball|volleyball)\s+(?:uniforms?|jerseys?|kits?|shorts?|shirts?|pants?|hoodies?|warm[- ]?ups?))\b/gi
 
 function push(into: Suggestion[], value: string, from: string, at: string) {
   const v = value.trim()
@@ -120,7 +141,7 @@ function push(into: Suggestion[], value: string, from: string, at: string) {
  * later than what was asked.
  */
 export function suggestFromTimeline(timeline: TimelineEvent[]): InvoiceSuggestions {
-  const out: InvoiceSuggestions = { quantity: [], amount: [], address: [] }
+  const out: InvoiceSuggestions = { item: [], quantity: [], amount: [], address: [] }
   const events = [...timeline]
     .filter((e) => CUSTOMER_KINDS.has(e.kind))
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
@@ -136,9 +157,15 @@ export function suggestFromTimeline(timeline: TimelineEvent[]): InvoiceSuggestio
       push(out.quantity, m[1] ? m[1] : `${m[2]} ${m[3]}`, where, e.at)
     }
     for (const m of text.matchAll(AMOUNT)) push(out.amount, `$${m[1]}`, where, e.at)
-    for (const m of text.matchAll(ADDRESS)) {
-      // A street address is long; a bare "12, ok" is not.
-      if (m[0].trim().length >= 14) push(out.address, m[0].replace(/\s+/g, ' ').trim(), where, e.at)
+    for (const m of text.matchAll(ITEM)) {
+      const t = m[1].replace(/\s+/g, ' ').trim()
+      push(out.item, t.charAt(0).toUpperCase() + t.slice(1).toLowerCase(), where, e.at)
+    }
+    if (ADDRESS_KINDS.has(e.kind)) {
+      for (const m of text.matchAll(ADDRESS)) {
+        const a = m[0].replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim()
+        if (a.length >= 14) push(out.address, a, where, e.at)
+      }
     }
   }
   return out
@@ -147,6 +174,10 @@ export function suggestFromTimeline(timeline: TimelineEvent[]): InvoiceSuggestio
 // ── The sheet ───────────────────────────────────────────────────────────────
 
 export interface InvoiceSheet {
+  /** Fields whose value came from the conversation rather than being typed. */
+  autofilled: string[]
+  /** Where each auto-filled value was said. */
+  sources: Record<string, string>
   name: string
   email: string
   phone: string
@@ -161,20 +192,41 @@ export interface InvoiceSheet {
   gaps: string[]
 }
 
-export function buildSheet(record: LeadRecord, draft: InvoiceDraft | null): InvoiceSheet {
+/**
+ * The sheet, with anything not yet typed taken from the conversation.
+ *
+ * A typed value always wins — it is the one somebody decided. An empty field
+ * is filled from the newest thing in the thread that looks like it, and the
+ * field is listed in `autofilled` with where it came from, so the panel can
+ * show its provenance instead of pretending a person entered it.
+ */
+export function buildSheet(
+  record: LeadRecord, draft: InvoiceDraft | null, sug?: InvoiceSuggestions,
+): InvoiceSheet {
   const d = draft ?? BLANK_INVOICE
   const value = record.value?.won ?? record.value?.estimated ?? null
+  const autofilled: string[] = []
+  const sources: Record<string, string> = {}
+  const fill = (field: string, typed: string, from?: Suggestion, strip?: RegExp) => {
+    if (typed) return typed
+    if (!from) return ''
+    autofilled.push(field)
+    sources[field] = from.from
+    return strip ? from.value.replace(strip, '') : from.value
+  }
   const sheet: InvoiceSheet = {
+    autofilled,
+    sources,
     name: record.contact.name || '',
     email: record.contact.email || '',
     phone: record.contact.phone || '',
     billTo: d.billTo || record.contact.name || '',
-    shipTo: d.shipTo,
-    item: d.item,
-    quantity: d.quantity,
+    shipTo: fill('shipTo', d.shipTo, sug?.address[0]),
+    item: fill('item', d.item, sug?.item[0]),
+    quantity: fill('quantity', d.quantity, sug?.quantity[0]),
     // A deal value already recorded on the pipeline is the amount unless
     // somebody typed a different one here.
-    amount: d.amount || (value !== null ? String(value) : ''),
+    amount: d.amount || (value !== null ? String(value) : fill('amount', '', sug?.amount[0], /^\$/)),
     currency: d.currency || record.value?.currency || 'USD',
     notes: d.notes,
     gaps: [],
