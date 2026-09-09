@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
 import {
-  CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES,
+  CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES, isInvoiceable,
   CURRENCY_SYMBOL, isDeadStage, type CrmStage, type CrmCurrency,
 } from '@/lib/crm'
 import { isImageMime } from '@/lib/attachment'
@@ -941,8 +941,13 @@ export default function LeadRecordPage() {
 
           {/* Last in the column, under the enquiry it is assembled from: the
               context comes first, the invoice is what you fill in after
-              reading it. */}
-          <Invoice leadId={record.id} />
+              reading it.
+
+              Shown from quote_sent onward — the first stage at which a number
+              exists to bill — and hidden on new, contacted and the dead
+              outcomes. Not gated on `won`: won means the money arrived, and
+              these details are what you need to ask for it. */}
+          {isInvoiceable(record.stage) && <Invoice leadId={record.id} />}
 
           <Card>
             <div className="px-3 py-2">

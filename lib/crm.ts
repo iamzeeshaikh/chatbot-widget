@@ -104,6 +104,26 @@ export const CRM_STAGES = [
 ] as const
 export type CrmStage = (typeof CRM_STAGES)[number]
 
+/**
+ * The stages where an invoice is a live question.
+ *
+ * From quote_sent onward, because that is the first point at which a number
+ * exists to bill. It deliberately includes `won` and stops before it: gating
+ * the invoice panel on `won` alone was backwards — won means the money has
+ * arrived, and the details are needed to ASK for the money, which happens
+ * earlier.
+ *
+ * `new` and `contacted` are too early — there is nothing to bill yet — and the
+ * dead outcomes are too late.
+ */
+export const CRM_INVOICEABLE_STAGES: readonly CrmStage[] = [
+  'quote_sent', 'follow_up', 'pending_design', 'on_hold', 'won',
+]
+
+export function isInvoiceable(stage: CrmStage): boolean {
+  return CRM_INVOICEABLE_STAGES.includes(stage)
+}
+
 export function isCrmStage(v: unknown): v is CrmStage {
   return typeof v === 'string' && (CRM_STAGES as readonly string[]).includes(v)
 }
