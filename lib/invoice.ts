@@ -110,8 +110,27 @@ const CUSTOMER_KINDS = new Set(['message', 'email_in', 'wa_in', 'note', 'email',
  */
 const ADDRESS_KINDS = new Set(['message', 'email_in', 'wa_in', 'note'])
 
-/** "8 sets", "24 jerseys", "qty 30", "x 12" — how a quantity is actually written. */
-const QTY = /\b(?:qty\.?|quantity)\s*[:=]?\s*(\d{1,4})\b|\b(\d{1,4})\s*(sets?|pcs?|pieces?|jerseys?|uniforms?|shirts?|kits?|units?)\b/gi
+/**
+ * A quantity, WITH the thing being counted.
+ *
+ * "8" is not a useful quantity on an invoice — "8 sets" is, and "23 custom
+ * long-sleeve shirts" is better still. The first version captured only the
+ * number and the bare unit, so an email saying "Quantity: 8" produced "8" and
+ * a note saying "23 custom long-sleeve shirts" produced nothing at all,
+ * because two describing words sat between the number and the noun.
+ *
+ * Up to three describing words are allowed between the two, which is what
+ * catches "1 Xl Jersey" and "23 custom long-sleeve shirts" while still
+ * refusing "2 games possibly 3" and "1.5-2 weeks prior".
+ */
+// "unit" is deliberately absent. It is a street word before it is a counting
+// word, and with it in the list "3101 Lynn Ave unit" was offered as a
+// quantity — the customer's own address, read as how many jerseys they wanted.
+const UNIT = 'sets?|pcs?|pieces?|jerseys?|uniforms?|shirts?|kits?|shorts?|socks?|hoodies?|tops?|pants?|jackets?|caps?|bags?'
+const DESCRIBED = new RegExp(`\\b([1-9]\\d{0,2})\\s+((?:[A-Za-z][A-Za-z-]{1,14}\\s+){0,3}(?:${UNIT}))\\b`, 'gi')
+/** "Quantity: 8", where the noun may or may not follow. */
+const LABELLED = new RegExp(`\\b(?:qty\\.?|quantity)\\s*[:=]?\\s*([1-9]\\d{0,2})\\s*((?:[A-Za-z][A-Za-z-]{1,14}\\s+){0,3}(?:${UNIT}))?`, 'gi')
+
 /** A currency amount, with or without a symbol. Bare integers are ignored on
  *  purpose — "24 jerseys" is not $24. */
 const AMOUNT = /(?:\$|usd\s*)\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+\.\d{2})\b/gi
@@ -153,9 +172,11 @@ export function suggestFromTimeline(timeline: TimelineEvent[]): InvoiceSuggestio
       : e.kind.startsWith('wa') ? 'WhatsApp'
       : e.kind.startsWith('email') ? 'email' : 'chat'
 
-    for (const m of text.matchAll(QTY)) {
-      push(out.quantity, m[1] ? m[1] : `${m[2]} ${m[3]}`, where, e.at)
-    }
+    // "23 custom long-sleeve shirts Shirts" — a heading immediately followed
+    // by the same noun. Both patterns can produce it, so both get tidied.
+    const tidy = (t: string) => t.replace(/\s+/g, ' ').trim().replace(/\b(\w+)\s+\1\b/gi, '$1')
+    for (const m of text.matchAll(DESCRIBED)) push(out.quantity, tidy(`${m[1]} ${m[2]}`), where, e.at)
+    for (const m of text.matchAll(LABELLED)) push(out.quantity, tidy(`${m[1]} ${m[2] ?? ''}`), where, e.at)
     for (const m of text.matchAll(AMOUNT)) push(out.amount, `$${m[1]}`, where, e.at)
     for (const m of text.matchAll(ITEM)) {
       const t = m[1].replace(/\s+/g, ' ').trim()
@@ -168,6 +189,10 @@ export function suggestFromTimeline(timeline: TimelineEvent[]): InvoiceSuggestio
       }
     }
   }
+  // A quantity that names what is being counted beats a bare number, whoever
+  // said it first. "8 sets" is an invoice line; "8" is a number somebody has
+  // to go back to the thread to understand.
+  out.quantity.sort((a, b) => Number(/\d\s+\S/.test(b.value)) - Number(/\d\s+\S/.test(a.value)))
   return out
 }
 
