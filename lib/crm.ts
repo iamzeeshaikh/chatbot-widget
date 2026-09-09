@@ -82,6 +82,9 @@ export const CRM_ROLES = [
   'call_intent',
   // Customer opened an email we sent (lib/emailtrack.ts) — lives on the lead.
   'crm_email_open',
+  // The invoice worksheet on a lead (lib/invoice.ts) — what was sold, how many
+  // and for how much. Lives on the lead and must never reach a transcript.
+  'crm_invoice',
   // Retired: the customer billing form was removed on 2026-09-08. Kept
   // registered so that if the feature ever comes back — or a stray row from it
   // turns up — the JSON can never surface as a transcript line or a preview.

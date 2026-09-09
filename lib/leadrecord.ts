@@ -329,20 +329,36 @@ export async function markThreadRepliesRead(
 
 export async function leadRecipient(id: string): Promise<string | null> {
   const resolved = await resolveLeadSite(id)
-  if (resolved?.lead?.email) return resolved.lead.email.trim() || null
 
-  // A chat lead's address lives in its control rows; ascending, so the newest
-  // wins — the same fold the record page uses.
+  // The SAME precedence loadLeadRecord uses, and it has to be: a manual
+  // override beats the contact row, which beats the capture, which beats the
+  // leads row.
+  //
+  // This used to read the leads row first and never look at crm_field at all,
+  // so a lead whose address an admin had typed in by hand showed that address
+  // on the record — badged "edited" — and then refused to send to it, saying
+  // the lead had no address on file. Two reads of the same value disagreeing
+  // is the bug; one fold is the fix.
   const { data } = await supabase.from('chat_logs')
     .select('role, message, created_at')
     .eq('session_id', id)
-    .in('role', [CONTACT_ROLE, LEAD_CAPTURE_ROLE])
+    .in('role', [CONTACT_ROLE, LEAD_CAPTURE_ROLE, CRM_FIELD_ROLE])
     .order('created_at', { ascending: true })
-  let email = ''
+
+  let contactEmail = ''
+  let captureEmail = ''
+  let override = ''
   for (const r of data ?? []) {
-    if (r.role === CONTACT_ROLE) { const c = parseContact(r.message); if (c.email) email = c.email }
-    else { const c = parseLeadCapture(r.message); if (c?.email) email = c.email }
+    if (r.role === CONTACT_ROLE) {
+      const c = parseContact(r.message); if (c.email) contactEmail = c.email
+    } else if (r.role === LEAD_CAPTURE_ROLE) {
+      const c = parseLeadCapture(r.message); if (c?.email) captureEmail = c.email
+    } else {
+      const f = parseCrmField(r.message)
+      if (f?.field === 'email') override = f.value
+    }
   }
+  const email = override || contactEmail || captureEmail || resolved?.lead?.email || ''
   return email.trim() || null
 }
 

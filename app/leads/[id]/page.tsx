@@ -34,6 +34,7 @@ import WhatsAppThread from './WhatsAppThread'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
+import Invoice from './Invoice'
 import EmailComposer, { type ReplyTo } from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
@@ -733,6 +734,11 @@ export default function LeadRecordPage() {
             onDelete={deleteTask}
             onReassign={reassignTask}
           />
+
+          {/* Under the deal is too late: by the time somebody wants these
+              details the sale is already agreed and they are being copied into
+              a payment page. */}
+          <Invoice leadId={record.id} />
 
           <Card title="Deal" icon={Target}>
             <div className="px-3 py-2.5 space-y-2">
