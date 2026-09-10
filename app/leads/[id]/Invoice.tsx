@@ -35,6 +35,7 @@ interface Suggestion { value: string; from: string; at: string }
 interface LinkState {
   present: boolean
   canEdit: boolean
+  canSend: boolean
   /** Populated only for a member who may see contacts. Never for an agent. */
   url: string | null
   savedBy: string
@@ -351,18 +352,34 @@ function PaymentLink({ leadId }: { leadId: string }) {
             {busy ? 'Saving…' : 'Save link'}
           </button>
         </>
-      ) : (
+      ) : state.present ? (
         <p className="rounded-lg bg-gray-50 border border-gray-200 px-2.5 py-2 text-[11px] text-gray-600">
           <span className="font-mono tracking-widest text-gray-800">••••••</span>
           <span className="ml-2">saved{state.savedBy ? ` by ${state.savedBy}` : ''}. You can send it without seeing it.</span>
         </p>
+      ) : (
+        /* Said plainly. This block used to render "•••••• saved" whether or not
+           anything had been, so a lead with no link at all claimed to have one
+           and then offered no way to send it. */
+        <p className="rounded-lg bg-gray-50 border border-gray-200 px-2.5 py-2 text-[11px] text-gray-500">
+          No payment link on this lead yet — an admin adds it here, then you can send it.
+        </p>
       )}
 
       {state.present && (
-        <button type="button" onClick={() => void send()} disabled={busy}
-          className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-          <Send className="w-3 h-3" aria-hidden />{busy ? 'Sending…' : 'Send to customer'}
-        </button>
+        <>
+          <button type="button" onClick={() => void send()} disabled={busy || !state.canSend}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            <Send className="w-3 h-3" aria-hidden />{busy ? 'Sending…' : 'Send to customer'}
+          </button>
+          {!state.canSend && (
+            /* A WhatsApp-only lead has no address. Better said before the click
+               than as a refusal after it. */
+            <p className="text-[10px] text-amber-700">
+              This lead has no email address, so the link cannot be emailed. Add one on the record first.
+            </p>
+          )}
+        </>
       )}
 
       {state.lastSent && (

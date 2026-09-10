@@ -45,6 +45,10 @@ export interface PayLinkRow {
 
 export interface PayLinkState {
   present: boolean
+  /** Whether the lead has an address to send to at all. A WhatsApp-only lead
+   *  has none, and offering Send there produces a refusal after the click
+   *  instead of before it. */
+  canSend: boolean
   /** Whether this member may SET the link. Sent explicitly rather than inferred
    *  from `url` being present: an admin with nothing saved yet and an agent
    *  with nothing saved yet look identical from the client's side, and the one
@@ -101,10 +105,16 @@ export async function readPayLink(leadId: string): Promise<{ link: PayLinkRow | 
  * `url` is populated ONLY for a member who may see contacts. Everyone else gets
  * `present` and nothing they could reconstruct the link from.
  */
-export function payLinkFor(member: Pick<Member, 'role' | 'workspace'>, link: PayLinkRow | null, sent: PayLinkRow | null): PayLinkState {
+export function payLinkFor(
+  member: Pick<Member, 'role' | 'workspace'>,
+  link: PayLinkRow | null,
+  sent: PayLinkRow | null,
+  hasRecipient = true,
+): PayLinkState {
   const present = Boolean(link?.url)
   return {
     present,
+    canSend: present && hasRecipient,
     canEdit: member.role === 'admin',
     url: present && canSeeContacts(member) ? (link?.url ?? null) : null,
     savedBy: link?.by ?? '',

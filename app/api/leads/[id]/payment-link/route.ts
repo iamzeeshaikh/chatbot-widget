@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
-import { guardLeadAccess } from '@/lib/leadrecord'
+import { guardLeadAccess, leadRecipient } from '@/lib/leadrecord'
 import { cleanPayLink, payLinkFor, readPayLink, savePayLink } from '@/lib/paylink'
 
 export const dynamic = 'force-dynamic'
@@ -27,8 +27,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params
   const c = await ctxFor(req, id)
   if ('error' in c) return c.error
-  const { link, sent } = await readPayLink(id)
-  return NextResponse.json({ ok: true, ...payLinkFor(c.access.member, link, sent) })
+  const [{ link, sent }, to] = await Promise.all([readPayLink(id), leadRecipient(id)])
+  return NextResponse.json({ ok: true, ...payLinkFor(c.access.member, link, sent, Boolean(to)) })
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -51,6 +51,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { error } = await savePayLink(id, c.access.siteId, url, c.access.member.email)
   if (error) return NextResponse.json({ error: 'That did not save.' }, { status: 500 })
 
-  const { link, sent } = await readPayLink(id)
-  return NextResponse.json({ ok: true, ...payLinkFor(c.access.member, link, sent) })
+  const [{ link, sent }, to] = await Promise.all([readPayLink(id), leadRecipient(id)])
+  return NextResponse.json({ ok: true, ...payLinkFor(c.access.member, link, sent, Boolean(to)) })
 }
