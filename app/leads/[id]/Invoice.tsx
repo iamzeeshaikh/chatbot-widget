@@ -356,7 +356,11 @@ function PaymentLink({ leadId }: { leadId: string }) {
       {canEdit ? (
         <>
           <input className={INPUT} value={url} onChange={(e) => setUrl(e.target.value)} inputMode="url"
-            placeholder="https://www.paypal.com/invoice/p/#…" aria-label="Payment link" />
+            placeholder="https://…" aria-label="Payment link" />
+          {/* Named because the field was written against PayPal and reads as if
+              it only takes PayPal. Nothing here knows one provider from
+              another — it stores an https link and sends it. */}
+          <p className="text-[10px] text-gray-500">PayPal, Wise, Stripe — any https payment link.</p>
           <button type="button" onClick={() => void save()} disabled={busy}
             className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             {busy ? 'Saving…' : 'Save link'}
