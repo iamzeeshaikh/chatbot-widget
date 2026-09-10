@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, leadRecipient, writeControlRow } from '@/lib/leadrecord'
 import { canSeeContacts } from '@/lib/pii'
-import { connectionFor, googleConfig, sendEmail, verifiedAliases, GmailAuthError, GmailRateError, configProblem, type SendAsAlias } from '@/lib/gmail'
+import { connectedAddresses, connectionFor, googleConfig, sendEmail, verifiedAliases, GmailAuthError, GmailRateError, configProblem, type SendAsAlias } from '@/lib/gmail'
 import { CRM_EMAIL_ROLE, MAX_SUBJECT, makeSnippet, newEmailId, type CrmEmailEntry } from '@/lib/crmemail'
 import { plainToHtml } from '@/lib/richtext'
 import { loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml } from '@/lib/signature'
@@ -74,9 +74,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // nothing to do about it.
   const conn = await connectionFor(access.member.email)
   if (!conn || conn.revoked) {
+    // Name who CAN send it. "Connect your Gmail" is the obvious advice and for
+    // some accounts it is a dead end — this OAuth app is Internal to one Google
+    // Workspace org, so a consumer Gmail is refused by Google itself with
+    // `403 org_internal`. Sending it out through an account that is already
+    // connected is the answer that actually works, and the person reading this
+    // has no way to know which those are.
+    const others = (await connectedAddresses()).filter((e) => e !== access.member.email.toLowerCase())
+    const who = others.length
+      ? ` Or sign in as an account that already has Gmail connected (${others.slice(0, 3).join(', ')}) and press Send there — the mail goes out through whoever is signed in.`
+      : ''
     return NextResponse.json({
-      error: conn?.revokedReason
-        ?? `Gmail is not connected for ${access.member.email}, so this cannot be sent from here. Connect it under Email on this record — or let the agent who works this lead press Send, since it goes out through whoever is signed in.`,
+      error: (conn?.revokedReason ?? `Gmail is not connected for ${access.member.email}, so this cannot be sent from here.`) + who,
       needsReconnect: true,
     }, { status: 401 })
   }

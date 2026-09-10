@@ -165,6 +165,33 @@ export async function connectionFor(email: string): Promise<GmailConnection | nu
   }
 }
 
+/**
+ * Every address with a live (non-revoked) Gmail connection.
+ *
+ * Used only to answer "then who CAN send this?" when somebody's own account
+ * cannot. Worth naming rather than leaving them to guess: this OAuth app is
+ * INTERNAL to one Google Workspace org, so a consumer Gmail is refused by
+ * Google itself with `403 org_internal` — and a member who is told to go and
+ * connect theirs can spend a while finding that out.
+ */
+export async function connectedAddresses(): Promise<string[]> {
+  const { data } = await supabase
+    .from('chat_logs')
+    .select('message, created_at')
+    .eq('role', GMAIL_TOKEN_ROLE)
+    .eq('session_id', GMAIL_TOKEN_SESSION)
+    .order('created_at', { ascending: true })
+    .limit(400)
+  const live = new Map<string, boolean>()   // ascending → the newest row wins
+  for (const r of data ?? []) {
+    try {
+      const o = JSON.parse(r.message) as StoredToken
+      if (o?.email) live.set(o.email.toLowerCase(), !o.revoked)
+    } catch { /* skip */ }
+  }
+  return Array.from(live.entries()).filter(([, ok]) => ok).map(([e]) => e).sort()
+}
+
 export async function saveConnection(email: string, refreshToken: string, scope: string): Promise<void> {
   await writeToken({ email, enc: seal(refreshToken), connectedAt: new Date().toISOString(), scope })
   forgetAccessToken(email)
