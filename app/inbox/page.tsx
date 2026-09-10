@@ -245,15 +245,35 @@ export default function InboxPage() {
               </div>
             )}
 
-            {status === 'ok' && q && (
+            {status === 'ok' && q && list.length > 0 && (
               <p className="text-xs text-gray-500 px-2 pb-2">
-                {list.length === 0 ? 'No mail matches' : `${list.length} result${list.length === 1 ? '' : 's'} for`} <span className="font-semibold text-gray-800">“{q}”</span>
+                {list.length} result{list.length === 1 ? '' : 's'} for <span className="font-semibold text-gray-800">“{q}”</span>
               </p>
             )}
+            {/* ONE empty state, saying which emptiness this is. A search that
+                matched nothing used to print "No mail matches" and then, right
+                under it, "No email conversations yet" — which reads as the whole
+                mailbox being gone. It was said over a full inbox of 270 threads,
+                to somebody looking for a customer they had every reason to
+                expect. So the search case answers the question it actually
+                raises: mail lives here only if it went through ZeeOps, and the
+                lead can be perfectly fine without it. */}
             {status === 'ok' && (folder !== 'drafts' || q) && list.length === 0 && (
-              <div className="text-center py-20">
+              <div className="text-center py-20 px-6">
                 <InboxIcon size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
-                <p className="text-sm font-medium text-gray-700">{folder === 'sent' ? 'Nothing sent yet' : onlyUnread ? 'Nothing unread' : 'No email conversations yet'}</p>
+                {q ? (
+                  <>
+                    <p className="text-sm font-medium text-gray-700">No mail matches <span className="font-semibold text-gray-900">“{q}”</span></p>
+                    <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-gray-500">
+                      The Inbox holds mail sent or received through ZeeOps. A lead whose replies
+                      went out from Gmail directly has no thread here — the lead itself can still
+                      exist. Press <kbd className="rounded border border-gray-300 bg-gray-100 px-1 font-sans">Ctrl</kbd>{' '}
+                      <kbd className="rounded border border-gray-300 bg-gray-100 px-1 font-sans">K</kbd> to search the leads.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm font-medium text-gray-700">{folder === 'sent' ? 'Nothing sent yet' : onlyUnread ? 'Nothing unread' : 'No email conversations yet'}</p>
+                )}
               </div>
             )}
 
