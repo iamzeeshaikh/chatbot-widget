@@ -85,6 +85,10 @@ export const CRM_ROLES = [
   // The invoice worksheet on a lead (lib/invoice.ts) — what was sold, how many
   // and for how much. Lives on the lead and must never reach a transcript.
   'crm_invoice',
+  // The payment link (lib/paylink.ts) — treated as PII in its own right,
+  // because opening it shows the customer's address on PayPal's own page. On
+  // the lead, and it must never reach a transcript.
+  'crm_pay_link',
   // The intake audit (lib/intakedrop.ts, lib/intakelag.ts) — what the intake
   // endpoint accepted and did not store, and what reached us hours after the
   // customer sent it. Both live on the reserved zeeops-crm site rather than on

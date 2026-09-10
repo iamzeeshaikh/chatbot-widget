@@ -14,7 +14,7 @@
 // Anything already typed always wins; alternatives stay as buttons underneath.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Receipt, Copy, Check, RefreshCw, Sparkles } from 'lucide-react'
+import { Receipt, Copy, Check, RefreshCw, Sparkles, Link2, Send } from 'lucide-react'
 import { Card, EmptyState } from './ui'
 
 interface Draft {
@@ -31,6 +31,16 @@ interface Sheet extends Draft {
   autofilled: string[]; sources: Record<string, string>
 }
 interface Suggestion { value: string; from: string; at: string }
+/** What the server is willing to tell THIS member about the payment link. */
+interface LinkState {
+  present: boolean
+  canEdit: boolean
+  /** Populated only for a member who may see contacts. Never for an agent. */
+  url: string | null
+  savedBy: string
+  savedAt: string
+  lastSent: { by: string; at: string } | null
+}
 /** Example text for the empty fields, chosen by the workspace — see lib/invoice.ts. */
 interface Hints { item: string; quantity: string; amount: string; billTo: string }
 interface Payload {
@@ -214,6 +224,8 @@ export default function Invoice({ leadId }: { leadId: string }) {
               </button>
             </div>
 
+            <PaymentLink leadId={leadId} />
+
             <div className="border-t border-gray-100 pt-2.5">
               <div className="flex items-center justify-between gap-2">
                 <span className={LABEL}>Copy for the invoice</span>
@@ -257,6 +269,107 @@ function Suggest({ list, onPick }: { list?: Suggestion[]; onPick: (v: string) =>
           {s.value}
         </button>
       ))}
+    </div>
+  )
+}
+
+/**
+ * The payment link, for somebody who may not be allowed to read it.
+ *
+ * An admin gets a field and saves the URL. Everybody else gets six dots and a
+ * Send button — the URL is not in the field, not in an href, and not in the
+ * response that fed this component, because opening a PayPal invoice link
+ * shows the customer's email address on PayPal's own page and that is exactly
+ * what the workspace hides. The send happens on the server, which resolves
+ * both the link and the recipient from our own rows.
+ */
+function PaymentLink({ leadId }: { leadId: string }) {
+  const [state, setState] = useState<LinkState | null>(null)
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [tick, setTick] = useState(0)
+
+  // Fetched inside the effect rather than through a shared callback: the effect
+  // must not reach any function that sets state before its first await, or it
+  // schedules a render inside a render.
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/payment-link`, { cache: 'no-store' })
+        const j = await res.json().catch(() => ({}))
+        if (!alive || !res.ok) return
+        setState(j)
+        if (j.url) setUrl(j.url)
+      } catch { /* the panel is still usable without it */ }
+    })()
+    return () => { alive = false }
+  }, [leadId, tick])
+
+  async function save() {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/payment-link`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { setErr(String(j.error || 'That did not save.')); return }
+      setState(j); setMsg(url ? 'Saved.' : 'Cleared.')
+    } catch { setErr('That did not save.') } finally { setBusy(false) }
+  }
+
+  async function send() {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/payment-link/send`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { setErr(String(j.error || 'That did not send.')); return }
+      setMsg('Sent to the customer.')
+      setTick((t) => t + 1)
+    } catch { setErr('That did not send.') } finally { setBusy(false) }
+  }
+
+  if (!state) return null
+  const canEdit = state.canEdit   // decided by the server, and refused there too
+
+  return (
+    <div className="border-t border-gray-100 pt-2.5 space-y-2">
+      <span className={LABEL}>
+        <Link2 className="inline w-3 h-3 mr-1 -mt-px text-gray-400" aria-hidden />Payment link
+      </span>
+
+      {canEdit ? (
+        <>
+          <input className={INPUT} value={url} onChange={(e) => setUrl(e.target.value)} inputMode="url"
+            placeholder="https://www.paypal.com/invoice/p/#…" aria-label="Payment link" />
+          <button type="button" onClick={() => void save()} disabled={busy}
+            className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            {busy ? 'Saving…' : 'Save link'}
+          </button>
+        </>
+      ) : (
+        <p className="rounded-lg bg-gray-50 border border-gray-200 px-2.5 py-2 text-[11px] text-gray-600">
+          <span className="font-mono tracking-widest text-gray-800">••••••</span>
+          <span className="ml-2">saved{state.savedBy ? ` by ${state.savedBy}` : ''}. You can send it without seeing it.</span>
+        </p>
+      )}
+
+      {state.present && (
+        <button type="button" onClick={() => void send()} disabled={busy}
+          className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          <Send className="w-3 h-3" aria-hidden />{busy ? 'Sending…' : 'Send to customer'}
+        </button>
+      )}
+
+      {state.lastSent && (
+        <p className="text-[10px] text-gray-500">Last sent by {state.lastSent.by}.</p>
+      )}
+      {msg && <p className="text-[11px] font-medium text-green-700">{msg}</p>}
+      {err && <p className="text-[11px] font-medium text-red-700">{err}</p>}
     </div>
   )
 }
