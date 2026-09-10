@@ -528,6 +528,20 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
   gets the Gmail label `ZeeOps/Needs a site label`. **When adding a lead site, check its
   real form email against `codeFromMessageText_` before assuming it will be ingested** —
   a Gmail label is no longer required, but a recognisable footer is.
+  It came back a fourth time on 10 Sep 2026 in its quietest form yet: a footer that is
+  just the **bare domain**, no `Page URL:` and no link. That resolved to null, so every
+  one of that site's leads rode on its Gmail label alone — and a label applied late puts
+  the thread behind the routine run's date gate until the next deep pass, so a 12:24am
+  enquiry was still not on the portal at 2:15am. `ownHostMentions_` now reads a bare host
+  as a claim, under the last-resort guards (built from `SITE_DOMAINS`, form shape still
+  required, an address *at* our domain is not a claim, ambiguity files nothing).
+  `scratch/bare-host-resolver.test.mjs` asserts all of those.
+- **A lead's `created_at` is the date on the CUSTOMER'S EMAIL, not when we stored it.**
+  So a lead ingested three hours late is, afterwards, indistinguishable from one ingested
+  instantly, and "it is not on the portal yet" could only be answered by guessing. A gap
+  over 45 minutes (the trigger runs every 30) is now recorded by `lib/intakelag.ts` and
+  returned by `/api/admin/intake-drops` next to the drops. Check it FIRST the next time
+  somebody says a lead is missing.
 - The widget is blocked by a host site's CSP unless `chat.zeeops.dev` is in `script-src`,
   `connect-src` and `img-src` — check both the HTTP header and any
   `<meta http-equiv="content-security-policy">`.
