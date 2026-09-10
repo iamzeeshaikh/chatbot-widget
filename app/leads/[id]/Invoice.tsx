@@ -294,6 +294,10 @@ function PaymentLink({ leadId }: { leadId: string }) {
   const [state, setState] = useState<LinkState | null>(null)
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
+  // WHICH button is working, not just that one is. A single `busy` put
+  // "Sending…" on both at once, so a send by email looked like a send by
+  // WhatsApp as well.
+  const [sending, setSending] = useState<'email' | 'whatsapp' | null>(null)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [tick, setTick] = useState(0)
@@ -328,7 +332,7 @@ function PaymentLink({ leadId }: { leadId: string }) {
   }
 
   async function send(channel: 'email' | 'whatsapp') {
-    setBusy(true); setErr(''); setMsg('')
+    setBusy(true); setSending(channel); setErr(''); setMsg('')
     try {
       const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/payment-link/send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }),
@@ -337,7 +341,7 @@ function PaymentLink({ leadId }: { leadId: string }) {
       if (!res.ok) { setErr(String(j.error || 'That did not send.')); return }
       setMsg(j.channel === 'whatsapp' ? 'Sent on WhatsApp.' : 'Emailed to the customer.')
       setTick((t) => t + 1)
-    } catch { setErr('That did not send.') } finally { setBusy(false) }
+    } catch { setErr('That did not send.') } finally { setBusy(false); setSending(null) }
   }
 
   if (!state) return null
@@ -385,7 +389,7 @@ function PaymentLink({ leadId }: { leadId: string }) {
                 ch === 'whatsapp' ? 'bg-green-700 hover:bg-green-800' : 'bg-gray-900 hover:bg-gray-800'
               }`}>
               {ch === 'whatsapp' ? <MessageCircle className="w-3 h-3" aria-hidden /> : <Send className="w-3 h-3" aria-hidden />}
-              {busy ? 'Sending…' : ch === 'whatsapp' ? 'Send on WhatsApp' : 'Email to customer'}
+              {sending === ch ? 'Sending…' : ch === 'whatsapp' ? 'Send on WhatsApp' : 'Email to customer'}
             </button>
           ))}
           {state.channels.includes('whatsapp') && (
