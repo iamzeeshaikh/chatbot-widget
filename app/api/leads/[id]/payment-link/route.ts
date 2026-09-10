@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, leadPhone, leadRecipient } from '@/lib/leadrecord'
 import { hasFeature } from '@/lib/workspaces'
-import { cleanPayLink, payChannel, payLinkFor, readPayLink, savePayLink } from '@/lib/paylink'
+import { cleanPayLink, payChannel, payLinkFor, readPayLink, savePayLink, whatsappWindowOpen } from '@/lib/paylink'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +39,8 @@ async function stateFor(member: Parameters<typeof payLinkFor>[0] & { workspace: 
     canEmail: hasFeature(member.workspace, 'email'),
     canWhatsApp: hasFeature(member.workspace, 'telephony'),
   })
-  return payLinkFor(member, link, sent, channel)
+  const waOpen = channel === 'whatsapp' ? await whatsappWindowOpen(id) : null
+  return payLinkFor(member, link, sent, channel, waOpen)
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

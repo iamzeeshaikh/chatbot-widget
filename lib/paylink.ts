@@ -71,6 +71,9 @@ export interface PayLinkState {
   canSend: boolean
   /** Which way it will go, so the button can say so. */
   channel: PayChannel | null
+  /** For the WhatsApp channel only: whether a free-form message is allowed
+   *  right now. Null when the channel is not WhatsApp. */
+  waWindowOpen: boolean | null
   /** Whether this member may SET the link. Sent explicitly rather than inferred
    *  from `url` being present: an admin with nothing saved yet and an agent
    *  with nothing saved yet look identical from the client's side, and the one
@@ -132,12 +135,14 @@ export function payLinkFor(
   link: PayLinkRow | null,
   sent: PayLinkRow | null,
   channel: PayChannel | null = 'email',
+  waWindowOpen: boolean | null = null,
 ): PayLinkState {
   const present = Boolean(link?.url)
   return {
     present,
     canSend: present && channel !== null,
     channel,
+    waWindowOpen: channel === 'whatsapp' ? waWindowOpen : null,
     canEdit: member.role === 'admin',
     url: present && canSeeContacts(member) ? (link?.url ?? null) : null,
     savedBy: link?.by ?? '',
@@ -213,4 +218,28 @@ export function payLinksInRows(rows: { role: string; message: string }[]): strin
     } catch { /* skip */ }
   }
   return Array.from(out)
+}
+
+/**
+ * Is WhatsApp's 24-hour window still open on this lead?
+ *
+ * WhatsApp only allows a free-form message within 24 hours of the CUSTOMER'S
+ * last one; outside it Twilio accepts the message and then quietly marks it
+ * undelivered with 63016 minutes later. So the panel says so before the click
+ * rather than leaving somebody to wonder why a "Sent" they were shown never
+ * arrived.
+ *
+ * Not a block: our own inbound log is evidence of the window, not the window
+ * itself, and refusing on it would be claiming more than we know.
+ */
+export async function whatsappWindowOpen(leadId: string): Promise<boolean> {
+  const { data } = await supabase.from('chat_logs')
+    .select('created_at')
+    .eq('session_id', leadId).eq('role', 'crm_wa_in')
+    .order('created_at', { ascending: false }).limit(1)
+  const last = data?.[0]?.created_at
+  if (!last) return false
+  // Stored naive-UTC in places, so the Z is forced rather than assumed local.
+  const at = new Date(/[Z+]/.test(last) ? last : `${last}Z`).getTime()
+  return Number.isFinite(at) && Date.now() - at < 24 * 60 * 60 * 1000
 }

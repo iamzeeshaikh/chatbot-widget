@@ -40,6 +40,7 @@ interface LinkState {
    *  number, null when neither. Decided on the server — both values are
    *  hidden from a masked member, so the browser cannot work it out. */
   channel: 'email' | 'whatsapp' | null
+  waWindowOpen: boolean | null
   /** Populated only for a member who may see contacts. Never for an agent. */
   url: string | null
   savedBy: string
@@ -385,9 +386,20 @@ function PaymentLink({ leadId }: { leadId: string }) {
             {busy ? 'Sending…' : state.channel === 'whatsapp' ? 'Send on WhatsApp' : 'Email to customer'}
           </button>
           {state.channel === 'whatsapp' && (
-            <p className="text-[10px] text-gray-500">
-              This lead has no email address, so it goes to their WhatsApp instead.
-            </p>
+            state.waWindowOpen === false ? (
+              /* Twilio ACCEPTS a message outside the window and marks it
+                 undelivered minutes later, so "Sent" would be a lie the agent
+                 only finds out about by checking the thread. */
+              <p className="text-[10px] text-amber-700">
+                This lead has no email address, so it goes to their WhatsApp — but WhatsApp only
+                allows a free message within 24 hours of the customer&apos;s last one, and this
+                conversation is outside that window. It will not be delivered until they message first.
+              </p>
+            ) : (
+              <p className="text-[10px] text-gray-500">
+                This lead has no email address, so it goes to their WhatsApp instead.
+              </p>
+            )
           )}
           {!state.canSend && (
             <p className="text-[10px] text-amber-700">
