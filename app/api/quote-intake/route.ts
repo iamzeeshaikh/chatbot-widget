@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody } from '@/lib/quoteintake'
 import { isRetiredLeadSite } from '@/lib/workspaces'
 import { recordIntakeDrop } from '@/lib/intakedrop'
+import { recordIntakeLag } from '@/lib/intakelag'
 
 export const dynamic = 'force-dynamic'
 
@@ -249,5 +250,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Insert failed' }, { status: 500 })
   }
   if (inserted?.id) await storeIntakeAttachments(siteId, inserted.id, files, createdAt)
+  // A lead's created_at is the date on the customer's email, so a lead that
+  // took hours to reach us looks, forever afterwards, exactly like one that
+  // arrived instantly. Note the gap while we still know it — this is the only
+  // record that an agent who says "it is not on the portal yet" is right.
+  if (inserted?.id) {
+    await recordIntakeLag({
+      siteId, leadId: inserted.id, sentAt: createdAt,
+      name: leadName || undefined, email: cleanEmail || undefined,
+      product: typeof product === 'string' ? product.trim() || undefined : undefined,
+    })
+  }
   return NextResponse.json({ success: true })
 }

@@ -61,7 +61,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = 'sports-2026-08-29b';
+var SCRIPT_VERSION = 'sports-2026-09-10';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -105,7 +105,7 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // matched by LEAF name (the part after the last "/"), so the parent folder is
 // free to be anything. These five must also exist in QUOTE_SITE_CODES on the
 // server; a code the server does not know comes back as a 400 in the run log.
-var SITE_CODES = ['TFU', 'TVU', 'CSJ', 'FBJ', 'TBJ', 'ZSW'];
+var SITE_CODES = ['TFU', 'TVU', 'CSJ', 'FBJ', 'TBJ'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -182,7 +182,6 @@ var SITE_DOMAINS = {
   CSJ: 'californiasoccerjerseys.com',
   FBJ: 'floridabasketballjerseys.com',
   TBJ: 'thebaseballjerseys.com',
-  ZSW: 'zeesportswear.com',
 };
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
@@ -1216,7 +1215,51 @@ function codeFromMessageText_(body, fromHeader) {
     if (found && found !== code) return null; // ambiguous — do not guess
     found = code;
   }
+  // …and the same rule applied to a domain written WITHOUT a scheme, which is
+  // all several of these templates ever say about where they came from.
+  var bare = ownHostMentions_(text);
+  for (i = 0; i < bare.length; i++) {
+    if (found && found !== bare[i]) return null; // ambiguous — do not guess
+    found = bare[i];
+  }
   return found;
+}
+
+/**
+ * Every one of OUR domains this message writes as a BARE HOST — no scheme.
+ *
+ * Three real templates in this mailbox say which site they are ONLY like this:
+ * the domain alone on the line under the form table, "Submitted via
+ * <domain>." in the footer prose, and "Sent via <domain> contact form". None
+ * of them is a URL, so none of the patterns above can see any of them.
+ *
+ * That gap is what makes this a recurring bug rather than a one-off. A site
+ * whose footer is a bare host resolves to null here, which leaves it depending
+ * ENTIRELY on its Gmail label — and when a label is applied late, a routine
+ * run's date gate skips the thread and the lead does not reach ZeeOps until
+ * the next DEEP pass, up to three hours later. On 9 Sep 2026 an agent went
+ * looking for a 12:24am enquiry at 2:15am and it was not there yet; every one
+ * of that site's leads had been arriving on the label alone.
+ *
+ * The spam guarantee is unchanged: the list is built from SITE_DOMAINS, so it
+ * can only ever name a site we already own, the caller has already required
+ * the body to have the shape of a submitted form, and two different sites in
+ * one body stays ambiguous and returns null.
+ */
+function ownHostMentions_(text) {
+  var s = String(text || ''), out = [];
+  for (var code in SITE_DOMAINS) {
+    if (isIgnoredLeaf_(code)) continue;
+    var d = SITE_DOMAINS[code].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Not preceded by "@" — an address AT one of our domains is one of our own
+    // agents writing, not a form naming its site — nor by another host label,
+    // so a "mail." subdomain is left alone while "www." is allowed. And never
+    // the prefix of a longer domain: a .co must not match somebody else's
+    // .co.uk of the same name.
+    var re = new RegExp('(^|[^A-Za-z0-9@._-])(?:www\\.)?' + d + '(?!\\.?[A-Za-z0-9-])', 'i');
+    if (re.test(s)) out.push(code);
+  }
+  return out;
 }
 
 // Free mailbox providers, whose domain says nothing about which site a mail

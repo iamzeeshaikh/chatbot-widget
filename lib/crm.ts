@@ -85,6 +85,12 @@ export const CRM_ROLES = [
   // The invoice worksheet on a lead (lib/invoice.ts) — what was sold, how many
   // and for how much. Lives on the lead and must never reach a transcript.
   'crm_invoice',
+  // The intake audit (lib/intakedrop.ts, lib/intakelag.ts) — what the intake
+  // endpoint accepted and did not store, and what reached us hours after the
+  // customer sent it. Both live on the reserved zeeops-crm site rather than on
+  // a lead, so a preview cannot reach them; registered here as the second line
+  // of defence, the same way call_intent is.
+  'crm_intake_drop', 'crm_intake_lag',
   // Retired: the customer billing form was removed on 2026-09-08. Kept
   // registered so that if the feature ever comes back — or a stray row from it
   // turns up — the JSON can never surface as a transcript line or a preview.

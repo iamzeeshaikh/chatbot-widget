@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, memberSites } from '@/lib/auth'
 import { recentIntakeDrops } from '@/lib/intakedrop'
+import { recentIntakeLags } from '@/lib/intakelag'
 
 export const dynamic = 'force-dynamic'
 
-// The leads the intake endpoint accepted and did not store.
+// The intake audit: the leads the endpoint accepted and did not store, and the
+// ones it did store hours after the customer sent them.
 //
 // This exists because "some leads are missing" was, until now, an unanswerable
 // question: a spam match, a retired site or a duplicate all returned success
@@ -22,10 +24,17 @@ export async function GET(req: NextRequest) {
   if (sites.length === 0) return NextResponse.json({ drops: [], counts: {} })
 
   const limit = Math.min(Number(req.nextUrl.searchParams.get('limit') ?? 200) || 200, 500)
-  const drops = await recentIntakeDrops(sites, limit)
+  // Late arrivals belong in the same answer as drops — "a lead is missing" is
+  // one question, and "we never stored it" and "it took three hours" are two
+  // of its answers. They are counted separately because a late lead IS stored,
+  // and folding it into the drop counts would make those counts lie.
+  const [drops, late] = await Promise.all([
+    recentIntakeDrops(sites, limit),
+    recentIntakeLags(sites, Math.min(limit, 100)),
+  ])
 
   const counts: Record<string, number> = { spam: 0, retired: 0, duplicate: 0 }
   for (const d of drops) counts[d.reason] = (counts[d.reason] ?? 0) + 1
 
-  return NextResponse.json({ drops, counts, total: drops.length })
+  return NextResponse.json({ drops, counts, total: drops.length, late, lateTotal: late.length })
 }
