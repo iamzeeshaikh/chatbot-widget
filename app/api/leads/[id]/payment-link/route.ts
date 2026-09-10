@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
-import { guardLeadAccess, leadRecipient } from '@/lib/leadrecord'
-import { cleanPayLink, payLinkFor, readPayLink, savePayLink } from '@/lib/paylink'
+import { guardLeadAccess, leadPhone, leadRecipient } from '@/lib/leadrecord'
+import { hasFeature } from '@/lib/workspaces'
+import { cleanPayLink, payChannel, payLinkFor, readPayLink, savePayLink } from '@/lib/paylink'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,12 +24,29 @@ async function ctxFor(req: NextRequest, id: string) {
   return { access }
 }
 
+/**
+ * The state, including WHICH WAY this customer can be reached.
+ *
+ * Resolved here rather than in the browser because both halves of it are
+ * hidden from the member who needs it: a masked agent is shown "•••••• hidden"
+ * for the address and the number alike, so only the server can say whether
+ * either exists.
+ */
+async function stateFor(member: Parameters<typeof payLinkFor>[0] & { workspace: 'sports' | 'packaging' }, id: string) {
+  const [{ link, sent }, to, phone] = await Promise.all([readPayLink(id), leadRecipient(id), leadPhone(id)])
+  const channel = payChannel({
+    email: Boolean(to), phone: Boolean(phone),
+    canEmail: hasFeature(member.workspace, 'email'),
+    canWhatsApp: hasFeature(member.workspace, 'telephony'),
+  })
+  return payLinkFor(member, link, sent, channel)
+}
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const c = await ctxFor(req, id)
   if ('error' in c) return c.error
-  const [{ link, sent }, to] = await Promise.all([readPayLink(id), leadRecipient(id)])
-  return NextResponse.json({ ok: true, ...payLinkFor(c.access.member, link, sent, Boolean(to)) })
+  return NextResponse.json({ ok: true, ...(await stateFor(c.access.member, id)) })
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -51,6 +69,5 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { error } = await savePayLink(id, c.access.siteId, url, c.access.member.email)
   if (error) return NextResponse.json({ error: 'That did not save.' }, { status: 500 })
 
-  const [{ link, sent }, to] = await Promise.all([readPayLink(id), leadRecipient(id)])
-  return NextResponse.json({ ok: true, ...payLinkFor(c.access.member, link, sent, Boolean(to)) })
+  return NextResponse.json({ ok: true, ...(await stateFor(c.access.member, id)) })
 }

@@ -14,7 +14,7 @@
 // Anything already typed always wins; alternatives stay as buttons underneath.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Receipt, Copy, Check, RefreshCw, Sparkles, Link2, Send } from 'lucide-react'
+import { Receipt, Copy, Check, RefreshCw, Sparkles, Link2, Send, MessageCircle } from 'lucide-react'
 import { Card, EmptyState } from './ui'
 
 interface Draft {
@@ -36,11 +36,15 @@ interface LinkState {
   present: boolean
   canEdit: boolean
   canSend: boolean
+  /** 'email' when the lead has an address, 'whatsapp' when it only has a
+   *  number, null when neither. Decided on the server — both values are
+   *  hidden from a masked member, so the browser cannot work it out. */
+  channel: 'email' | 'whatsapp' | null
   /** Populated only for a member who may see contacts. Never for an agent. */
   url: string | null
   savedBy: string
   savedAt: string
-  lastSent: { by: string; at: string } | null
+  lastSent: { by: string; at: string; channel: 'email' | 'whatsapp' } | null
 }
 /** Example text for the empty fields, chosen by the workspace — see lib/invoice.ts. */
 interface Hints { item: string; quantity: string; amount: string; billTo: string }
@@ -329,7 +333,7 @@ function PaymentLink({ leadId }: { leadId: string }) {
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) { setErr(String(j.error || 'That did not send.')); return }
-      setMsg('Sent to the customer.')
+      setMsg(j.channel === 'whatsapp' ? 'Sent on WhatsApp.' : 'Emailed to the customer.')
       setTick((t) => t + 1)
     } catch { setErr('That did not send.') } finally { setBusy(false) }
   }
@@ -368,22 +372,35 @@ function PaymentLink({ leadId }: { leadId: string }) {
 
       {state.present && (
         <>
+          {/* The label names the channel, because it is not the agent's choice
+              and they cannot see which one applies — the address and the number
+              are both masked for them. */}
           <button type="button" onClick={() => void send()} disabled={busy || !state.canSend}
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-            <Send className="w-3 h-3" aria-hidden />{busy ? 'Sending…' : 'Send to customer'}
+            className={`w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              state.channel === 'whatsapp' ? 'bg-green-700 hover:bg-green-800' : 'bg-gray-900 hover:bg-gray-800'
+            }`}>
+            {state.channel === 'whatsapp'
+              ? <MessageCircle className="w-3 h-3" aria-hidden />
+              : <Send className="w-3 h-3" aria-hidden />}
+            {busy ? 'Sending…' : state.channel === 'whatsapp' ? 'Send on WhatsApp' : 'Email to customer'}
           </button>
+          {state.channel === 'whatsapp' && (
+            <p className="text-[10px] text-gray-500">
+              This lead has no email address, so it goes to their WhatsApp instead.
+            </p>
+          )}
           {!state.canSend && (
-            /* A WhatsApp-only lead has no address. Better said before the click
-               than as a refusal after it. */
             <p className="text-[10px] text-amber-700">
-              This lead has no email address, so the link cannot be emailed. Add one on the record first.
+              This lead has no email address and no phone number, so the link cannot be sent. Add one on the record first.
             </p>
           )}
         </>
       )}
 
       {state.lastSent && (
-        <p className="text-[10px] text-gray-500">Last sent by {state.lastSent.by}.</p>
+        <p className="text-[10px] text-gray-500">
+          Last sent by {state.lastSent.by}{state.lastSent.channel === 'whatsapp' ? ' on WhatsApp' : ' by email'}.
+        </p>
       )}
       {msg && <p className="text-[11px] font-medium text-green-700">{msg}</p>}
       {err && <p className="text-[11px] font-medium text-red-700">{err}</p>}

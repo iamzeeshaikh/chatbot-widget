@@ -26,7 +26,6 @@
 // time it was sent.
 
 import { supabase } from './supabase'
-import { writeControlRow } from './leadrecord'
 import { canSeeContacts } from './pii'
 import type { Member } from './auth'
 
@@ -35,20 +34,43 @@ export const PAY_LINK_ROLE = 'crm_pay_link'
 /** Six dots. Deliberately not a truncated URL — a prefix is still a leak. */
 export const HIDDEN_LINK = '••••••'
 
+export type PayChannel = 'email' | 'whatsapp'
+
 export interface PayLinkRow {
   kind: 'link' | 'sent'
   /** Only on 'link'. */
   url?: string
+  /** Only on 'sent'. Absent on rows written before WhatsApp was an option. */
+  channel?: PayChannel
   by: string
   at: string
 }
 
+/**
+ * How this customer can be reached, best first.
+ *
+ * Email when there is one, because a payment link is a thing people open on a
+ * desktop and keep. WhatsApp when there is not — a lead that arrived through
+ * the widget or a WhatsApp message often has a number and nothing else, and
+ * "this lead has no email address" is a dead end when the customer is sitting
+ * in a chat we can already write to.
+ *
+ * Pure, so the panel and the send cannot disagree about which button to show
+ * and which channel to use.
+ */
+export function payChannel(opts: { email: boolean; phone: boolean; canEmail: boolean; canWhatsApp: boolean }): PayChannel | null {
+  if (opts.email && opts.canEmail) return 'email'
+  if (opts.phone && opts.canWhatsApp) return 'whatsapp'
+  return null
+}
+
 export interface PayLinkState {
   present: boolean
-  /** Whether the lead has an address to send to at all. A WhatsApp-only lead
-   *  has none, and offering Send there produces a refusal after the click
-   *  instead of before it. */
+  /** Whether the lead can be reached at all. Offering Send with nowhere to send
+   *  it produces a refusal after the click instead of before it. */
   canSend: boolean
+  /** Which way it will go, so the button can say so. */
+  channel: PayChannel | null
   /** Whether this member may SET the link. Sent explicitly rather than inferred
    *  from `url` being present: an admin with nothing saved yet and an agent
    *  with nothing saved yet look identical from the client's side, and the one
@@ -58,7 +80,7 @@ export interface PayLinkState {
   url: string | null
   savedBy: string
   savedAt: string
-  lastSent: { by: string; at: string } | null
+  lastSent: { by: string; at: string; channel: PayChannel } | null
 }
 
 const MAX_URL = 2000
@@ -109,28 +131,37 @@ export function payLinkFor(
   member: Pick<Member, 'role' | 'workspace'>,
   link: PayLinkRow | null,
   sent: PayLinkRow | null,
-  hasRecipient = true,
+  channel: PayChannel | null = 'email',
 ): PayLinkState {
   const present = Boolean(link?.url)
   return {
     present,
-    canSend: present && hasRecipient,
+    canSend: present && channel !== null,
+    channel,
     canEdit: member.role === 'admin',
     url: present && canSeeContacts(member) ? (link?.url ?? null) : null,
     savedBy: link?.by ?? '',
     savedAt: link?.at ?? '',
-    lastSent: sent ? { by: sent.by, at: sent.at } : null,
+    lastSent: sent ? { by: sent.by, at: sent.at, channel: sent.channel ?? 'email' } : null,
   }
 }
 
-export async function savePayLink(leadId: string, siteId: string, url: string | null, by: string) {
-  const row: PayLinkRow = { kind: 'link', url: url ?? undefined, by, at: new Date().toISOString() }
-  return writeControlRow({ sessionId: leadId, siteId, role: PAY_LINK_ROLE, message: JSON.stringify(row) })
+// Inserted here rather than through leadrecord's writeControlRow: leadrecord
+// imports the redaction helpers from this file, and a module that imports its
+// own importer is a cycle waiting to resolve in the wrong order.
+async function writeRow(leadId: string, siteId: string, row: PayLinkRow) {
+  const { error } = await supabase.from('chat_logs').insert({
+    site_id: siteId, session_id: leadId, role: PAY_LINK_ROLE, message: JSON.stringify(row),
+  })
+  return { error: error?.message ?? null }
 }
 
-export async function recordPayLinkSent(leadId: string, siteId: string, by: string) {
-  const row: PayLinkRow = { kind: 'sent', by, at: new Date().toISOString() }
-  return writeControlRow({ sessionId: leadId, siteId, role: PAY_LINK_ROLE, message: JSON.stringify(row) })
+export async function savePayLink(leadId: string, siteId: string, url: string | null, by: string) {
+  return writeRow(leadId, siteId, { kind: 'link', url: url ?? undefined, by, at: new Date().toISOString() })
+}
+
+export async function recordPayLinkSent(leadId: string, siteId: string, by: string, channel: PayChannel) {
+  return writeRow(leadId, siteId, { kind: 'sent', by, at: new Date().toISOString(), channel })
 }
 
 /**
