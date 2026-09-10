@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, leadRecipient, writeControlRow } from '@/lib/leadrecord'
 import { canSeeContacts } from '@/lib/pii'
-import { googleConfig, sendEmail, verifiedAliases, GmailAuthError, GmailRateError, configProblem } from '@/lib/gmail'
+import { connectionFor, googleConfig, sendEmail, verifiedAliases, GmailAuthError, GmailRateError, configProblem, type SendAsAlias } from '@/lib/gmail'
 import { CRM_EMAIL_ROLE, MAX_SUBJECT, makeSnippet, newEmailId, type CrmEmailEntry } from '@/lib/crmemail'
 import { plainToHtml } from '@/lib/richtext'
 import { loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml } from '@/lib/signature'
@@ -66,8 +66,31 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const body = await req.json().catch(() => ({}))
   const note = String(body?.note ?? '').trim().slice(0, MAX_NOTE)
 
-  const [aliases, agentSigs, siteContacts, allSites, chatNames] = await Promise.all([
-    verifiedAliases(access.member.email, cfg).catch(() => []),
+  // The mail goes out through the SIGNED-IN PERSON'S OWN Gmail, exactly as the
+  // composer's send does. So the first question is whether this member has one
+  // connected at all — asked plainly, because swallowing the answer turned "your
+  // Google account is not connected" into "no verified send-as address is
+  // available", which names a thing the reader has never heard of and gives them
+  // nothing to do about it.
+  const conn = await connectionFor(access.member.email)
+  if (!conn || conn.revoked) {
+    return NextResponse.json({
+      error: conn?.revokedReason
+        ?? `Gmail is not connected for ${access.member.email}, so this cannot be sent from here. Connect it under Email on this record — or let the agent who works this lead press Send, since it goes out through whoever is signed in.`,
+      needsReconnect: true,
+    }, { status: 401 })
+  }
+
+  let aliases: SendAsAlias[]
+  try {
+    aliases = await verifiedAliases(access.member.email, cfg)
+  } catch (e) {
+    if (e instanceof GmailRateError) return NextResponse.json({ error: e.message, retryable: true }, { status: 429 })
+    if (e instanceof GmailAuthError) return NextResponse.json({ error: e.message, needsReconnect: true }, { status: 401 })
+    return NextResponse.json({ error: 'Gmail could not be reached to check which address this may be sent from.' }, { status: 502 })
+  }
+
+  const [agentSigs, siteContacts, allSites, chatNames] = await Promise.all([
     loadAgentSignatures(), loadSiteContacts(),
     db.from('sites').select('site_id, name'), storedMemberNames(),
   ])
@@ -75,7 +98,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const siteName = siteNameOf.get(access.siteId) ?? ''
   const alias = aliasForSite(aliases, access.siteId, siteName)
   if (!alias) {
-    return NextResponse.json({ error: 'No verified send-as address is available on the connected Google account.', needsSetup: true }, { status: 503 })
+    return NextResponse.json({
+      error: `${access.member.email} has Gmail connected, but Google lists no verified send-as address on it. Add the site's address as a send-as alias in Gmail settings, then try again.`,
+      needsSetup: true,
+    }, { status: 503 })
   }
 
   const subject = `Payment link for your order${siteName ? ` — ${siteName}` : ''}`.slice(0, MAX_SUBJECT)
