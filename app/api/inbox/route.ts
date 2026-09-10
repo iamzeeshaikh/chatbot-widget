@@ -8,6 +8,7 @@ import { ASSIGNMENT_ROLE } from '@/lib/assignment'
 import { CRM_EMAIL_OPEN_ROLE, parseCrmEmailOpen } from '@/lib/emailtrack'
 import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
 import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
+import { PAY_LINK_ROLE, payLinksInRows, redactLinks } from '@/lib/paylink'
 import { asUtcIso } from '@/lib/visitor'
 import { storedMemberNames } from '@/lib/membername'
 import { agentDisplayName } from '@/lib/agentname'
@@ -56,7 +57,7 @@ async function emailRows(sites: string[], since: string): Promise<Row[]> {
     const { data: page } = await supabase.from('chat_logs')
       .select('session_id, site_id, role, message, created_at')
       .in('site_id', sites)
-      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_OPEN_ROLE])
+      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_OPEN_ROLE, PAY_LINK_ROLE])
       .gte('created_at', since)
       .order('created_at', { ascending: true })
       .range(from, from + 999)
@@ -142,6 +143,11 @@ export async function GET(req: NextRequest) {
       if (o) opened.add(o.emailId)
       continue
     }
+    // Fetched only so the masking below knows which links to remove — it is
+    // not mail. Skipped BEFORE the thread is created, or a lead carrying a
+    // payment link and no email at all would appear in the Inbox as an empty
+    // conversation.
+    if (r.role === PAY_LINK_ROLE) continue
     let t = threads.get(r.session_id)
     if (!t) {
       t = { leadId: r.session_id, siteId: r.site_id, subject: '', from: '', snippet: '', at: '', direction: 'out', messages: 0, unread: 0, hasAttachments: false, inboundIds: [], participants: [], files: [], lastOutAt: '', lastOutId: '', lastOutOpened: false, matched: false, hit: '' }
@@ -193,6 +199,20 @@ export async function GET(req: NextRequest) {
   const seesAll = await canSeeAllLeads(member)
   const owner = seesAll ? new Map<string, string | null>() : await ownersFor(Array.from(threads.keys()))
   const hideContactsHere = !canSeeContacts(member)
+  // A subject or a snippet can carry a payment link — the customer quotes it
+  // back in their reply — and that link is PII on these leads for the same
+  // reason the address is (lib/paylink.ts). Collected per lead from rows this
+  // endpoint already fetches.
+  const linksByLead = new Map<string, string[]>()
+  if (hideContactsHere) {
+    for (const r of rows) {
+      if (r.role !== PAY_LINK_ROLE) continue
+      const have = linksByLead.get(r.session_id) ?? []
+      linksByLead.set(r.session_id, have.concat(payLinksInRows([r])))
+    }
+  }
+  const scrub = (leadId: string, t: string | null | undefined) =>
+    redactLinks(scrubText(t), linksByLead.get(leadId) ?? [])
   const { data: siteRows } = await supabase.from('sites').select('site_id, name')
   const siteName = new Map((siteRows ?? []).map((s) => [s.site_id, String(s.name ?? '')]))
 
@@ -204,9 +224,9 @@ export async function GET(req: NextRequest) {
       leadId: t.leadId,
       siteId: t.siteId,
       siteName: siteName.get(t.siteId) ?? t.siteId,
-      subject: hideContactsHere ? (scrubText(t.subject) ?? '') : t.subject,
+      subject: hideContactsHere ? (scrub(t.leadId, t.subject) ?? '') : t.subject,
       from: hideContactsHere && /@/.test(t.from) ? HIDDEN_EMAIL : (hideContactsHere ? (scrubText(t.from) ?? '') : t.from),
-      snippet: hideContactsHere ? (scrubText(q && t.hit ? t.hit : t.snippet) ?? '') : (q && t.hit ? t.hit : t.snippet),
+      snippet: hideContactsHere ? (scrub(t.leadId, q && t.hit ? t.hit : t.snippet) ?? '') : (q && t.hit ? t.hit : t.snippet),
       at: asUtcIso(t.at),
       direction: t.direction,
       messages: t.messages,

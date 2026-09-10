@@ -136,3 +136,40 @@ export async function recordPayLinkSent(leadId: string, siteId: string, by: stri
 export function redactedForTimeline(text: string, url: string): string {
   return text.split(url).join(`[payment link — ${HIDDEN_LINK}]`)
 }
+
+/**
+ * Take every payment link this lead has ever carried out of text served to a
+ * member who may not see it.
+ *
+ * The outbound copy was never stored (see redactedForTimeline) and that was not
+ * enough: the CUSTOMER quotes it straight back. A reply saying "I got that,
+ * https://www.paypal.com/invoice/p/#…" puts the link on the timeline in the
+ * customer's own words, and the quoted chain under it carries our whole
+ * original message. Anything that reproduces the link reproduces the leak,
+ * whoever typed it.
+ *
+ * Every link ever saved on the lead, not just the current one: a superseded
+ * link still opens the same invoice.
+ */
+export function redactLinks<T extends string | null | undefined>(text: T, links: string[]): string | null {
+  if (!text) return (text ?? null) as string | null
+  let out = String(text)
+  for (const l of links) {
+    if (!l) continue
+    out = out.split(l).join(`[payment link \u2014 ${HIDDEN_LINK}]`)
+  }
+  return out
+}
+
+/** Every payment link on a lead, read out of rows the caller already has. */
+export function payLinksInRows(rows: { role: string; message: string }[]): string[] {
+  const out = new Set<string>()
+  for (const r of rows) {
+    if (r.role !== PAY_LINK_ROLE) continue
+    try {
+      const o = JSON.parse(r.message) as PayLinkRow
+      if (o?.url) out.add(o.url)
+    } catch { /* skip */ }
+  }
+  return Array.from(out)
+}

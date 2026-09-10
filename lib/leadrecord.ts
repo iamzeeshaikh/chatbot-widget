@@ -46,6 +46,7 @@ import {
   type CrmEmailInEntry, splitQuoted } from './emailreply'
 import { signAttachments, type EmailAttachment } from './emailattach'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
+import { payLinksInRows, redactLinks } from './paylink'
 
 export type LeadKind = 'chat' | 'quote' | 'checkout' | 'call' | 'whatsapp'
 
@@ -966,7 +967,10 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     messageCount: realMessages.length,
   }
 
-  return canSeeContacts(member) ? record : hideContacts(record)
+  // The payment links come out of rows this function already has, so hiding
+  // them costs no extra query. See redactLinks: the customer quotes the link
+  // back at us, so not storing our own copy was never going to be enough.
+  return canSeeContacts(member) ? record : hideContacts(record, payLinksInRows(logs))
 }
 
 /**
@@ -988,7 +992,12 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
  * The stored data is untouched. This is a read edge: an admin still sees all of
  * it, and nothing here is destructive.
  */
-function hideContacts(rec: LeadRecord): LeadRecord {
+function hideContacts(rec: LeadRecord, payLinks: string[] = []): LeadRecord {
+  // One scrub, used everywhere below, so a field cannot pick up the address
+  // rule and miss the link rule. A payment link is PII on this record for the
+  // same reason an address is: opening it shows the customer on PayPal's own
+  // page.
+  const scrub = <T extends string | null | undefined>(t: T) => redactLinks(scrubText(t), payLinks)
   const softName = (n: string) => (/@/.test(n) || /\d{7,}/.test(n) ? (scrubText(n) ?? '') : n)
   // FILES ARE NO LONGER HIDDEN — the owner's explicit decision, 2026-09-03,
   // made knowing what it trades away: a scanned order form or a screenshot can
@@ -1006,8 +1015,8 @@ function hideContacts(rec: LeadRecord): LeadRecord {
     attachments: rec.attachments.map((a) => ({ ...a, name: softName(a.name) || 'Attachment' })),
     contact: { name: softName(rec.contact.name), email: rec.contact.email ? HIDDEN_EMAIL : '', phone: rec.contact.phone ? HIDDEN_PHONE : '' },
     captured: { name: softName(rec.captured.name), email: rec.captured.email ? HIDDEN_EMAIL : '', phone: rec.captured.phone ? HIDDEN_PHONE : '' },
-    quoteMessage: scrubText(rec.quoteMessage),
-    notes: rec.notes.map((n) => ({ ...n, body: scrubText(n.body) ?? '' })),
+    quoteMessage: scrub(rec.quoteMessage),
+    notes: rec.notes.map((n) => ({ ...n, body: scrub(n.body) ?? '' })),
     related: rec.related.map((r) => ({
       ...r, name: r.name ? softName(r.name) : r.name, email: maskEmail(r.email), phone: maskPhone(r.phone),
     })),
@@ -1018,15 +1027,15 @@ function hideContacts(rec: LeadRecord): LeadRecord {
       // timeline as the event's byline — the one field on this record that was
       // never scrubbed. scrubText masks addresses and leaves agent labels and
       // human names alone, which is exactly what a byline needs.
-      actor: scrubText(e.actor) ?? '',
-      title: scrubText(e.title) ?? '',
-      body: e.body === undefined ? undefined : (scrubText(e.body) ?? ''),
+      actor: scrub(e.actor) ?? '',
+      title: scrub(e.title) ?? '',
+      body: e.body === undefined ? undefined : (scrub(e.body) ?? ''),
       email: e.email && {
         ...e.email,
         to: HIDDEN_EMAIL,
         cc: e.email.cc ? HIDDEN_EMAIL : e.email.cc,
-        subject: scrubText(e.email.subject) ?? '',
-        body: scrubText(e.email.body) ?? '',
+        subject: scrub(e.email.subject) ?? '',
+        body: scrub(e.email.body) ?? '',
         // The quoted chain, same as on the inbound branch below — and this is
         // where it actually leaked. A reply we send quotes the customer's own
         // message, headers and all, so `quoted` on an OUTBOUND email carries
@@ -1034,21 +1043,21 @@ function hideContacts(rec: LeadRecord): LeadRecord {
         // start; the outbound one did not, and three copies of a live
         // customer's address were being served to an agent whose `contact.email`
         // field said "hidden".
-        quoted: scrubText(e.email.quoted) ?? undefined,
-        snippet: scrubText(e.email.snippet) ?? '',
+        quoted: scrub(e.email.quoted) ?? undefined,
+        snippet: scrub(e.email.snippet) ?? '',
       },
       files: e.files?.map(openFile),
-      wa: e.wa && { ...e.wa, from: HIDDEN_PHONE, to: HIDDEN_PHONE, body: scrubText(e.wa.body) ?? '' },
+      wa: e.wa && { ...e.wa, from: HIDDEN_PHONE, to: HIDDEN_PHONE, body: scrub(e.wa.body) ?? '' },
       inbound: e.inbound && {
         ...e.inbound,
         from: HIDDEN_EMAIL,
         to: HIDDEN_EMAIL,
-        subject: scrubText(e.inbound.subject) ?? '',
-        body: scrubText(e.inbound.body) ?? '',
+        subject: scrub(e.inbound.subject) ?? '',
+        body: scrub(e.inbound.body) ?? '',
         // The quoted chain and the signature the reply was trimmed of — which
         // is exactly where a customer's own phone number and address live.
-        quoted: scrubText(e.inbound.quoted),
-        snippet: scrubText(e.inbound.snippet) ?? '',
+        quoted: scrub(e.inbound.quoted),
+        snippet: scrub(e.inbound.snippet) ?? '',
         attachments: e.inbound.attachments?.map((a) => ({ ...a, name: softName(a.name) || 'Attachment' })),
         skippedAttachments: e.inbound.skippedAttachments?.map((a) => ({ ...a, name: softName(a.name) || 'Attachment' })),
       },
