@@ -10,7 +10,7 @@ import { CRM_EMAIL_ROLE, MAX_SUBJECT, makeSnippet, newEmailId, type CrmEmailEntr
 import { plainToHtml } from '@/lib/richtext'
 import { loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml } from '@/lib/signature'
 import { storedMemberNames } from '@/lib/membername'
-import { payChannel, readPayLink, recordPayLinkSent, redactedForTimeline } from '@/lib/paylink'
+import { payChannels, readPayLink, recordPayLinkSent, redactedForTimeline } from '@/lib/paylink'
 import { supabase as db } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -61,11 +61,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // "•••••• hidden" for each of them and would post that straight back.
   const [to, phone] = await Promise.all([leadRecipient(id), leadPhone(id)])
   const ws = access.member.workspace
-  const channel = payChannel({
+  const available = payChannels({
     email: Boolean(to), phone: Boolean(phone),
     canEmail: hasFeature(ws, 'email'), canWhatsApp: hasFeature(ws, 'telephony'),
   })
-  if (!channel) {
+  if (available.length === 0) {
     return NextResponse.json({
       error: 'This lead has no email address and no phone number on file, so the link cannot be sent.',
     }, { status: 400 })
@@ -73,6 +73,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const body = await req.json().catch(() => ({}))
   const note = String(body?.note ?? '').trim().slice(0, MAX_NOTE)
+  // A customer with both gets a choice, and the choice is the sender's. It is
+  // still CHECKED against what this lead actually has: the request may name a
+  // channel, it may not invent one.
+  const asked = String(body?.channel ?? '')
+  const channel = (available as string[]).includes(asked) ? (asked as typeof available[number]) : available[0]
   const opening = note || 'Thank you for your order. You can complete the payment using the secure link below.'
 
   // ── WhatsApp: the customer who never gave us an address ───────────────────

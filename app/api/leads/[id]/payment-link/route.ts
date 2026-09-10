@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, leadPhone, leadRecipient } from '@/lib/leadrecord'
 import { hasFeature } from '@/lib/workspaces'
-import { cleanPayLink, payChannel, payLinkFor, readPayLink, savePayLink, whatsappWindowOpen } from '@/lib/paylink'
+import { cleanPayLink, payChannels, payLinkFor, readPayLink, savePayLink, whatsappWindowOpen } from '@/lib/paylink'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,13 +34,13 @@ async function ctxFor(req: NextRequest, id: string) {
  */
 async function stateFor(member: Parameters<typeof payLinkFor>[0] & { workspace: 'sports' | 'packaging' }, id: string) {
   const [{ link, sent }, to, phone] = await Promise.all([readPayLink(id), leadRecipient(id), leadPhone(id)])
-  const channel = payChannel({
+  const channels = payChannels({
     email: Boolean(to), phone: Boolean(phone),
     canEmail: hasFeature(member.workspace, 'email'),
     canWhatsApp: hasFeature(member.workspace, 'telephony'),
   })
-  const waOpen = channel === 'whatsapp' ? await whatsappWindowOpen(id) : null
-  return payLinkFor(member, link, sent, channel, waOpen)
+  const waOpen = channels.includes('whatsapp') ? await whatsappWindowOpen(id) : null
+  return payLinkFor(member, link, sent, channels, waOpen)
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

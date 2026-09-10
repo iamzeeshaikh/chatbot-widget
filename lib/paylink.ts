@@ -47,21 +47,29 @@ export interface PayLinkRow {
 }
 
 /**
- * How this customer can be reached, best first.
+ * Every way this customer can be reached, best first.
  *
- * Email when there is one, because a payment link is a thing people open on a
- * desktop and keep. WhatsApp when there is not — a lead that arrived through
- * the widget or a WhatsApp message often has a number and nothing else, and
- * "this lead has no email address" is a dead end when the customer is sitting
- * in a chat we can already write to.
+ * Email leads because a payment link is a thing people open on a desktop and
+ * keep; WhatsApp is there because a lead that arrived through the widget or a
+ * WhatsApp message often has a number and nothing else, and "no email address"
+ * is a dead end in a conversation we are already having.
  *
- * Pure, so the panel and the send cannot disagree about which button to show
- * and which channel to use.
+ * When a customer has BOTH, the list has both and the person sending picks —
+ * that is a judgement about this customer (some read mail, some do not) and it
+ * is not ours to make silently. The first entry is the default.
+ *
+ * Pure, so the panel and the send cannot disagree about what is on offer.
  */
-export function payChannel(opts: { email: boolean; phone: boolean; canEmail: boolean; canWhatsApp: boolean }): PayChannel | null {
-  if (opts.email && opts.canEmail) return 'email'
-  if (opts.phone && opts.canWhatsApp) return 'whatsapp'
-  return null
+export function payChannels(opts: { email: boolean; phone: boolean; canEmail: boolean; canWhatsApp: boolean }): PayChannel[] {
+  const out: PayChannel[] = []
+  if (opts.email && opts.canEmail) out.push('email')
+  if (opts.phone && opts.canWhatsApp) out.push('whatsapp')
+  return out
+}
+
+/** The default channel — the best one available. */
+export function payChannel(opts: Parameters<typeof payChannels>[0]): PayChannel | null {
+  return payChannels(opts)[0] ?? null
 }
 
 export interface PayLinkState {
@@ -69,7 +77,9 @@ export interface PayLinkState {
   /** Whether the lead can be reached at all. Offering Send with nowhere to send
    *  it produces a refusal after the click instead of before it. */
   canSend: boolean
-  /** Which way it will go, so the button can say so. */
+  /** Every way it can go, best first — one button each. */
+  channels: PayChannel[]
+  /** The default: the best channel available. */
   channel: PayChannel | null
   /** For the WhatsApp channel only: whether a free-form message is allowed
    *  right now. Null when the channel is not WhatsApp. */
@@ -134,15 +144,17 @@ export function payLinkFor(
   member: Pick<Member, 'role' | 'workspace'>,
   link: PayLinkRow | null,
   sent: PayLinkRow | null,
-  channel: PayChannel | null = 'email',
+  channels: PayChannel[] = ['email'],
   waWindowOpen: boolean | null = null,
 ): PayLinkState {
+  const channel = channels[0] ?? null
   const present = Boolean(link?.url)
   return {
     present,
-    canSend: present && channel !== null,
+    canSend: present && channels.length > 0,
+    channels,
     channel,
-    waWindowOpen: channel === 'whatsapp' ? waWindowOpen : null,
+    waWindowOpen: channels.includes('whatsapp') ? waWindowOpen : null,
     canEdit: member.role === 'admin',
     url: present && canSeeContacts(member) ? (link?.url ?? null) : null,
     savedBy: link?.by ?? '',
