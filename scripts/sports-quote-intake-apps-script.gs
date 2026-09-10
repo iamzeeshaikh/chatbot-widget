@@ -728,11 +728,27 @@ function dailyCatchUp() {
   processQuoteLeads();
 }
 
+// ONE run, not two. This used to move the watermark and then tell you to go
+// back to the dropdown and run processQuoteLeads yourself — and a two-step
+// recovery is a recovery that gets half done. It is the whole reason the
+// rewind exists that makes this matter: it is run precisely when the script
+// has just gained a new way of finding mail, i.e. when the half that was
+// skipped is the half that does the work.
+//
+// Deliberately NOT a deep pass. Deep widens the date gate to everything in the
+// search window, and with a 7-day window that is a week of the WHOLE mailbox —
+// the shape that exhausted the daily Gmail allowance on 27 Aug 2026. A normal
+// pass after a rewind already opens every thread with mail in those 7 days,
+// which is the mail there is to find; dailyCatchUp is the deep one, over 2 days.
+//
+// The pass may stop on its time budget, and that is fine: the watermark only
+// advances on a complete pass, so the 30-minute trigger carries on from here.
 function rewindWatermark() {
   var target = Date.now() - REWIND_DAYS * 24 * 60 * 60 * 1000;
   saveWatermark_(target + WATERMARK_OVERLAP_MS); // readWatermark_ subtracts the overlap again
   Logger.log('Watermark rewound to ' + new Date(target) +
-    '. Run processQuoteLeads once now — it will re-read everything since then.');
+    ' — re-reading everything since then now.');
+  processQuoteLeads();
 }
 
 // Why did THIS email never become a lead? Put anything that identifies it in
