@@ -63,6 +63,19 @@ export const ALLOWED_EMAIL_MIME: Record<string, string> = {
   'image/tiff': 'tif',
   'text/plain': 'txt',
   'text/csv': 'csv',
+  'text/tab-separated-values': 'tsv',
+  // A roster arrived as .rtf and was refused. RTF is what Word and TextEdit
+  // hand you when somebody types a list on a Mac, so it is exactly the format
+  // a coach sends sizes in — and losing it loses the order's roster.
+  'application/rtf': 'rtf',
+  'text/rtf': 'rtf',
+  'application/vnd.oasis.opendocument.text': 'odt',
+  'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+  // iPhone photos. Artwork and "here is what we have now" shots arrive as HEIC
+  // by default on any recent iPhone that has not been told to convert.
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'image/bmp': 'bmp',
   'application/msword': 'doc',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
   'application/vnd.ms-excel': 'xls',
@@ -97,9 +110,29 @@ export function isDangerousName(name: string): boolean {
   return parts.slice(1).some((p) => BANNED_EXT.has(p))
 }
 
+/**
+ * Extensions that may be accepted when the MIME says nothing useful.
+ *
+ * Mail clients routinely label an ordinary document `application/octet-stream`
+ * — the sender's software decides the Content-Type and plenty of it does not
+ * bother. Without this, a roster that arrives correctly named and perfectly
+ * safe is refused because Outlook shrugged.
+ *
+ * This is still an allowlist, and isDangerousName() runs first, so nothing
+ * executable can arrive this way whatever it is called.
+ */
+const GENERIC_MIME = new Set(['application/octet-stream', 'binary/octet-stream', 'application/download', ''])
+const ALLOWED_EXT_WHEN_GENERIC = new Set([
+  'pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'tif', 'tiff', 'bmp', 'heic', 'heif',
+  'txt', 'csv', 'tsv', 'rtf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'odt', 'ods', 'ai', 'eps', 'zip',
+])
+
 export function isAllowedEmailAttachment(mime: string, name: string): boolean {
   if (isDangerousName(name)) return false
-  return Object.prototype.hasOwnProperty.call(ALLOWED_EMAIL_MIME, (mime ?? '').toLowerCase())
+  const m = (mime ?? '').toLowerCase().split(';')[0].trim()
+  if (Object.prototype.hasOwnProperty.call(ALLOWED_EMAIL_MIME, m)) return true
+  return GENERIC_MIME.has(m) && ALLOWED_EXT_WHEN_GENERIC.has(extOf(name))
 }
 
 export interface EmailAttachment {
