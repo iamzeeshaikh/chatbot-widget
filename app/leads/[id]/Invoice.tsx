@@ -31,11 +31,14 @@ interface Sheet extends Draft {
   autofilled: string[]; sources: Record<string, string>
 }
 interface Suggestion { value: string; from: string; at: string }
+/** Example text for the empty fields, chosen by the workspace — see lib/invoice.ts. */
+interface Hints { item: string; quantity: string; amount: string; billTo: string }
 interface Payload {
   sheet: Sheet
   text: string
   draft: Draft | null
   suggestions: { item: Suggestion[]; quantity: Suggestion[]; amount: Suggestion[]; address: Suggestion[] }
+  hints?: Hints
   contactsHidden: boolean
 }
 
@@ -117,6 +120,9 @@ export default function Invoice({ leadId }: { leadId: string }) {
 
   const gaps = data?.sheet.gaps ?? []
   const sug = data?.suggestions
+  // Empty until the server says which workspace this is. A hard-coded default
+  // here is how the sports examples reached a packaging lead in the first place.
+  const hint = data?.hints
 
   return (
     <Card
@@ -160,7 +166,7 @@ export default function Invoice({ leadId }: { leadId: string }) {
               <div>
                 <label className={LABEL} htmlFor="inv-item">What was sold</label>
                 <input id="inv-item" className={INPUT} value={v.item} onChange={set('item')}
-                  placeholder="Thunder soccer uniforms" />
+                  placeholder={hint?.item ?? ''} />
                 <From sheet={data.sheet} field="item" />
                 <Suggest list={sug?.item} onPick={(x) => take('item', x)} />
               </div>
@@ -168,7 +174,7 @@ export default function Invoice({ leadId }: { leadId: string }) {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={LABEL} htmlFor="inv-qty">Quantity</label>
-                  <input id="inv-qty" className={INPUT} value={v.quantity} onChange={set('quantity')} placeholder="8 sets" />
+                  <input id="inv-qty" className={INPUT} value={v.quantity} onChange={set('quantity')} placeholder={hint?.quantity ?? ''} />
                   <From sheet={data.sheet} field="quantity" />
                   <Suggest list={sug?.quantity} onPick={(x) => take('quantity', x)} />
                 </div>
@@ -176,7 +182,7 @@ export default function Invoice({ leadId }: { leadId: string }) {
                   <label className={LABEL} htmlFor="inv-amt">Amount</label>
                   <div className="mt-1 flex gap-1.5">
                     <input className={`${INPUT} mt-0 w-16`} value={v.currency} onChange={set('currency')} aria-label="Currency" />
-                    <input id="inv-amt" className={`${INPUT} mt-0 flex-1`} value={v.amount} onChange={set('amount')} placeholder="429.00" />
+                    <input id="inv-amt" className={`${INPUT} mt-0 flex-1`} value={v.amount} onChange={set('amount')} placeholder={hint?.amount ?? ''} />
                   </div>
                   <From sheet={data.sheet} field="amount" />
                   <Suggest list={sug?.amount} onPick={(x) => take('amount', x.replace(/^\$/, ''))} />
@@ -186,7 +192,7 @@ export default function Invoice({ leadId }: { leadId: string }) {
               <div>
                 <label className={LABEL} htmlFor="inv-billto">Bill to</label>
                 <input id="inv-billto" className={INPUT} value={v.billTo} onChange={set('billTo')}
-                  placeholder="Club or school that pays, if not the contact" />
+                  placeholder={hint?.billTo ?? ''} />
               </div>
 
               <div>

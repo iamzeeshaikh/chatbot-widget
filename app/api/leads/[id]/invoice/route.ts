@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, loadLeadRecord } from '@/lib/leadrecord'
 import {
-  buildSheet, cleanInvoice, readInvoice, sheetToText, suggestFromTimeline, writeInvoice,
+  buildSheet, cleanInvoice, invoiceHints, readInvoice, sheetToText, suggestFromTimeline, writeInvoice,
 } from '@/lib/invoice'
 
 export const dynamic = 'force-dynamic'
@@ -42,6 +42,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     // Read out of the conversation and offered, never applied: "8 sets" in a
     // thread might be what was ordered or what was first asked about.
     suggestions,
+    // The example text for the empty fields. It belongs to the workspace, not
+    // to the component: one panel serves both dashboards, and the sports
+    // examples it was built against read as nonsense on a packaging lead.
+    hints: invoiceHints(c.access.member.workspace),
     contactsHidden: Boolean(c.record.contactsHidden),
   })
 }

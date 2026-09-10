@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { writeControlRow, type LeadRecord, type TimelineEvent } from './leadrecord'
+import type { Workspace } from './workspaces'
 
 /**
  * Everything needed to raise an invoice, on the record, in one block that can
@@ -277,4 +278,25 @@ export function sheetToText(s: InvoiceSheet): string {
     line('Amount', s.amount ? `${s.currency} ${s.amount}` : ''),
     line('Notes', s.notes),
   ].filter((l) => l !== null).join('\n')
+}
+
+// ── The example text in the empty fields ─────────────────────────────────────
+// These were written while the panel was being built against a sports lead —
+// "Thunder soccer uniforms", "8 sets", "Club or school that pays" — and this
+// dashboard serves two workspaces off one component. So a packaging agent
+// opening a wax-paper enquiry was shown a soccer team as the example of what
+// they had just sold. A placeholder is read as instruction, and the wrong one
+// makes a correct panel look like somebody else's product.
+export interface InvoiceHints { item: string; quantity: string; amount: string; billTo: string }
+
+export function invoiceHints(workspace: Workspace): InvoiceHints {
+  return workspace === 'sports'
+    ? {
+        item: 'Thunder soccer uniforms', quantity: '8 sets', amount: '429.00',
+        billTo: 'Club or school that pays, if not the contact',
+      }
+    : {
+        item: 'Custom printed sandwich papers', quantity: '5,000 sheets', amount: '429.00',
+        billTo: 'Company that pays, if not the contact',
+      }
 }
