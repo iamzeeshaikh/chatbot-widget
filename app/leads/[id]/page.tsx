@@ -301,11 +301,19 @@ export default function LeadRecordPage() {
     try { await post('/value', next); load() } catch { load() }
   }
 
+  // A refused owner change used to roll the dropdown back in silence, so the
+  // choice just snapped back and nobody could tell whether it was the network,
+  // a rule, or them. The server's reason is shown instead.
+  const [ownerError, setOwnerError] = useState('')
   async function saveOwner(email: string) {
     if (!record) return
     const prev = record.owner
+    setOwnerError('')
     setRecord({ ...record, owner: email || null })
-    try { await post('/owner', { email }); load() } catch { setRecord((r) => (r ? { ...r, owner: prev } : r)) }
+    try { await post('/owner', { email }); load() } catch (e) {
+      setRecord((r) => (r ? { ...r, owner: prev } : r))
+      setOwnerError(e instanceof Error ? e.message : 'That did not save.')
+    }
   }
 
   async function addNote() {
@@ -661,6 +669,7 @@ export default function LeadRecordPage() {
                     <option key={m} value={m} className="bg-white text-gray-800">{m.split('@')[0]}</option>
                   ))}
                 </select>
+                {ownerError && <p className="mt-1 text-[11px] font-medium text-red-700">{ownerError}</p>}
               </Prop>
             </PropGroup>
 

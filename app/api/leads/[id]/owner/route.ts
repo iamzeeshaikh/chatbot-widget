@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getMember, HARDCODED_ACCOUNTS } from '@/lib/auth'
+import { getMember, canAccessSite, HARDCODED_ACCOUNTS, type Member } from '@/lib/auth'
 import { guardLeadAccess } from '@/lib/leadrecord'
 import { setAssignment } from '@/lib/assignment'
 import { supabase } from '@/lib/supabase'
@@ -34,8 +34,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       .eq('workspace', access.member.workspace)
       .ilike('email', target)
       .maybeSingle()
-    const allowed = data && (data.role === 'admin' || (data.assigned_sites ?? []).includes(access.siteId))
-    if (!allowed) return NextResponse.json({ error: 'That member cannot be assigned this lead' }, { status: 400 })
+    // canAccessSite, not a hand-written copy of it. The copy said "admin, or the
+    // site is in their list" — and a member with NO sites picked covers the whole
+    // workspace (memberSites, lib/auth.ts). Every packaging agent has an empty
+    // list, so every one of them was refused as an owner: the dropdown offered
+    // them, the server said no, and the UI swallowed the no. A team lead
+    // assigning a lead to an agent simply saw nothing happen.
+    const candidate: Member | null = data
+      ? { id: '', email: data.email, workspace: access.member.workspace, role: data.role, assigned_sites: data.assigned_sites ?? [] }
+      : null
+    if (!candidate || !canAccessSite(candidate, access.siteId)) {
+      return NextResponse.json({ error: `${candidate?.email ?? target} does not work this site, so this lead cannot be assigned to them.` }, { status: 400 })
+    }
   }
 
   await setAssignment(id, access.siteId, target)

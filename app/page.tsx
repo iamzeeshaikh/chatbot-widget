@@ -961,6 +961,11 @@ export default function Dashboard() {
   // rather than reset in an effect — an effect that calls setState on every
   // open is a re-render nobody needs.
   const [assigned, setAssigned] = useState<{ id: string; email: string } | null>(null)
+  // Why the last assignment on THIS lead was refused. Keyed to the lead like
+  // `assigned`, for the same reason. The select used to ignore a refusal
+  // outright — the choice was made, the server said no, and the box just sat
+  // there reading "Assign to…" as if nothing had been tried.
+  const [assignError, setAssignError] = useState<{ id: string; msg: string } | null>(null)
   const [showTeam, setShowTeam] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
   const [histSiteFilter, setHistSiteFilter] = useState('')
@@ -4595,7 +4600,11 @@ export default function Dashboard() {
                           method: 'POST', headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ email }),
                         })
-                        if (r.ok) setAssigned({ id: viewOverviewLead.id, email })
+                        if (r.ok) { setAssigned({ id: viewOverviewLead.id, email }); setAssignError(null) }
+                        else {
+                          const j = await r.json().catch(() => ({}))
+                          setAssignError({ id: viewOverviewLead.id, msg: String(j.error || 'That assignment did not save.') })
+                        }
                       } finally { setAssigning(false) }
                     }}
                     className="text-xs bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-gray-800 focus:outline-none focus:border-blue-500 cursor-pointer disabled:opacity-50 max-w-[190px]">
@@ -4612,6 +4621,9 @@ export default function Dashboard() {
                       <option key={a.email} value={a.email}>{a.email}</option>
                     ))}
                   </select>
+                  {assignError && assignError.id === viewOverviewLead.id && (
+                    <span role="alert" className="text-[11px] font-medium text-red-700 max-w-[220px]">{assignError.msg}</span>
+                  )}
                 </label>
               )}
               {canRecords && <a href={leadRecordHref(leadRecordId(viewOverviewLead))}

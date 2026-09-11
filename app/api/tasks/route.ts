@@ -78,7 +78,11 @@ async function assignableMembers(
     .eq('workspace', member.workspace)
   const out = new Set<string>([member.email])
   for (const m of data ?? []) {
-    if (m.role === 'admin' || (m.assigned_sites ?? []).some((s: string) => allowed.includes(s))) {
+    // An empty site list means the WHOLE workspace (memberSites, lib/auth.ts) —
+    // the same rule the owner route got wrong. Read as "no sites", it left every
+    // packaging agent off the reassign list.
+    const sites: string[] = m.assigned_sites ?? []
+    if (m.role === 'admin' || sites.length === 0 || sites.some((s) => allowed.includes(s))) {
       out.add(m.email)
     }
   }
