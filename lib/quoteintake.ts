@@ -166,6 +166,20 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   ZSW: 'zeesportswear',
 }
 
+/**
+ * A Google Merchant Center test order, not a customer.
+ *
+ * Google's Storebot places real orders through a site's checkout to confirm
+ * that products listed in Shopping can actually be bought: "John Smith",
+ * johnsmith0NN@storebotmail.joonix.net, 650 253 0000, a US street address.
+ * Keyed on the ADDRESS DOMAIN only — the phone alone also matches a genuine
+ * 2024 enquiry from somebody who typed Google's number into a form.
+ */
+export function isMerchantTestOrder(email: string | null | undefined): boolean {
+  const domain = String(email ?? '').trim().toLowerCase().split('@')[1] ?? ''
+  return domain === 'joonix.net' || domain.endsWith('.joonix.net')
+}
+
 export function siteIdFromQuoteCode(code: string): string | null {
   return QUOTE_SITE_CODES[code.trim().toUpperCase()] ?? null
 }

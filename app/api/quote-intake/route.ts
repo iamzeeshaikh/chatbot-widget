@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllowedMime, parseAttachment, uniqueAttachmentPath, type AttachmentInfo } from '@/lib/attachment'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody } from '@/lib/quoteintake'
 import { isRetiredLeadSite } from '@/lib/workspaces'
 import { recordIntakeDrop } from '@/lib/intakedrop'
 import { recordIntakeLag } from '@/lib/intakelag'
@@ -111,6 +111,22 @@ export async function POST(req: NextRequest) {
   const files = parseIntakeAttachments(body.attachments)
   const createdAt = typeof receivedAt === 'string' && !isNaN(new Date(receivedAt).getTime())
     ? receivedAt : new Date().toISOString()
+
+  // Google Merchant Center's Storebot test orders (lib/quoteintake.ts). On
+  // 14 Sep 2026 seventeen of them reached one site's checkout in a day and sat
+  // in the pipeline as "John Smith" checkout leads. They must never count —
+  // but the SITE must keep answering them normally, because a checkout that
+  // fails for Storebot gets the Shopping listings flagged. So the refusal lives
+  // here, in the CRM, after the order has already succeeded, and it is recorded
+  // like every other drop rather than vanishing.
+  if (isMerchantTestOrder(cleanEmail)) {
+    await recordIntakeDrop({
+      siteId, reason: 'spam', at: createdAt, detail: 'Google Merchant Center test order (Storebot)',
+      name: leadName || undefined, email: cleanEmail || undefined,
+      phone: cleanPhone || undefined, excerpt: bodyText,
+    })
+    return NextResponse.json({ success: true, spam: true })
+  }
 
   // Bot spam hits these WordPress quote-forms directly (crypto/loan/casino
   // promo content) and still carries a real site label since the visitor
