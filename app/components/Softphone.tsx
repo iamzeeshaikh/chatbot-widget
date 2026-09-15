@@ -50,6 +50,15 @@ function mmss(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+// Twilio Voice SDK quality warnings that leave the call up but break the audio,
+// in words an agent can act on. The SDK raises and clears each one on its own.
+const QUALITY_WARNINGS: Record<string, string> = {
+  'high-packet-loss': 'Your internet is losing audio — the customer hears you breaking up. Move closer to the Wi-Fi router or use a cable, and close video calls or downloads.',
+  'high-jitter': 'Your connection is unsteady — your voice is reaching the customer in pieces. Move closer to the Wi-Fi router or use a cable.',
+  'low-mos': 'Call quality is poor on your connection — the customer may not hear you clearly.',
+  'high-rtt': 'Your connection is slow — expect a delay before the customer hears you.',
+}
+
 export default function Softphone() {
   const [phase, setPhase] = useState<Phase>('off')
   const [who, setWho] = useState('')
@@ -77,6 +86,9 @@ export default function Softphone() {
   // path never formed, 'low-bytes-sent' means the microphone is silent. Without
   // it every such call reads as the useless "Call ended."
   const warnRef = useRef('')
+  // Whether this call has hit a network-quality warning at any point, so the
+  // end-of-call line can say why it sounded bad even after the SDK cleared it.
+  const qualityRef = useRef(false)
 
   const endedTo = useCallback((msg: string, tone: 'error' | 'notice' = 'error') => {
     callRef.current = null
@@ -107,6 +119,7 @@ export default function Softphone() {
       liveRef.current = true
       setPhase('live'); setSeconds(0); setError(''); setNotice('')
     })
+    qualityRef.current = false
     call.on('warning', (name: unknown) => {
       const w = String(name ?? '')
       warnRef.current = w
@@ -114,8 +127,21 @@ export default function Softphone() {
       // while it is happening rather than after.
       if (w === 'ice-connectivity-lost') setNotice('Audio path lost — the network is blocking the call.')
       else if (w === 'low-bytes-sent') setNotice('No sound is leaving your microphone.')
+      // The call stays up, but the agent's voice reaches the customer in pieces.
+      // Nothing on screen said so: an 85-second call on 15 Sep carried ~87 short
+      // dropouts a minute on the agent's channel against ~31 on another call by
+      // the same account, the customer complained they could not hear, and the
+      // agent had no way of knowing it was their own connection. Said while it
+      // is happening, when it can still be fixed.
+      else if (QUALITY_WARNINGS[w]) { qualityRef.current = true; setNotice(QUALITY_WARNINGS[w]) }
     })
-    call.on('warning-cleared', () => { warnRef.current = '' })
+    call.on('warning-cleared', (name: unknown) => {
+      // The banner goes when the SDK says the condition is over, so it never
+      // lingers over a line that has recovered — a stale warning teaches people
+      // to ignore the one place we tell them something is wrong.
+      if (QUALITY_WARNINGS[String(name ?? '')]) setNotice('')
+      warnRef.current = ''
+    })
     call.on('disconnect', () => {
       // Never went live = the audio path never formed. Twilio kills such a call
       // after ~30 seconds of silence (error 32014, "no audio received from
@@ -130,8 +156,10 @@ export default function Softphone() {
             ? 'Call ended: no sound was leaving your microphone. Check the right microphone is selected and unmuted.'
             : w === 'low-bytes-received'
               ? 'Call ended: no sound was arriving from the other side.'
-              : 'Call ended.',
-        w ? 'error' : 'notice',
+              : qualityRef.current
+                ? 'Call ended. Your internet was dropping audio during this call, so the customer may not have heard you clearly — for the next one, move closer to the Wi-Fi router or use a cable, and close any video calls or downloads.'
+                : 'Call ended.',
+        w && !QUALITY_WARNINGS[w] ? 'error' : 'notice',
       )
     })
     call.on('cancel', () => endedTo('The caller hung up.', 'notice'))
