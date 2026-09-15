@@ -28,6 +28,35 @@ export const MIN_PHONE_DIGITS = 7
  */
 export const PHONE_KEY_DIGITS = 9
 
+/**
+ * The phone number inside whatever text arrived in the phone field.
+ *
+ * Forms label a field "Phone (optional):" and the intake parser takes the
+ * label's tail as part of the value, so leads were stored as
+ * "(optional): 6154306952" — and that exact text was handed to Twilio to dial.
+ * Every call failed a second after it started, with nothing on screen but
+ * "the call could not be connected". The same field has held an email address
+ * and "297 592 5750  (WhatsApp)".
+ *
+ * Returns the first run that has enough digits to be a real number, as digits
+ * with a leading + kept only if the customer typed one — the same shapes
+ * (10 digits, 11 digits, +11 digits) Twilio has already dialled successfully
+ * from this app. No country code is ever guessed. Null when there is no number.
+ */
+export function phoneFromText(v: string | null | undefined): string | null {
+  // "/" is deliberately NOT a joiner: "6154306952 / 6154300000" is two numbers.
+  const runs = String(v ?? '').match(/\+?\d[\d\s().-]*\d/g) ?? []
+  for (const run of runs) {
+    const d = digitsOnly(run)
+    if (d.length < MIN_PHONE_DIGITS) continue
+    // Longer than any real number (E.164 caps at 15) means two numbers were
+    // typed with spaces between them — there is no telling which to ring.
+    if (d.length > 15) return null
+    return (run.trimStart().startsWith('+') ? '+' : '') + d
+  }
+  return null
+}
+
 export function phoneKey(v: string | null | undefined): string | null {
   const d = digitsOnly(v)
   if (d.length < MIN_PHONE_DIGITS) return null

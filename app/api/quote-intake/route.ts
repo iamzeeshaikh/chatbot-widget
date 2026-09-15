@@ -5,6 +5,7 @@ import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerc
 import { isRetiredLeadSite } from '@/lib/workspaces'
 import { recordIntakeDrop } from '@/lib/intakedrop'
 import { recordIntakeLag } from '@/lib/intakelag'
+import { phoneFromText } from '@/lib/identity'
 
 export const dynamic = 'force-dynamic'
 
@@ -96,8 +97,15 @@ export async function POST(req: NextRequest) {
   }
 
   const cleanEmail = typeof email === 'string' ? email.trim() : ''
-  const cleanPhone = typeof phone === 'string' ? phone.trim() : ''
-  if (!cleanEmail && !cleanPhone) {
+  // The phone as a number, not as whatever text shared its line on the form:
+  // "Phone (optional): 6154306952" used to be stored as "(optional): 6154306952"
+  // and every call to it failed. The presence check below still looks at the
+  // RAW value, so a submission whose phone field held junk is stored (without
+  // a phone) rather than refused — a 400 here would make the Apps Script retry
+  // it on every run for ever.
+  const rawPhone = typeof phone === 'string' ? phone.trim() : ''
+  const cleanPhone = phoneFromText(rawPhone) ?? ''
+  if (!cleanEmail && !rawPhone) {
     return NextResponse.json({ error: 'email or phone required' }, { status: 400 })
   }
 

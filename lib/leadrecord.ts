@@ -45,6 +45,7 @@ import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry, splitQuoted } from './emailreply'
 import { signAttachments, type EmailAttachment } from './emailattach'
+import { phoneFromText } from './identity'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 import { payLinksInRows, redactLinks } from './paylink'
 
@@ -278,7 +279,11 @@ export async function writeControlRow(
  *  leadRecipient: an agent who may not see it still has to be able to use it. */
 export async function leadPhone(id: string): Promise<string | null> {
   const resolved = await resolveLeadSite(id)
-  if (resolved?.lead?.phone) return resolved.lead.phone.trim() || null
+  // Through phoneFromText at the one place every caller gets a number from:
+  // call, the softphone's connect/dial webhooks, WhatsApp, the WhatsApp check
+  // and the payment link all use this, and all of them need something Twilio
+  // can dial — not "(optional): 6154306952", which is what one lead held.
+  if (resolved?.lead?.phone) return phoneFromText(resolved.lead.phone)
 
   const { data } = await supabase.from('chat_logs')
     .select('role, message, created_at')
@@ -290,7 +295,7 @@ export async function leadPhone(id: string): Promise<string | null> {
     if (r.role === CONTACT_ROLE) { const c = parseContact(r.message); if (c.phone) phone = c.phone }
     else { const c = parseLeadCapture(r.message); if (c?.phone) phone = c.phone }
   }
-  return phone.trim() || null
+  return phoneFromText(phone)
 }
 
 export async function markThreadRepliesRead(
