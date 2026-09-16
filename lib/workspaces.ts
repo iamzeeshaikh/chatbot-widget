@@ -111,10 +111,13 @@ export function workspaceSites(ws: Workspace): string[] {
 // buttons used to be gated on 'records', which packaging also has, so a
 // packaging agent pressing WhatsApp would have messaged their customer FROM the
 // sports number and the reply would have landed on a sports lead.
-export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony'
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony' | 'sales'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
-  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony']),
+  // 'sales' (2026-09-16): each business keeps its own sales ledger — Model Town
+  // direct and the old lead-partner orders here, jersey sales on sports — with
+  // a master view across both for the owner accounts (lib/salescore.ts).
+  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony', 'sales']),
   // Sports carries the CRM as of 2026-08-29, at the user's request. The reason
   // it did not before was that it had nothing to run a CRM on: chat had been off
   // on all five sites since 2026-08-05 and the workspace had produced one lead
@@ -142,7 +145,7 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   //      its own screen, and the fix is a second OAuth client owned by that org,
   //      chosen per workspace. Nothing here breaks either way: an unconnectable
   //      Connect button is inert.
-  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy', 'telephony']),
+  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy', 'telephony', 'sales']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {

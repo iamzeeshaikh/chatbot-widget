@@ -59,6 +59,8 @@ export default function LeadRecordPage() {
   const [markingRead, setMarkingRead] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ok' | 'forbidden' | 'missing' | 'error'>('loading')
   const [me, setMe] = useState('')
+  // Only an admin can add a sale; the button follows the server's answer.
+  const [meRole, setMeRole] = useState('')
   const [noteDraft, setNoteDraft] = useState('')
   const [addingNote, setAddingNote] = useState(false)
   const [stageError, setStageError] = useState('')
@@ -105,7 +107,7 @@ export default function LeadRecordPage() {
     let alive = true
     fetch('/api/auth/me')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (alive && d?.email) setMe(String(d.email)) })
+      .then((d) => { if (alive && d?.email) { setMe(String(d.email)); setMeRole(String(d.role ?? '')) } })
       .catch(() => {})
     return () => { alive = false }
   }, [])
@@ -780,6 +782,15 @@ export default function LeadRecordPage() {
                   rolled-back save) re-seeds the inputs without an effect. */}
               <DealValue key={`${record.value.estimated}|${record.value.won}|${record.value.currency}`}
                 record={record} onSave={saveValue} />
+              {/* A won deal belongs in the sales ledger. The sales page fills
+                  the sale in from this lead's invoice details, and opens the
+                  existing sale instead if this lead is already there. */}
+              {record.stage === 'won' && meRole === 'admin' && (
+                <a href={`/sales?new=1&lead=${encodeURIComponent(record.id)}`}
+                  className="inline-flex items-center gap-1.5 self-start rounded-lg bg-green-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                  <Target size={13} strokeWidth={2} aria-hidden />Add to sales
+                </a>
+              )}
             </div>
           </Card>
 

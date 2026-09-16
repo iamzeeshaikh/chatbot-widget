@@ -318,6 +318,33 @@ kind of thing that stays correct only until the next site is added and one membe
 missed. Narrowing still works: pick sites and only those apply. Empty never reaches
 outside the member's own workspace.
 
+### Sales ledger: three streams, admins only, one master view for the owners
+`/sales` (added 2026-09-16). Each business keeps its own ledger — packaging has
+**Model Town Direct** (`pk_direct`) and **Old Lead Partner Orders** (`pk_partner`),
+sports has **Sports Jerseys** (`sp_direct`). The partner stream is kept apart on
+purpose: the same Model Town team sold under a different arrangement (leads sold to a
+partner, fee waived, the partner's closed orders handed to us to produce), so the
+partner owes that money, not the end customer. Never fold it into direct sales.
+- **Pure arithmetic lives in `lib/salescore.ts`** and is used by the page, the API and
+  the CSV export alike, so the three cannot disagree. Storage and the rate lookup are in
+  `lib/sales.ts` (server only). `scratch/sales-core.test.ts` (run with
+  `node --import ./scripts/ts-resolve.mjs`) and `scratch/sales-probe.mjs` cover it.
+- **Storage:** one `crm_sale` snapshot per save on the reserved `zeeops-crm` site,
+  session `zeeops-sales-<workspace>`, newest per sale id wins; delete = a snapshot with
+  `deleted: true`. The workspace is checked on write AND on read.
+- **Access:** admins of the workspace only (`canUseSales`), refused in every route.
+  `?scope=master` spans both businesses and is for `SALES_OWNERS` only; it is
+  **read-only** — a sale is edited on its own business's dashboard, and an edit by id
+  must find the sale in the caller's own ledger first.
+- **Money rules:** received / fees / net / outstanding / status are derived from the
+  payment list, never typed. Each payment carries the PKR rate it was actually
+  converted at; until one is entered, today's mid-market rate (open.er-api.com, cached
+  6h) stands in and the figure says *est.* An unpaid order's outstanding is always an
+  estimate and is not counted as "needs a rate". Refunded/cancelled sales stay listed
+  but are excluded from money totals.
+- The 11 sales that lived in spreadsheets were imported by `scratch/import-sales.mjs`
+  (idempotent). No rate was recorded for any of them — that is why they show *est.*
+
 ### Enforce access server-side
 Workspace isolation and per-member site access are decided **on the server**, in the
 API route — never only by hiding UI. A member without access to a lead's site gets
