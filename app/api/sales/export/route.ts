@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       s.product, s.size, s.material, s.printing, s.quantity, s.currency, s.orderAmount, s.rate ?? '',
       f.received, f.fees, f.net, f.outstanding, PAYMENT_STATUS_LABEL[f.status],
       s.payments.map((p) => `${p.date} ${p.amount} (fee ${p.fee}, ${p.method}${p.rate ? `, @${p.rate}` : ''})`).join('; '),
-      f.netPkr, f.outstandingPkr, f.costPkr, f.profitPkr, s.agreedProfit ? `${s.agreedProfit.amount} ${s.agreedProfit.currency}` : '', f.estimated || f.incomplete ? 'yes' : 'no',
+      f.netPkr, f.outstandingPkr, f.costPkr, f.profitKnown ? f.profitPkr : 'costing pending', s.agreedProfit ? `${s.agreedProfit.amount} ${s.agreedProfit.currency}` : '', f.estimated || f.incomplete ? 'yes' : 'no',
       s.production ? PRODUCTION_LABEL[s.production] : '', s.salesPerson, s.source, s.counterparty, s.notes,
     ]
   })

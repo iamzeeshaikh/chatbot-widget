@@ -399,6 +399,13 @@ function Stat({ label, value, hint, tone = 'default' }: { label: string; value: 
   )
 }
 
+/** Profit is only summed over sales whose costing is in; say what is left out. */
+function profitHint(t: StreamTotals): string {
+  const pending = t.awaitingCosting ? `${t.awaitingCosting} sale${t.awaitingCosting === 1 ? '' : 's'} awaiting costing` : ''
+  if (!t.profitSales) return pending || 'no open sales'
+  return [pending, t.profitEstimated ? 'estimated' : 'at locked rates'].filter(Boolean).join(' · ')
+}
+
 function TotalsGrid({ t }: { t: StreamTotals }) {
   const est = t.estimated || t.incomplete
   return (
@@ -412,8 +419,8 @@ function TotalsGrid({ t }: { t: StreamTotals }) {
         tone={t.outstandingUsd > 0 ? 'warn' : 'default'} />
       <Stat label="Revenue (PKR)" value={money(t.revenuePkr, 'PKR')} hint={est ? 'includes estimates' : 'at locked rates'} />
       <Stat label="Cost (PKR)" value={money(t.costPkr, 'PKR')} hint="production + other" />
-      <Stat label="Profit (PKR)" value={money(t.profitPkr, 'PKR')}
-        hint={t.needsRate ? `${t.needsRate} sale${t.needsRate === 1 ? '' : 's'} still need a rate` : est ? 'estimated' : 'at locked rates'}
+      <Stat label="Profit (PKR)" value={t.profitSales ? money(t.profitPkr, 'PKR') : '—'}
+        hint={profitHint(t)}
         tone={t.profitPkr < 0 ? 'bad' : 'good'} />
     </div>
   )
@@ -450,7 +457,10 @@ function MasterBreakdown({ data, onPick }: { data: Payload; onPick: (k: SalesStr
                   <td className="px-3 py-2 text-right tabular-nums">{money(t.receivedUsd, 'USD')}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{money(t.netUsd, 'USD')}</td>
                   <td className={`px-3 py-2 text-right tabular-nums ${t.outstandingUsd > 0 ? 'text-amber-700 font-semibold' : ''}`}>{money(t.outstandingUsd, 'USD')}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{money(t.profitPkr, 'PKR')}{t.estimated || t.incomplete ? <span className="text-[10px] text-amber-700"> est.</span> : null}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {t.profitSales ? money(t.profitPkr, 'PKR') : '—'}{t.profitSales && t.profitEstimated ? <span className="text-[10px] text-amber-700"> est.</span> : null}
+                    {t.awaitingCosting > 0 && <p className="text-[10px] font-normal text-gray-500">{t.awaitingCosting} awaiting costing</p>}
+                  </td>
                 </tr>
               )
             })}
@@ -461,7 +471,10 @@ function MasterBreakdown({ data, onPick }: { data: Payload; onPick: (k: SalesStr
               <td className="px-3 py-2 text-right tabular-nums">{money(data.all.receivedUsd, 'USD')}</td>
               <td className="px-3 py-2 text-right tabular-nums">{money(data.all.netUsd, 'USD')}</td>
               <td className="px-3 py-2 text-right tabular-nums">{money(data.all.outstandingUsd, 'USD')}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{money(data.all.profitPkr, 'PKR')}</td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {data.all.profitSales ? money(data.all.profitPkr, 'PKR') : '—'}
+                {data.all.awaitingCosting > 0 && <p className="text-[10px] font-normal text-gray-500">{data.all.awaitingCosting} awaiting costing</p>}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -532,6 +545,9 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                   {s.production && <p className="mt-0.5 text-[10px] text-gray-500">{PRODUCTION_LABEL[s.production]}</p>}
                 </td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.profitPkr < 0 ? 'text-red-700' : 'text-gray-900'}`}>
+                  {!f.profitKnown ? (
+                    <><span className="text-gray-400">—</span><p className="text-[10px] text-gray-500">costing pending</p></>
+                  ) : <>
                   {money(f.profitPkr, 'PKR')}
                   {f.profit.currency !== 'PKR' ? (
                     <p className="text-[10px] text-gray-500">{money(f.profit.amount, f.profit.currency)}{f.profitEstimated ? <span className="text-amber-700"> · est.</span> : null}</p>
@@ -540,6 +556,7 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                       {f.incomplete ? 'rate missing' : 'est.'}
                     </p>
                   )}
+                  </>}
                 </td>
               </tr>
             )
@@ -621,8 +638,8 @@ function SaleEditor({ form, setForm, data, onClose, onSaved }: {
             <Stat label="Status" value={PAYMENT_STATUS_LABEL[live.status]} />
             <Stat label="Revenue (PKR)" value={money(live.revenuePkr, 'PKR')} />
             <Stat label="Cost (PKR)" value={money(live.costPkr, 'PKR')} />
-            <Stat label="Profit (PKR)" value={money(live.profitPkr, 'PKR')} tone={live.profitPkr < 0 ? 'bad' : 'good'}
-              hint={`${live.profit.currency !== 'PKR' ? `${money(live.profit.amount, live.profit.currency)} · ` : ''}${form.profitAmount ? 'as agreed' : live.incomplete ? 'a rate is missing' : live.profitEstimated ? 'estimated' : 'at locked rates'}`} />
+            <Stat label="Profit (PKR)" value={live.profitKnown ? money(live.profitPkr, 'PKR') : '—'} tone={!live.profitKnown ? 'default' : live.profitPkr < 0 ? 'bad' : 'good'}
+              hint={!live.profitKnown ? 'add a cost or the agreed profit' : `${live.profit.currency !== 'PKR' ? `${money(live.profit.amount, live.profit.currency)} · ` : ''}${form.profitAmount ? 'as agreed' : live.incomplete ? 'a rate is missing' : live.profitEstimated ? 'estimated' : 'at locked rates'}`} />
             <Stat label="Net received (PKR)" value={money(live.netPkr, 'PKR')} />
           </div>
           {live.needsRate.length > 0 && (
@@ -848,7 +865,7 @@ function SaleViewer({ view, onClose }: { view: SaleView; onClose: () => void }) 
           {line('Payments', s.payments.map((p) => `${shortDate(p.date)} — ${money(p.amount, s.currency)} via ${PAYMENT_METHOD_LABEL[p.method]}${p.rate ? ` @ Rs ${p.rate}` : ''}`).join('; '))}
           {line('Costs', s.costs.map((c) => `${c.label}: ${money(c.amount, c.currency)}`).join('; '))}
           {line('Revenue (PKR)', money(f.revenuePkr, 'PKR'))}
-          {line('Profit (PKR)', `${money(f.profitPkr, 'PKR')}${f.profit.currency !== 'PKR' ? ` (${money(f.profit.amount, f.profit.currency)})` : ''}${f.profitEstimated ? ' (est.)' : ''}${s.agreedProfit ? ' — as agreed' : ''}`)}
+          {line('Profit (PKR)', !f.profitKnown ? 'Costing pending' : `${money(f.profitPkr, 'PKR')}${f.profit.currency !== 'PKR' ? ` (${money(f.profit.amount, f.profit.currency)})` : ''}${f.profitEstimated ? ' (est.)' : ''}${s.agreedProfit ? ' — as agreed' : ''}`)}
           {line('Production', s.production ? PRODUCTION_LABEL[s.production] : '')}
           {line('Owed by', s.counterparty)}
           {line('Sales person', s.salesPerson)}

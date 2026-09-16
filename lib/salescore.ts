@@ -241,6 +241,12 @@ export interface SaleFigures {
   profitPkr: number
   /** The profit to show, in its own currency — the agreed one when set, else profitPkr in PKR. */
   profit: { amount: number; currency: SaleCurrency }
+  /**
+   * False while the costing has not come in (no cost, no agreed profit): the
+   * profit is unknown, not "everything received". profitPkr is 0 then and
+   * must be shown as pending, never as a number.
+   */
+  profitKnown: boolean
   /** The profit's PKR figure leans on today's rate. */
   profitEstimated: boolean
   /** Some part used today's rate instead of a locked one. */
@@ -293,7 +299,12 @@ export function figures(s: Sale, suggested: PkrRates | null): SaleFigures {
   let profitPkr = revenuePkr - costPkr
   let profit: { amount: number; currency: SaleCurrency } = { amount: Math.round(profitPkr), currency: 'PKR' }
   let profitEstimated = estimated || incomplete
-  if (s.agreedProfit && !closed) {
+  const profitKnown = closed || !!s.agreedProfit || s.costs.length > 0
+  if (!profitKnown) {
+    profitPkr = 0
+    profit = { amount: 0, currency: 'PKR' }
+    profitEstimated = false
+  } else if (s.agreedProfit && !closed) {
     const a = s.agreedProfit
     const v = toPkr(a.amount, a.currency, a.currency === s.currency ? agreed : null, suggested)
     profitPkr = v.value
@@ -309,7 +320,7 @@ export function figures(s: Sale, suggested: PkrRates | null): SaleFigures {
     revenuePkr: Math.round(revenuePkr),
     costPkr: Math.round(costPkr),
     profitPkr: Math.round(profitPkr),
-    profit, profitEstimated,
+    profit, profitKnown, profitEstimated,
     estimated, incomplete, needsRate,
   }
 }
@@ -328,7 +339,11 @@ export interface StreamTotals {
   outstandingUsd: number
   revenuePkr: number
   costPkr: number
+  /** Summed over open sales whose costing is in; the rest are counted in awaitingCosting. */
   profitPkr: number
+  profitSales: number
+  awaitingCosting: number
+  profitEstimated: boolean
   awaitingPayment: number
   needsRate: number
   estimated: boolean
@@ -348,7 +363,7 @@ export function totals(views: SaleView[], suggested: PkrRates | null): StreamTot
   const t: StreamTotals = {
     orders: views.length, open: 0, closed: 0,
     orderValueUsd: 0, receivedUsd: 0, feesUsd: 0, netUsd: 0, outstandingUsd: 0,
-    revenuePkr: 0, costPkr: 0, profitPkr: 0,
+    revenuePkr: 0, costPkr: 0, profitPkr: 0, profitSales: 0, awaitingCosting: 0, profitEstimated: false,
     awaitingPayment: 0, needsRate: 0, estimated: false, incomplete: false,
   }
   for (const { sale: s, fig: f } of views) {
@@ -366,7 +381,11 @@ export function totals(views: SaleView[], suggested: PkrRates | null): StreamTot
     t.outstandingUsd += usd(f.outstanding)
     t.revenuePkr += f.revenuePkr
     t.costPkr += f.costPkr
-    t.profitPkr += f.profitPkr
+    if (f.profitKnown) {
+      t.profitPkr += f.profitPkr
+      t.profitSales++
+      t.profitEstimated ||= f.profitEstimated
+    } else t.awaitingCosting++
     if (f.status === 'pending' || f.status === 'partial') t.awaitingPayment++
     if (f.needsRate.length) t.needsRate++
     t.estimated ||= f.estimated
