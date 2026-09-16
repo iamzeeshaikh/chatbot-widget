@@ -59,6 +59,8 @@ interface SaleForm {
   currency: SaleCurrency
   orderAmount: string
   rate: string
+  profitAmount: string
+  profitCurrency: SaleCurrency
   payments: PayForm[]
   costs: CostForm[]
   statusOverride: '' | 'refunded' | 'cancelled'
@@ -77,7 +79,7 @@ function blankForm(stream: SalesStream): SaleForm {
     customer: '', company: '', email: '', phone: '', country: '',
     orderDate: todayKey(),
     product: '', size: '', material: '', printing: '', quantity: '',
-    currency: 'USD', orderAmount: '', rate: '',
+    currency: 'USD', orderAmount: '', rate: '', profitAmount: '', profitCurrency: 'PKR',
     payments: [], costs: [],
     statusOverride: '', production: '',
     salesPerson: '', source: stream === 'pk_partner' ? 'Old lead-selling arrangement' : '',
@@ -92,6 +94,7 @@ function formFromSale(s: Sale): SaleForm {
     orderDate: s.orderDate,
     product: s.product, size: s.size, material: s.material, printing: s.printing, quantity: s.quantity,
     currency: s.currency, orderAmount: str(s.orderAmount), rate: str(s.rate ?? null),
+    profitAmount: str(s.agreedProfit?.amount ?? null), profitCurrency: s.agreedProfit?.currency ?? 'PKR',
     payments: s.payments.map((p) => ({ id: p.id, date: p.date, amount: str(p.amount), fee: str(p.fee), method: p.method, rate: str(p.rate), note: p.note })),
     costs: s.costs.map((c) => ({ id: c.id, label: c.label, amount: str(c.amount), currency: c.currency, rate: str(c.rate), note: c.note })),
     statusOverride: s.statusOverride ?? '',
@@ -109,6 +112,7 @@ function saleFromForm(f: SaleForm, ws: Workspace): Sale {
     orderDate: f.orderDate, product: f.product, size: f.size, material: f.material, printing: f.printing,
     quantity: f.quantity, currency: f.currency, orderAmount: parseAmount(f.orderAmount) ?? 0,
     rate: f.currency === 'PKR' ? null : parseAmount(f.rate),
+    agreedProfit: parseAmount(f.profitAmount) ? { amount: parseAmount(f.profitAmount)!, currency: f.profitCurrency } : null,
     payments: f.payments
       .map((p) => ({ id: p.id, date: p.date, amount: parseAmount(p.amount) ?? 0, fee: parseAmount(p.fee) ?? 0, method: p.method, rate: f.currency === 'PKR' ? null : parseAmount(p.rate), note: p.note }))
       .filter((p) => p.amount > 0),
@@ -470,7 +474,7 @@ function RateNote({ rates }: { rates: RateInfo | null }) {
   return (
     <p className="mb-3 text-[11px] text-gray-500">
       {rates?.rates.USD
-        ? <>Today&apos;s suggested rate: <b className="tabular-nums text-gray-700">1 USD = Rs {rates.rates.USD}</b> ({rates.source}). It fills in only where neither the payment (or cost) nor the sale has an agreed rate — those figures say <i>est.</i> Put the rate you actually converted at on each payment, or the deal's agreed rate on the sale, to lock it.</>
+        ? <>Today&apos;s suggested rate: <b className="tabular-nums text-gray-700">1 USD = Rs {rates.rates.USD}</b> ({rates.source}). It fills in only where neither the payment (or cost) nor the sale has an agreed rate — those figures say <i>est.</i> Put the rate you actually converted at on each payment, or the deal&apos;s agreed rate on the sale, to lock it.</>
         : <>Today&apos;s rate could not be fetched, so any payment without its own rate cannot be converted to PKR yet.</>}
     </p>
   )
@@ -527,8 +531,10 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                   {s.production && <p className="mt-0.5 text-[10px] text-gray-500">{PRODUCTION_LABEL[s.production]}</p>}
                 </td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.profitPkr < 0 ? 'text-red-700' : 'text-gray-900'}`}>
-                  {money(f.profitPkr, 'PKR')}
-                  {(f.estimated || f.incomplete) && (
+                  {money(f.profit.amount, f.profit.currency)}
+                  {f.profit.currency !== 'PKR' ? (
+                    <p className="text-[10px] text-gray-500">≈ {money(f.profitPkr, 'PKR')}{f.profitEstimated ? <span className="text-amber-700"> est.</span> : null}</p>
+                  ) : f.profitEstimated && (
                     <p className="text-[10px] text-amber-700" title={f.needsRate.length ? `Needs a rate: ${f.needsRate.join(', ')}` : undefined}>
                       {f.incomplete ? 'rate missing' : 'est.'}
                     </p>
@@ -614,8 +620,8 @@ function SaleEditor({ form, setForm, data, onClose, onSaved }: {
             <Stat label="Status" value={PAYMENT_STATUS_LABEL[live.status]} />
             <Stat label="Revenue (PKR)" value={money(live.revenuePkr, 'PKR')} />
             <Stat label="Cost (PKR)" value={money(live.costPkr, 'PKR')} />
-            <Stat label="Profit (PKR)" value={money(live.profitPkr, 'PKR')} tone={live.profitPkr < 0 ? 'bad' : 'good'}
-              hint={live.incomplete ? 'a rate is missing' : live.estimated ? 'estimated' : 'at locked rates'} />
+            <Stat label="Profit" value={money(live.profit.amount, live.profit.currency)} tone={live.profitPkr < 0 ? 'bad' : 'good'}
+              hint={`${live.profit.currency !== 'PKR' ? `≈ ${money(live.profitPkr, 'PKR')} · ` : ''}${form.profitAmount ? 'as agreed' : live.incomplete ? 'a rate is missing' : live.profitEstimated ? 'estimated' : 'at locked rates'}`} />
             <Stat label="Net received (PKR)" value={money(live.netPkr, 'PKR')} />
           </div>
           {live.needsRate.length > 0 && (
@@ -747,6 +753,18 @@ function SaleEditor({ form, setForm, data, onClose, onSaved }: {
             </div>
           </Card>
 
+          <Card title="Agreed profit">
+            <div className="p-3">
+              <div className="flex gap-2">
+                <select className={`${INLINE} w-24`} value={form.profitCurrency} onChange={(e) => set('profitCurrency', e.target.value as SaleCurrency)} aria-label="Profit currency">
+                  {SALE_CURRENCIES.map((x) => <option key={x} value={x}>{x}</option>)}
+                </select>
+                <input className={`${INLINE} flex-1`} inputMode="decimal" value={form.profitAmount} onChange={(e) => set('profitAmount', e.target.value)} placeholder="Leave empty to work it out from the costs" aria-label="Agreed profit" />
+              </div>
+              <p className="mt-1 text-[10px] text-gray-500">Only when the deal or the sheet states the profit (e.g. 172k PKR). It is shown exactly as entered.</p>
+            </div>
+          </Card>
+
           <Card title="Status & source">
             <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Payment status">
@@ -829,7 +847,7 @@ function SaleViewer({ view, onClose }: { view: SaleView; onClose: () => void }) 
           {line('Payments', s.payments.map((p) => `${shortDate(p.date)} — ${money(p.amount, s.currency)} via ${PAYMENT_METHOD_LABEL[p.method]}${p.rate ? ` @ Rs ${p.rate}` : ''}`).join('; '))}
           {line('Costs', s.costs.map((c) => `${c.label}: ${money(c.amount, c.currency)}`).join('; '))}
           {line('Revenue (PKR)', money(f.revenuePkr, 'PKR'))}
-          {line('Profit (PKR)', `${money(f.profitPkr, 'PKR')}${f.estimated || f.incomplete ? ' (est.)' : ''}`)}
+          {line('Profit', `${money(f.profit.amount, f.profit.currency)}${f.profit.currency !== 'PKR' ? ` (≈ ${money(f.profitPkr, 'PKR')})` : ''}${f.profitEstimated ? ' (est.)' : ''}${s.agreedProfit ? ' — as agreed' : ''}`)}
           {line('Production', s.production ? PRODUCTION_LABEL[s.production] : '')}
           {line('Sales person', s.salesPerson)}
           {line('Source', s.source)}

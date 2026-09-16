@@ -174,6 +174,12 @@ export interface Sale {
    * sales saved before it existed.
    */
   rate?: number | null
+  /**
+   * The profit exactly as the deal or the source sheet states it ("172k pkr",
+   * "$2,496"). When set it IS the profit — shown as written, not recomputed
+   * from revenue minus costs. Absent on sales saved before it existed.
+   */
+  agreedProfit?: { amount: number; currency: SaleCurrency } | null
   payments: SalePayment[]
   costs: SaleCost[]
   /** Set by hand; otherwise the status follows the payments. */
@@ -233,6 +239,10 @@ export interface SaleFigures {
   revenuePkr: number
   costPkr: number
   profitPkr: number
+  /** The profit to show, in its own currency — the agreed one when set, else profitPkr in PKR. */
+  profit: { amount: number; currency: SaleCurrency }
+  /** The profit's PKR figure leans on today's rate. */
+  profitEstimated: boolean
   /** Some part used today's rate instead of a locked one. */
   estimated: boolean
   /** Some part could not be converted at all. */
@@ -280,13 +290,26 @@ export function figures(s: Sale, suggested: PkrRates | null): SaleFigures {
   }
 
   const revenuePkr = netPkr + out.value
+  let profitPkr = revenuePkr - costPkr
+  let profit: { amount: number; currency: SaleCurrency } = { amount: Math.round(profitPkr), currency: 'PKR' }
+  let profitEstimated = estimated || incomplete
+  if (s.agreedProfit && !closed) {
+    const a = s.agreedProfit
+    const v = toPkr(a.amount, a.currency, a.currency === s.currency ? agreed : null, suggested)
+    profitPkr = v.value
+    profit = { amount: a.amount, currency: a.currency }
+    profitEstimated = v.estimated || v.missing
+    estimated ||= v.estimated
+    incomplete ||= v.missing
+  }
   return {
     received, fees, net, outstanding, status, closed,
     netPkr: Math.round(netPkr),
     outstandingPkr: Math.round(out.value),
     revenuePkr: Math.round(revenuePkr),
     costPkr: Math.round(costPkr),
-    profitPkr: Math.round(revenuePkr - costPkr),
+    profitPkr: Math.round(profitPkr),
+    profit, profitEstimated,
     estimated, incomplete, needsRate,
   }
 }
@@ -371,7 +394,9 @@ export function parseAmount(v: unknown): number | null {
   // saved a $0 sale instead of being refused.
   const cleaned = typeof v === 'number' ? null : String(v).replace(/[^0-9.-]/g, '')
   if (cleaned !== null && !/\d/.test(cleaned)) return null
-  const n = typeof v === 'number' ? v : Number(cleaned)
+  // "31.8k" / "172k pkr" — how the sheets write thousands.
+  const thousands = typeof v === 'string' && /\d\s*k\b/i.test(v)
+  const n = typeof v === 'number' ? v : Number(cleaned) * (thousands ? 1000 : 1)
   if (!Number.isFinite(n) || n < 0 || n > MAX_AMOUNT) return null
   return round2(n)
 }
@@ -441,6 +466,10 @@ export function cleanSale(
     })
   }
 
+  const ap = (r.agreedProfit ?? null) as Record<string, unknown> | null
+  const apAmount = ap ? parseAmount(ap.amount) : null
+  const agreedProfit = ap && apAmount ? { amount: apAmount, currency: currency(ap.currency) } : null
+
   const override = r.statusOverride === 'refunded' || r.statusOverride === 'cancelled' ? r.statusOverride : null
   const production = (PRODUCTION_STATUSES as readonly string[]).includes(String(r.production))
     ? (r.production as ProductionStatus) : null
@@ -465,6 +494,7 @@ export function cleanSale(
       currency: cur,
       orderAmount,
       rate: cur === 'PKR' ? null : parseRate(r.rate),
+      agreedProfit,
       payments, costs,
       statusOverride: override,
       production,
