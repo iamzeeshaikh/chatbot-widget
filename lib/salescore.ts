@@ -85,8 +85,10 @@ export function canUseSales(m: Pick<Member, 'role' | 'workspace'> | null | undef
   return !!m && m.role === 'admin' && hasFeature(m.workspace, 'sales')
 }
 
+// The master view lives on the packaging dashboard only: on sports the owners
+// see just the sports ledger, like everyone else there.
 export function isSalesOwner(m: Pick<Member, 'role' | 'workspace' | 'email'> | null | undefined): boolean {
-  return canUseSales(m) && SALES_OWNERS.includes(String(m?.email ?? '').trim().toLowerCase())
+  return canUseSales(m) && m?.workspace === 'packaging' && SALES_OWNERS.includes(String(m?.email ?? '').trim().toLowerCase())
 }
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
