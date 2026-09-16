@@ -537,7 +537,7 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(s.orderAmount, s.currency)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
                   {money(f.received, s.currency)}
-                  {f.fees > 0 && <p className="text-[10px] text-gray-500">net {money(f.net, s.currency)}</p>}
+                  {f.fees > 0 && <p className="text-[10px] text-gray-500">fee −{money(f.fees, s.currency)} · net {money(f.net, s.currency)}</p>}
                 </td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.outstanding > 0 ? 'text-amber-700 font-semibold' : 'text-gray-500'}`}>{money(f.outstanding, s.currency)}</td>
                 <td className="px-3 py-2 whitespace-nowrap">
