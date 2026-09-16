@@ -3,7 +3,7 @@
 // Sales — /sales.
 //
 // One ledger per business, three streams, and a master view for the owner:
-//   packaging  → Model Town Direct · Lead Partner Orders
+//   packaging  → Model Town Direct · Hamdan — Partner Orders
 //   sports     → Sports Jerseys
 //   owners     → Master: all three side by side, then combined
 //
@@ -83,7 +83,7 @@ function blankForm(stream: SalesStream): SaleForm {
     payments: [], costs: [],
     statusOverride: '', production: '',
     salesPerson: '', source: stream === 'pk_partner' ? 'Old lead-selling arrangement' : '',
-    counterparty: '', leadId: '', notes: '',
+    counterparty: stream === 'pk_partner' ? 'Hamdan' : '', leadId: '', notes: '',
   }
 }
 
@@ -514,6 +514,7 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                   </button>
                   {readOnly && <Lock className="inline w-3 h-3 ml-1 text-gray-400" aria-label="Read-only here" />}
                   <p className="text-[10px] text-gray-500">{[s.reference, s.company].filter(Boolean).join(' · ') || '—'}</p>
+                  {s.counterparty && <p className="text-[10px] text-gray-600">Owed by <b className="font-semibold">{s.counterparty}</b></p>}
                 </td>
                 {showStream && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{STREAMS[s.stream].short}</td>}
                 <td className="px-3 py-2 min-w-[8rem] text-gray-700">
@@ -849,6 +850,7 @@ function SaleViewer({ view, onClose }: { view: SaleView; onClose: () => void }) 
           {line('Revenue (PKR)', money(f.revenuePkr, 'PKR'))}
           {line('Profit', `${money(f.profit.amount, f.profit.currency)}${f.profit.currency !== 'PKR' ? ` (≈ ${money(f.profitPkr, 'PKR')})` : ''}${f.profitEstimated ? ' (est.)' : ''}${s.agreedProfit ? ' — as agreed' : ''}`)}
           {line('Production', s.production ? PRODUCTION_LABEL[s.production] : '')}
+          {line('Owed by', s.counterparty)}
           {line('Sales person', s.salesPerson)}
           {line('Source', s.source)}
           {line('Notes', s.notes)}

@@ -53,8 +53,8 @@ export const STREAMS: Record<SalesStream, StreamInfo> = {
   },
   pk_partner: {
     key: 'pk_partner', workspace: 'packaging',
-    label: 'Packaging — Old Lead Partner Orders', short: 'Lead Partner Orders',
-    blurb: 'Orders the old lead-buying partner closed from our leads and gave us to produce. The partner owes these payments.',
+    label: 'Packaging — Old Lead Partner Orders (Hamdan)', short: 'Hamdan — Partner Orders',
+    blurb: 'Orders the old lead-buying partner, Hamdan, closed from our leads and gave us to produce. The partner owes these payments.',
   },
   sp_direct: {
     key: 'sp_direct', workspace: 'sports',
