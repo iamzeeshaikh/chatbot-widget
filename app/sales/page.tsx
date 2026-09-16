@@ -413,11 +413,11 @@ function TotalsGrid({ t }: { t: StreamTotals }) {
       <Stat label="Orders" value={String(t.open)} hint={t.closed ? `+${t.closed} refunded / cancelled` : 'open orders'} />
       <Stat label="Order value" value={money(t.orderValueUsd, 'USD')} hint="open orders, USD" />
       <Stat label="Received" value={money(t.receivedUsd, 'USD')} hint={`fees ${money(t.feesUsd, 'USD')}`} />
-      <Stat label="Net received" value={money(t.netUsd, 'USD')} hint="after PayPal / Wise fees" tone="good" />
+      <Stat label="Net received" value={money(t.netUsd, 'USD')} hint="after merchant fees" tone="good" />
       <Stat label="Outstanding" value={money(t.outstandingUsd, 'USD')}
         hint={t.awaitingPayment ? `${t.awaitingPayment} awaiting payment` : 'nothing owed'}
         tone={t.outstandingUsd > 0 ? 'warn' : 'default'} />
-      <Stat label="PayPal / Wise fees" value={t.feesUsd > 0 ? `−${money(t.feesUsd, 'USD')}` : money(0, 'USD')} hint="cut from payments received" tone={t.feesUsd > 0 ? 'bad' : 'default'} />
+      <Stat label="Merchant fees" value={t.feesUsd > 0 ? `−${money(t.feesUsd, 'USD')}` : money(0, 'USD')} hint="PayPal · Wise · Payoneer cuts" tone={t.feesUsd > 0 ? 'bad' : 'default'} />
       <Stat label="Revenue (PKR)" value={money(t.revenuePkr, 'PKR')} hint={est ? 'includes estimates' : 'at locked rates'} />
       <Stat label="Cost (PKR)" value={money(t.costPkr, 'PKR')} hint="production + other" />
       <Stat label="Profit (PKR)" value={t.profitSales ? money(t.profitPkr, 'PKR') : '—'}
@@ -438,7 +438,7 @@ function MasterBreakdown({ data, onPick }: { data: Payload; onPick: (k: SalesStr
               <th className="px-3 py-2 font-semibold text-right">Orders</th>
               <th className="px-3 py-2 font-semibold text-right">Order value</th>
               <th className="px-3 py-2 font-semibold text-right">Received</th>
-              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">PayPal fee</th>
+              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Merchant fee</th>
               <th className="px-3 py-2 font-semibold text-right">Net</th>
               <th className="px-3 py-2 font-semibold text-right">Outstanding</th>
               <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Profit (PKR)</th>
@@ -513,7 +513,7 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
             <th className="px-3 py-2 font-semibold">Product</th>
             <th className="px-3 py-2 font-semibold text-right">Order</th>
             <th className="px-3 py-2 font-semibold text-right">Received</th>
-            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">PayPal fee</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Merchant fee</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Net received</th>
             <th className="px-3 py-2 font-semibold text-right">Outstanding</th>
             <th className="px-3 py-2 font-semibold">Status</th>
@@ -542,7 +542,10 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(s.orderAmount, s.currency)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(f.received, s.currency)}</td>
-                <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.fees > 0 ? 'text-red-700' : 'text-gray-400'}`}>{f.fees > 0 ? `−${money(f.fees, s.currency)}` : money(0, s.currency)}</td>
+                <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.fees > 0 ? 'text-red-700' : 'text-gray-400'}`}>
+                  {f.fees > 0 ? `−${money(f.fees, s.currency)}` : money(0, s.currency)}
+                  {s.payments.length > 0 && <p className="text-[10px] text-gray-500">{[...new Set(s.payments.map((p) => PAYMENT_METHOD_LABEL[p.method]))].join(' · ')}</p>}
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap font-semibold text-green-700">{money(f.net, s.currency)}</td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.outstanding > 0 ? 'text-amber-700 font-semibold' : 'text-gray-500'}`}>{money(f.outstanding, s.currency)}</td>
                 <td className="px-3 py-2 whitespace-nowrap">
