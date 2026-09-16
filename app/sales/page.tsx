@@ -417,6 +417,7 @@ function TotalsGrid({ t }: { t: StreamTotals }) {
       <Stat label="Outstanding" value={money(t.outstandingUsd, 'USD')}
         hint={t.awaitingPayment ? `${t.awaitingPayment} awaiting payment` : 'nothing owed'}
         tone={t.outstandingUsd > 0 ? 'warn' : 'default'} />
+      <Stat label="PayPal / Wise fees" value={t.feesUsd > 0 ? `−${money(t.feesUsd, 'USD')}` : money(0, 'USD')} hint="cut from payments received" tone={t.feesUsd > 0 ? 'bad' : 'default'} />
       <Stat label="Revenue (PKR)" value={money(t.revenuePkr, 'PKR')} hint={est ? 'includes estimates' : 'at locked rates'} />
       <Stat label="Cost (PKR)" value={money(t.costPkr, 'PKR')} hint="production + other" />
       <Stat label="Profit (PKR)" value={t.profitSales ? money(t.profitPkr, 'PKR') : '—'}
@@ -437,9 +438,10 @@ function MasterBreakdown({ data, onPick }: { data: Payload; onPick: (k: SalesStr
               <th className="px-3 py-2 font-semibold text-right">Orders</th>
               <th className="px-3 py-2 font-semibold text-right">Order value</th>
               <th className="px-3 py-2 font-semibold text-right">Received</th>
+              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">PayPal fee</th>
               <th className="px-3 py-2 font-semibold text-right">Net</th>
               <th className="px-3 py-2 font-semibold text-right">Outstanding</th>
-              <th className="px-3 py-2 font-semibold text-right">Profit (PKR)</th>
+              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Profit (PKR)</th>
             </tr>
           </thead>
           <tbody>
@@ -455,6 +457,7 @@ function MasterBreakdown({ data, onPick }: { data: Payload; onPick: (k: SalesStr
                   <td className="px-3 py-2 text-right tabular-nums">{t.open}{t.closed ? <span className="text-gray-400"> +{t.closed}</span> : null}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{money(t.orderValueUsd, 'USD')}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{money(t.receivedUsd, 'USD')}</td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${t.feesUsd > 0 ? 'text-red-700' : ''}`}>{t.feesUsd > 0 ? `−${money(t.feesUsd, 'USD')}` : money(0, 'USD')}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{money(t.netUsd, 'USD')}</td>
                   <td className={`px-3 py-2 text-right tabular-nums ${t.outstandingUsd > 0 ? 'text-amber-700 font-semibold' : ''}`}>{money(t.outstandingUsd, 'USD')}</td>
                   <td className="px-3 py-2 text-right tabular-nums">
@@ -469,6 +472,7 @@ function MasterBreakdown({ data, onPick }: { data: Payload; onPick: (k: SalesStr
               <td className="px-3 py-2 text-right tabular-nums">{data.all.open}</td>
               <td className="px-3 py-2 text-right tabular-nums">{money(data.all.orderValueUsd, 'USD')}</td>
               <td className="px-3 py-2 text-right tabular-nums">{money(data.all.receivedUsd, 'USD')}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-red-700">−{money(data.all.feesUsd, 'USD')}</td>
               <td className="px-3 py-2 text-right tabular-nums">{money(data.all.netUsd, 'USD')}</td>
               <td className="px-3 py-2 text-right tabular-nums">{money(data.all.outstandingUsd, 'USD')}</td>
               <td className="px-3 py-2 text-right tabular-nums">
@@ -509,9 +513,11 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
             <th className="px-3 py-2 font-semibold">Product</th>
             <th className="px-3 py-2 font-semibold text-right">Order</th>
             <th className="px-3 py-2 font-semibold text-right">Received</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">PayPal fee</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Net received</th>
             <th className="px-3 py-2 font-semibold text-right">Outstanding</th>
             <th className="px-3 py-2 font-semibold">Status</th>
-            <th className="px-3 py-2 font-semibold text-right">Profit (PKR)</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Profit (PKR)</th>
           </tr>
         </thead>
         <tbody>
@@ -535,10 +541,9 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                   {s.quantity && <span className="text-gray-500"> · {s.quantity}</span>}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(s.orderAmount, s.currency)}</td>
-                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
-                  {money(f.received, s.currency)}
-                  {f.fees > 0 && <p className="text-[10px] text-gray-500">fee −{money(f.fees, s.currency)} · net {money(f.net, s.currency)}</p>}
-                </td>
+                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(f.received, s.currency)}</td>
+                <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.fees > 0 ? 'text-red-700' : 'text-gray-400'}`}>{f.fees > 0 ? `−${money(f.fees, s.currency)}` : money(0, s.currency)}</td>
+                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap font-semibold text-green-700">{money(f.net, s.currency)}</td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.outstanding > 0 ? 'text-amber-700 font-semibold' : 'text-gray-500'}`}>{money(f.outstanding, s.currency)}</td>
                 <td className="px-3 py-2 whitespace-nowrap">
                   <span className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold ${PAYMENT_STATUS_STYLE[f.status]}`}>{PAYMENT_STATUS_LABEL[f.status]}</span>
