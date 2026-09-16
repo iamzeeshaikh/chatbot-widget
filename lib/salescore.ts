@@ -166,6 +166,14 @@ export interface Sale {
   quantity: string
   currency: SaleCurrency
   orderAmount: number
+  /**
+   * PKR per one unit of the order currency, when the DEAL fixed one — the old
+   * lead-partner orders were all worked out at 275. It converts the unpaid
+   * amount, any payment without a rate of its own, and any cost in the order's
+   * currency, and none of those is an estimate while it is set. Absent on
+   * sales saved before it existed.
+   */
+  rate?: number | null
   payments: SalePayment[]
   costs: SaleCost[]
   /** Set by hand; otherwise the status follows the payments. */
@@ -220,7 +228,7 @@ export interface SaleFigures {
   closed: boolean
   /** Net received in PKR, at each payment's own rate. */
   netPkr: number
-  /** Outstanding in PKR at today's rate — always an estimate. */
+  /** Outstanding in PKR — at the agreed rate if the deal fixed one, else today's (an estimate). */
   outstandingPkr: number
   revenuePkr: number
   costPkr: number
@@ -246,21 +254,25 @@ export function figures(s: Sale, suggested: PkrRates | null): SaleFigures {
   let incomplete = false
   const needsRate: string[] = []
 
+  // A payment's own rate beats the agreed one: it is what that money was
+  // actually converted at.
+  const agreed = s.currency === 'PKR' ? null : (s.rate ?? null)
+
   let netPkr = 0
   for (const p of s.payments) {
-    const v = toPkr(p.amount - p.fee, s.currency, p.rate, suggested)
+    const v = toPkr(p.amount - p.fee, s.currency, p.rate ?? agreed, suggested)
     netPkr += v.value
     if (v.estimated || v.missing) needsRate.push(`payment of ${p.date || 'unknown date'}`)
     estimated ||= v.estimated
     incomplete ||= v.missing
   }
-  const out = toPkr(outstanding, s.currency, null, suggested)
+  const out = toPkr(outstanding, s.currency, agreed, suggested)
   estimated ||= out.estimated
   incomplete ||= out.missing
 
   let costPkr = 0
   for (const c of s.costs) {
-    const v = toPkr(c.amount, c.currency, c.rate, suggested)
+    const v = toPkr(c.amount, c.currency, c.rate ?? (c.currency === s.currency ? agreed : null), suggested)
     costPkr += v.value
     if (v.estimated || v.missing) needsRate.push(`${c.label || 'cost'} (${c.currency})`)
     estimated ||= v.estimated
@@ -452,6 +464,7 @@ export function cleanSale(
       quantity: text(r.quantity, 60),
       currency: cur,
       orderAmount,
+      rate: cur === 'PKR' ? null : parseRate(r.rate),
       payments, costs,
       statusOverride: override,
       production,

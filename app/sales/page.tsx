@@ -58,6 +58,7 @@ interface SaleForm {
   product: string; size: string; material: string; printing: string; quantity: string
   currency: SaleCurrency
   orderAmount: string
+  rate: string
   payments: PayForm[]
   costs: CostForm[]
   statusOverride: '' | 'refunded' | 'cancelled'
@@ -76,7 +77,7 @@ function blankForm(stream: SalesStream): SaleForm {
     customer: '', company: '', email: '', phone: '', country: '',
     orderDate: todayKey(),
     product: '', size: '', material: '', printing: '', quantity: '',
-    currency: 'USD', orderAmount: '',
+    currency: 'USD', orderAmount: '', rate: '',
     payments: [], costs: [],
     statusOverride: '', production: '',
     salesPerson: '', source: stream === 'pk_partner' ? 'Old lead-selling arrangement' : '',
@@ -90,7 +91,7 @@ function formFromSale(s: Sale): SaleForm {
     customer: s.customer, company: s.company, email: s.email, phone: s.phone, country: s.country,
     orderDate: s.orderDate,
     product: s.product, size: s.size, material: s.material, printing: s.printing, quantity: s.quantity,
-    currency: s.currency, orderAmount: str(s.orderAmount),
+    currency: s.currency, orderAmount: str(s.orderAmount), rate: str(s.rate ?? null),
     payments: s.payments.map((p) => ({ id: p.id, date: p.date, amount: str(p.amount), fee: str(p.fee), method: p.method, rate: str(p.rate), note: p.note })),
     costs: s.costs.map((c) => ({ id: c.id, label: c.label, amount: str(c.amount), currency: c.currency, rate: str(c.rate), note: c.note })),
     statusOverride: s.statusOverride ?? '',
@@ -107,6 +108,7 @@ function saleFromForm(f: SaleForm, ws: Workspace): Sale {
     customer: f.customer, company: f.company, email: f.email, phone: f.phone, country: f.country,
     orderDate: f.orderDate, product: f.product, size: f.size, material: f.material, printing: f.printing,
     quantity: f.quantity, currency: f.currency, orderAmount: parseAmount(f.orderAmount) ?? 0,
+    rate: f.currency === 'PKR' ? null : parseAmount(f.rate),
     payments: f.payments
       .map((p) => ({ id: p.id, date: p.date, amount: parseAmount(p.amount) ?? 0, fee: parseAmount(p.fee) ?? 0, method: p.method, rate: f.currency === 'PKR' ? null : parseAmount(p.rate), note: p.note }))
       .filter((p) => p.amount > 0),
@@ -468,7 +470,7 @@ function RateNote({ rates }: { rates: RateInfo | null }) {
   return (
     <p className="mb-3 text-[11px] text-gray-500">
       {rates?.rates.USD
-        ? <>Today&apos;s suggested rate: <b className="tabular-nums text-gray-700">1 USD = Rs {rates.rates.USD}</b> ({rates.source}). It fills in only where a payment or cost has no rate of its own — those figures say <i>est.</i> Put the rate you actually converted at on each payment to lock it.</>
+        ? <>Today&apos;s suggested rate: <b className="tabular-nums text-gray-700">1 USD = Rs {rates.rates.USD}</b> ({rates.source}). It fills in only where neither the payment (or cost) nor the sale has an agreed rate — those figures say <i>est.</i> Put the rate you actually converted at on each payment, or the deal's agreed rate on the sale, to lock it.</>
         : <>Today&apos;s rate could not be fetched, so any payment without its own rate cannot be converted to PKR yet.</>}
     </p>
   )
@@ -650,6 +652,12 @@ function SaleEditor({ form, setForm, data, onClose, onSaved }: {
                   <input className={`${INLINE} flex-1`} inputMode="decimal" value={form.orderAmount} onChange={(e) => set('orderAmount', e.target.value)} placeholder="0.00" aria-label="Order amount" />
                 </div>
               </Field>
+              {form.currency !== 'PKR' && (
+                <Field label={`Agreed rate (PKR per ${form.currency})`}>
+                  <input className={INPUT} inputMode="decimal" value={form.rate} onChange={(e) => set('rate', e.target.value)} placeholder="Only if the deal fixed one" />
+                  <span className="mt-1 block text-[10px] text-gray-500">Converts the unpaid amount and any payment without its own rate.</span>
+                </Field>
+              )}
             </div>
           </Card>
 
@@ -814,6 +822,7 @@ function SaleViewer({ view, onClose }: { view: SaleView; onClose: () => void }) 
           {line('Order date', shortDate(s.orderDate))}
           {line('Product', [s.product, s.quantity].filter(Boolean).join(' · '))}
           {line('Order amount', money(s.orderAmount, s.currency))}
+          {s.rate ? line('Agreed rate', `Rs ${s.rate} per ${s.currency}`) : null}
           {line('Received', `${money(f.received, s.currency)} (fees ${money(f.fees, s.currency)})`)}
           {line('Outstanding', money(f.outstanding, s.currency))}
           {line('Payment status', PAYMENT_STATUS_LABEL[f.status])}
