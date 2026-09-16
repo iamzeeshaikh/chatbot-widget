@@ -399,6 +399,13 @@ function Stat({ label, value, hint, tone = 'default' }: { label: string; value: 
   )
 }
 
+/** Costs in the currency they were written in, one total per currency: "$1,920", "Rs 80,000". */
+function costSummary(costs: Sale['costs']): string {
+  const by = new Map<SaleCurrency, number>()
+  for (const c of costs) by.set(c.currency, (by.get(c.currency) ?? 0) + c.amount)
+  return [...by].map(([cur, amt]) => money(amt, cur)).join(' + ')
+}
+
 /** Profit is only summed over sales whose costing is in; say what is left out. */
 function profitHint(t: StreamTotals): string {
   const pending = t.awaitingCosting ? `${t.awaitingCosting} sale${t.awaitingCosting === 1 ? '' : 's'} awaiting costing` : ''
@@ -511,11 +518,13 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
             <th className="px-3 py-2 font-semibold">Customer</th>
             {showStream && <th className="px-3 py-2 font-semibold">Stream</th>}
             <th className="px-3 py-2 font-semibold">Product</th>
+            <th className="px-3 py-2 font-semibold text-right">Qty</th>
             <th className="px-3 py-2 font-semibold text-right">Order</th>
             <th className="px-3 py-2 font-semibold text-right">Received</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Merchant fee</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Net received</th>
             <th className="px-3 py-2 font-semibold text-right">Outstanding</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Production cost</th>
             <th className="px-3 py-2 font-semibold">Status</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Profit (PKR)</th>
           </tr>
@@ -538,8 +547,8 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                 {showStream && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{STREAMS[s.stream].short}</td>}
                 <td className="px-3 py-2 min-w-[8rem] text-gray-700">
                   {s.product || '—'}
-                  {s.quantity && <span className="text-gray-500"> · {s.quantity}</span>}
                 </td>
+                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-gray-700">{s.quantity || '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(s.orderAmount, s.currency)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(f.received, s.currency)}</td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.fees > 0 ? 'text-red-700' : 'text-gray-400'}`}>
@@ -548,6 +557,12 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap font-semibold text-green-700">{money(f.net, s.currency)}</td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.outstanding > 0 ? 'text-amber-700 font-semibold' : 'text-gray-500'}`}>{money(f.outstanding, s.currency)}</td>
+                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                  {s.costs.length ? costSummary(s.costs) : <span className="text-gray-400">—</span>}
+                  {s.costs.length > 0 && s.costs.some((c) => c.currency !== 'PKR') && f.costPkr > 0 && (
+                    <p className="text-[10px] text-gray-500">≈ {money(f.costPkr, 'PKR')}</p>
+                  )}
+                </td>
                 <td className="px-3 py-2 whitespace-nowrap">
                   <span className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold ${PAYMENT_STATUS_STYLE[f.status]}`}>{PAYMENT_STATUS_LABEL[f.status]}</span>
                   {s.production && <p className="mt-0.5 text-[10px] text-gray-500">{PRODUCTION_LABEL[s.production]}</p>}

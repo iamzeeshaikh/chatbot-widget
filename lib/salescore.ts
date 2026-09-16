@@ -79,7 +79,7 @@ export function streamsForWorkspace(ws: Workspace): SalesStream[] {
 // owner's own accounts only, and is the one deliberate exception to the rule
 // that a workspace never sees the other's data.
 
-export const SALES_OWNERS = ['shanimazhar82@gmail.com', 'zeeshanmzhr3@gmail.com']
+export const SALES_OWNERS = ['shanimazhar82@gmail.com', 'zeeshanmzhr3@gmail.com', 'dev@zeecustomboxes.com']
 
 export function canUseSales(m: Pick<Member, 'role' | 'workspace'> | null | undefined): boolean {
   return !!m && m.role === 'admin' && hasFeature(m.workspace, 'sales')
