@@ -513,7 +513,7 @@ function splitReference(ref: string): { orderNo: string; sNo: string } {
 }
 
 // `detailed` lays the table out like the partner's spreadsheet, every column
-// of it in the sheet's order: S No, Order No, customer, email, phone, country,
+// of it in the sheet's order (bar its S No): Order No, customer, email, phone, country,
 // order date, box style, size, material, printing, quantity — then the money.
 function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }: {
   rows: SaleView[]; showStream: boolean; detailed?: boolean; onOpen: (v: SaleView) => void; ownWorkspace: Workspace
@@ -526,7 +526,6 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
             {detailed ? <>
-              <th className={TH}>S No</th>
               <th className={TH}>Order No</th>
               <th className={TH}>Customer</th>
               <th className={TH}>Email</th>
@@ -562,7 +561,6 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
             return (
               <tr key={s.id} className={`border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${f.closed ? 'opacity-60' : ''}`} onClick={() => onOpen(v)}>
                 {detailed && <>
-                  <td className={`${TD} tabular-nums text-[11px]`}>{ref.sNo || '—'}</td>
                   <td className={`${TD} tabular-nums font-semibold`}>{ref.orderNo || '—'}</td>
                 </>}
                 {!detailed && <td className="px-3 py-2 whitespace-nowrap tabular-nums text-gray-600">{shortDate(s.orderDate)}</td>}
