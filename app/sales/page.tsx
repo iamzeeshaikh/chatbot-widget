@@ -326,7 +326,7 @@ export default function SalesPage() {
         {rows.length === 0 ? (
           <EmptyState icon={Receipt} title="No sales here yet" hint={canAddHere ? 'Add one with “New sale”, or from a won lead’s record.' : undefined} />
         ) : (
-          <SalesTable rows={rows} showStream={tab === 'master'} onOpen={(v) => openSale(v)} ownWorkspace={data.workspace} />
+          <SalesTable rows={rows} showStream={tab === 'master'} detailed={tab === 'pk_partner'} onOpen={(v) => openSale(v)} ownWorkspace={data.workspace} />
         )}
       </Card>
 
@@ -506,48 +506,90 @@ function RateNote({ rates }: { rates: RateInfo | null }) {
 
 // ── The list ─────────────────────────────────────────────────────────────────
 
-function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
-  rows: SaleView[]; showStream: boolean; onOpen: (v: SaleView) => void; ownWorkspace: Workspace
+/** "ZCB-023 · SK-ZCB-07242026-23" → order no and the sheet's S No. */
+function splitReference(ref: string): { orderNo: string; sNo: string } {
+  const [orderNo = '', ...rest] = ref.split(' · ')
+  return { orderNo, sNo: rest.join(' · ') }
+}
+
+// `detailed` lays the table out like the partner's spreadsheet, every column
+// of it in the sheet's order: S No, Order No, customer, email, phone, country,
+// order date, box style, size, material, printing, quantity — then the money.
+function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }: {
+  rows: SaleView[]; showStream: boolean; detailed?: boolean; onOpen: (v: SaleView) => void; ownWorkspace: Workspace
 }) {
+  const TH = 'px-3 py-2 font-semibold whitespace-nowrap'
+  const TD = 'px-3 py-2 whitespace-nowrap text-gray-700'
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
-            <th className="px-3 py-2 font-semibold">Date</th>
-            <th className="px-3 py-2 font-semibold">Customer</th>
-            {showStream && <th className="px-3 py-2 font-semibold">Stream</th>}
-            <th className="px-3 py-2 font-semibold">Product</th>
-            <th className="px-3 py-2 font-semibold text-right">Qty</th>
-            <th className="px-3 py-2 font-semibold text-right">Order</th>
+            {detailed ? <>
+              <th className={TH}>S No</th>
+              <th className={TH}>Order No</th>
+              <th className={TH}>Customer</th>
+              <th className={TH}>Email</th>
+              <th className={TH}>Phone</th>
+              <th className={TH}>Country</th>
+              <th className={TH}>Order date</th>
+              <th className={TH}>Box style</th>
+              <th className={TH}>Size</th>
+              <th className={TH}>Material</th>
+              <th className={TH}>Printing</th>
+            </> : <>
+              <th className="px-3 py-2 font-semibold">Date</th>
+              <th className="px-3 py-2 font-semibold">Customer</th>
+              {showStream && <th className="px-3 py-2 font-semibold">Stream</th>}
+              <th className="px-3 py-2 font-semibold">Product</th>
+            </>}
+            <th className={`${TH} text-right`}>{detailed ? 'Quantity' : 'Qty'}</th>
+            <th className={`${TH} text-right`}>{detailed ? 'Order amount' : 'Order'}</th>
             <th className="px-3 py-2 font-semibold text-right">Received</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Merchant fee</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Net received</th>
             <th className="px-3 py-2 font-semibold text-right">Outstanding</th>
-            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Production cost</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">{detailed ? 'Production price' : 'Production cost'}</th>
             <th className="px-3 py-2 font-semibold">Status</th>
-            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Profit (PKR)</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">{detailed ? 'Gross profit (PKR)' : 'Profit (PKR)'}</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((v) => {
             const { sale: s, fig: f } = v
             const readOnly = s.workspace !== ownWorkspace
+            const ref = splitReference(s.reference)
             return (
               <tr key={s.id} className={`border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${f.closed ? 'opacity-60' : ''}`} onClick={() => onOpen(v)}>
-                <td className="px-3 py-2 whitespace-nowrap tabular-nums text-gray-600">{shortDate(s.orderDate)}</td>
+                {detailed && <>
+                  <td className={`${TD} tabular-nums text-[11px]`}>{ref.sNo || '—'}</td>
+                  <td className={`${TD} tabular-nums font-semibold`}>{ref.orderNo || '—'}</td>
+                </>}
+                {!detailed && <td className="px-3 py-2 whitespace-nowrap tabular-nums text-gray-600">{shortDate(s.orderDate)}</td>}
                 <td className="px-3 py-2 min-w-[10rem]">
                   <button type="button" className="font-semibold text-gray-900 hover:underline text-left" onClick={(e) => { e.stopPropagation(); onOpen(v) }}>
                     {s.customer}
                   </button>
                   {readOnly && <Lock className="inline w-3 h-3 ml-1 text-gray-400" aria-label="Read-only here" />}
-                  <p className="text-[10px] text-gray-500">{[s.reference, s.company].filter(Boolean).join(' · ') || '—'}</p>
+                  {!detailed && <p className="text-[10px] text-gray-500">{[s.reference, s.company].filter(Boolean).join(' · ') || '—'}</p>}
+                  {detailed && s.company && <p className="text-[10px] text-gray-500">{s.company}</p>}
                   {s.counterparty && <p className="text-[10px] text-gray-600">Owed by <b className="font-semibold">{s.counterparty}</b></p>}
                 </td>
-                {showStream && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{STREAMS[s.stream].short}</td>}
-                <td className="px-3 py-2 min-w-[8rem] text-gray-700">
-                  {s.product || '—'}
-                </td>
+                {detailed ? <>
+                  <td className={TD} onClick={(e) => e.stopPropagation()}>{s.email ? <a className="hover:underline" href={`mailto:${s.email}`}>{s.email}</a> : '—'}</td>
+                  <td className={`${TD} tabular-nums`}>{s.phone || '—'}</td>
+                  <td className={TD}>{s.country || '—'}</td>
+                  <td className={`${TD} tabular-nums`}>{shortDate(s.orderDate)}</td>
+                  <td className="px-3 py-2 min-w-[8rem] text-gray-700">{s.product || '—'}</td>
+                  <td className="px-3 py-2 min-w-[8rem] text-gray-700">{s.size || '—'}</td>
+                  <td className={TD}>{s.material || '—'}</td>
+                  <td className={TD}>{s.printing || '—'}</td>
+                </> : <>
+                  {showStream && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{STREAMS[s.stream].short}</td>}
+                  <td className="px-3 py-2 min-w-[8rem] text-gray-700">
+                    {s.product || '—'}
+                  </td>
+                </>}
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-gray-700">{s.quantity || '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(s.orderAmount, s.currency)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(f.received, s.currency)}</td>
