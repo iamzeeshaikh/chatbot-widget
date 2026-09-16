@@ -532,9 +532,9 @@ function SalesTable({ rows, showStream, onOpen, ownWorkspace }: {
                   {s.production && <p className="mt-0.5 text-[10px] text-gray-500">{PRODUCTION_LABEL[s.production]}</p>}
                 </td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.profitPkr < 0 ? 'text-red-700' : 'text-gray-900'}`}>
-                  {money(f.profit.amount, f.profit.currency)}
+                  {money(f.profitPkr, 'PKR')}
                   {f.profit.currency !== 'PKR' ? (
-                    <p className="text-[10px] text-gray-500">≈ {money(f.profitPkr, 'PKR')}{f.profitEstimated ? <span className="text-amber-700"> est.</span> : null}</p>
+                    <p className="text-[10px] text-gray-500">{money(f.profit.amount, f.profit.currency)}{f.profitEstimated ? <span className="text-amber-700"> · est.</span> : null}</p>
                   ) : f.profitEstimated && (
                     <p className="text-[10px] text-amber-700" title={f.needsRate.length ? `Needs a rate: ${f.needsRate.join(', ')}` : undefined}>
                       {f.incomplete ? 'rate missing' : 'est.'}
@@ -621,8 +621,8 @@ function SaleEditor({ form, setForm, data, onClose, onSaved }: {
             <Stat label="Status" value={PAYMENT_STATUS_LABEL[live.status]} />
             <Stat label="Revenue (PKR)" value={money(live.revenuePkr, 'PKR')} />
             <Stat label="Cost (PKR)" value={money(live.costPkr, 'PKR')} />
-            <Stat label="Profit" value={money(live.profit.amount, live.profit.currency)} tone={live.profitPkr < 0 ? 'bad' : 'good'}
-              hint={`${live.profit.currency !== 'PKR' ? `≈ ${money(live.profitPkr, 'PKR')} · ` : ''}${form.profitAmount ? 'as agreed' : live.incomplete ? 'a rate is missing' : live.profitEstimated ? 'estimated' : 'at locked rates'}`} />
+            <Stat label="Profit (PKR)" value={money(live.profitPkr, 'PKR')} tone={live.profitPkr < 0 ? 'bad' : 'good'}
+              hint={`${live.profit.currency !== 'PKR' ? `${money(live.profit.amount, live.profit.currency)} · ` : ''}${form.profitAmount ? 'as agreed' : live.incomplete ? 'a rate is missing' : live.profitEstimated ? 'estimated' : 'at locked rates'}`} />
             <Stat label="Net received (PKR)" value={money(live.netPkr, 'PKR')} />
           </div>
           {live.needsRate.length > 0 && (
@@ -848,7 +848,7 @@ function SaleViewer({ view, onClose }: { view: SaleView; onClose: () => void }) 
           {line('Payments', s.payments.map((p) => `${shortDate(p.date)} — ${money(p.amount, s.currency)} via ${PAYMENT_METHOD_LABEL[p.method]}${p.rate ? ` @ Rs ${p.rate}` : ''}`).join('; '))}
           {line('Costs', s.costs.map((c) => `${c.label}: ${money(c.amount, c.currency)}`).join('; '))}
           {line('Revenue (PKR)', money(f.revenuePkr, 'PKR'))}
-          {line('Profit', `${money(f.profit.amount, f.profit.currency)}${f.profit.currency !== 'PKR' ? ` (≈ ${money(f.profitPkr, 'PKR')})` : ''}${f.profitEstimated ? ' (est.)' : ''}${s.agreedProfit ? ' — as agreed' : ''}`)}
+          {line('Profit (PKR)', `${money(f.profitPkr, 'PKR')}${f.profit.currency !== 'PKR' ? ` (${money(f.profit.amount, f.profit.currency)})` : ''}${f.profitEstimated ? ' (est.)' : ''}${s.agreedProfit ? ' — as agreed' : ''}`)}
           {line('Production', s.production ? PRODUCTION_LABEL[s.production] : '')}
           {line('Owed by', s.counterparty)}
           {line('Sales person', s.salesPerson)}
