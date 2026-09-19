@@ -112,7 +112,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = '2026-09-10';
+var SCRIPT_VERSION = '2026-09-19';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -164,7 +164,10 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // haven't been seen yet, and guessing one that means something else in this
 // mailbox would file leads under the wrong site. Run listSiteLabels to see
 // which labels exist and add them as they're confirmed.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL'];
+// SBM and TRP joined on 2026-09-19, the day their labels were created: both
+// sites' form mail names the site nowhere a pattern can read it, so the label
+// is what places it.
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -295,7 +298,38 @@ var SITE_DOMAINS = {
   TDCS: 'thediecutstickers.com',
   CPB: 'customperfumeboxes.com',
   SDB: 'shopdisplayboxes.com',
+  // 2026-09-19: theretailpackaging.com had the widget since 20 Aug but was
+  // never in this map, so its form mail resolved to no site at all and was
+  // skipped in silence — a quote request from Pablo (TRP-MU7WLHEF-2DEF) sat
+  // unread in the mailbox while the dashboard showed nothing.
+  TRP: 'theretailpackaging.com',
 };
+
+/**
+ * The SENDER'S DISPLAY NAME as a last way to place a site.
+ *
+ * Some of these templates say the site's name and nothing else: the table has
+ * no footer, the from address is a Gmail account, and the only thing in the
+ * whole message that names the site is "Shop Bubble Mailers" in the From line.
+ * Those leads depended entirely on a Gmail label existing, and when one did
+ * not, they never reached ZeeOps at all.
+ *
+ * Keys are lower-cased display names, and every value is a code in
+ * SITE_DOMAINS, so this can only ever name a site we already own. Add one only
+ * when the name is confirmed to be that site's form mail — a brand name that
+ * two sites share would mis-file leads, which is worse than not filing them.
+ */
+var SENDER_NAMES = {
+  'shop bubble mailers': 'SBM',
+  'the retail packaging': 'TRP',
+};
+
+function codeFromSenderName_(fromHeader) {
+  var m = String(fromHeader || '').match(/^\s*"?([^"<]+?)"?\s*</);
+  if (!m) return null;
+  var code = SENDER_NAMES[m[1].trim().toLowerCase()];
+  return code && !isIgnoredLeaf_(code) ? code : null;
+}
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
 var TIME_BUDGET_MS = 4.5 * 60 * 1000;
@@ -1205,7 +1239,9 @@ var SITE_NAMED_MARKERS = [
  * Ordered most-trustworthy first:
  *   1. a form's own "this is the page it was submitted from" line
  *   2. a form's own "new quote request from <domain>" line
- *   3. the sending address's domain (noreply@thecoffeesleeves.com)
+ *   3. the sending address's domain (noreply@thecoffeesleeves.com), then the
+ *      sender's display name ("Shop Bubble Mailers") for the templates that
+ *      name the site nowhere else
  *   4. LAST RESORT: any URL in the body pointing at one of our domains — and
  *      only when the whole body points at exactly ONE of them. Two different
  *      sites in one body is ambiguous, and filing a lead under the wrong site
@@ -1227,6 +1263,9 @@ function codeFromMessageText_(body, fromHeader) {
 
   var sender = String(fromHeader || '').match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
   if (sender) { code = codeFromHost_(sender[1]); if (code) return code; }
+
+  code = codeFromSenderName_(fromHeader);
+  if (code) return code;
 
   // Guarded, because "a link to one of our sites" on its own is not evidence
   // of a lead — a deploy notification, an invoice or our own newsletter all
