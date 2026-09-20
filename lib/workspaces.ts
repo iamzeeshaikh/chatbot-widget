@@ -31,6 +31,10 @@ export const PACKAGING_SITES = [
   'theretailpackaging',
   // 2026-08-29: thefoodtrays.com got the widget.
   'thefoodtrays',
+  // 2026-09-20: thepillowboxes.com is quote-tracking only for now — its
+  // designer form mails this inbox, but it was in no list at all, so its very
+  // first lead (Rachael Strattard, 20 Sep) resolved to no site and was skipped.
+  'thepillowboxes',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.

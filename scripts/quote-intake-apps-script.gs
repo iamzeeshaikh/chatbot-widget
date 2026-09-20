@@ -112,7 +112,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = '2026-09-19';
+var SCRIPT_VERSION = '2026-09-20';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -167,7 +167,7 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // SBM and TRP joined on 2026-09-19, the day their labels were created: both
 // sites' form mail names the site nowhere a pattern can read it, so the label
 // is what places it.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP'];
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP', 'TPB'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -303,6 +303,13 @@ var SITE_DOMAINS = {
   // skipped in silence — a quote request from Pablo (TRP-MU7WLHEF-2DEF) sat
   // unread in the mailbox while the dashboard showed nothing.
   TRP: 'theretailpackaging.com',
+  // 2026-09-20: live sites whose form mail could not be placed because they
+  // were in no map. thepillowboxes.com writes its host as a link AND labels
+  // itself TPB; the other three resolve from their footers.
+  LB: 'lipboxes.com',
+  TPM: 'thepolymailers.com',
+  TFT: 'thefoodtrays.com',
+  TPB: 'thepillowboxes.com',
 };
 
 /**
@@ -322,6 +329,10 @@ var SITE_DOMAINS = {
 var SENDER_NAMES = {
   'shop bubble mailers': 'SBM',
   'the retail packaging': 'TRP',
+  'the pillow boxes': 'TPB',
+  'the food trays': 'TFT',
+  'the poly mailers': 'TPM',
+  'lip boxes': 'LB',
 };
 
 function codeFromSenderName_(fromHeader) {
