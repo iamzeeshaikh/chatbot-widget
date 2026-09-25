@@ -45,7 +45,7 @@ import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry, splitQuoted } from './emailreply'
 import { signAttachments, type EmailAttachment } from './emailattach'
-import { phoneFromText } from './identity'
+import { phoneFromText, dialable } from './identity'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 import { payLinksInRows, redactLinks } from './paylink'
 
@@ -279,23 +279,42 @@ export async function writeControlRow(
  *  leadRecipient: an agent who may not see it still has to be able to use it. */
 export async function leadPhone(id: string): Promise<string | null> {
   const resolved = await resolveLeadSite(id)
+
+  // The SAME precedence loadLeadRecord and leadRecipient use — a manual
+  // override beats the contact row, which beats the capture, which beats the
+  // leads row.
+  //
+  // This used to return the leads row FIRST and never read crm_field at all,
+  // which is the email bug over again in the telephony half: an agent who
+  // added a customer's number by hand (or corrected a wrong one) saw it on the
+  // record and was then told "this lead has no phone number on file" when they
+  // pressed call — and on a lead whose leads row held a number, the call went
+  // to the OLD one. Reported by the packaging agent on 25 Sep 2026.
+  const { data } = await supabase.from('chat_logs')
+    .select('role, message, created_at')
+    .eq('session_id', id)
+    .in('role', [CONTACT_ROLE, LEAD_CAPTURE_ROLE, CRM_FIELD_ROLE])
+    .order('created_at', { ascending: true })
+
+  let contactPhone = ''
+  let capturePhone = ''
+  let override = ''
+  for (const r of data ?? []) {
+    if (r.role === CONTACT_ROLE) {
+      const c = parseContact(r.message); if (c.phone) contactPhone = c.phone
+    } else if (r.role === LEAD_CAPTURE_ROLE) {
+      const c = parseLeadCapture(r.message); if (c?.phone) capturePhone = c.phone
+    } else {
+      const f = parseCrmField(r.message)
+      if (f?.field === 'phone') override = f.value      // '' clears it on purpose
+    }
+  }
+
   // Through phoneFromText at the one place every caller gets a number from:
   // call, the softphone's connect/dial webhooks, WhatsApp, the WhatsApp check
   // and the payment link all use this, and all of them need something Twilio
   // can dial — not "(optional): 6154306952", which is what one lead held.
-  if (resolved?.lead?.phone) return phoneFromText(resolved.lead.phone)
-
-  const { data } = await supabase.from('chat_logs')
-    .select('role, message, created_at')
-    .eq('session_id', id)
-    .in('role', [CONTACT_ROLE, LEAD_CAPTURE_ROLE])
-    .order('created_at', { ascending: true })
-  let phone = ''
-  for (const r of data ?? []) {
-    if (r.role === CONTACT_ROLE) { const c = parseContact(r.message); if (c.phone) phone = c.phone }
-    else { const c = parseLeadCapture(r.message); if (c?.phone) phone = c.phone }
-  }
-  return phoneFromText(phone)
+  return dialable(override || contactPhone || capturePhone || resolved?.lead?.phone || '')
 }
 
 export async function markThreadRepliesRead(

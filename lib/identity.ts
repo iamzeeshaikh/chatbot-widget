@@ -57,6 +57,27 @@ export function phoneFromText(v: string | null | undefined): string | null {
   return null
 }
 
+/**
+ * The same number, in the shape Twilio will actually dial.
+ *
+ * phoneFromText keeps what was typed: a form that captured "419-438-6519"
+ * yields "4194386519", and Twilio wants E.164. A number that came through
+ * intake is already "+1…", but one an agent typed on the record is not, which
+ * is why this exists at all.
+ *
+ * Only US/Canada is inferred, because a bare ten-digit number in this mailbox
+ * is always one of those. Any other national format (a UK "02476 422600", say)
+ * is returned exactly as typed rather than guessed at — a wrong country code
+ * rings a stranger.
+ */
+export function dialable(v: string | null | undefined): string | null {
+  const n = phoneFromText(v)
+  if (!n || n.startsWith('+')) return n
+  if (n.length === 10) return '+1' + n
+  if (n.length === 11 && n.startsWith('1')) return '+' + n
+  return n
+}
+
 export function phoneKey(v: string | null | undefined): string | null {
   const d = digitsOnly(v)
   if (d.length < MIN_PHONE_DIGITS) return null
