@@ -45,7 +45,7 @@ import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry, splitQuoted } from './emailreply'
 import { signAttachments, type EmailAttachment } from './emailattach'
-import { phoneFromText, dialable } from './identity'
+import { dialable } from './identity'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 import { payLinksInRows, redactLinks } from './paylink'
 
