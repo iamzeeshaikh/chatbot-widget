@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import DeployRefresh from "./components/DeployRefresh";
 import Softphone from "./components/Softphone";
+import DialPad from "./components/DialPad";
 import WorkspaceChrome from "./components/WorkspaceChrome";
 
 const geistSans = Geist({
@@ -68,6 +69,10 @@ export default function RootLayout({
             agent is — not only on the record it belongs to. It renders nothing
             (and downloads nothing) unless the workspace actually has calling. */}
         <Softphone />
+        {/* Calling a number that is not on any record yet. Renders nothing
+            until the softphone has registered, so it is invisible on a
+            dashboard without telephony. */}
+        <DialPad />
         {/* Register the service worker so the dashboard installs as a PWA. */}
         <script
           dangerouslySetInnerHTML={{
