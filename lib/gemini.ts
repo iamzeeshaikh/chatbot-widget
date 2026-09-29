@@ -1,4 +1,5 @@
 import Groq from 'groq-sdk'
+import { llmComplete, wasCutOff, type LlmMessage } from './llm'
 
 // Groq retires model ids without warning, and the app fails SILENTLY when that
 // happens: the 404 is caught and every visitor gets "I'm having trouble
@@ -102,40 +103,40 @@ function buildGroqMessages(
   return result
 }
 
+// The visitor-facing reply. WHICH model writes it is lib/llm.ts's business:
+// Claude when ANTHROPIC_API_KEY is set, Groq otherwise, and Groq for the one
+// request if Claude fails. Everything about the bot's behaviour — the style
+// block, the word ceiling, the sentence trim — is identical either way.
 export async function generateReply(
   systemPrompt: string,
   messages: { role: string; content: string }[]
 ): Promise<{ text: string; error: boolean }> {
-  const groqMessages = buildGroqMessages(systemPrompt + CONSULTATIVE_STYLE, messages)
-  if (!groqMessages) return { text: 'Hello! How can I help you today?', error: false }
+  const built = buildGroqMessages(systemPrompt + CONSULTATIVE_STYLE, messages)
+  if (!built) return { text: 'Hello! How can I help you today?', error: false }
 
-  const lastMsg = groqMessages[groqMessages.length - 1]
-  console.log(`[Groq] generateReply model=${MODEL} msgs=${groqMessages.length} prompt="${lastMsg.content.slice(0, 80)}"`)
+  // buildGroqMessages puts the system prompt first; the vendors take it as its
+  // own field, so it is split back off here rather than duplicated upstream.
+  const [system, ...rest] = built
+  const chat: LlmMessage[] = rest.map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }))
+  const last = chat[chat.length - 1]
+  console.log(`[llm] generateReply msgs=${chat.length} prompt="${last?.content.slice(0, 80) ?? ''}"`)
 
-  try {
-    const completion = await getGroq().chat.completions.create({
-      model: MODEL,
-      messages: groqMessages,
-      temperature: 0.7,
-      // A ceiling, not the target: the prompt asks for <=45 words (~60 tokens),
-      // so this only catches a runaway. 1024 used to let the model deliver a
-      // six-paragraph essay into a phone-sized chat bubble.
-      max_tokens: REPLY_MAX_TOKENS,
-      reasoning_effort: REASONING_EFFORT,
-    })
-    const choice = completion.choices[0]
-    const raw = choice?.message?.content ?? ''
-    // Hitting the ceiling means the model was cut off mid-word. Never show that
-    // — fall back to the last complete sentence instead of a dangling fragment.
-    const text = choice?.finish_reason === 'length' ? trimToLastSentence(raw) : raw
-    console.log(`[Groq] reply: finish=${choice?.finish_reason} words=${raw.trim().split(/\s+/).length} "${text.slice(0, 120)}"`)
-    return { text, error: false }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[Groq] generateReply FAILED model=${MODEL}: ${msg}`)
-    console.error('[Groq] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)))
-    return { text: ERROR_REPLY, error: true }
-  }
+  const r = await llmComplete({
+    system: system.content,
+    messages: chat,
+    // A ceiling, not the target: the prompt asks for <=45 words (~60 tokens),
+    // so this only catches a runaway. 1024 used to let the model deliver a
+    // six-paragraph essay into a phone-sized chat bubble.
+    maxTokens: REPLY_MAX_TOKENS,
+    temperature: 0.7,
+  })
+  if (r.error) return { text: ERROR_REPLY, error: true }
+
+  // Hitting the ceiling means the model was cut off mid-word. Never show that
+  // — fall back to the last complete sentence instead of a dangling fragment.
+  const text = wasCutOff(r.stopReason) ? trimToLastSentence(r.text) : r.text
+  console.log(`[llm] reply via ${r.provider}/${r.model}: stop=${r.stopReason} words=${r.text.trim().split(/\s+/).length} "${text.slice(0, 120)}"`)
+  return { text, error: false }
 }
 
 // One-off sample completion against an arbitrary model id, used by the
