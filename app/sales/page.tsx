@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import type { Workspace } from '@/lib/workspaces'
 import { WORKSPACE_LABEL } from '@/lib/workspaces'
+import { SITE_DOMAINS } from '@/lib/sitedomains'
 import {
   STREAMS, STREAM_ORDER, SALE_CURRENCIES, PAYMENT_METHODS, PAYMENT_METHOD_LABEL,
   PRODUCTION_STATUSES, PRODUCTION_LABEL, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_STYLE,
@@ -588,6 +589,7 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
                     {s.product || '—'}
                   </td>
                 </>}
+                <td className={TD}>{s.siteId ? (SITE_DOMAINS[s.siteId] ?? s.siteId) : <span className="text-gray-400">—</span>}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-gray-700">{s.quantity || '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(s.orderAmount, s.currency)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(f.received, s.currency)}</td>

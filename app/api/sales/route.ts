@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { resolveLeadSite } from '@/lib/leadrecord'
 import { supabase } from '@/lib/supabase'
 import type { Workspace } from '@/lib/workspaces'
 import { readSales, writeSale, suggestedRates } from '@/lib/sales'
@@ -34,7 +35,20 @@ export async function GET(req: NextRequest) {
     supabase.from('members').select('email').eq('workspace', member.workspace),
   ])
   const suggested = rateInfo?.rates ?? null
-  const views: SaleView[] = lists.flat().map((sale) => ({ sale, fig: figures(sale, suggested) }))
+
+  // Which site each sale came from, read from its lead rather than stored on
+  // the sale — a lead can be re-filed under the right site later, and the
+  // ledger should follow it instead of keeping the old answer.
+  const withLead = lists.flat()
+  const sites = new Map<string, string>()
+  await Promise.all([...new Set(withLead.map((s) => s.leadId).filter(Boolean))].slice(0, 300).map(async (id) => {
+    const r = await resolveLeadSite(String(id))
+    if (r?.siteId) sites.set(String(id), r.siteId)
+  }))
+  const views: SaleView[] = withLead.map((sale) => ({
+    sale: { ...sale, siteId: sale.leadId ? sites.get(sale.leadId) ?? null : null },
+    fig: figures(sale, suggested),
+  }))
 
   const streams: SalesStream[] = master ? STREAM_ORDER : streamsForWorkspace(member.workspace)
   const byStream = Object.fromEntries(

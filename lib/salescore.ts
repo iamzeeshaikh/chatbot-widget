@@ -182,6 +182,15 @@ export interface Sale {
    * from revenue minus costs. Absent on sales saved before it existed.
    */
   agreedProfit?: { amount: number; currency: SaleCurrency } | null
+  /**
+   * WHICH WEBSITE sold it — "peptidesboxes", "thepapercups".
+   *
+   * Not typed in by hand and not parsed out of `source`: the server reads it
+   * from the linked lead, which is the only place that actually knows. A sale
+   * with no lead (the two sports ones, entered from a spreadsheet) has none,
+   * and shows a dash rather than a guess.
+   */
+  siteId?: string | null
   payments: SalePayment[]
   costs: SaleCost[]
   /** Set by hand; otherwise the status follows the payments. */
