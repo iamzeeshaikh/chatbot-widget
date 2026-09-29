@@ -68,6 +68,17 @@ interface CompleteOpts {
   model?: string
   /** Hard stop, so a hanging provider cannot hold a visitor's reply open. */
   timeoutMs?: number
+  /**
+   * A LOWER ceiling for Claude, and the reason the two differ.
+   *
+   * `maxTokens` has to be generous for Groq because gpt-oss is a reasoning
+   * model: its thinking is billed against the ceiling although the visitor
+   * never sees it, so a 45-word answer needs hundreds of tokens of headroom.
+   * Claude spends none of that, so the same number lets it write six times
+   * what was asked for. The prompt asks for at most 45 words; this makes that
+   * a limit rather than a request.
+   */
+  anthropicMaxTokens?: number
 }
 
 async function callAnthropic(o: CompleteOpts): Promise<{ text: string; model: string; stopReason: string }> {
@@ -81,7 +92,7 @@ async function callAnthropic(o: CompleteOpts): Promise<{ text: string; model: st
     },
     body: JSON.stringify({
       model,
-      max_tokens: o.maxTokens,
+      max_tokens: o.anthropicMaxTokens ?? o.maxTokens,
       temperature: o.temperature ?? 0.7,
       system: o.system,
       messages: o.messages,

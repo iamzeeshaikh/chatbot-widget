@@ -128,6 +128,11 @@ export async function generateReply(
     // so this only catches a runaway. 1024 used to let the model deliver a
     // six-paragraph essay into a phone-sized chat bubble.
     maxTokens: REPLY_MAX_TOKENS,
+    // ~45 words is the rule in the prompt; 160 tokens is about 120, which
+    // leaves room for a legitimately longer answer and makes an essay
+    // impossible. A reply cut off at the ceiling is trimmed back to its last
+    // whole sentence below, so the visitor never sees a dangling half-word.
+    anthropicMaxTokens: 160,
     temperature: 0.7,
   })
   if (r.error) return { text: ERROR_REPLY, error: true }
