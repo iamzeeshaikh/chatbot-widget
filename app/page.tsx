@@ -945,6 +945,12 @@ export default function Dashboard() {
   const [viewDayAgents, setViewDayAgents] = useState<PerfDaily | null>(null)
   const leadsTableRef = useRef<HTMLDivElement | null>(null)
   const sitesPanelRef = useRef<HTMLDivElement | null>(null)
+  // The "Leads by Site" panel is SPORTS ONLY (owner, 2026-09-30). Packaging has
+  // 28 sites, so that list ran longer than the screen and repeated what the
+  // Configured Sites cards below already say per site; sports has five, where
+  // the same list reads at a glance. The cards keep the per-site counts and the
+  // same click-to-filter, so nothing was lost on packaging.
+  const configuredSitesRef = useRef<HTMLDivElement | null>(null)
   const OVERVIEW_LEADS_PER_PAGE = 40
   // Visitors tab (Zendesk-style history of every widget session, last 7 days).
   const [visitorHistory, setVisitorHistory] = useState<HistVisitor[]>([])
@@ -2692,7 +2698,8 @@ export default function Dashboard() {
                     act: () => {
                       setOverviewLeadSite('')
                       setOverviewLeadPage(0)
-                      sitesPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      // Whichever site breakdown this dashboard actually shows.
+                      ;(sitesPanelRef.current ?? configuredSitesRef.current)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                     },
                   },
                   {
@@ -2789,7 +2796,7 @@ export default function Dashboard() {
               </div>
 
               {/* Chart + Sites row */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <div className={`grid grid-cols-1 ${workspace === 'sports' ? 'lg:grid-cols-2' : ''} gap-6 mb-6`}>
                 {/* Bar chart */}
                 <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
                   <div className="flex items-center justify-between mb-4">
@@ -2823,7 +2830,8 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                {/* Quick stats per site */}
+                {/* Quick stats per site — sports only; see configuredSitesRef. */}
+                {workspace === 'sports' && (
                 <div ref={sitesPanelRef} className="bg-gray-100 rounded-xl border border-gray-200 p-5 scroll-mt-4">
                   <h2 className="text-sm font-semibold text-gray-900 mb-4">Leads by Site</h2>
                   <div className="space-y-2.5">
@@ -2855,10 +2863,11 @@ export default function Dashboard() {
                     })}
                   </div>
                 </div>
+                )}
               </div>
 
               {/* Site cards */}
-              <div className="mb-6">
+              <div ref={configuredSitesRef} className="mb-6 scroll-mt-4">
                 <h2 className="text-sm font-semibold text-gray-900 mb-3">Configured Sites</h2>
                 <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
                   {roleSites.map((site) => {
