@@ -131,7 +131,7 @@ interface LeadRow {
 // Fold two records of the same customer into one card.
 //
 // The rules are chosen so that nothing an agent has already done is lost:
-//  • the card OPENS the earliest record, which is where the history starts;
+//  • the card OPENS the record the work is on — see `open` below;
 //  • the stage is the furthest one reached, because a customer who has had a
 //    quote sent has had a quote sent whichever row records it;
 //  • tasks and unread replies ADD UP — they are work, and work does not merge
@@ -141,8 +141,25 @@ function mergeCards(a: PipelineCard, b: PipelineCard): PipelineCard {
   const earlier = (a.createdAt ?? '') <= (b.createdAt ?? '') ? a : b
   const later = earlier === a ? b : a
   const furthest = CRM_STAGES.indexOf(a.stage) >= CRM_STAGES.indexOf(b.stage) ? a : b
+
+  // WHICH RECORD THE CARD OPENS.
+  //
+  // It used to open the earliest, on the reasoning that the history starts
+  // there. It does not: when a customer's chat and their emailed quote land
+  // seconds apart, the agent works one of them and the other stays empty —
+  // and the empty one is as likely to be first. Jennifer Overman's card read
+  // "Quote Sent · $588" and opened a record that said New, with no tasks, no
+  // emails and no value on it (owner, 2026-10-01).
+  //
+  // So it opens whichever record actually carries the stage the card is
+  // advertising, and on a tie the one with the newer activity. The other id
+  // stays in mergedIds, so bulk actions and the Related leads panel still
+  // reach both.
+  const byActivity = (a.lastActivityAt ?? '') >= (b.lastActivityAt ?? '') ? a : b
+  const open = CRM_STAGES.indexOf(a.stage) === CRM_STAGES.indexOf(b.stage) ? byActivity : furthest
   return {
     ...earlier,
+    id: open.id,
     mergedIds: [...earlier.mergedIds, ...later.mergedIds],
     mergedCount: earlier.mergedCount + later.mergedCount,
     // A quote row carries the enquiry text; prefer its label over "chat".
