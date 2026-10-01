@@ -31,7 +31,7 @@ import { ASSIGNMENT_ROLE } from './assignment'
 import { canSeeAllLeads, visibleToMember } from './teamlead'
 import { quoteSessionId, leadSource } from './quoteintake'
 import {
-  CRM_STAGE_ROLE, CRM_VALUE_ROLE, CRM_STAGES, DEFAULT_CURRENCY,
+  CRM_STAGE_ROLE, CRM_VALUE_ROLE, CRM_STAGES, stagesForWorkspace, DEFAULT_CURRENCY,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE,
   parseCrmStage, parseCrmValue, stageFromLeadStatus,
   type CrmStage, type CrmCurrency,
@@ -184,7 +184,7 @@ export async function loadPipeline(
 ): Promise<PipelineResult> {
   const allowed = memberSites(member)
   const empty = (): PipelineResult => ({
-    columns: CRM_STAGES.map((stage) => ({ stage, count: 0, totals: [], unvalued: 0, cards: [], hasMore: false })),
+    columns: stagesForWorkspace(member.workspace).map((stage) => ({ stage, count: 0, totals: [], unvalued: 0, cards: [], hasMore: false })),
     total: 0, options: { sites: [], owners: [] }, truncated: false, excluded: 0,
   })
   if (allowed.length === 0) return empty()
@@ -428,7 +428,12 @@ export async function loadPipeline(
 
   // ── columns: exact aggregates over EVERY matching lead ─────────────────────
   const perColumn = opts.perColumn ?? CARDS_PER_COLUMN
-  const columns: PipelineColumn[] = CRM_STAGES.map((stage) => {
+  // The columns this dashboard shows. A lead whose stage is not one of them
+  // (a sports-only stage on a packaging lead, say) would otherwise vanish from
+  // the board, so it is kept and shown in its own column at the end.
+  const shown = stagesForWorkspace(member.workspace)
+  const extra = [...new Set(list.map((c) => c.stage))].filter((s) => !shown.includes(s))
+  const columns: PipelineColumn[] = [...shown, ...extra].map((stage) => {
     const inStage = list.filter((c) => c.stage === stage)
     // Newest first — the freshest work belongs at the top of a column.
     inStage.sort((a, b) => (b.lastActivityAt ?? '').localeCompare(a.lastActivityAt ?? ''))

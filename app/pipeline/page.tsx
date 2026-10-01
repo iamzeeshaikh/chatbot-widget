@@ -51,6 +51,9 @@ export default function PipelinePage() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS)
   const [prefsReady, setPrefsReady] = useState(false)
   const [columns, setColumns] = useState<PipelineColumn[]>(EMPTY_COLUMNS)
+  // Which stages THIS dashboard has. The server decides (stagesForWorkspace),
+  // because it is the side that knows the member's workspace.
+  const [stages, setStages] = useState<readonly CrmStage[]>(CRM_STAGES)
   const [options, setOptions] = useState<{ sites: { siteId: string; name: string }[]; owners: string[] }>({ sites: [], owners: [] })
   const [me, setMe] = useState('')   // the signed-in member, for "assign to me"
   const [total, setTotal] = useState(0)
@@ -130,6 +133,7 @@ export default function PipelinePage() {
         if (!res.ok) { setStatus('error'); return }
         const d = await res.json()
         setColumns(d.columns ?? EMPTY_COLUMNS)
+        if (Array.isArray(d.stages) && d.stages.length) setStages(d.stages)
         setOptions(d.options ?? { sites: [], owners: [] })
         setMe(d.me ?? '')
         setTotal(d.total ?? 0)
@@ -426,7 +430,7 @@ export default function PipelinePage() {
                 ...options.owners.map((o) => ({ value: o, label: o.split('@')[0] })),
               ]} />
             <Select label="Stage" value={prefs.stage} active={prefs.stage !== 'all'} onChange={(v) => setPrefs((p) => ({ ...p, stage: v as CrmStage | 'all' }))}
-              options={[{ value: 'all', label: 'All stages' }, ...CRM_STAGES.map((s) => ({ value: s, label: CRM_STAGE_LABEL[s] }))]} />
+              options={[{ value: 'all', label: 'All stages' }, ...stages.map((s) => ({ value: s, label: CRM_STAGE_LABEL[s] }))]} />
             <Select label="Created" value={prefs.range} active={prefs.range !== DEFAULT_PREFS.range} onChange={(v) => setPrefs((p) => ({ ...p, range: v as DatePresetKey }))}
               options={DATE_PRESETS.map((d) => ({ value: d.key, label: d.label }))} />
             {filtersOn && (
@@ -466,20 +470,20 @@ export default function PipelinePage() {
         ) : mode === 'board' ? (
           <div className="flex-1 min-h-0">
             <Board columns={shownColumns} loading={status === 'loading'} movingId={movingId}
-              loadingMore={loadingMore} onMove={move} onLoadMore={loadMore} />
+              loadingMore={loadingMore} onMove={move} onLoadMore={loadMore} stages={stages} />
           </div>
         ) : (
           <ListView cards={allCards} movingId={movingId} onMove={move} loading={status === 'loading'}
             selected={selected} onToggleOne={toggleOne} onToggleLoaded={toggleLoaded}
             onSelectAllMatching={selectAllMatching} onClearSelection={clearSelection}
-            totalMatching={total} allMatching={allMatching} selectingAll={selectingAll} />
+            totalMatching={total} allMatching={allMatching} selectingAll={selectingAll} stages={stages} />
         )}
       </main>
 
       {/* List mode only: the board has no row to tick. */}
       {mode === 'list' && (
         <BulkBar
-          count={selected.size} allMatching={allMatching}
+          count={selected.size} allMatching={allMatching} stages={stages}
           owners={options.owners} me={me} busy={bulkBusy} result={bulkResult}
           onApply={(body) => runBulkAction(body)}
           onUndo={undoBulk}

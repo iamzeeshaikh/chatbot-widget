@@ -113,7 +113,14 @@ export const CRM_STAGES = [
   // paused — waiting on the customer's season, budget cycle, a reorder date —
   // not a dead one, so it does not belong with the outcomes at the end.
   'new', 'contacted', 'quote_sent', 'follow_up', 'pending_design', 'on_hold', 'won',
-  'contact_not_successful', 'no_response', 'not_interested', 'lost',
+  'contact_not_successful', 'no_response', 'not_interested',
+  // 2026-10-01, asked for by the sports team: two things that are not a lost
+  // deal but still end the work. `duplicate` is the same customer already in
+  // the board under another record; `manufacturer` is a factory or supplier
+  // writing in to SELL to us, which arrives often enough on the jersey sites
+  // to be worth its own column rather than being filed as "not interested".
+  'duplicate', 'manufacturer',
+  'lost',
 ] as const
 export type CrmStage = (typeof CRM_STAGES)[number]
 
@@ -152,6 +159,8 @@ export const CRM_STAGE_LABEL: Record<CrmStage, string> = {
   contact_not_successful: 'Contact Not Successful',
   no_response: 'No Response',
   not_interested: 'Not Interested',
+  duplicate: 'Duplicate',
+  manufacturer: 'Manufacturer',
   lost: 'Lost',
 }
 
@@ -173,6 +182,10 @@ export const CRM_STAGE_STYLE: Record<CrmStage, string> = {
   contact_not_successful: 'bg-gray-100 text-gray-700 border-gray-300',
   no_response: 'bg-yellow-100 text-yellow-700 border-yellow-300',
   not_interested: 'bg-red-100 text-red-700 border-red-300',
+  // Quieter still than the other dead ends: neither is a deal that was lost,
+  // so neither should read as a loss on the board.
+  duplicate: 'bg-slate-100 text-slate-700 border-slate-300',
+  manufacturer: 'bg-stone-100 text-stone-700 border-stone-300',
   lost: 'bg-red-100 text-red-700 border-red-300',
 }
 
@@ -189,6 +202,8 @@ export const CRM_STAGE_DOT: Record<CrmStage, string> = {
   contact_not_successful: '#64748b',
   no_response: '#eab308',
   not_interested: '#fb7185',
+  duplicate: '#94a3b8',
+  manufacturer: '#a8a29e',
   lost: '#ef4444',
 }
 
@@ -197,8 +212,21 @@ export const CRM_STAGE_DOT: Record<CrmStage, string> = {
 // progress rail excludes them and greys out, exactly as it always did for the
 // single `lost` case.
 export const CRM_DEAD_STAGES: readonly CrmStage[] = [
-  'contact_not_successful', 'no_response', 'not_interested', 'lost',
+  'contact_not_successful', 'no_response', 'not_interested', 'duplicate', 'manufacturer', 'lost',
 ]
+
+// Which stages a given dashboard offers.
+//
+// `duplicate` and `manufacturer` were asked for by the sports team and are
+// shown there only: adding two more columns to the packaging board — which
+// already carries eleven — would be charging every packaging agent for a
+// request that was not theirs. Both are real stages everywhere, so a lead that
+// somehow carries one still renders its own label and colour on either board.
+const SPORTS_ONLY_STAGES: readonly CrmStage[] = ['duplicate', 'manufacturer']
+
+export function stagesForWorkspace(workspace: 'sports' | 'packaging'): readonly CrmStage[] {
+  return workspace === 'sports' ? CRM_STAGES : CRM_STAGES.filter((s) => !SPORTS_ONLY_STAGES.includes(s))
+}
 
 export function isDeadStage(stage: CrmStage): boolean {
   return CRM_DEAD_STAGES.includes(stage)
@@ -243,6 +271,10 @@ export function leadStatusForStage(stage: CrmStage): LeadStatus {
     case 'contact_not_successful': return 'lost'
     case 'no_response': return 'lost'
     case 'not_interested': return 'lost'
+    // Billing has five statuses and none of them is "this was never a deal",
+    // so both land on lost — the exact stage stays on the crm_stage row.
+    case 'duplicate': return 'lost'
+    case 'manufacturer': return 'lost'
     case 'lost': return 'lost'
   }
 }

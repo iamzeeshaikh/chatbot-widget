@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
 import { loadPipeline, CARDS_PER_COLUMN, type PipelineFilters } from '@/lib/pipeline'
-import { isCrmStage, CRM_STAGES, type CrmStage } from '@/lib/crm'
+import { isCrmStage, stagesForWorkspace, type CrmStage } from '@/lib/crm'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ...result,
       me: member.email,
-      stages: CRM_STAGES,
+      stages: stagesForWorkspace(member.workspace),
       perColumn: CARDS_PER_COLUMN,
     })
   } catch (err) {

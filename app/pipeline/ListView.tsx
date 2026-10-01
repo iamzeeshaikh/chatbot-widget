@@ -36,9 +36,10 @@ const stageRank = (s: CrmStage) => CRM_STAGES.indexOf(s)
 export default function ListView({
   cards, movingId, onMove, loading,
   selected, onToggleOne, onToggleLoaded, onSelectAllMatching, onClearSelection,
-  totalMatching, allMatching, selectingAll,
+  totalMatching, allMatching, selectingAll, stages,
 }: {
   cards: PipelineCard[]
+  stages?: readonly CrmStage[]
   movingId: string | null
   onMove: (card: PipelineCard, to: CrmStage) => void
   loading: boolean
@@ -190,7 +191,7 @@ export default function ListView({
                     </td>
                     <td className="px-2.5 py-1.5">
                       <div className="w-[124px]">
-                        <StageSelect value={card.stage} disabled={movingId === card.id}
+                        <StageSelect value={card.stage} disabled={movingId === card.id} stages={stages}
                           label={`Stage for ${card.name}`} onChange={(next) => onMove(card, next)} />
                       </div>
                     </td>

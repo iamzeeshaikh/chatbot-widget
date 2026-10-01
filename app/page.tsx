@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGES, type CrmStage } from '@/lib/crm'
+import { CRM_STAGE_LABEL, CRM_STAGE_STYLE, stagesForWorkspace, type CrmStage } from '@/lib/crm'
 import { useRouter } from 'next/navigation'
 import GlobalSearch from '@/app/components/GlobalSearch'
 // Same icon set, stroke weight and sizing the CRM pages use, so the dashboard
@@ -3186,7 +3186,9 @@ export default function Dashboard() {
                                   aria-label="Deal stage"
                                   title={CRM_STAGE_LABEL[lead.stage ?? 'new']}
                                   className={`max-w-[8.5rem] text-[11px] font-semibold border rounded-full px-2 py-0.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${CRM_STAGE_STYLE[lead.stage ?? 'new']}`}>
-                                  {CRM_STAGES.map((st) => (
+                                  {/* The stages this dashboard has, plus whatever
+                                      this lead already carries. */}
+                                  {[...new Set([...stagesForWorkspace(workspace), lead.stage ?? 'new'])].map((st) => (
                                     <option key={st} value={st}>{CRM_STAGE_LABEL[st]}</option>
                                   ))}
                                 </select>

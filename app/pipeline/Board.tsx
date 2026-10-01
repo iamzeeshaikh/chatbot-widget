@@ -30,9 +30,10 @@ import ColumnTotals from './ColumnTotals'
 import StageSelect from './StageSelect'
 
 export default function Board({
-  columns, loading, movingId, loadingMore, onMove, onLoadMore,
+  columns, loading, movingId, loadingMore, onMove, onLoadMore, stages,
 }: {
   columns: PipelineColumn[]
+  stages?: readonly CrmStage[]
   loading: boolean
   movingId: string | null
   loadingMore: CrmStage | null
@@ -50,7 +51,7 @@ export default function Board({
     <div className="h-full overflow-x-auto">
       <div className="flex gap-1.5 h-full" style={{ minWidth: columns.length * 140 }}>
         {columns.map((col) => (
-          <Column key={col.stage} col={col} loading={loading} movingId={movingId}
+          <Column key={col.stage} col={col} loading={loading} movingId={movingId} stages={stages}
             loadingMore={loadingMore} onMove={onMove} onLoadMore={onLoadMore}
             dragging={dragging} setDragging={setDragging}
             isOver={over === col.stage && dragging?.stage !== col.stage}
@@ -62,9 +63,10 @@ export default function Board({
 }
 
 function Column({
-  col, loading, movingId, loadingMore, onMove, onLoadMore, dragging, setDragging, isOver, setOver,
+  col, loading, movingId, loadingMore, onMove, onLoadMore, dragging, setDragging, isOver, setOver, stages,
 }: {
   col: PipelineColumn
+  stages?: readonly CrmStage[]
   loading: boolean
   movingId: string | null
   loadingMore: CrmStage | null
@@ -142,7 +144,7 @@ function Column({
         ) : (
           <>
             {col.cards.map((card) => (
-              <BoardCard key={card.id} card={card} moving={movingId === card.id}
+              <BoardCard key={card.id} card={card} moving={movingId === card.id} stages={stages}
                 onDragStart={() => setDragging(card)}
                 onDragEnd={() => { setDragging(null); setOver(null) }}
                 onMove={onMove} />
@@ -168,8 +170,9 @@ function Column({
   )
 }
 
-function BoardCard({ card, moving, onDragStart, onDragEnd, onMove }: {
+function BoardCard({ card, moving, onDragStart, onDragEnd, onMove, stages }: {
   card: PipelineCard
+  stages?: readonly CrmStage[]
   moving: boolean
   onDragStart: () => void
   onDragEnd: () => void
@@ -256,7 +259,7 @@ function BoardCard({ card, moving, onDragStart, onDragEnd, onMove }: {
       {/* Keyboard / no-drag path. Absolutely positioned so it costs the card no
           height when hidden — the card stays as short as its content. */}
       <div className="absolute inset-x-1 bottom-1 opacity-0 group-hover/card:opacity-100 focus-within:opacity-100 transition-opacity">
-        <StageSelect value={card.stage} disabled={moving}
+        <StageSelect value={card.stage} disabled={moving} stages={stages}
           label={`Stage for ${card.name}`}
           onChange={(next) => onMove(card, next)} />
       </div>

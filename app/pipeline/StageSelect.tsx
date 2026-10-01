@@ -7,13 +7,18 @@
 
 import { CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, type CrmStage } from '@/lib/crm'
 
-export default function StageSelect({ value, onChange, disabled, label, size = 'sm' }: {
+export default function StageSelect({ value, onChange, disabled, label, size = 'sm', stages = CRM_STAGES }: {
   value: CrmStage
   onChange: (next: CrmStage) => void
   disabled?: boolean
   label: string
   size?: 'sm' | 'md'
+  /** The stages this dashboard offers (see stagesForWorkspace). */
+  stages?: readonly CrmStage[]
 }) {
+  // A lead can carry a stage this dashboard does not list — it stays selectable
+  // so that opening the dropdown cannot silently change what the lead is.
+  const options = stages.includes(value) ? stages : [...stages, value]
   return (
     <>
       <label className="sr-only" htmlFor={`stage-${label}`}>{label}</label>
@@ -29,7 +34,7 @@ export default function StageSelect({ value, onChange, disabled, label, size = '
         className={`w-full font-semibold rounded-md border cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed ${CRM_STAGE_STYLE[value]} ${
           size === 'sm' ? 'text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-1'
         }`}>
-        {CRM_STAGES.map((s) => (
+        {options.map((s) => (
           <option key={s} value={s} className="bg-white font-semibold" style={{ color: CRM_STAGE_DOT[s] }}>
             {CRM_STAGE_LABEL[s]}
           </option>

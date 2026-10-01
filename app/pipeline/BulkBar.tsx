@@ -16,6 +16,8 @@ import {
   X, Check, Undo2, ListTodo, UserRound, TriangleAlert, Loader2, ArrowRightLeft,
 } from 'lucide-react'
 import { CRM_STAGES, CRM_STAGE_LABEL, type CrmStage } from '@/lib/crm'
+
+// The stages this dashboard offers; see stagesForWorkspace in lib/crm.ts.
 import { TASK_TYPES, TASK_TYPE_LABEL, defaultDueDate, DEFAULT_DUE_TIME, type TaskType } from '@/lib/tasks'
 
 export interface BulkResult {
@@ -33,9 +35,10 @@ type Pending =
   | null
 
 export default function BulkBar({
-  count, allMatching, owners, me, busy, result, onApply, onUndo, onClear, onDismissResult,
+  count, allMatching, owners, me, busy, result, onApply, onUndo, onClear, onDismissResult, stages,
 }: {
   count: number
+  stages?: readonly CrmStage[]
   allMatching: boolean
   owners: string[]
   me: string
@@ -181,7 +184,7 @@ export default function BulkBar({
             onChange={(e) => { if (e.target.value) setPending({ kind: 'stage', stage: e.target.value as CrmStage }) }}
             className="bg-white border border-gray-300 rounded-lg px-1.5 py-1 text-[11px] text-gray-800 cursor-pointer focus:outline-none focus:border-blue-500 disabled:opacity-50">
             <option value="">Set stage…</option>
-            {CRM_STAGES.map((s) => <option key={s} value={s}>{CRM_STAGE_LABEL[s]}</option>)}
+            {(stages ?? CRM_STAGES).map((s) => <option key={s} value={s}>{CRM_STAGE_LABEL[s]}</option>)}
           </select>
 
           <select value="" disabled={busy} aria-label="Set owner for the selected leads"
