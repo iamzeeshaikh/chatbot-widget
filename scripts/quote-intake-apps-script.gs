@@ -112,7 +112,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = '2026-09-20';
+var SCRIPT_VERSION = '2026-10-03';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -167,7 +167,7 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // SBM and TRP joined on 2026-09-19, the day their labels were created: both
 // sites' form mail names the site nowhere a pattern can read it, so the label
 // is what places it.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP', 'TPB'];
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP', 'TPB', 'TCST'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -685,7 +685,7 @@ function processQuoteLeads() {
       var umsgs = lookbackMessages_(thread, cutoff);
       for (var um = 0; um < umsgs.length; um++) {
         var ubody = umsgs[um].getPlainBody();
-        var ucode = codeFromMessageText_(ubody, umsgs[um].getFrom());
+        var ucode = codeFromMessageText_(ubody, umsgs[um].getFrom(), recipientsOf_(umsgs[um]));
         if (!ucode) continue;
         var uparsed = parseLeadBody_(ubody);
         if (!uparsed.email && !uparsed.phone) continue;
@@ -882,7 +882,7 @@ function diagnoseThread() {
       // What the message says about itself, which is what decides an
       // unlabelled thread — printed per message because a forward and its
       // original can disagree.
-      var bodyCode = codeFromMessageText_(m.getPlainBody(), m.getFrom());
+      var bodyCode = codeFromMessageText_(m.getPlainBody(), m.getFrom(), recipientsOf_(m));
       Logger.log('    msg ' + (j + 1) + '  ' + m.getDate() +
         '  | newer than watermark: ' + (m.getDate().getTime() > cutoff) +
         '  | site from body: ' + (bodyCode || 'NONE') +
@@ -1250,15 +1250,48 @@ var SITE_NAMED_MARKERS = [
  * Ordered most-trustworthy first:
  *   1. a form's own "this is the page it was submitted from" line
  *   2. a form's own "new quote request from <domain>" line
- *   3. the sending address's domain (noreply@thecoffeesleeves.com), then the
- *      sender's display name ("Shop Bubble Mailers") for the templates that
- *      name the site nowhere else
+ *   3. the sending address's domain (noreply@thecoffeesleeves.com), then OUR
+ *      OWN address in To/Cc, then the sender's display name ("Shop Bubble
+ *      Mailers") for the templates that name the site nowhere else
  *   4. LAST RESORT: any URL in the body pointing at one of our domains — and
  *      only when the whole body points at exactly ONE of them. Two different
  *      sites in one body is ambiguous, and filing a lead under the wrong site
  *      is worse than not filing it, so ambiguity returns null.
  */
-function codeFromMessageText_(body, fromHeader) {
+/**
+ * The site OUR OWN RECIPIENT ADDRESS names.
+ *
+ * A cold enquiry written by hand — an RFQ, a supplier pitch, a buyer who found
+ * the address on the site — says nothing about which of our sites it is for,
+ * except in the one place nobody thinks to read: who it was addressed to.
+ * "To: info@thecustomstickers.co" is that site and no other.
+ *
+ * (A 19,000-sticker RFQ sat unmatched on 3 Oct 2026 for exactly this reason:
+ * the sender's domain was theirs, the body never named us, and the only
+ * mention of us was the To line.)
+ *
+ * Resolved through SITE_DOMAINS like everything else, so it can only ever name
+ * a site we own, and ambiguity (two of our addresses on one mail) returns null
+ * rather than guessing.
+ */
+function recipientsOf_(message) {
+  try { return [message.getTo(), message.getCc()].join(' '); } catch (e) { return ''; }
+}
+
+function codeFromOwnRecipient_(toHeader) {
+  var text = String(toHeader || '').toLowerCase();
+  if (!text) return null;
+  var found = null;
+  for (var code in SITE_DOMAINS) {
+    if (isIgnoredLeaf_(code)) continue;
+    if (text.indexOf('@' + SITE_DOMAINS[code].toLowerCase()) === -1) continue;
+    if (found && found !== code) return null;
+    found = code;
+  }
+  return found;
+}
+
+function codeFromMessageText_(body, fromHeader, toHeader) {
   var text = String(body || '');
   var i, m, code;
 
@@ -1274,6 +1307,10 @@ function codeFromMessageText_(body, fromHeader) {
 
   var sender = String(fromHeader || '').match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
   if (sender) { code = codeFromHost_(sender[1]); if (code) return code; }
+
+  // Who it was sent TO, before any guessing from names or stray links.
+  code = codeFromOwnRecipient_(toHeader);
+  if (code) return code;
 
   code = codeFromSenderName_(fromHeader);
   if (code) return code;
