@@ -26,7 +26,7 @@ import { SITE_DOMAINS } from '@/lib/sitedomains'
 import {
   STREAMS, STREAM_ORDER, SALE_CURRENCIES, PAYMENT_METHODS, PAYMENT_METHOD_LABEL,
   PRODUCTION_STATUSES, PRODUCTION_LABEL, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_STYLE,
-  figures, money, shortDate, newId, parseAmount,
+  figures, totals, money, shortDate, newId, parseAmount,
   type Sale, type SaleView, type StreamInfo, type StreamTotals, type SalesStream,
   type RateInfo, type SaleCurrency, type PaymentMethod, type ProductionStatus,
 } from '@/lib/salescore'
@@ -142,6 +142,7 @@ export default function SalesPage() {
   const [error, setError] = useState('')
   const [tab, setTab] = useState<Tab | null>(null)
   const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState<SaleFilters>(NO_FILTERS)
   const [editing, setEditing] = useState<SaleForm | null>(null)
   const [viewing, setViewing] = useState<SaleView | null>(null)
 
@@ -228,14 +229,35 @@ export default function SalesPage() {
     return data.owner ? ['master', ...STREAM_ORDER] : data.streams.map((s) => s.key)
   }, [data])
 
-  const rows = useMemo(() => {
+  // Everything on this tab, before search and filters — the filter menus list
+  // what is actually here, so a website or agent with no sales never appears.
+  const tabRows = useMemo(() => {
     if (!data || !tab) return []
+    return data.sales.filter((v) => tab === 'master' || v.sale.stream === tab)
+  }, [data, tab])
+
+  const filterOptions = useMemo(() => filterOptionsFor(tabRows), [tabRows])
+
+  const rows = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return data.sales
-      .filter((v) => tab === 'master' || v.sale.stream === tab)
+    return tabRows
+      .filter((v) => matchesFilters(v, filters))
       .filter((v) => !q || [v.sale.customer, v.sale.company, v.sale.reference, v.sale.product, v.sale.email]
         .some((x) => x.toLowerCase().includes(q)))
-  }, [data, tab, search])
+  }, [tabRows, filters, search])
+
+  const narrowed = !!search.trim() || filtersActive(filters)
+  // The totals cards follow the filter: "this month on thepapercups.com" is a
+  // question people ask of the ledger, and the answer is the same arithmetic
+  // over fewer rows. Unfiltered, the server's figures are used unchanged.
+  const narrowedTotals = useMemo(
+    () => (narrowed && data ? totals(rows, data.rates?.rates ?? null) : null),
+    [narrowed, rows, data],
+  )
+
+  // A tab switch drops the filters: the menus are built from that tab's rows,
+  // and a website picked on one stream usually means nothing on the next.
+  const pickTab = (k: Tab) => { setTab(k); setFilters(NO_FILTERS) }
 
   const canAddHere = !!data && (tab === 'master' || (tab !== null && STREAMS[tab].workspace === data.workspace))
   const exportHref = tab === 'master'
@@ -267,7 +289,7 @@ export default function SalesPage() {
     )
   }
 
-  const t = tab === 'master' ? data.all : data.totals[tab]
+  const t = narrowedTotals ?? (tab === 'master' ? data.all : data.totals[tab])
   const mineFirst = STREAM_ORDER.find((k) => STREAMS[k].workspace === data.workspace)
 
   return (
@@ -296,7 +318,7 @@ export default function SalesPage() {
           const label = k === 'master' ? 'Master' : STREAMS[k].short
           const n = k === 'master' ? data.all.orders : data.totals[k]?.orders ?? 0
           return (
-            <button key={k} type="button" onClick={() => setTab(k)} aria-pressed={on}
+            <button key={k} type="button" onClick={() => pickTab(k)} aria-pressed={on}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                 on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
               {k === 'master' && <LayoutGrid className="w-3.5 h-3.5" aria-hidden />}
@@ -311,7 +333,7 @@ export default function SalesPage() {
 
       <TotalsGrid t={t} />
 
-      {tab === 'master' && <MasterBreakdown data={data} onPick={setTab} />}
+      {tab === 'master' && <MasterBreakdown data={data} onPick={pickTab} />}
 
       <RateNote rates={data.rates} />
 
@@ -324,8 +346,11 @@ export default function SalesPage() {
               className="w-40 sm:w-56 rounded-lg border border-gray-300 bg-white pl-7 pr-2 py-1 text-xs text-gray-900 outline-none focus:border-gray-900" />
           </label>
         }>
+        <FilterBar filters={filters} setFilters={setFilters} options={filterOptions} shown={rows.length} total={tabRows.length} narrowed={narrowed} />
         {rows.length === 0 ? (
-          <EmptyState icon={Receipt} title="No sales here yet" hint={canAddHere ? 'Add one with “New sale”, or from a won lead’s record.' : undefined} />
+          narrowed
+            ? <EmptyState icon={Search} title="No sales match" hint="Loosen a filter, or clear them all." />
+            : <EmptyState icon={Receipt} title="No sales here yet" hint={canAddHere ? 'Add one with “New sale”, or from a won lead’s record.' : undefined} />
         ) : (
           <SalesTable rows={rows} showStream={tab === 'master'} detailed={tab === 'pk_partner'} onOpen={(v) => openSale(v)} ownWorkspace={data.workspace} />
         )}
@@ -516,6 +541,117 @@ function splitReference(ref: string): { orderNo: string; sNo: string } {
 // `detailed` lays the table out like the partner's spreadsheet, every column
 // of it in the sheet's order (bar its S No): Order No, customer, email, phone, country,
 // order date, box style, size, material, printing, quantity — then the money.
+// ── Filters ─────────────────────────────────────────────────────────────────
+// Website, sales person, payment status and month. All four are read off the
+// rows themselves (a sale's site comes from its linked lead, which the server
+// already resolved), so nothing here needs another request and the menus can
+// only offer values that would match something.
+interface SaleFilters { site: string; agent: string; status: string; month: string }
+const NO_FILTERS: SaleFilters = { site: '', agent: '', status: '', month: '' }
+
+function filtersActive(f: SaleFilters): boolean {
+  return !!(f.site || f.agent || f.status || f.month)
+}
+
+/** YYYY-MM of the order date, or '' when the date is missing or malformed. */
+function monthKey(ymd: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd.slice(0, 7) : ''
+}
+
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number)
+  return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`
+}
+
+/** "samirkhan@shopcardboardboxes.com" → "samirkhan"; a typed-in name stays as typed. */
+function agentLabel(v: string): string {
+  return v.includes('@') ? v.split('@')[0] : v
+}
+
+function matchesFilters(v: SaleView, f: SaleFilters): boolean {
+  const s = v.sale
+  if (f.site && (s.siteId ?? '') !== f.site) return false
+  if (f.agent && s.salesPerson.trim().toLowerCase() !== f.agent) return false
+  if (f.status && v.fig.status !== f.status) return false
+  if (f.month && monthKey(s.orderDate) !== f.month) return false
+  return true
+}
+
+interface FilterOptions {
+  sites: { value: string; label: string; n: number }[]
+  agents: { value: string; label: string; n: number }[]
+  statuses: { value: string; label: string; n: number }[]
+  months: { value: string; label: string; n: number }[]
+}
+
+function filterOptionsFor(rows: SaleView[]): FilterOptions {
+  const count = (keyOf: (v: SaleView) => string) => {
+    const m = new Map<string, number>()
+    for (const v of rows) { const k = keyOf(v); if (k) m.set(k, (m.get(k) ?? 0) + 1) }
+    return m
+  }
+  const sites = count((v) => v.sale.siteId ?? '')
+  const agents = count((v) => v.sale.salesPerson.trim().toLowerCase())
+  const statuses = count((v) => v.fig.status)
+  const months = count((v) => monthKey(v.sale.orderDate))
+  const STATUS_ORDER = ['pending', 'partial', 'paid', 'refunded', 'cancelled']
+  return {
+    sites: [...sites].map(([value, n]) => ({ value, label: SITE_DOMAINS[value] ?? value, n }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    agents: [...agents].map(([value, n]) => ({ value, label: agentLabel(value), n }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    statuses: [...statuses].map(([value, n]) => ({ value, label: PAYMENT_STATUS_LABEL[value as keyof typeof PAYMENT_STATUS_LABEL] ?? value, n }))
+      .sort((a, b) => STATUS_ORDER.indexOf(a.value) - STATUS_ORDER.indexOf(b.value)),
+    // Newest month first — that is the one being asked about.
+    months: [...months].map(([value, n]) => ({ value, label: monthLabel(value), n }))
+      .sort((a, b) => b.value.localeCompare(a.value)),
+  }
+}
+
+const FILTER_SELECT = 'rounded-lg border bg-white px-2 py-1 text-xs text-gray-900 outline-none focus:border-gray-900 max-w-[11rem]'
+
+function FilterSelect({ label, value, options, onChange }: {
+  label: string; value: string; options: { value: string; label: string; n: number }[]; onChange: (v: string) => void
+}) {
+  // A menu with one choice still earns its place: it says which single
+  // website or agent this tab holds. A menu with none would be noise.
+  if (options.length === 0) return null
+  return (
+    <label className="inline-flex items-center gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)}
+        className={`${FILTER_SELECT} ${value ? 'border-blue-500 text-blue-800 font-semibold' : 'border-gray-300'}`}>
+        <option value="">All</option>
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label} ({o.n})</option>)}
+      </select>
+    </label>
+  )
+}
+
+function FilterBar({ filters, setFilters, options, shown, total, narrowed }: {
+  filters: SaleFilters; setFilters: (f: SaleFilters) => void; options: FilterOptions
+  shown: number; total: number; narrowed: boolean
+}) {
+  const set = (k: keyof SaleFilters) => (v: string) => setFilters({ ...filters, [k]: v })
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 border-b border-gray-200 bg-gray-50/60" role="group" aria-label="Filter sales">
+      <FilterSelect label="Website" value={filters.site} options={options.sites} onChange={set('site')} />
+      <FilterSelect label="Agent" value={filters.agent} options={options.agents} onChange={set('agent')} />
+      <FilterSelect label="Status" value={filters.status} options={options.statuses} onChange={set('status')} />
+      <FilterSelect label="Month" value={filters.month} options={options.months} onChange={set('month')} />
+      <span className="ml-auto text-[11px] text-gray-500 tabular-nums">
+        {narrowed ? `${shown} of ${total}` : `${total} sale${total === 1 ? '' : 's'}`}
+      </span>
+      {filtersActive(filters) && (
+        <button type="button" onClick={() => setFilters(NO_FILTERS)}
+          className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-100">
+          <X className="w-3 h-3" aria-hidden />Clear
+        </button>
+      )}
+    </div>
+  )
+}
+
 function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }: {
   rows: SaleView[]; showStream: boolean; detailed?: boolean; onOpen: (v: SaleView) => void; ownWorkspace: Workspace
 }) {
