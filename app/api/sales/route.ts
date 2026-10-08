@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { resolveLeadSite } from '@/lib/leadrecord'
+import { leadSource } from '@/lib/quoteintake'
 import { supabase } from '@/lib/supabase'
 import type { Workspace } from '@/lib/workspaces'
 import { readSales, writeSale, suggestedRates } from '@/lib/sales'
 import {
   STREAMS, STREAM_ORDER, streamsForWorkspace, canUseSales, isSalesOwner, cleanSale,
-  figures, totals, type SaleView, type SalesStream,
+  figures, totals, type SaleView, type SalesStream, type SaleLeadKind,
 } from '@/lib/salescore'
 
 export const dynamic = 'force-dynamic'
@@ -40,13 +41,23 @@ export async function GET(req: NextRequest) {
   // the sale — a lead can be re-filed under the right site later, and the
   // ledger should follow it instead of keeping the old answer.
   const withLead = lists.flat()
+  // The same lookup says how the lead arrived: a `quote-` id carries the
+  // leads row (quote form, phone call, WhatsApp, checkout — leadSource reads
+  // it off the message, as the record page does); a bare session id is a chat.
   const sites = new Map<string, string>()
+  const kinds = new Map<string, SaleLeadKind>()
   await Promise.all([...new Set(withLead.map((s) => s.leadId).filter(Boolean))].slice(0, 300).map(async (id) => {
     const r = await resolveLeadSite(String(id))
-    if (r?.siteId) sites.set(String(id), r.siteId)
+    if (!r?.siteId) return
+    sites.set(String(id), r.siteId)
+    kinds.set(String(id), r.lead ? leadSource(r.lead.message) : 'chat')
   }))
   const views: SaleView[] = withLead.map((sale) => ({
-    sale: { ...sale, siteId: sale.leadId ? sites.get(sale.leadId) ?? null : null },
+    sale: {
+      ...sale,
+      siteId: sale.leadId ? sites.get(sale.leadId) ?? null : null,
+      leadKind: sale.leadId ? kinds.get(sale.leadId) ?? null : null,
+    },
     fig: figures(sale, suggested),
   }))
 

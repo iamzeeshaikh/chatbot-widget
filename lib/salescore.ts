@@ -191,6 +191,12 @@ export interface Sale {
    * and shows a dash rather than a guess.
    */
   siteId?: string | null
+  /**
+   * HOW the lead came in — chat widget, quote form, phone call, WhatsApp or a
+   * checkout order. Read from the linked lead by the server exactly like
+   * `siteId`, never stored on the sale; absent without a lead.
+   */
+  leadKind?: SaleLeadKind | null
   payments: SalePayment[]
   costs: SaleCost[]
   /** Set by hand; otherwise the status follows the payments. */
@@ -337,6 +343,12 @@ export function figures(s: Sale, suggested: PkrRates | null): SaleFigures {
 }
 
 export interface SaleView { sale: Sale; fig: SaleFigures }
+
+export type SaleLeadKind = 'chat' | 'quote' | 'checkout' | 'call' | 'whatsapp'
+export const SALE_LEAD_KIND_ORDER: readonly SaleLeadKind[] = ['chat', 'quote', 'call', 'whatsapp', 'checkout']
+export const SALE_LEAD_KIND_LABEL: Record<SaleLeadKind, string> = {
+  chat: 'Chat', quote: 'Quote form', call: 'Phone call', whatsapp: 'WhatsApp', checkout: 'Checkout',
+}
 
 export interface StreamTotals {
   orders: number

@@ -4,9 +4,12 @@ import type { Workspace } from '@/lib/workspaces'
 import { pktDayKey } from '@/lib/datetime'
 import { toCsv } from '@/lib/reportexport'
 import { readSales, suggestedRates } from '@/lib/sales'
+import { resolveLeadSite } from '@/lib/leadrecord'
+import { leadSource } from '@/lib/quoteintake'
+import { SITE_DOMAINS } from '@/lib/sitedomains'
 import {
   STREAMS, canUseSales, isSalesOwner, isSalesStream, figures,
-  PAYMENT_STATUS_LABEL, PRODUCTION_LABEL,
+  PAYMENT_STATUS_LABEL, PRODUCTION_LABEL, SALE_LEAD_KIND_LABEL,
 } from '@/lib/salescore'
 
 export const dynamic = 'force-dynamic'
@@ -32,8 +35,16 @@ export async function GET(req: NextRequest) {
   const rates = rateInfo?.rates ?? null
   const sales = lists.flat().filter((s) => !stream || s.stream === stream)
 
+  // Website and lead source come from the linked lead, as on the page.
+  const leads = new Map<string, { site: string; via: string }>()
+  await Promise.all([...new Set(sales.map((s) => s.leadId).filter(Boolean))].slice(0, 300).map(async (id) => {
+    const r = await resolveLeadSite(String(id))
+    if (!r?.siteId) return
+    leads.set(String(id), { site: SITE_DOMAINS[r.siteId] ?? r.siteId, via: SALE_LEAD_KIND_LABEL[r.lead ? leadSource(r.lead.message) : 'chat'] })
+  }))
+
   const headers = [
-    'Stream', 'Reference', 'Customer', 'Company', 'Email', 'Phone', 'Country', 'Order date',
+    'Stream', 'Reference', 'Customer', 'Company', 'Email', 'Phone', 'Country', 'Order date', 'Website', 'Lead via',
     'Product', 'Size', 'Material', 'Printing', 'Quantity', 'Currency', 'Order amount', 'Agreed rate (PKR)',
     'Received', 'Fees', 'Net received', 'Outstanding', 'Payment status', 'Payments',
     'Net received PKR', 'Outstanding PKR', 'Cost PKR', 'Profit PKR', 'Agreed profit', 'PKR figures estimated',
@@ -41,8 +52,9 @@ export async function GET(req: NextRequest) {
   ]
   const rows = sales.map((s) => {
     const f = figures(s, rates)
+    const lead = s.leadId ? leads.get(s.leadId) : undefined
     return [
-      STREAMS[s.stream].label, s.reference, s.customer, s.company, s.email, s.phone, s.country, s.orderDate,
+      STREAMS[s.stream].label, s.reference, s.customer, s.company, s.email, s.phone, s.country, s.orderDate, lead?.site ?? '', lead?.via ?? '',
       s.product, s.size, s.material, s.printing, s.quantity, s.currency, s.orderAmount, s.rate ?? '',
       f.received, f.fees, f.net, f.outstanding, PAYMENT_STATUS_LABEL[f.status],
       s.payments.map((p) => `${p.date} ${p.amount} (fee ${p.fee}, ${p.method}${p.rate ? `, @${p.rate}` : ''})`).join('; '),

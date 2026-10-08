@@ -26,6 +26,7 @@ import { SITE_DOMAINS } from '@/lib/sitedomains'
 import {
   STREAMS, STREAM_ORDER, SALE_CURRENCIES, PAYMENT_METHODS, PAYMENT_METHOD_LABEL,
   PRODUCTION_STATUSES, PRODUCTION_LABEL, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_STYLE,
+  SALE_LEAD_KIND_LABEL, SALE_LEAD_KIND_ORDER, type SaleLeadKind,
   figures, totals, money, shortDate, newId, parseAmount,
   type Sale, type SaleView, type StreamInfo, type StreamTotals, type SalesStream,
   type RateInfo, type SaleCurrency, type PaymentMethod, type ProductionStatus,
@@ -546,11 +547,11 @@ function splitReference(ref: string): { orderNo: string; sNo: string } {
 // rows themselves (a sale's site comes from its linked lead, which the server
 // already resolved), so nothing here needs another request and the menus can
 // only offer values that would match something.
-interface SaleFilters { site: string; agent: string; status: string; month: string }
-const NO_FILTERS: SaleFilters = { site: '', agent: '', status: '', month: '' }
+interface SaleFilters { site: string; via: string; agent: string; status: string; month: string }
+const NO_FILTERS: SaleFilters = { site: '', via: '', agent: '', status: '', month: '' }
 
 function filtersActive(f: SaleFilters): boolean {
-  return !!(f.site || f.agent || f.status || f.month)
+  return !!(f.site || f.via || f.agent || f.status || f.month)
 }
 
 /** YYYY-MM of the order date, or '' when the date is missing or malformed. */
@@ -571,6 +572,7 @@ function agentLabel(v: string): string {
 function matchesFilters(v: SaleView, f: SaleFilters): boolean {
   const s = v.sale
   if (f.site && (s.siteId ?? '') !== f.site) return false
+  if (f.via && (s.leadKind ?? '') !== f.via) return false
   if (f.agent && s.salesPerson.trim().toLowerCase() !== f.agent) return false
   if (f.status && v.fig.status !== f.status) return false
   if (f.month && monthKey(s.orderDate) !== f.month) return false
@@ -579,6 +581,7 @@ function matchesFilters(v: SaleView, f: SaleFilters): boolean {
 
 interface FilterOptions {
   sites: { value: string; label: string; n: number }[]
+  vias: { value: string; label: string; n: number }[]
   agents: { value: string; label: string; n: number }[]
   statuses: { value: string; label: string; n: number }[]
   months: { value: string; label: string; n: number }[]
@@ -591,6 +594,7 @@ function filterOptionsFor(rows: SaleView[]): FilterOptions {
     return m
   }
   const sites = count((v) => v.sale.siteId ?? '')
+  const vias = count((v) => v.sale.leadKind ?? '')
   const agents = count((v) => v.sale.salesPerson.trim().toLowerCase())
   const statuses = count((v) => v.fig.status)
   const months = count((v) => monthKey(v.sale.orderDate))
@@ -598,6 +602,8 @@ function filterOptionsFor(rows: SaleView[]): FilterOptions {
   return {
     sites: [...sites].map(([value, n]) => ({ value, label: SITE_DOMAINS[value] ?? value, n }))
       .sort((a, b) => a.label.localeCompare(b.label)),
+    vias: [...vias].map(([value, n]) => ({ value, label: SALE_LEAD_KIND_LABEL[value as SaleLeadKind] ?? value, n }))
+      .sort((a, b) => SALE_LEAD_KIND_ORDER.indexOf(a.value as SaleLeadKind) - SALE_LEAD_KIND_ORDER.indexOf(b.value as SaleLeadKind)),
     agents: [...agents].map(([value, n]) => ({ value, label: agentLabel(value), n }))
       .sort((a, b) => a.label.localeCompare(b.label)),
     statuses: [...statuses].map(([value, n]) => ({ value, label: PAYMENT_STATUS_LABEL[value as keyof typeof PAYMENT_STATUS_LABEL] ?? value, n }))
@@ -636,6 +642,7 @@ function FilterBar({ filters, setFilters, options, shown, total, narrowed }: {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 border-b border-gray-200 bg-gray-50/60" role="group" aria-label="Filter sales">
       <FilterSelect label="Website" value={filters.site} options={options.sites} onChange={set('site')} />
+      <FilterSelect label="Via" value={filters.via} options={options.vias} onChange={set('via')} />
       <FilterSelect label="Agent" value={filters.agent} options={options.agents} onChange={set('agent')} />
       <FilterSelect label="Status" value={filters.status} options={options.statuses} onChange={set('status')} />
       <FilterSelect label="Month" value={filters.month} options={options.months} onChange={set('month')} />
@@ -649,6 +656,22 @@ function FilterBar({ filters, setFilters, options, shown, total, narrowed }: {
         </button>
       )}
     </div>
+  )
+}
+
+const LEAD_KIND_STYLE: Record<SaleLeadKind, string> = {
+  chat: 'bg-violet-50 text-violet-800 border-violet-200',
+  quote: 'bg-sky-50 text-sky-800 border-sky-200',
+  call: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  whatsapp: 'bg-green-50 text-green-800 border-green-200',
+  checkout: 'bg-amber-50 text-amber-800 border-amber-200',
+}
+
+function LeadKindChip({ kind }: { kind: SaleLeadKind }) {
+  return (
+    <span className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${LEAD_KIND_STYLE[kind]}`}>
+      {SALE_LEAD_KIND_LABEL[kind]}
+    </span>
   )
 }
 
@@ -679,6 +702,8 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
               {showStream && <th className="px-3 py-2 font-semibold">Stream</th>}
               <th className="px-3 py-2 font-semibold">Product</th>
             </>}
+            <th className={TH}>Website</th>
+            <th className={TH}>Via</th>
             <th className={`${TH} text-right`}>{detailed ? 'Quantity' : 'Qty'}</th>
             <th className={`${TH} text-right`}>{detailed ? 'Order amount' : 'Order'}</th>
             <th className="px-3 py-2 font-semibold text-right">Received</th>
@@ -726,6 +751,7 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
                   </td>
                 </>}
                 <td className={TD}>{s.siteId ? (SITE_DOMAINS[s.siteId] ?? s.siteId) : <span className="text-gray-400">—</span>}</td>
+                <td className={TD}>{s.leadKind ? <LeadKindChip kind={s.leadKind} /> : <span className="text-gray-400">—</span>}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-gray-700">{s.quantity || '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(s.orderAmount, s.currency)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(f.received, s.currency)}</td>
@@ -1069,6 +1095,8 @@ function SaleViewer({ view, onClose }: { view: SaleView; onClose: () => void }) 
           {line('Profit (PKR)', !f.profitKnown ? 'Costing pending' : `${money(f.profitPkr, 'PKR')}${f.profit.currency !== 'PKR' ? ` (${money(f.profit.amount, f.profit.currency)})` : ''}${f.profitEstimated ? ' (est.)' : ''}${s.agreedProfit ? ' — as agreed' : ''}`)}
           {line('Production', s.production ? PRODUCTION_LABEL[s.production] : '')}
           {line('Owed by', s.counterparty)}
+          {line('Website', s.siteId ? (SITE_DOMAINS[s.siteId] ?? s.siteId) : '')}
+          {line('Lead via', s.leadKind ? SALE_LEAD_KIND_LABEL[s.leadKind] : '')}
           {line('Sales person', s.salesPerson)}
           {line('Source', s.source)}
           {line('Notes', s.notes)}
