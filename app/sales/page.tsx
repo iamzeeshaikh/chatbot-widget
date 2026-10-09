@@ -709,14 +709,22 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
 }) {
   const TH = 'px-3 py-2 font-semibold whitespace-nowrap'
   const TD = 'px-3 py-2 whitespace-nowrap text-gray-700'
+  // The first two columns (date / order no, then customer) stay put while the
+  // rest scrolls sideways — a spreadsheet's frozen pane — so a payment or a
+  // cost far to the right is never read against the wrong name. The first
+  // column has a fixed width so the customer column knows where to pin.
+  const COL1 = 'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem]'
+  const FROZEN = 'sticky z-[1] bg-white group-hover:bg-gray-50'
+  const FROZEN_HEAD = 'sticky z-[2] bg-white'
+  const PANE_EDGE = 'shadow-[inset_-1px_0_0_#e5e7eb]'
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
             {detailed ? <>
-              <th className={TH}>Order No</th>
-              <th className={TH}>Customer</th>
+              <th className={`${TH} ${FROZEN_HEAD} left-0 ${COL1}`}>Order No</th>
+              <th className={`${TH} ${FROZEN_HEAD} left-[6.5rem] ${PANE_EDGE}`}>Customer</th>
               <th className={TH}>Email</th>
               <th className={TH}>Phone</th>
               <th className={TH}>Country</th>
@@ -726,8 +734,8 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
               <th className={TH}>Material</th>
               <th className={TH}>Printing</th>
             </> : <>
-              <th className="px-3 py-2 font-semibold">Date</th>
-              <th className="px-3 py-2 font-semibold">Customer</th>
+              <th className={`px-3 py-2 font-semibold ${FROZEN_HEAD} left-0 ${COL1}`}>Date</th>
+              <th className={`px-3 py-2 font-semibold ${FROZEN_HEAD} left-[6.5rem] ${PANE_EDGE}`}>Customer</th>
               {showStream && <th className="px-3 py-2 font-semibold">Stream</th>}
               <th className="px-3 py-2 font-semibold">Product</th>
             </>}
@@ -750,12 +758,12 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
             const readOnly = s.workspace !== ownWorkspace
             const ref = splitReference(s.reference)
             return (
-              <tr key={s.id} className={`border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${f.closed ? 'opacity-60' : ''}`} onClick={() => onOpen(v)}>
+              <tr key={s.id} className={`group border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${f.closed ? 'opacity-60' : ''}`} onClick={() => onOpen(v)}>
                 {detailed && <>
-                  <td className={`${TD} tabular-nums font-semibold`}>{ref.orderNo || '—'}</td>
+                  <td className={`${TD} tabular-nums font-semibold ${FROZEN} left-0 ${COL1} truncate`}>{ref.orderNo || '—'}</td>
                 </>}
-                {!detailed && <td className="px-3 py-2 whitespace-nowrap tabular-nums text-gray-600">{shortDate(s.orderDate)}</td>}
-                <td className="px-3 py-2 min-w-[10rem]">
+                {!detailed && <td className={`px-3 py-2 whitespace-nowrap tabular-nums text-gray-600 ${FROZEN} left-0 ${COL1}`}>{shortDate(s.orderDate)}</td>}
+                <td className={`px-3 py-2 min-w-[10rem] max-w-[14rem] ${FROZEN} left-[6.5rem] ${PANE_EDGE}`}>
                   <button type="button" className="font-semibold text-gray-900 hover:underline text-left" onClick={(e) => { e.stopPropagation(); onOpen(v) }}>
                     {s.customer}
                   </button>
