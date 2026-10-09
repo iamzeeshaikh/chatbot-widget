@@ -433,6 +433,33 @@ function costSummary(costs: Sale['costs']): string {
   return [...by].map(([cur, amt]) => money(amt, cur)).join(' + ')
 }
 
+/**
+ * Costs line by line — "Production Rs 31,000", "Shipping Rs 52,000" — with
+ * the total underneath once there is more than one. A single summed figure
+ * under a "Production cost" heading read as though shipping had never been
+ * entered, when it had; the row has to show each cost by its own name.
+ */
+function CostLines({ costs }: { costs: Sale['costs'] }) {
+  const by = new Map<string, { label: string; amount: number; currency: SaleCurrency }>()
+  for (const c of costs) {
+    const label = (c.label || 'Cost').trim()
+    const k = `${label.toLowerCase()}|${c.currency}`
+    const prev = by.get(k)
+    by.set(k, prev ? { ...prev, amount: prev.amount + c.amount } : { label, amount: c.amount, currency: c.currency })
+  }
+  const lines = [...by.values()]
+  return (
+    <>
+      {lines.map((l) => (
+        <p key={`${l.label}|${l.currency}`} className="leading-tight">
+          <span className="text-[10px] text-gray-500 mr-1">{l.label}</span>{money(l.amount, l.currency)}
+        </p>
+      ))}
+      {lines.length > 1 && <p className="text-[10px] font-semibold text-gray-700 border-t border-gray-200 mt-0.5 pt-0.5">Total {costSummary(costs)}</p>}
+    </>
+  )
+}
+
 /** Profit is only summed over sales whose costing is in; say what is left out. */
 function profitHint(t: StreamTotals): string {
   const pending = t.awaitingCosting ? `${t.awaitingCosting} sale${t.awaitingCosting === 1 ? '' : 's'} awaiting costing` : ''
@@ -712,7 +739,7 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Merchant fee</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Net received</th>
             <th className="px-3 py-2 font-semibold text-right">Outstanding</th>
-            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">{detailed ? 'Production price' : 'Production cost'}</th>
+            <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">{detailed ? 'Production price' : 'Costs'}</th>
             <th className="px-3 py-2 font-semibold">Status</th>
             <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">{detailed ? 'Gross profit (PKR)' : 'Profit (PKR)'}</th>
           </tr>
@@ -764,7 +791,7 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap font-semibold text-green-700">{money(f.net, s.currency)}</td>
                 <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${f.outstanding > 0 ? 'text-amber-700 font-semibold' : 'text-gray-500'}`}>{money(f.outstanding, s.currency)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
-                  {s.costs.length ? costSummary(s.costs) : <span className="text-gray-400">—</span>}
+                  {s.costs.length ? <CostLines costs={s.costs} /> : <span className="text-gray-400">—</span>}
                   {s.costs.length > 0 && s.costs.some((c) => c.currency !== 'PKR') && f.costPkr > 0 && (
                     <p className="text-[10px] text-gray-500">≈ {money(f.costPkr, 'PKR')}</p>
                   )}
