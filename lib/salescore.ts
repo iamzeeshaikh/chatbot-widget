@@ -233,12 +233,35 @@ export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 10
 interface Pkr { value: number; estimated: boolean; missing: boolean }
 
 /** One amount in PKR: at its own locked rate, else today's (estimated), else unknown. */
-function toPkr(amount: number, currency: SaleCurrency, locked: number | null, suggested: PkrRates | null): Pkr {
+// ── Payout routes ───────────────────────────────────────────────────────────
+// Money does not reach the Pakistan bank at the mid-market rate. The two real
+// routes, as the owner described them (2026-10-09):
+//   paypal — invoice paid in USD → PayPal's own fee (recorded on the payment)
+//            → on withdrawal PayPal converts USD→GBP with its margin (the UK
+//            Ltd account) → GBP moves to Wise free → Wise converts GBP→PKR.
+//   wise   — the customer pays the Wise USD account → a small Wise fee → USD
+//            converts to PKR at Wise's rate. Cheaper by a few percent.
+// Until a payment has actually been withdrawn, its estimate carries the
+// route's typical haircut off the mid-market rate instead of pretending the
+// whole spread does not exist. The haircuts are deliberate round guesses and
+// are replaced by the real figure the moment a payout is recorded.
+export type PayoutRoute = 'paypal' | 'wise' | 'other'
+export const PAYOUT_ROUTES: readonly PayoutRoute[] = ['paypal', 'wise', 'other']
+export const PAYOUT_ROUTE_LABEL: Record<PayoutRoute, string> = {
+  paypal: 'PayPal → GBP → Wise → PKR', wise: 'Wise USD → PKR', other: 'Other',
+}
+export const ROUTE_HAIRCUT: Record<PayoutRoute, number> = { paypal: 0.04, wise: 0.006, other: 0 }
+
+export function routeOf(method: PaymentMethod): PayoutRoute {
+  return method === 'paypal' ? 'paypal' : method === 'wise' ? 'wise' : 'other'
+}
+
+function toPkr(amount: number, currency: SaleCurrency, locked: number | null, suggested: PkrRates | null, haircut = 0): Pkr {
   if (!amount) return { value: 0, estimated: false, missing: false }
   if (currency === 'PKR') return { value: amount, estimated: false, missing: false }
   if (locked && locked > 0) return { value: amount * locked, estimated: false, missing: false }
   const r = suggested?.[currency]
-  if (r && r > 0) return { value: amount * r, estimated: true, missing: false }
+  if (r && r > 0) return { value: amount * r * (1 - haircut), estimated: true, missing: false }
   return { value: 0, estimated: false, missing: true }
 }
 
@@ -293,7 +316,7 @@ export function figures(s: Sale, suggested: PkrRates | null): SaleFigures {
 
   let netPkr = 0
   for (const p of s.payments) {
-    const v = toPkr(p.amount - p.fee, s.currency, p.rate ?? agreed, suggested)
+    const v = toPkr(p.amount - p.fee, s.currency, p.rate ?? agreed, suggested, ROUTE_HAIRCUT[routeOf(p.method)])
     netPkr += v.value
     if (v.estimated || v.missing) needsRate.push(`payment of ${p.date || 'unknown date'}`)
     estimated ||= v.estimated
@@ -576,4 +599,175 @@ export function shortDate(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number)
   const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]
   return `${d} ${mon} ${y}`
+}
+
+// ── Payouts: a withdrawal that landed in the bank ───────────────────────────
+// One record per withdrawal: how many dollars left (PayPal or Wise), what
+// came out the other end in rupees, and — for the PayPal route — the pounds
+// in between, kept for the record. The effective rate is simply PKR in ÷ USD
+// out, and that rate is what gets LOCKED onto the payments the withdrawal
+// covered, oldest first, so their profit stops being an estimate.
+//
+// Stored like a sale: one snapshot per save on the reserved site, newest per
+// id wins, delete = a snapshot with `deleted: true` (lib/payouts.ts).
+export interface PayoutSettled { saleId: string; paymentId: string; net: number }
+
+export interface Payout {
+  id: string
+  workspace: Workspace
+  /** YYYY-MM-DD — the day the rupees arrived. */
+  date: string
+  route: PayoutRoute
+  /** The order currency this withdrawal was drawn from. USD for everything so far. */
+  currency: SaleCurrency
+  /** How much of that currency left the PayPal / Wise balance (after their fees). */
+  amountOut: number
+  /** PayPal route only: the pounds PayPal paid into Wise. Informational. */
+  gbpReceived: number | null
+  /** What landed in the Pakistan bank. */
+  pkrReceived: number
+  note: string
+  /** The payments this payout locked, in the order they were covered. */
+  settled: PayoutSettled[]
+  /** Dollars this withdrawal covered that no payment accounts for (or the cents left over). */
+  leftover: number
+  createdAt: string
+  createdBy: string
+  updatedAt: string
+  updatedBy: string
+  deleted?: boolean
+}
+
+export function payoutRate(p: Pick<Payout, 'amountOut' | 'pkrReceived'>): number | null {
+  if (!(p.amountOut > 0) || !(p.pkrReceived > 0)) return null
+  return Math.round((p.pkrReceived / p.amountOut) * 100) / 100
+}
+
+/**
+ * Which unsettled payments a payout pays for. Candidates are payments in the
+ * payout's currency and route (PayPal money settles PayPal payments) that
+ * carry no rate yet, oldest payment first. They are covered whole, in order,
+ * while the money lasts; a payment the remainder cannot cover in full is left
+ * for the next withdrawal rather than split — one payment, one rate.
+ */
+export function allocatePayout(
+  payout: Pick<Payout, 'route' | 'currency' | 'amountOut'>,
+  sales: Sale[],
+): { settled: PayoutSettled[]; leftover: number; nextUncovered: PayoutSettled | null } {
+  const candidates: { saleId: string; paymentId: string; net: number; date: string; orderDate: string }[] = []
+  for (const s of sales) {
+    if (s.currency !== payout.currency || s.deleted) continue
+    for (const p of s.payments) {
+      if (p.rate || routeOf(p.method) !== payout.route) continue
+      const net = round2(p.amount - p.fee)
+      if (net <= 0) continue
+      candidates.push({ saleId: s.id, paymentId: p.id, net, date: p.date || '', orderDate: s.orderDate || '' })
+    }
+  }
+  candidates.sort((a, b) => a.date.localeCompare(b.date) || a.orderDate.localeCompare(b.orderDate) || a.saleId.localeCompare(b.saleId))
+  const settled: PayoutSettled[] = []
+  let left = payout.amountOut
+  let nextUncovered: PayoutSettled | null = null
+  for (const c of candidates) {
+    if (c.net <= left + 0.005) {
+      settled.push({ saleId: c.saleId, paymentId: c.paymentId, net: c.net })
+      left = round2(left - c.net)
+    } else {
+      nextUncovered = { saleId: c.saleId, paymentId: c.paymentId, net: c.net }
+      break
+    }
+  }
+  return { settled, leftover: round2(Math.max(left, 0)), nextUncovered }
+}
+
+export function cleanPayout(
+  r: Record<string, unknown>, prev: Payout | null, by: string, ws: Workspace,
+): { payout: Payout } | { error: string } {
+  const route = String(r.route ?? '') as PayoutRoute
+  if (!PAYOUT_ROUTES.includes(route)) return { error: 'Choose the route the money took.' }
+  const currency = String(r.currency ?? 'USD') as SaleCurrency
+  if (!SALE_CURRENCIES.includes(currency) || currency === 'PKR') return { error: 'The withdrawal currency must be a foreign one.' }
+  const amountOut = parseAmount(r.amountOut)
+  if (amountOut === null || amountOut <= 0) return { error: 'How much was withdrawn (in the order currency) is required.' }
+  const pkrReceived = parseAmount(r.pkrReceived)
+  if (pkrReceived === null || pkrReceived <= 0) return { error: 'How many rupees landed in the bank is required.' }
+  const gbp = route === 'paypal' ? parseAmount(r.gbpReceived) : null
+  const dateStr = String(r.date ?? '').slice(0, 10)
+  if (!DATE_RE.test(dateStr)) return { error: 'The date the money arrived is required (YYYY-MM-DD).' }
+  const now = new Date().toISOString()
+  return {
+    payout: {
+      id: prev?.id ?? (typeof r.id === 'string' && r.id.trim() ? r.id.trim() : newId('payout')),
+      workspace: ws, date: dateStr, route, currency, amountOut, gbpReceived: gbp, pkrReceived,
+      note: String(r.note ?? '').slice(0, 1000),
+      settled: prev?.settled ?? [], leftover: prev?.leftover ?? amountOut,
+      createdAt: prev?.createdAt ?? now, createdBy: prev?.createdBy ?? by, updatedAt: now, updatedBy: by,
+    },
+  }
+}
+
+// ── Expenses: money that is not a sale's cost ───────────────────────────────
+// Salaries, the office, a vendor paid on Alibaba, gear — everything that has
+// to come out of the month before the profit is real but belongs to no one
+// order. One row per payment made, in the currency it was paid in, with the
+// month it belongs to (a salary paid on the 3rd is last month's). Stored like
+// sales and payouts (lib/expenses.ts).
+export type ExpenseCategory = 'salary' | 'office' | 'vendor' | 'equipment' | 'marketing' | 'other'
+export const EXPENSE_CATEGORIES: readonly ExpenseCategory[] = ['salary', 'office', 'vendor', 'equipment', 'marketing', 'other']
+export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
+  salary: 'Salary', office: 'Office', vendor: 'Vendor / supplier', equipment: 'Equipment', marketing: 'Marketing', other: 'Other',
+}
+
+export interface Expense {
+  id: string
+  workspace: Workspace
+  /** YYYY-MM-DD — when it was paid. */
+  date: string
+  /** YYYY-MM — the month it belongs to. */
+  month: string
+  category: ExpenseCategory
+  /** Who was paid — a person, "Alibaba — <vendor>", "Office rent". */
+  payee: string
+  amount: number
+  currency: SaleCurrency
+  /** PKR per unit of `currency`, when known; ignored for PKR. */
+  rate: number | null
+  note: string
+  createdAt: string
+  createdBy: string
+  updatedAt: string
+  updatedBy: string
+  deleted?: boolean
+}
+
+export function expensePkr(e: Expense, suggested: PkrRates | null): Pkr {
+  return toPkr(e.amount, e.currency, e.rate, suggested)
+}
+
+export function cleanExpense(
+  r: Record<string, unknown>, prev: Expense | null, by: string, ws: Workspace,
+): { expense: Expense } | { error: string } {
+  const category = String(r.category ?? '') as ExpenseCategory
+  if (!EXPENSE_CATEGORIES.includes(category)) return { error: 'Choose what kind of expense this is.' }
+  const payee = String(r.payee ?? '').trim().slice(0, 200)
+  if (!payee) return { error: 'Who was paid is required.' }
+  const amount = parseAmount(r.amount)
+  if (amount === null || amount <= 0) return { error: 'The amount must be a number above zero.' }
+  const currency = String(r.currency ?? 'PKR') as SaleCurrency
+  if (!SALE_CURRENCIES.includes(currency)) return { error: 'Unknown currency.' }
+  const dateStr = String(r.date ?? '').slice(0, 10)
+  if (!DATE_RE.test(dateStr)) return { error: 'The payment date is required (YYYY-MM-DD).' }
+  const monthRaw = String(r.month ?? '').slice(0, 7)
+  const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : dateStr.slice(0, 7)
+  const rate = currency === 'PKR' ? null : parseAmount(r.rate)
+  const now = new Date().toISOString()
+  return {
+    expense: {
+      id: prev?.id ?? (typeof r.id === 'string' && r.id.trim() ? r.id.trim() : newId('exp')),
+      workspace: ws, date: dateStr, month, category, payee, amount, currency,
+      rate: rate && rate > 0 ? rate : null,
+      note: String(r.note ?? '').slice(0, 1000),
+      createdAt: prev?.createdAt ?? now, createdBy: prev?.createdBy ?? by, updatedAt: now, updatedBy: by,
+    },
+  }
 }

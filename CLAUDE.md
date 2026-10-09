@@ -344,6 +344,19 @@ partner owes that money, not the end customer. Never fold it into direct sales.
   but are excluded from money totals.
 - The 11 sales that lived in spreadsheets were imported by `scratch/import-sales.mjs`
   (idempotent). No rate was recorded for any of them — that is why they show *est.*
+- **Payouts and expenses (2026-10-09)** sit beside the ledger on `/sales`
+  (`app/sales/money.tsx`), stored the same way: `crm_payout` on
+  `zeeops-payouts-<ws>` and `crm_expense` on `zeeops-expenses-<ws>`
+  (`lib/payouts.ts`, `lib/expenses.ts`). Money reaches the Pakistan bank by two
+  routes — PayPal → GBP (PayPal's margin) → Wise → PKR, or Wise USD → PKR — so an
+  unwithdrawn payment is estimated under mid-market by its route (`ROUTE_HAIRCUT`,
+  4% / 0.6%). **Recording a payout locks its real rate (PKR in ÷ USD out) onto the
+  oldest unsettled payments of that route, whole payments only, FIFO**
+  (`allocatePayout`); it writes the payout snapshot first, then one sale snapshot per
+  locked payment, and deleting the payout is the compensating unlock. A payout cannot
+  be edited — delete and re-enter. Expenses carry the month they belong to (a salary
+  paid on the 3rd is last month's) and the card shows net-after-expenses for the month
+  the table is filtered to. `scratch/payouts.test.ts` covers the arithmetic.
 
 ### Enforce access server-side
 Workspace isolation and per-member site access are decided **on the server**, in the

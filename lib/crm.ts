@@ -74,6 +74,8 @@ export const CRM_ROLES = [
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
   CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_WA_LOOKUP_ROLE,
   CRM_NOT_A_LEAD_ROLE,
+  // Payouts (lib/payouts.ts) — on the reserved site too; see below.
+  'crm_payout', 'crm_expense',
   // Both live on the reserved zeeops-crm site, not on a lead — but registered
   // here anyway, as the second line of defence the reserved site is the first.
   CRM_SIGNATURE_ROLE, CRM_SITE_CONTACT_ROLE, CRM_TEAM_LEAD_ROLE,

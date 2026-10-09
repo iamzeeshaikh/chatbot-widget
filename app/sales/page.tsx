@@ -33,6 +33,7 @@ import {
 } from '@/lib/salescore'
 import { Card, Skeleton, EmptyState } from '@/app/leads/[id]/ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
+import { PayoutsCard, ExpensesCard } from './money'
 
 interface Payload {
   scope: string
@@ -338,6 +339,11 @@ export default function SalesPage() {
 
       <RateNote rates={data.rates} />
 
+      {/* The two side ledgers. Both act on the member's own workspace, so on
+          the owner's master tab they still show that owner's business. */}
+      <PayoutsCard onChanged={() => { void load() }} />
+      <ExpensesCard month={filters.month} monthProfitPkr={filters.month ? t.profitPkr : null} />
+
       <Card title={tab === 'master' ? 'All sales' : `${STREAMS[tab].short} — sales`} icon={Receipt}
         action={
           <label className="relative block">
@@ -552,7 +558,7 @@ function RateNote({ rates }: { rates: RateInfo | null }) {
   return (
     <p className="mb-3 text-[11px] text-gray-500">
       {rates?.rates.USD
-        ? <>Today&apos;s suggested rate: <b className="tabular-nums text-gray-700">1 USD = Rs {rates.rates.USD}</b> ({rates.source}). It fills in only where neither the payment (or cost) nor the sale has an agreed rate — those figures say <i>est.</i> Put the rate you actually converted at on each payment, or the deal&apos;s agreed rate on the sale, to lock it.</>
+        ? <>Today&apos;s mid-market rate: <b className="tabular-nums text-gray-700">1 USD = Rs {rates.rates.USD}</b> ({rates.source}). A payment nobody has withdrawn yet is estimated below that by its route — PayPal money loses about 4% on the way (USD → GBP at PayPal&apos;s margin, then GBP → PKR at Wise), Wise money about 0.6% — and the figure says <i>est.</i> Recording a payout below locks the real rate onto the payments it covered.</>
         : <>Today&apos;s rate could not be fetched, so any payment without its own rate cannot be converted to PKR yet.</>}
     </p>
   )
