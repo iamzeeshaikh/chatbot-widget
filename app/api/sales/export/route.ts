@@ -3,9 +3,7 @@ import { getMember } from '@/lib/auth'
 import type { Workspace } from '@/lib/workspaces'
 import { pktDayKey } from '@/lib/datetime'
 import { toCsv } from '@/lib/reportexport'
-import { readSales, suggestedRates } from '@/lib/sales'
-import { resolveLeadSite } from '@/lib/leadrecord'
-import { leadSource } from '@/lib/quoteintake'
+import { readSales, suggestedRates, leadFactsFor } from '@/lib/sales'
 import { SITE_DOMAINS } from '@/lib/sitedomains'
 import {
   STREAMS, canUseSales, isSalesOwner, isSalesStream, figures,
@@ -36,12 +34,8 @@ export async function GET(req: NextRequest) {
   const sales = lists.flat().filter((s) => !stream || s.stream === stream)
 
   // Website and lead source come from the linked lead, as on the page.
-  const leads = new Map<string, { site: string; via: string }>()
-  await Promise.all([...new Set(sales.map((s) => s.leadId).filter(Boolean))].slice(0, 300).map(async (id) => {
-    const r = await resolveLeadSite(String(id))
-    if (!r?.siteId) return
-    leads.set(String(id), { site: SITE_DOMAINS[r.siteId] ?? r.siteId, via: SALE_LEAD_KIND_LABEL[r.lead ? leadSource(r.lead.message) : 'chat'] })
-  }))
+  const facts = await leadFactsFor(sales.map((s) => s.leadId))
+  const leads = new Map([...facts].map(([id, f]) => [id, { site: SITE_DOMAINS[f.siteId] ?? f.siteId, via: SALE_LEAD_KIND_LABEL[f.kind] }]))
 
   const headers = [
     'Stream', 'Reference', 'Customer', 'Company', 'Email', 'Phone', 'Country', 'Order date', 'Website', 'Lead via',

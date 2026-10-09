@@ -660,6 +660,8 @@ function FilterBar({ filters, setFilters, options, shown, total, narrowed }: {
 }
 
 const LEAD_KIND_STYLE: Record<SaleLeadKind, string> = {
+  chat_human: 'bg-violet-50 text-violet-800 border-violet-200',
+  chat_bot: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200',
   chat: 'bg-violet-50 text-violet-800 border-violet-200',
   quote: 'bg-sky-50 text-sky-800 border-sky-200',
   call: 'bg-emerald-50 text-emerald-800 border-emerald-200',

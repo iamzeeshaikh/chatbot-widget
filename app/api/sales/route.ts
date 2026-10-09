@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
-import { resolveLeadSite } from '@/lib/leadrecord'
-import { leadSource } from '@/lib/quoteintake'
 import { supabase } from '@/lib/supabase'
 import type { Workspace } from '@/lib/workspaces'
-import { readSales, writeSale, suggestedRates } from '@/lib/sales'
+import { readSales, writeSale, suggestedRates, leadFactsFor } from '@/lib/sales'
 import {
   STREAMS, STREAM_ORDER, streamsForWorkspace, canUseSales, isSalesOwner, cleanSale,
-  figures, totals, type SaleView, type SalesStream, type SaleLeadKind,
+  figures, totals, type SaleView, type SalesStream,
 } from '@/lib/salescore'
 
 export const dynamic = 'force-dynamic'
@@ -44,19 +42,12 @@ export async function GET(req: NextRequest) {
   // The same lookup says how the lead arrived: a `quote-` id carries the
   // leads row (quote form, phone call, WhatsApp, checkout — leadSource reads
   // it off the message, as the record page does); a bare session id is a chat.
-  const sites = new Map<string, string>()
-  const kinds = new Map<string, SaleLeadKind>()
-  await Promise.all([...new Set(withLead.map((s) => s.leadId).filter(Boolean))].slice(0, 300).map(async (id) => {
-    const r = await resolveLeadSite(String(id))
-    if (!r?.siteId) return
-    sites.set(String(id), r.siteId)
-    kinds.set(String(id), r.lead ? leadSource(r.lead.message) : 'chat')
-  }))
+  const facts = await leadFactsFor(withLead.map((s) => s.leadId))
   const views: SaleView[] = withLead.map((sale) => ({
     sale: {
       ...sale,
-      siteId: sale.leadId ? sites.get(sale.leadId) ?? null : null,
-      leadKind: sale.leadId ? kinds.get(sale.leadId) ?? null : null,
+      siteId: sale.leadId ? facts.get(sale.leadId)?.siteId ?? null : null,
+      leadKind: sale.leadId ? facts.get(sale.leadId)?.kind ?? null : null,
     },
     fig: figures(sale, suggested),
   }))

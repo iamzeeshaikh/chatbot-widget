@@ -89,3 +89,42 @@ export async function suggestedRates(): Promise<RateInfo | null> {
     return rateCache?.info ?? null
   }
 }
+
+// ── What the linked lead says about a sale ──────────────────────────────────
+// Website and "how it came in" are never stored on the sale: they are read off
+// the linked lead each time, so a lead re-filed under the right site carries
+// its sales with it. One call for the whole ledger, used by the page and the
+// CSV export alike so the two cannot disagree.
+import { resolveLeadSite } from './leadrecord'
+import { leadSource } from './quoteintake'
+import type { SaleLeadKind } from './salescore'
+
+export interface LeadFacts { siteId: string; kind: SaleLeadKind }
+
+export async function leadFactsFor(leadIds: (string | null | undefined)[]): Promise<Map<string, LeadFacts>> {
+  const ids = [...new Set(leadIds.filter((x): x is string => !!x))].slice(0, 300)
+  const out = new Map<string, LeadFacts>()
+  const chatIds: string[] = []
+  await Promise.all(ids.map(async (id) => {
+    const r = await resolveLeadSite(id)
+    if (!r?.siteId) return
+    // A `quote-` id carries the leads row and leadSource reads the channel off
+    // its message, exactly as the record page does. A bare id is a chat
+    // session; who worked it is decided below.
+    if (r.lead) out.set(id, { siteId: r.siteId, kind: leadSource(r.lead.message) })
+    else { out.set(id, { siteId: r.siteId, kind: 'chat' }); chatIds.push(id) }
+  }))
+  if (chatIds.length === 0) return out
+  // An agent's reply in the widget is a chat_logs row with role 'admin'
+  // (lib/replyauthor.ts). One such row means a human took the chat over;
+  // none means the bot alone handled it. One query for every chat session.
+  const { data, error } = await supabase
+    .from('chat_logs').select('session_id').in('session_id', chatIds).eq('role', 'admin').limit(5000)
+  if (error) return out // leave the plain 'chat' fallback rather than guess
+  const human = new Set((data ?? []).map((r) => String(r.session_id)))
+  for (const id of chatIds) {
+    const f = out.get(id)
+    if (f) out.set(id, { ...f, kind: human.has(id) ? 'chat_human' : 'chat_bot' })
+  }
+  return out
+}
