@@ -35,6 +35,8 @@ export const PACKAGING_SITES = [
   // designer form mails this inbox, but it was in no list at all, so its very
   // first lead (Rachael Strattard, 20 Sep) resolved to no site and was skipped.
   'thepillowboxes',
+  // 2026-10-12: thecustomfolders.com got the widget.
+  'thecustomfolders',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
