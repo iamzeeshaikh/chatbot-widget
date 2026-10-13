@@ -151,20 +151,27 @@ async function takeLease(now: Date): Promise<boolean> {
   return true
 }
 
-/** Has anyone already written to this address? Any lead, last 30 days. */
-async function addressAlreadyContacted(address: string, now: Date): Promise<boolean> {
+/**
+ * Has anyone already written to this address? Any lead, last 30 days.
+ *
+ * Mail on a lead since marked "not a lead" (spam, a test) does not count: it
+ * says nothing about whether this customer has heard from us, and counting it
+ * would let one test or one mis-marked record silence a real enquiry.
+ */
+async function addressAlreadyContacted(address: string, now: Date, notLeads: Set<string>): Promise<boolean> {
   const since = new Date(now.getTime() - 30 * 864e5).toISOString()
   // `_` is ilike's one-character wildcard, which matches a literal `_` too, so
   // the address is used as it is. Stripping it once made john_doe@ unfindable.
   const needle = `%${address.trim().replace(/%/g, '')}%`
   const [mail, bot] = await Promise.all([
     supabase.from('chat_logs').select('session_id').eq('role', CRM_EMAIL_ROLE)
-      .gte('created_at', since).ilike('message', needle).limit(1),
-    supabase.from('chat_logs').select('message').eq('role', CRM_BOT_ROLE)
-      .gte('created_at', since).ilike('message', needle).limit(20),
+      .gte('created_at', since).ilike('message', needle).limit(200),
+    supabase.from('chat_logs').select('session_id, message').eq('role', CRM_BOT_ROLE)
+      .gte('created_at', since).ilike('message', needle).limit(200),
   ])
-  if ((mail.data ?? []).length) return true
+  if ((mail.data ?? []).some((r) => !notLeads.has(r.session_id))) return true
   return (bot.data ?? []).some((r) => {
+    if (notLeads.has(r.session_id)) return false
     const e = parseBotLedger(r.message)
     return e?.state === 'sent' || e?.state === 'claimed'
   })
@@ -276,7 +283,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     const to = await leadRecipient(id)
     if (!to) { await skip('no email address on the lead'); continue }
     if (!isAddress(to)) { await skip(`"${to}" is not a valid email address`); continue }
-    if (await addressAlreadyContacted(to, now)) { await skip('this address was already emailed in the last 30 days', { to }); continue }
+    if (await addressAlreadyContacted(to, now, excluded)) { await skip('this address was already emailed in the last 30 days', { to }); continue }
 
     const assessment = await assessQuote(lead.message ?? '', lead.name)
     // The model being down is not a decision about the lead: no ledger row, so
