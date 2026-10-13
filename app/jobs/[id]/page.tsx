@@ -32,6 +32,7 @@ export default function JobPage() {
   const [messages, setMessages] = useState<JobMessage[]>([])
   const [members, setMembers] = useState<Member[]>([])
   const [me, setMe] = useState('')
+  const [jobsOnly, setJobsOnly] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
@@ -50,7 +51,7 @@ export default function JobPage() {
       const j = await r.json().catch(() => ({}))
       if (!alive) return
       if (!r.ok) { setError(j.error ?? 'Could not load this job.'); return }
-      setMessages(j.messages); setMembers(j.members); setMe(j.me); setJob(j.job); setDraft(j.job)
+      setMessages(j.messages); setMembers(j.members); setMe(j.me); setJob(j.job); setDraft(j.job); setJobsOnly(!!j.jobsOnly)
     }).catch(() => { if (alive) setError('Could not load this job.') })
     return () => { alive = false }
   }, [jobId])
@@ -183,7 +184,9 @@ export default function JobPage() {
               </div>
               <p className="text-xs text-gray-500">
                 Requested by {nameOf(job.createdBy)} · {formatDateTime(job.createdAt)}
-                {job.leadId && <> · Lead: <a className="text-blue-700 hover:underline" href={`/leads/${encodeURIComponent(job.leadId)}`} target="_blank" rel="noopener">{job.leadName || job.leadId}</a></>}
+                {job.leadId && (jobsOnly
+                  ? <> · Customer: {job.leadName || '—'}</>
+                  : <> · Lead: <a className="text-blue-700 hover:underline" href={`/leads/${encodeURIComponent(job.leadId)}`} target="_blank" rel="noopener">{job.leadName || job.leadId}</a></>)}
               </p>
               <div>
                 <label className={label} htmlFor="j-req">Requirements</label>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
+import { isJobsOnly } from '@/lib/jobsonly'
 import { resolveLeadSite } from '@/lib/leadrecord'
 import { listJobs, jobCount, writeJob, workspaceMembers, notifyJob } from '@/lib/jobstore'
 import { cleanJobInput, newJobId, JOB_TYPE_LABEL, type Job } from '@/lib/jobs'
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
   const [jobs, members] = await Promise.all([listJobs(c.m.workspace), workspaceMembers(c.m.workspace)])
   // A job tied to a lead on a site this member cannot see stays out of view.
   const visible = jobs.filter((j) => !j.siteId || canAccessSite(c.m, j.siteId))
-  return NextResponse.json({ ok: true, me: c.m.email, jobs: lead ? visible.filter((j) => j.leadId === lead) : visible, members })
+  return NextResponse.json({ ok: true, me: c.m.email, jobsOnly: isJobsOnly(c.m.email), jobs: lead ? visible.filter((j) => j.leadId === lead) : visible, members })
 }
 
 export async function POST(req: NextRequest) {

@@ -2,6 +2,7 @@
 // and erasing the import keeps this module loadable under Node's type stripping.
 import type { NextRequest } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
+import { isJobsOnly, jobsOnlyMayCall } from './jobsonly'
 import { supabase } from './supabase'
 // `type` on Workspace so the import erases cleanly — it is a type, and marking
 // it lets these modules load under Node's native TypeScript stripping (which is
@@ -157,6 +158,9 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
   if (!data) return null
   if (bound && data.workspace !== bound) return null
   if ((session.iat ?? 0) < validFrom) return null
+  // A jobs-only account (lib/jobsonly.ts) is nobody outside the Jobs API —
+  // decided here, once, so no route can forget to check it.
+  if (isJobsOnly(data.email) && !jobsOnlyMayCall(req.nextUrl.pathname)) return null
   return {
     id: data.id,
     email: data.email,

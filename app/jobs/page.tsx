@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, Plus, X } from 'lucide-react'
 import GlobalSearch from '@/app/components/GlobalSearch'
+import PushButton from './PushButton'
 import { timeAgo } from '@/lib/datetime'
 import {
   JOB_STATUSES, JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, JOB_DESIGNERS,
@@ -35,12 +36,15 @@ function JobsPage() {
   const [open, setOpen] = useState(search.get('new') === '1')
   const [mine, setMine] = useState(false)
   const [me, setMe] = useState('')
+  // The designer/estimator's account only has Jobs (lib/jobsonly.ts): no way
+  // back to a dashboard it cannot open, and no lead search it cannot use.
+  const [jobsOnly, setJobsOnly] = useState(false)
 
   const load = useCallback(() => {
     fetch('/api/jobs').then(async (r) => {
       const j = await r.json()
       if (!r.ok) { setError(r.status === 403 ? 'Jobs are not available for this workspace.' : (j.error ?? 'Could not load jobs.')); setJobs([]); return }
-      setJobs(j.jobs); setMembers(j.members); setMe(j.me)
+      setJobs(j.jobs); setMembers(j.members); setMe(j.me); setJobsOnly(!!j.jobsOnly)
     }).catch(() => { setError('Could not load jobs.'); setJobs([]) })
   }, [])
   useEffect(() => { load() }, [load])
@@ -52,14 +56,23 @@ function JobsPage() {
     <main className="min-h-screen bg-gray-50">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
         <div className="max-w-[1500px] mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-3 flex-wrap">
-          <Link href="/" title="Back to the dashboard" aria-label="Back to the dashboard"
-            className="shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100"><ArrowLeft size={16} aria-hidden /></Link>
+          {!jobsOnly && (
+            <Link href="/" title="Back to the dashboard" aria-label="Back to the dashboard"
+              className="shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100"><ArrowLeft size={16} aria-hidden /></Link>
+          )}
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-gray-900 leading-tight">Jobs</h1>
             <p className="text-[11px] text-gray-500 leading-tight">Estimates, designs and production — from request to shipped</p>
           </div>
           <span className="ml-auto flex items-center gap-2">
-            <GlobalSearch />
+            {!jobsOnly && <GlobalSearch />}
+            <PushButton />
+            {jobsOnly && (
+              <button type="button" className="text-xs text-gray-500 hover:text-gray-800"
+                onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); window.location.href = '/login' }}>
+                Sign out
+              </button>
+            )}
             <label className="inline-flex items-center gap-1.5 text-xs text-gray-600">
               <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> Mine only
             </label>

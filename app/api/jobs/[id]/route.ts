@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
+import { isJobsOnly } from '@/lib/jobsonly'
 import { listJobs, writeJob, listMessages, workspaceMembers, notifyJob } from '@/lib/jobstore'
 import { cleanJobInput, JOB_STATUS_LABEL, type Job } from '@/lib/jobs'
 
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const c = await load(req, id)
   if ('error' in c) return c.error
   const [messages, members] = await Promise.all([listMessages(c.m.workspace, id), workspaceMembers(c.m.workspace)])
-  return NextResponse.json({ ok: true, me: c.m.email, job: c.job, messages, members })
+  return NextResponse.json({ ok: true, me: c.m.email, jobsOnly: isJobsOnly(c.m.email), job: c.job, messages, members })
 }
 
 // Every change is a new snapshot, so the trail of who moved what stays.
