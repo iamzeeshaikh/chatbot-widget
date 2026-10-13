@@ -35,12 +35,12 @@ import { supabase } from './supabase'
 import { workspaceSites, hasFeature } from './workspaces'
 import { quoteSessionId, leadSource } from './quoteintake'
 import { leadRecipient, writeControlRow } from './leadrecord'
-import { notALeadSessions } from './notalead'
+import { notALeadSessions, parseNotALead } from './notalead'
 import { ASSIGNMENT_ROLE, setAssignment } from './assignment'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import {
   CRM_STAGE_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_TASK_ROLE, CRM_WA_IN_ROLE,
-  parseCrmStage, stageFromLeadStatus,
+  parseCrmStage, stageFromLeadStatus, CRM_NOT_A_LEAD_ROLE,
 } from './crm'
 import { applyStageChange } from './stagechange'
 import { threadContextFor, isNoiseSender } from './emailsweep'
@@ -142,6 +142,7 @@ export interface BotRunResult {
   skipped?: 'leased'
   scanned: number
   actions: BotAction[]
+  followUps?: { leadId: string; state: string; n?: number; why?: string }[]
 }
 
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; message: string | null; created_at: string }
@@ -248,7 +249,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
   if (error) throw new Error(`leads query failed: ${error.message}`)
   const leads = (leadRows ?? []) as LeadRow[]
   result.scanned = leads.length
-  if (!leads.length) return result
+  if (!leads.length) return withFollowUps(result, now, dryRun, opts.leadIds?.length ? 0 : MAX_SENDS_PER_RUN)
 
   const sessions = leads.map((l) => quoteSessionId(l.id))
   const [{ data: logRows }, excluded, siteRes] = await Promise.all([
@@ -396,6 +397,57 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     act({ state: 'sent', why: assessment.reason, ...preview })
   }
 
+  return withFollowUps(result, now, dryRun, opts.leadIds?.length ? 0 : MAX_SENDS_PER_RUN - sends)
+}
+
+/** How far back a bot lead can still be followed up. Long, on purpose: the
+ *  owner's rule is "until they reply" — this only bounds the query. */
+const FOLLOW_UP_WINDOW_DAYS = 180
+
+// Every lead the bot asked for details and is still waiting on. Leads that
+// were complete on arrival are left alone here: the next move there is OUR
+// price, and chasing a customer for an answer we owe them reads badly. Their
+// follow-ups begin once the price is sent (Step 3).
+async function withFollowUps(result: BotRunResult, now: Date, dryRun: boolean, budget: number): Promise<BotRunResult> {
+  if (budget <= 0) return result
+  // ONE bounded query, and due-ness worked out from the bot's own ledger, so a
+  // run touches only leads that are actually due. Checking every bot lead's
+  // timeline every five minutes would be hundreds of thousands of queries a
+  // day against a database that has fallen over once already (CLAUDE.md §6).
+  const since = new Date(now.getTime() - FOLLOW_UP_WINDOW_DAYS * 864e5).toISOString()
+  const { data } = await supabase.from('chat_logs').select('session_id, site_id, message')
+    .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
+    .order('created_at', { ascending: true }).limit(20000)
+  if ((data ?? []).length >= 20000) console.warn('[quotebot] follow-up ledger query hit its cap')
+  const state = new Map<string, { siteId: string; waiting: boolean; stopped: boolean; lastAt: number }>()
+  for (const r of data ?? []) {
+    const e = parseBotLedger(r.message)
+    if (!e) continue
+    const cur = state.get(r.session_id) ?? { siteId: r.site_id, waiting: false, stopped: false, lastAt: 0 }
+    if (e.step === 'first' && e.state === 'sent') { cur.waiting = e.complete === false; cur.lastAt = new Date(e.at).getTime() }
+    // A failed send counts as an attempt: try again in three days, not in five
+    // minutes and then every five minutes after that.
+    if (e.step === 'followup' && (e.state === 'sent' || e.state === 'failed')) cur.lastAt = Math.max(cur.lastAt, new Date(e.at).getTime())
+    if (e.step === 'followup' && e.state === 'skipped') cur.stopped = true
+    state.set(r.session_id, cur)
+  }
+  const due = [...state.entries()]
+    .filter(([, v]) => v.waiting && !v.stopped && now.getTime() - v.lastAt >= FOLLOW_UP_GAP_DAYS * 864e5)
+    .sort((a, b) => a[1].lastAt - b[1].lastAt)
+
+  result.followUps = []
+  let sent = 0
+  for (const [id, v] of due) {
+    if (sent >= budget) break
+    const r = await sendFollowUp(id, now, { dryRun })
+    result.followUps.push({ leadId: id, state: r.state, n: r.n, why: r.why })
+    if (r.state === 'sent') sent++
+    // Stopped is final: a reply, a person, a new stage or a spam mark. Written
+    // down so this lead never costs a query again.
+    if (r.state === 'stopped' && !dryRun) {
+      await ledger(id, v.siteId, { step: 'followup', state: 'skipped', at: now.toISOString(), why: `stopped: ${r.why ?? ''}` })
+    }
+  }
   return result
 }
 
@@ -439,13 +491,16 @@ export interface FollowUpResult {
  * is a human conversation. `force` skips only the 3-day wait, never those
  * checks; it is how an admin tests the sequence on a lead without waiting.
  */
-export async function sendFollowUp(leadId: string, now = new Date(), opts: { force?: boolean } = {}): Promise<FollowUpResult> {
+export async function sendFollowUp(leadId: string, now = new Date(), opts: { force?: boolean; dryRun?: boolean } = {}): Promise<FollowUpResult> {
   const id = leadId.startsWith('quote-') ? leadId : `quote-${leadId}`
   const { data } = await supabase.from('chat_logs').select('session_id, site_id, role, message, created_at')
     .eq('session_id', id)
-    .in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE])
+    .in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE,
+      CRM_STAGE_ROLE, LEAD_STATUS_ROLE, CRM_NOT_A_LEAD_ROLE])
     .order('created_at', { ascending: true })
   const rows = (data ?? []) as (LogRow & { site_id: string })[]
+  const notALead = rows.filter((r) => r.role === CRM_NOT_A_LEAD_ROLE).map((r) => parseNotALead(r.message)).filter(Boolean).pop()
+  if (notALead?.spam) return { ok: true, state: 'stopped', why: 'marked not a lead' }
   const ledgers = rows.filter((r) => r.role === CRM_BOT_ROLE).map((r) => parseBotLedger(r.message)).filter(Boolean) as BotLedger[]
   const first = ledgers.find((e) => e.step === 'first' && e.state === 'sent')
   if (!first || !first.agent || !first.from || !first.to) return { ok: false, state: 'stopped', why: 'the bot never emailed this lead' }
@@ -464,6 +519,9 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   const human = after.find((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
     || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot))
   if (human) return { ok: true, state: 'stopped', why: `an agent reached the customer themselves (${human.role})` }
+  // Moved on by a person (quote sent, won, lost, on hold...) — not ours to chase.
+  const stage = currentStage(rows)
+  if (stage !== 'contacted') return { ok: true, state: 'stopped', why: `stage is ${stage}` }
 
   const sentUps = ledgers.filter((e) => e.step === 'followup' && e.state === 'sent')
   const n = sentUps.length + 1
@@ -483,6 +541,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   const sentRows = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
   const original = sentRows.find((e) => e.id === first.emailId) ?? sentRows.find((e) => e.bot)
   if (!original) return { ok: false, state: 'failed', why: 'the first email is missing from the timeline' }
+  if (opts.dryRun) return { ok: true, state: 'not-due', n, text: fu.text, why: 'dry run: would send now' }
   const thread = await threadContextFor(id, original.gmailId)
   const subject = /^re:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`
 
