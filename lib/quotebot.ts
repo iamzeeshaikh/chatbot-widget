@@ -221,7 +221,10 @@ async function weeklyLoad(now: Date): Promise<Map<string, number>> {
   const load = new Map<string, number>(BOT_AGENTS.map((a) => [a, 0]))
   for (const r of data ?? []) {
     const e = parseBotLedger(r.message)
-    if (e?.state === 'sent' && e.agent && load.has(e.agent)) load.set(e.agent, load.get(e.agent)! + 1)
+    // New leads only. Counting follow-ups and replies too made one long
+    // conversation (a test lead with a dozen follow-ups) push every new lead
+    // to the other agent for a week.
+    if (e?.step === 'first' && e.state === 'sent' && e.agent && load.has(e.agent)) load.set(e.agent, load.get(e.agent)! + 1)
   }
   return load
 }
