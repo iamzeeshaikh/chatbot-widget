@@ -100,6 +100,10 @@ export const CRM_ROLES = [
   // The sales ledger (lib/sales.ts) — one snapshot per save, on the reserved
   // zeeops-crm site. Registered here as the second line of defence.
   'crm_sale',
+  // The quote bot's ledger (lib/quotebot.ts) — one row per thing the bot did or
+  // decided not to do on a lead: claimed, sent, skipped, failed. On the lead,
+  // so it must never reach a transcript or a preview.
+  'crm_bot',
   // Retired: the customer billing form was removed on 2026-09-08. Kept
   // registered so that if the feature ever comes back — or a stray row from it
   // turns up — the JSON can never surface as a transcript line or a preview.

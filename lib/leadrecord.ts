@@ -199,7 +199,7 @@ export async function resolveLeadSite(id: string): Promise<{ siteId: string; lea
   return data?.site_id ? { siteId: data.site_id, lead: null } : null
 }
 
-const AGENT_LABEL = (email: string) => (email ? email.split('@')[0] : 'Agent')
+const AGENT_LABEL = (email: string) => (email === 'zeeops-bot' ? 'Quote bot' : email ? email.split('@')[0] : 'Agent')
 
 // Every /api/leads route funnels through this: the record must exist AND belong
 // to a site this member is allowed to see. Hiding the link is not enough —

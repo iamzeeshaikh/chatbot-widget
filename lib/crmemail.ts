@@ -61,6 +61,9 @@ export interface CrmEmailEntry {
   messageId: string
   /** Room for inbound replies to be recorded against this send later. */
   direction: 'outbound'
+  /** Written by the quote bot (lib/quotebot.ts) in the agent's name, not typed
+   *  by the agent. `sentBy` is still the agent: it went out of their mailbox. */
+  bot?: boolean
   /** Files sent with it. Paths into the private bucket, signed on read. */
   attachments?: EmailAttachment[]
 }
@@ -91,6 +94,7 @@ export function parseCrmEmail(message: string | null | undefined): CrmEmailEntry
       threadId: str(o.threadId),
       messageId: str(o.messageId),
       direction: 'outbound',
+      bot: o.bot === true ? true : undefined,
       attachments: parseEmailAttachments(o.attachments),
     }
   } catch {

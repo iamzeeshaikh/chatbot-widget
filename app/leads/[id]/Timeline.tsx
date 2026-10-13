@@ -392,6 +392,12 @@ export function EmailEntry({ entry, flat = false }: { entry: NonNullable<Timelin
             sent from Gmail
           </span>
         )}
+        {entry.bot && (
+          <span className="ml-1.5 inline-block rounded-full border border-violet-300 bg-violet-100 px-1.5 text-[9px] font-medium text-violet-700 align-middle"
+            title="Written and sent by the quote bot, from this agent's mailbox and in their name">
+            sent by bot
+          </span>
+        )}
       </p>
       {/* Open tracking. Worded carefully: "not opened yet" means no signal,
           which a client that blocks images also produces. */}

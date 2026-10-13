@@ -16,6 +16,8 @@ customer email in this voice. It never gives a price.
 - Discounts actually used: 7% (Sept 7 broadcast), 10% (month-end, ~50 leads,
   closed one order), 15% once after an objection, 5% for wire transfer. No
   holiday offers were ever sent.
+- Owner's rule (2026-10-13): bot offers 10–15%; up to 20% only for a special
+  occasion such as a big holiday. Never more.
 
 ## Data traps (matter for the build)
 
@@ -55,10 +57,11 @@ customer email in this voice. It never gives a price.
 
 ## What counts as a complete request
 
-Complete = size (L×W×H with a unit, or product size + how many per box, or oz
-for cups) AND box type/style (name or a reference image). Agents also never
-quote without a quantity; when quantity is missing the bot asks for it in the
-same email. Material, printing and finish are optional: the agents choose
+Complete = size (L×W×H, or product size + how many per box, or oz for cups)
+AND box type/style (name or a reference image) AND quantity — agents never
+quote without one, and the owner asked for it on 2026-10-13. Whatever is
+missing is asked for in one email. The size question fits the product: oz for
+cups, width x length for papers and mailers, L×W×H for boxes. Material, printing and finish are optional: the agents choose
 defaults themselves (e.g. 18pt SBS, full color outside).
 
 Missing-size signals: "what sizes do you have?", only two dimensions, only a
