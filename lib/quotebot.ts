@@ -34,7 +34,7 @@
 import { supabase } from './supabase'
 import { workspaceSites, hasFeature } from './workspaces'
 import { quoteSessionId, leadSource } from './quoteintake'
-import { leadRecipient, writeControlRow } from './leadrecord'
+import { leadRecipient, writeControlRow, markThreadRepliesRead } from './leadrecord'
 import { notALeadSessions, parseNotALead } from './notalead'
 import { ASSIGNMENT_ROLE, setAssignment } from './assignment'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
@@ -54,7 +54,7 @@ import { sendPushToMember } from './push'
 import { llmComplete, CLAUDE_CHAT_MODEL } from './llm'
 import {
   ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf, buildFollowUp,
-  FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, type Missing,
+  FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, REPLY_SYSTEM, parseReplyDecision, buildReplyAnswer, type Missing,
   quoteTextForAssessment, emailHtml, type QuoteAssessment,
 } from './quotebotcore'
 
@@ -93,7 +93,7 @@ const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.de
 export type BotState = 'claimed' | 'sent' | 'skipped' | 'failed'
 
 export interface BotLedger {
-  step: 'first' | 'followup'
+  step: 'first' | 'followup' | 'reply'
   /** Follow-up number, 1-based. */
   n?: number
   state: BotState
@@ -107,6 +107,8 @@ export interface BotLedger {
   emailId?: string
   /** Discount offered in this follow-up, percent. */
   offer?: number
+  /** step 'reply': the customer email (Gmail id) this row answered. */
+  inboundId?: string
 }
 
 export function parseBotLedger(message: string | null | undefined): BotLedger | null {
@@ -143,7 +145,10 @@ export interface BotRunResult {
   scanned: number
   actions: BotAction[]
   followUps?: { leadId: string; state: string; n?: number; why?: string }[]
+  replies?: ({ leadId: string } & ReplyResult)[]
 }
+
+export interface ReplyResult { state: 'sent' | 'handed-over' | 'failed' | 'would-send'; why?: string; complete?: boolean; text?: string }
 
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; message: string | null; created_at: string }
 interface LogRow { session_id: string; role: string; message: string; created_at: string }
@@ -419,24 +424,56 @@ async function withFollowUps(result: BotRunResult, now: Date, dryRun: boolean, b
     .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
     .order('created_at', { ascending: true }).limit(20000)
   if ((data ?? []).length >= 20000) console.warn('[quotebot] follow-up ledger query hit its cap')
-  const state = new Map<string, { siteId: string; waiting: boolean; stopped: boolean; lastAt: number }>()
+  const state = new Map<string, { siteId: string; waiting: boolean; stopped: boolean; lastAt: number; anchor: number; handled: Set<string> }>()
   for (const r of data ?? []) {
     const e = parseBotLedger(r.message)
     if (!e) continue
-    const cur = state.get(r.session_id) ?? { siteId: r.site_id, waiting: false, stopped: false, lastAt: 0 }
-    if (e.step === 'first' && e.state === 'sent') { cur.waiting = e.complete === false; cur.lastAt = new Date(e.at).getTime() }
+    const cur = state.get(r.session_id) ?? { siteId: r.site_id, waiting: false, stopped: false, lastAt: 0, anchor: 0, handled: new Set<string>() }
+    const at = new Date(e.at).getTime()
+    if (e.step === 'first' && e.state === 'sent') { cur.waiting = e.complete === false; cur.lastAt = at; cur.anchor = at }
+    if (e.step === 'reply' && e.inboundId) cur.handled.add(e.inboundId)
+    if (e.step === 'reply' && e.state === 'sent') { cur.waiting = e.complete === false; cur.lastAt = Math.max(cur.lastAt, at); cur.anchor = Math.max(cur.anchor, at) }
+    if (e.step === 'reply' && e.state === 'skipped') cur.stopped = true
     // A failed send counts as an attempt: try again in three days, not in five
     // minutes and then every five minutes after that.
     if (e.step === 'followup' && (e.state === 'sent' || e.state === 'failed')) cur.lastAt = Math.max(cur.lastAt, new Date(e.at).getTime())
     if (e.step === 'followup' && e.state === 'skipped') cur.stopped = true
     state.set(r.session_id, cur)
   }
+  // ── first, answer anyone who wrote back ────────────────────────────────
+  result.replies = []
+  const open = [...state.entries()].filter(([, v]) => v.waiting && !v.stopped)
+  const inbound = new Map<string, { gmailId: string; at: number; from: string; body: string }[]>()
+  for (let i = 0; i < open.length; i += 100) {
+    const { data: inRows } = await supabase.from('chat_logs').select('session_id, message, created_at')
+      .eq('role', CRM_EMAIL_IN_ROLE).in('session_id', open.slice(i, i + 100).map(([id]) => id))
+      .gte('created_at', since).order('created_at', { ascending: true })
+    for (const r of inRows ?? []) {
+      const e = parseCrmEmailIn(r.message)
+      if (!e || isNoiseSender(e.from)) continue
+      const list = inbound.get(r.session_id) ?? []
+      list.push({ gmailId: e.gmailId, at: new Date(r.created_at).getTime(), from: e.from, body: e.body })
+      inbound.set(r.session_id, list)
+    }
+  }
+  let used = 0
+  for (const [id, v] of open) {
+    if (used >= budget) break
+    const all = inbound.get(id) ?? []
+    const fresh = all.filter((m) => m.at > v.anchor - 1000 && !v.handled.has(m.gmailId))
+    if (!fresh.length) continue
+    const r = await answerReply(id, v.siteId, all, fresh[fresh.length - 1], now, dryRun)
+    result.replies.push({ leadId: id, ...r })
+    if (r.state === 'sent' || r.state === 'handed-over') used++
+    if (r.state !== 'failed') v.stopped = true // answered this run: no follow-up on top of it
+  }
+
   const due = [...state.entries()]
     .filter(([, v]) => v.waiting && !v.stopped && now.getTime() - v.lastAt >= FOLLOW_UP_GAP_DAYS * 864e5)
     .sort((a, b) => a[1].lastAt - b[1].lastAt)
 
   result.followUps = []
-  let sent = 0
+  let sent = used
   for (const [id, v] of due) {
     if (sent >= budget) break
     const r = await sendFollowUp(id, now, { dryRun })
@@ -507,15 +544,25 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   const siteId = rows[0].site_id
   const firstAt = new Date(first.at).getTime()
 
+  // The bot's latest word: its first email, or its answer to a reply.
+  const replies = ledgers.filter((e) => e.step === 'reply')
+  if (replies.some((e) => e.state === 'skipped')) return { ok: true, state: 'stopped', why: 'the bot handed this lead to a person' }
+  const answered = replies.filter((e) => e.state === 'sent')
+  const latest = answered[answered.length - 1] ?? first
+  if (latest.complete) return { ok: true, state: 'stopped', why: 'the customer gave every detail — the price is with a person' }
+  const anchor = new Date(latest.at).getTime()
+  const handled = new Set(replies.map((e) => e.inboundId).filter(Boolean))
+
   // ── has anyone else spoken since? ────────────────────────────────────────
   const after = rows.filter((r) => new Date(r.created_at).getTime() > firstAt - 1000)
-  const customer = after.find((r) => {
-    if (r.role === CRM_WA_IN_ROLE) return true
+  if (after.some((r) => r.role === CRM_WA_IN_ROLE)) return { ok: true, state: 'stopped', why: 'the customer answered on WhatsApp — a person carries it on' }
+  const pending = after.find((r) => {
     if (r.role !== CRM_EMAIL_IN_ROLE) return false
     const e = parseCrmEmailIn(r.message)
-    return !!e && !isNoiseSender(e.from)
+    return !!e && !isNoiseSender(e.from) && !handled.has(e.gmailId) && new Date(r.created_at).getTime() > anchor - 1000
   })
-  if (customer) return { ok: true, state: 'stopped', why: 'the customer replied — this is a conversation for a person now' }
+  // Not a stop: the reply pass answers it (or hands it over) on this same run.
+  if (pending) return { ok: true, state: 'not-due', why: 'the customer replied — waiting for the reply to be answered' }
   const human = after.find((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
     || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot))
   if (human) return { ok: true, state: 'stopped', why: `an agent reached the customer themselves (${human.role})` }
@@ -525,7 +572,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
 
   const sentUps = ledgers.filter((e) => e.step === 'followup' && e.state === 'sent')
   const n = sentUps.length + 1
-  const lastAt = Math.max(firstAt, ...sentUps.map((e) => new Date(e.at).getTime()))
+  const lastAt = Math.max(anchor, ...sentUps.map((e) => new Date(e.at).getTime()))
   if (!opts.force && now.getTime() - lastAt < FOLLOW_UP_GAP_DAYS * 864e5) {
     return { ok: true, state: 'not-due', n, why: `next one is due ${new Date(lastAt + FOLLOW_UP_GAP_DAYS * 864e5).toISOString()}` }
   }
@@ -534,12 +581,14 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   const assessment = await assessQuote(lead?.message ?? '', lead?.name ?? null)
   if (!assessment) return { ok: false, state: 'failed', why: 'could not read the enquiry (model unavailable)' }
-  const missing = (first.missing ?? []) as Missing[]
+  const missing = (latest.missing ?? []) as Missing[]
   const fu = buildFollowUp(assessment, { n, missing, firstName: assessment.firstName, now })
 
   // Threaded under the first email, in the customer's mail client and ours.
   const sentRows = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
-  const original = sentRows.find((e) => e.id === first.emailId) ?? sentRows.find((e) => e.bot)
+  // Answer the bot's latest email in the thread, so the customer's client
+  // stacks the follow-up under the message it follows.
+  const original = [...sentRows].reverse().find((e) => e.bot) ?? sentRows.find((e) => e.id === first.emailId)
   if (!original) return { ok: false, state: 'failed', why: 'the first email is missing from the timeline' }
   if (opts.dryRun) return { ok: true, state: 'not-due', n, text: fu.text, why: 'dry run: would send now' }
   const thread = await threadContextFor(id, original.gmailId)
@@ -596,4 +645,113 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
 
   await ledger(id, siteId, { step: 'followup', n, state: 'sent', at, to: first.to, agent: first.agent, from: first.from, emailId, offer: fu.offer ?? undefined })
   return { ok: true, state: 'sent', n, text: fu.text, callTask }
+}
+
+// ── Answering a reply ───────────────────────────────────────────────────────
+/**
+ * The customer wrote back to the bot. If all they did was send details, the
+ * bot answers: "thanks, the price is in process" when nothing is missing any
+ * more (and the agent gets the task to price it), or a short ask for whatever
+ * is still missing. Anything else is handed to the agent with a task.
+ */
+async function answerReply(
+  id: string, siteId: string,
+  all: { gmailId: string; at: number; from: string; body: string }[],
+  latest: { gmailId: string; body: string },
+  now: Date, dryRun: boolean,
+): Promise<ReplyResult> {
+  const { data: logRows } = await supabase.from('chat_logs').select('role, message, created_at')
+    .eq('session_id', id).in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE]).order('created_at', { ascending: true })
+  const ledgers = (logRows ?? []).filter((r) => r.role === CRM_BOT_ROLE).map((r) => parseBotLedger(r.message)).filter(Boolean) as BotLedger[]
+  const first = ledgers.find((e) => e.step === 'first' && e.state === 'sent')
+  if (!first?.agent || !first.from || !first.to) return { state: 'failed', why: 'no first email on record' }
+  const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
+  const who = lead?.name || first.to
+
+  const decided = await llmComplete({
+    system: REPLY_SYSTEM, messages: [{ role: 'user', content: latest.body.slice(0, 4000) || '(empty reply — attachment only)' }],
+    maxTokens: 600, anthropicMaxTokens: 150, temperature: 0, model: CLAUDE_CHAT_MODEL, timeoutMs: 25000,
+  })
+  const decision = decided.error ? null : parseReplyDecision(decided.text)
+  if (!decision) return { state: 'failed', why: 'could not read the reply (model unavailable)' }
+
+  if (decision.needsPerson) {
+    if (dryRun) return { state: 'would-send', why: `would hand over: ${decision.reason}` }
+    const at = new Date().toISOString()
+    const task: CrmTaskEntry = {
+      id: newTaskId(), title: `Reply to ${who} — ${decision.reason} (bot stepped back)`.slice(0, 200),
+      type: 'email', due_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+      assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+    }
+    await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+    await sendPushToMember(first.agent, 'packaging', {
+      title: 'Customer needs you', body: `${who}: ${decision.reason}`,
+      url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-reply-${id}`,
+    }).catch(() => 0)
+    await ledger(id, siteId, { step: 'reply', state: 'skipped', at, why: `handover: ${decision.reason}`, inboundId: latest.gmailId, agent: first.agent })
+    return { state: 'handed-over', why: decision.reason }
+  }
+
+  // Read the enquiry and every reply together: the size may be in one email
+  // and the quantity in the next.
+  const combined = `${lead?.message ?? ''}\n\nThe customer's replies to our questions:\n${all.map((m) => m.body).join('\n---\n')}`
+  const assessment = await assessQuote(combined, lead?.name ?? null)
+  if (!assessment) return { state: 'failed', why: 'could not read the enquiry (model unavailable)' }
+  const answer = buildReplyAnswer(assessment, assessment.firstName)
+  if (dryRun) return { state: 'would-send', complete: answer.complete, text: answer.text }
+
+  const cfg = googleConfig(PUBLIC_BASE)
+  if (!cfg) return { state: 'failed', why: 'Google OAuth is not configured' }
+  const sentRows = (logRows ?? []).filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
+  const original = [...sentRows].reverse().find((e) => e.bot)
+  const subject = original ? (/^re:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`) : 'Your packaging quote'
+  const thread = await threadContextFor(id, latest.gmailId)
+  if (!(await ledger(id, siteId, { step: 'reply', state: 'claimed', at: now.toISOString(), inboundId: latest.gmailId, agent: first.agent }))) {
+    return { state: 'failed', why: 'ledger write failed' }
+  }
+  const sig = await buildSendSignature({ memberEmail: first.agent, workspace: 'packaging', siteId, from: first.from, base: PUBLIC_BASE })
+  const emailId = newEmailId()
+  const finalText = sig.text ? `${answer.text}\n\n${sig.text}` : answer.text
+  const finalHtml = `${emailHtml(answer.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+  let sent
+  try {
+    sent = await sendEmail(first.agent, cfg, {
+      from: first.from, to: first.to, subject, body: finalText, html: finalHtml,
+      threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
+    })
+  } catch (e) {
+    const why = e instanceof GmailAuthError ? `${first.agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
+    await ledger(id, siteId, { step: 'reply', state: 'failed', at: new Date().toISOString(), why, inboundId: latest.gmailId, agent: first.agent })
+    return { state: 'failed', why }
+  }
+  const at = new Date().toISOString()
+  const entry: CrmEmailEntry = {
+    id: emailId, sentBy: first.agent, from: first.from, to: first.to, subject,
+    body: finalText, html: finalHtml, snippet: makeSnippet(answer.text), at,
+    gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
+    direction: 'outbound', bot: true,
+  }
+  await writeControlRow({ sessionId: id, siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
+  // The bot answered it, so it is not "waiting on you" any more. When the
+  // answer means work for the agent, the task below is what says so.
+  await markThreadRepliesRead(id, siteId, sent.threadId, BOT_ACTOR)
+
+  if (answer.complete) {
+    const task: CrmTaskEntry = {
+      id: newTaskId(),
+      title: `Send the price quote — ${who} has now given size, style and quantity (bot replied)`.slice(0, 200),
+      type: 'email', due_at: new Date(Date.now() + 3 * 3600 * 1000).toISOString(),
+      assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+    }
+    await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+    await sendPushToMember(first.agent, 'packaging', {
+      title: 'Quote ready to price', body: `${who} sent the last details. Send the price.`,
+      url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-${id}`,
+    }).catch(() => 0)
+  }
+  await ledger(id, siteId, {
+    step: 'reply', state: 'sent', at, inboundId: latest.gmailId, agent: first.agent, from: first.from, to: first.to,
+    complete: answer.complete, missing: missingOf(assessment), emailId,
+  })
+  return { state: 'sent', complete: answer.complete, text: answer.text }
 }

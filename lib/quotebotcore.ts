@@ -327,3 +327,43 @@ export function buildFollowUp(a: QuoteAssessment, c: FollowUpContext): { text: s
     offer: usedOffer,
   }
 }
+
+// ── Answering the customer's reply ──────────────────────────────────────────
+// Once a customer writes back, the bot may answer ONLY when the reply is the
+// details it asked for. Anything else — a question, a price talk, a worry, a
+// no, "call me" — is a person's job, and the bot hands the lead over instead.
+
+export const REPLY_SYSTEM = `A customer of a custom packaging company was asked by email for missing details (size, style, quantity). Read their LATEST reply and decide, as JSON only:
+{"needs_person": boolean, "reason": string}
+needs_person is TRUE when the reply contains anything besides plain details: a question of any kind (price, MOQ, delivery, materials, samples, "can you..."), negotiation, a complaint or worry, saying they are not interested or will order later, asking for a call, sending artwork with instructions, or anything you are unsure about.
+needs_person is FALSE only when the reply simply provides details (size, quantity, style, a picture) with at most a greeting or thanks.
+reason: one short English sentence.`
+
+export function parseReplyDecision(text: string): { needsPerson: boolean; reason: string } | null {
+  const m = String(text || '').match(/\{[\s\S]*\}/)
+  if (!m) return null
+  try {
+    const o = JSON.parse(m[0])
+    if (typeof o.needs_person !== 'boolean') return null
+    return { needsPerson: o.needs_person, reason: typeof o.reason === 'string' ? o.reason.slice(0, 200) : '' }
+  } catch { return null }
+}
+
+/** The bot's answer to a reply that brought details. */
+export function buildReplyAnswer(a: QuoteAssessment, firstName: string | null): { text: string; complete: boolean } {
+  const missing = missingOf(a)
+  const complete = missing.length === 0
+  const parts: string[] = [firstName ? `Hello ${firstName},` : 'Hello,', '']
+  if (complete) {
+    parts.push(`Thank you for the details! I have everything I need, and the price quote for your ${a.product} is in process. I'll share it with you shortly.`)
+    if (!a.hasDeadline) parts.push('', 'In the meantime, could you please let me know how soon you need these?')
+  } else if (missing.length === 1) {
+    const ask = askFor(missing, a)
+    parts.push(`Thank you for the details! ${ask}`)
+  } else {
+    parts.push('Thank you for the details! To finish your price quote, could you please also share:',
+      ...missing.map((m) => `• ${ASK_LINE[m](a)}`))
+  }
+  parts.push('', 'Looking forward to hearing from you.', '', 'Warm regards,')
+  return { text: parts.join('\n'), complete }
+}
