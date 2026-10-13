@@ -70,19 +70,33 @@ export function parseAssessment(text: string): QuoteAssessment | null {
   const bool = (v: unknown) => v === true
   if (typeof o.is_quote !== 'boolean') return null
   const product = cleanPhrase(o.product, 40).replace(/^custom\s+/, '') || 'packaging'
+  const styleLabel = cleanPhrase(o.style_label, 24) || 'style'
   return {
     isQuote: bool(o.is_quote),
     language: typeof o.language === 'string' ? o.language.trim().toLowerCase().slice(0, 5) : 'en',
     firstName: cleanName(o.first_name),
     product,
-    styleLabel: cleanPhrase(o.style_label, 24) || 'style',
+    styleLabel,
     sizeLabel: cleanPhrase(o.size_label, 45) || 'size (length x width x height)',
     hasDeadline: bool(o.has_deadline),
     hasSize: bool(o.has_size),
-    hasStyle: bool(o.has_style),
+    // A product that names its own style ("mailer boxes", "pillow boxes") has
+    // told us the style. The model sometimes still says no, and the customer
+    // then gets asked which style they want for the style they already named.
+    hasStyle: bool(o.has_style) || namesAStyle(product),
     hasQuantity: bool(o.has_quantity),
     reason: typeof o.reason === 'string' ? o.reason.trim().slice(0, 300) : '',
   }
+}
+
+// Only names that ARE a construction. Cups, stickers and plain "shipping
+// boxes" are left to the model on purpose: for those, the style question
+// (single or double wall, the sticker shape) is one our agents still ask.
+const STYLE_WORDS = /\b(mailer|tuck|pillow|rigid|two[- ]piece|gable|sleeves?|trays?|tubes?|window|display|auto[- ]bottom|magnetic|drawer|slide|hexagon|tote|lid|cones?|pouch(es)?|envelopes?|folders?|inserts?|wax)\b/
+
+/** Does the product phrase itself name a style or a single-style product? */
+export function namesAStyle(product: string): boolean {
+  return STYLE_WORDS.test(product.toLowerCase())
 }
 
 // A phrase from the model goes into a customer's email, so it is cut down to
@@ -170,6 +184,18 @@ function askFor(missing: Missing[], a: QuoteAssessment): string {
     'To prepare an accurate price quote, could you please share:',
     ...missing.map((m) => `• ${ASK_LINE[m](a)}`),
   ].join('\n')
+}
+
+/**
+ * The HTML half of the bot's email: one <p> per paragraph, lines inside a
+ * paragraph broken with <br>. plainToHtml turns every blank line into extra
+ * <br>s, which in Gmail reads as two empty lines between each paragraph.
+ */
+export function emailHtml(text: string): string {
+  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return text.split(/\n\s*\n/)
+    .map((para) => `<p style="margin:0 0 14px 0;">${para.split('\n').map(esc).join('<br>')}</p>`)
+    .join('')
 }
 
 /** The text the model reads: the form or chat, with our own boilerplate cut. */

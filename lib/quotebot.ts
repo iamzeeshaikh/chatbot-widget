@@ -45,7 +45,6 @@ import {
 import { applyStageChange } from './stagechange'
 import { googleConfig, verifiedAliases, sendEmail, GmailAuthError, type SendAsAlias } from './gmail'
 import { makeSnippet, newEmailId, isAddress, type CrmEmailEntry } from './crmemail'
-import { plainToHtml } from './richtext'
 import { openPixelHtml } from './emailtrack'
 import { buildSendSignature } from './sendsignature'
 import { newTaskId, type CrmTaskEntry } from './tasks'
@@ -53,7 +52,7 @@ import { sendPushToMember } from './push'
 import { llmComplete, CLAUDE_CHAT_MODEL } from './llm'
 import {
   ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf,
-  quoteTextForAssessment, type QuoteAssessment,
+  quoteTextForAssessment, emailHtml, type QuoteAssessment,
 } from './quotebotcore'
 
 export const CRM_BOT_ROLE = 'crm_bot'
@@ -329,7 +328,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     const sig = await buildSendSignature({ memberEmail: agent, workspace: 'packaging', siteId: lead.site_id, from: alias.email, base })
     const emailId = newEmailId()
     const finalText = sig.text ? `${mail.text}\n\n${sig.text}` : mail.text
-    const finalHtml = `${plainToHtml(mail.text)}${sig.html}${openPixelHtml(base, id, emailId)}`
+    const finalHtml = `${emailHtml(mail.text)}${sig.html}${openPixelHtml(base, id, emailId)}`
 
     let sent
     try {
