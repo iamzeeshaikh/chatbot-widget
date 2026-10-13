@@ -216,7 +216,7 @@ export default function InvoicePage() {
                       className="shrink-0 rounded-lg border border-gray-300 px-2 text-gray-500 hover:text-red-700"><Trash2 size={13} aria-hidden /></button>
                   )}
                 </div>
-                <textarea aria-label="Details" className={input} rows={2} placeholder={'Double Wall\nCustom Color Printing'} value={it.details} onChange={(e) => item(i, { details: e.target.value })} />
+                <textarea aria-label="Details" className={input} rows={3} placeholder={'Double Wall\nCustom Color Printing'} value={it.details} onChange={(e) => item(i, { details: e.target.value })} />
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div><label className={label}>Quantity</label><input inputMode="numeric" className={input} value={it.quantity} placeholder="2000" onChange={(e) => item(i, { quantity: e.target.value })} /></div>
                   <div><label className={label}>Rate</label><input inputMode="decimal" className={input} value={it.rate} placeholder="0.52" onChange={(e) => item(i, { rate: e.target.value })} /></div>
