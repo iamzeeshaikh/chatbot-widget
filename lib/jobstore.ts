@@ -41,7 +41,9 @@ export async function writeJob(ws: Workspace, job: Job): Promise<string | null> 
 export async function listMessages(ws: Workspace, jobId: string): Promise<JobMessage[]> {
   const { data } = await supabase.from('chat_logs').select('message')
     .eq('session_id', jobSession(ws)).eq('role', CRM_JOB_MSG_ROLE)
-    .ilike('message', `%"jobId":"${jobId.replace(/[%_"]/g, '')}"%`)
+    // `_` is ilike's one-character wildcard and matches a literal `_`, so it
+    // stays: stripping it (job_…) made every message unfindable.
+    .ilike('message', `%"jobId":"${jobId.replace(/[%"\\]/g, '')}"%`)
     .order('created_at', { ascending: true }).limit(2000)
   return (data ?? []).map((r) => parseJobMessage(r.message)).filter((m): m is JobMessage => !!m && m.jobId === jobId)
 }
