@@ -44,7 +44,7 @@ import {
 } from './crm'
 import { applyStageChange } from './stagechange'
 import { googleConfig, verifiedAliases, sendEmail, GmailAuthError, type SendAsAlias } from './gmail'
-import { makeSnippet, newEmailId, type CrmEmailEntry } from './crmemail'
+import { makeSnippet, newEmailId, isAddress, type CrmEmailEntry } from './crmemail'
 import { plainToHtml } from './richtext'
 import { openPixelHtml } from './emailtrack'
 import { buildSendSignature } from './sendsignature'
@@ -155,7 +155,9 @@ async function takeLease(now: Date): Promise<boolean> {
 /** Has anyone already written to this address? Any lead, last 30 days. */
 async function addressAlreadyContacted(address: string, now: Date): Promise<boolean> {
   const since = new Date(now.getTime() - 30 * 864e5).toISOString()
-  const needle = `%${address.replace(/[%_]/g, '')}%`
+  // `_` is ilike's one-character wildcard, which matches a literal `_` too, so
+  // the address is used as it is. Stripping it once made john_doe@ unfindable.
+  const needle = `%${address.trim().replace(/%/g, '')}%`
   const [mail, bot] = await Promise.all([
     supabase.from('chat_logs').select('session_id').eq('role', CRM_EMAIL_ROLE)
       .gte('created_at', since).ilike('message', needle).limit(1),
@@ -274,6 +276,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
 
     const to = await leadRecipient(id)
     if (!to) { await skip('no email address on the lead'); continue }
+    if (!isAddress(to)) { await skip(`"${to}" is not a valid email address`); continue }
     if (await addressAlreadyContacted(to, now)) { await skip('this address was already emailed in the last 30 days', { to }); continue }
 
     const assessment = await assessQuote(lead.message ?? '', lead.name)
@@ -281,7 +284,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     // the next run tries again (until the lead ages out of the window).
     if (!assessment) { act({ state: 'retry-later', why: 'could not read the enquiry (model unavailable)' }); continue }
     if (!assessment.isQuote) { await skip(`not a packaging quote: ${assessment.reason}`); continue }
-    if (assessment.language !== 'en') { await skip(`customer wrote in "${assessment.language}" — left for a person`); continue }
+    if (!assessment.language.startsWith('en')) { await skip(`customer wrote in "${assessment.language}" — left for a person`); continue }
 
     // ── whose lead, and which address ───────────────────────────────────────
     const assigned = lastAssignment(rows)
