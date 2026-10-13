@@ -667,6 +667,7 @@ async function answerReply(
   if (!first?.agent || !first.from || !first.to) return { state: 'failed', why: 'no first email on record' }
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   const who = lead?.name || first.to
+  if (!dryRun) await closeBotCallTasks(id, siteId)
 
   const decided = await llmComplete({
     system: REPLY_SYSTEM, messages: [{ role: 'user', content: latest.body.slice(0, 4000) || '(empty reply — attachment only)' }],
@@ -754,4 +755,27 @@ async function answerReply(
     complete: answer.complete, missing: missingOf(assessment), emailId,
   })
   return { state: 'sent', complete: answer.complete, text: answer.text }
+}
+
+/**
+ * The customer answered, so the bot's "call them — no reply yet" tasks are
+ * no longer true. Closed with a new revision, the way a person completes a
+ * task, so the trail still shows they existed. Tasks a PERSON created are
+ * never touched.
+ */
+async function closeBotCallTasks(id: string, siteId: string): Promise<void> {
+  const { data } = await supabase.from('chat_logs').select('message')
+    .eq('session_id', id).eq('role', CRM_TASK_ROLE).order('created_at', { ascending: true })
+  const latest = new Map<string, CrmTaskEntry>()
+  for (const r of data ?? []) {
+    try { const t = JSON.parse(r.message) as CrmTaskEntry; if (t?.id) latest.set(t.id, t) } catch { /* not a task */ }
+  }
+  const at = new Date().toISOString()
+  for (const t of latest.values()) {
+    if (t.status !== 'open' || t.deleted || t.type !== 'call' || t.created_by !== BOT_ACTOR) continue
+    await writeControlRow({
+      sessionId: id, siteId, role: CRM_TASK_ROLE,
+      message: JSON.stringify({ ...t, status: 'done', completed_by: BOT_ACTOR, completed_at: at, updated_by: BOT_ACTOR, updated_at: at }),
+    })
+  }
 }
