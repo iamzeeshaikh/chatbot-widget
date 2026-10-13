@@ -367,3 +367,49 @@ export function buildReplyAnswer(a: QuoteAssessment, firstName: string | null): 
   parts.push('', 'Looking forward to hearing from you.', '', 'Warm regards,')
   return { text: parts.join('\n'), complete }
 }
+
+// ── Follow-ups after the price was sent (Step 3) ────────────────────────────
+// Our agents' own sequence after a quote (docs/bot-voice.md §4): did it
+// arrive, float it back up, remind them what is included, a holiday offer on
+// the quoted pricing, one last check-in. Never a new price — the numbers are
+// the agent's, and a different figure from the bot would undercut them.
+
+/** A sent email carries a price when it has a dollar amount in the agent's own words. */
+export function looksLikeQuote(body: string): boolean {
+  const own = String(body || '').split(/\n--\s*\n|\nOn .{5,200}wrote:/)[0]
+  return /\$\s?\d/.test(own)
+}
+
+export function buildQuoteFollowUp(c: { n: number; firstName: string | null; product: string; now: Date }): { text: string; offer: number | null } {
+  const greet = c.firstName ? `Hello ${c.firstName},` : 'Hello,'
+  const cycle = Math.floor((c.n - 1) / 5)
+  const step = (c.n - 1) % 5
+  const holiday = nextHoliday(c.now)
+  const offer = cycle === 0 ? 10 : 15
+  const product = c.product || 'packaging'
+  let body: string[]
+  let used: number | null = null
+  switch (step) {
+    case 0:
+      body = cycle === 0
+        ? [`I hope you're doing well! I wanted to circle back on the price quote I sent over for your ${product} - just checking if it reached you and if you've had a chance to look it over.`, `I'm happy to answer any questions or make adjustments if needed.`]
+        : [`I hope you're doing well! Your price quote for the ${product} is still here whenever you're ready, and I'm happy to update it if anything has changed on your side.`]
+      break
+    case 1:
+      body = [`Just floating this back to the top of your inbox in case it got buried. No rush at all - whenever you get a chance to take a look, I'd love to hear your thoughts.`, `Happy to jump on a quick call if that's easier than email.`]
+      break
+    case 2:
+      body = [`A quick reminder of what comes with your quote: free shipping to your doorstep, no extra or hidden charges, free lamination, and 2D and 3D mockups before anything goes to print.`, `If the quantity or budget needs a different option, just let me know and I'll see what I can do.`]
+      break
+    case 3:
+      used = offer
+      body = [`With ${holiday.name} coming up, I can offer ${offer}% off the quoted pricing if you're able to move forward before ${MONTHS[holiday.date.getUTCMonth()]} ${holiday.date.getUTCDate()}.`, `Please let me know if you have any questions or would like to make any changes. I'd be happy to help!`]
+      break
+    default:
+      body = [`I wanted to check in one more time: are you still interested in moving forward with your ${product}?`, `If the timing isn't right now, I totally understand. Just let me know and I'll follow up later instead.`]
+  }
+  return {
+    text: [greet, '', ...body.flatMap((p, i) => (i ? ['', p] : [p])), '', 'Looking forward to hearing from you.', '', 'Warm regards,'].join('\n'),
+    offer: used,
+  }
+}

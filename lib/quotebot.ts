@@ -54,7 +54,8 @@ import { sendPushToMember } from './push'
 import { llmComplete, CLAUDE_CHAT_MODEL } from './llm'
 import {
   ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf, buildFollowUp,
-  FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, REPLY_SYSTEM, parseReplyDecision, buildReplyAnswer, type Missing,
+  FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, REPLY_SYSTEM, parseReplyDecision, buildReplyAnswer,
+  buildQuoteFollowUp, type Missing,
   quoteTextForAssessment, emailHtml, type QuoteAssessment,
 } from './quotebotcore'
 
@@ -93,7 +94,7 @@ const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.de
 export type BotState = 'claimed' | 'sent' | 'skipped' | 'failed'
 
 export interface BotLedger {
-  step: 'first' | 'followup' | 'reply'
+  step: 'first' | 'followup' | 'reply' | 'quote' | 'quote_fu'
   /** Follow-up number, 1-based. */
   n?: number
   state: BotState
@@ -146,6 +147,7 @@ export interface BotRunResult {
   actions: BotAction[]
   followUps?: { leadId: string; state: string; n?: number; why?: string }[]
   replies?: ({ leadId: string } & ReplyResult)[]
+  quotes?: { leadId: string; state: string; n?: number; why?: string }[]
 }
 
 export interface ReplyResult { state: 'sent' | 'handed-over' | 'failed' | 'would-send'; why?: string; complete?: boolean; text?: string }
@@ -485,7 +487,7 @@ async function withFollowUps(result: BotRunResult, now: Date, dryRun: boolean, b
       await ledger(id, v.siteId, { step: 'followup', state: 'skipped', at: now.toISOString(), why: `stopped: ${r.why ?? ''}` })
     }
   }
-  return result
+  return withQuotes(result, now, dryRun, budget - sent)
 }
 
 // Same fold as the pipeline: the newest crm_stage wins, and a legacy
@@ -778,4 +780,194 @@ async function closeBotCallTasks(id: string, siteId: string): Promise<void> {
       message: JSON.stringify({ ...t, status: 'done', completed_by: BOT_ACTOR, completed_at: at, updated_by: BOT_ACTOR, updated_at: at }),
     })
   }
+}
+
+// ── After the price (Step 3) ────────────────────────────────────────────────
+// A lead counts as quoted when a person sets the stage to Quote Sent (the
+// "Price sent" button does exactly that). The bot then closes its own "send
+// the price" task and follows the quote up every 3 days until the customer
+// answers. Only quotes from BOT_START on — a quote_sent lead from
+// September must not wake up to a stranger's follow-up.
+
+async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budget: number): Promise<BotRunResult> {
+  result.quotes = []
+  const sites = workspaceSites('packaging')
+  const since = new Date(Math.max(new Date(BOT_START).getTime(), now.getTime() - FOLLOW_UP_WINDOW_DAYS * 864e5)).toISOString()
+  const { data: ledgerRows } = await supabase.from('chat_logs').select('session_id, site_id, message')
+    .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
+    .order('created_at', { ascending: true }).limit(20000)
+  interface Q { siteId: string; awaitingPrice: number | null; quotedAt: number | null; lastAt: number; stopped: boolean }
+  const st = new Map<string, Q>()
+  for (const r of ledgerRows ?? []) {
+    const e = parseBotLedger(r.message)
+    if (!e) continue
+    const q = st.get(r.session_id) ?? { siteId: r.site_id, awaitingPrice: null, quotedAt: null, lastAt: 0, stopped: false }
+    const at = new Date(e.at).getTime()
+    if ((e.step === 'first' || e.step === 'reply') && e.state === 'sent' && e.complete) q.awaitingPrice = at
+    if (e.step === 'quote' && e.state === 'sent') { q.quotedAt = at; q.lastAt = Math.max(q.lastAt, at) }
+    if (e.step === 'quote_fu' && (e.state === 'sent' || e.state === 'failed')) q.lastAt = Math.max(q.lastAt, at)
+    if (e.step === 'quote_fu' && e.state === 'skipped') q.stopped = true
+    st.set(r.session_id, q)
+  }
+
+  // ── 1. a person marked the quote sent ───────────────────────────────────
+  // The agent who sent the price moves the stage (the owner's rule, 2026-10-13:
+  // "stage Steve change karni chahie kiunke quote usne bheji hai") — by the
+  // dropdown or the Price sent button. The bot never moves it on their behalf.
+  const { data: stageRows } = await supabase.from('chat_logs').select('session_id, site_id, message, created_at')
+    .eq('role', CRM_STAGE_ROLE).in('site_id', sites).gte('created_at', new Date(BOT_START).toISOString())
+    .ilike('message', '%"stage":"quote_sent"%').order('created_at', { ascending: true }).limit(2000)
+  for (const r of stageRows ?? []) {
+    const s = parseCrmStage(r.message)
+    if (!s || s.changed_by === BOT_ACTOR) continue
+    const q = st.get(r.session_id) ?? { siteId: r.site_id, awaitingPrice: null, quotedAt: null, lastAt: 0, stopped: false }
+    if (q.quotedAt) continue
+    const at = new Date(r.created_at).getTime()
+    await markQuoted(r.session_id, r.site_id, at, undefined, `${s.changed_by} set Quote Sent`, dryRun)
+    result.quotes.push({ leadId: r.session_id, state: 'quoted', why: `${s.changed_by} set Quote Sent` })
+    q.quotedAt = at; q.lastAt = at
+    st.set(r.session_id, q)
+  }
+
+  // ── 2. follow the quotes up ─────────────────────────────────────────────
+  if (budget <= 0) return result
+  const due = [...st.entries()]
+    .filter(([, q]) => q.quotedAt && !q.stopped && now.getTime() - q.lastAt >= FOLLOW_UP_GAP_DAYS * 864e5)
+    .sort((a, b) => a[1].lastAt - b[1].lastAt)
+  let sent = 0
+  for (const [id, q] of due) {
+    if (sent >= budget) break
+    const r = await sendQuoteFollowUp(id, now, { dryRun })
+    result.quotes.push({ leadId: id, state: r.state, n: r.n, why: r.why })
+    if (r.state === 'sent') sent++
+    if (r.state === 'stopped' && !dryRun) {
+      await ledger(id, q.siteId, { step: 'quote_fu', state: 'skipped', at: now.toISOString(), why: `stopped: ${r.why ?? ''}` })
+    }
+  }
+  return result
+}
+
+/** The bot's "send the price" task closed, and the quote noted. The stage is the agent's. */
+async function markQuoted(id: string, siteId: string, atMs: number, emailId: string | undefined, why: string, dryRun: boolean): Promise<void> {
+  if (dryRun) return
+  const { data } = await supabase.from('chat_logs').select('role, message, created_at')
+    .eq('session_id', id).eq('role', CRM_TASK_ROLE).order('created_at', { ascending: true })
+  const rows = (data ?? []) as LogRow[]
+  const latest = new Map<string, CrmTaskEntry>()
+  for (const r of rows) if (r.role === CRM_TASK_ROLE) { try { const t = JSON.parse(r.message) as CrmTaskEntry; if (t?.id) latest.set(t.id, t) } catch { /* skip */ } }
+  const now = new Date().toISOString()
+  for (const t of latest.values()) {
+    if (t.status !== 'open' || t.deleted || t.created_by !== BOT_ACTOR || !t.title.startsWith('Send the price quote')) continue
+    await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE,
+      message: JSON.stringify({ ...t, status: 'done', completed_by: BOT_ACTOR, completed_at: now, updated_by: BOT_ACTOR, updated_at: now }) })
+  }
+  await ledger(id, siteId, { step: 'quote', state: 'sent', at: new Date(atMs).toISOString(), why, emailId })
+}
+
+/**
+ * The next follow-up on a quote. Stops for good when the customer answers,
+ * when a person writes or calls them after the quote, when the stage moves on
+ * from Quote Sent, or when the lead is marked not a lead.
+ */
+export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: { force?: boolean; dryRun?: boolean } = {}): Promise<FollowUpResult> {
+  const id = leadId.startsWith('quote-') ? leadId : `quote-${leadId}`
+  const { data } = await supabase.from('chat_logs').select('session_id, site_id, role, message, created_at')
+    .eq('session_id', id)
+    .in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE,
+      CRM_STAGE_ROLE, LEAD_STATUS_ROLE, CRM_NOT_A_LEAD_ROLE, ASSIGNMENT_ROLE])
+    .order('created_at', { ascending: true })
+  const rows = (data ?? []) as (LogRow & { site_id: string })[]
+  if (!rows.length) return { ok: false, state: 'stopped', why: 'no such lead' }
+  const siteId = rows[0].site_id
+  const spam = rows.filter((r) => r.role === CRM_NOT_A_LEAD_ROLE).map((r) => parseNotALead(r.message)).filter(Boolean).pop()
+  if (spam?.spam) return { ok: true, state: 'stopped', why: 'marked not a lead' }
+  const ledgers = rows.filter((r) => r.role === CRM_BOT_ROLE).map((r) => parseBotLedger(r.message)).filter(Boolean) as BotLedger[]
+  const quote = [...ledgers].reverse().find((e) => e.step === 'quote' && e.state === 'sent')
+  if (!quote) return { ok: false, state: 'stopped', why: 'no quote on record' }
+  const anchor = new Date(quote.at).getTime()
+  if (currentStage(rows) !== 'quote_sent') return { ok: true, state: 'stopped', why: `stage is ${currentStage(rows)}` }
+
+  const after = rows.filter((r) => new Date(r.created_at).getTime() > anchor + 60 * 1000)
+  // The agent may set the stage first and send the priced email a few minutes
+  // later; that email is the quote, not the agent taking over the follow-ups.
+  const afterGrace = after.filter((r) => new Date(r.created_at).getTime() > anchor + 30 * 60 * 1000)
+  const replied = after.find((r) => r.role === CRM_WA_IN_ROLE || (r.role === CRM_EMAIL_IN_ROLE && !isNoiseSender(parseCrmEmailIn(r.message)?.from ?? '')))
+  if (replied) {
+    if (!opts.dryRun) await closeBotCallTasks(id, siteId)
+    return { ok: true, state: 'stopped', why: 'the customer answered the quote — over to the agent' }
+  }
+  const human = afterGrace.find((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
+    || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot))
+  if (human) return { ok: true, state: 'stopped', why: `the agent is following up themselves (${human.role})` }
+
+  // Written in the name of whoever owns the lead, from the address the
+  // conversation is already on.
+  const sentRows = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
+  const owner = lastAssignment(rows)
+  const agent = owner && (BOT_AGENTS as readonly string[]).includes(owner) ? owner : null
+  if (!agent) return { ok: true, state: 'stopped', why: `owner ${owner ?? '(none)'} is not one the bot writes for` }
+  const lastMine = [...sentRows].reverse().find((e) => e.sentBy.toLowerCase() === agent)
+  if (!lastMine) return { ok: true, state: 'stopped', why: `${agent} has not emailed this customer from the CRM` }
+  const to = await leadRecipient(id)
+  if (!to || !isAddress(to)) return { ok: true, state: 'stopped', why: 'no valid email address' }
+
+  const ups = ledgers.filter((e) => e.step === 'quote_fu' && e.state === 'sent')
+  const n = ups.length + 1
+  const lastAt = Math.max(anchor, ...ups.map((e) => new Date(e.at).getTime()))
+  if (!opts.force && now.getTime() - lastAt < FOLLOW_UP_GAP_DAYS * 864e5) {
+    return { ok: true, state: 'not-due', n, why: `next one is due ${new Date(lastAt + FOLLOW_UP_GAP_DAYS * 864e5).toISOString()}` }
+  }
+
+  const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
+  const assessment = await assessQuote(lead?.message ?? '', lead?.name ?? null)
+  const fu = buildQuoteFollowUp({ n, firstName: assessment?.firstName ?? null, product: assessment?.product ?? 'packaging', now })
+  if (opts.dryRun) return { ok: true, state: 'not-due', n, text: fu.text, why: 'dry run: would send now' }
+
+  const cfg = googleConfig(PUBLIC_BASE)
+  if (!cfg) return { ok: false, state: 'failed', why: 'Google OAuth is not configured' }
+  const latestMsg = sentRows[sentRows.length - 1]
+  const thread = await threadContextFor(id, latestMsg.gmailId)
+  const subject = /^re:/i.test(latestMsg.subject) ? latestMsg.subject : `Re: ${latestMsg.subject}`
+  if (!(await ledger(id, siteId, { step: 'quote_fu', n, state: 'claimed', at: now.toISOString(), to, agent }))) {
+    return { ok: false, state: 'failed', why: 'ledger write failed' }
+  }
+  const sig = await buildSendSignature({ memberEmail: agent, workspace: 'packaging', siteId, from: lastMine.from, base: PUBLIC_BASE })
+  const emailId = newEmailId()
+  const finalText = sig.text ? `${fu.text}\n\n${sig.text}` : fu.text
+  const finalHtml = `${emailHtml(fu.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+  let sent
+  try {
+    sent = await sendEmail(agent, cfg, {
+      from: lastMine.from, to, subject, body: finalText, html: finalHtml,
+      threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
+    })
+  } catch (e) {
+    const why = e instanceof GmailAuthError ? `${agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
+    await ledger(id, siteId, { step: 'quote_fu', n, state: 'failed', at: new Date().toISOString(), why, to, agent })
+    return { ok: false, state: 'failed', n, why }
+  }
+  const at = new Date().toISOString()
+  const entry: CrmEmailEntry = {
+    id: emailId, sentBy: agent, from: lastMine.from, to, subject,
+    body: finalText, html: finalHtml, snippet: makeSnippet(fu.text), at,
+    gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
+    direction: 'outbound', bot: true,
+  }
+  await writeControlRow({ sessionId: id, siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
+  const callTask = n % CALL_TASK_EVERY === 0
+  if (callTask) {
+    const who = lead?.name || to
+    const task: CrmTaskEntry = {
+      id: newTaskId(), title: `Call ${who} about the quote — ${n} follow-ups and no reply yet (bot)`.slice(0, 200),
+      type: 'call', due_at: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
+      assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+    }
+    await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+    await sendPushToMember(agent, 'packaging', {
+      title: 'Call about the quote', body: `${who} has not answered ${n} follow-ups on the quote.`,
+      url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-qcall-${id}`,
+    }).catch(() => 0)
+  }
+  await ledger(id, siteId, { step: 'quote_fu', n, state: 'sent', at, to, agent, from: lastMine.from, emailId, offer: fu.offer ?? undefined })
+  return { ok: true, state: 'sent', n, text: fu.text, callTask }
 }

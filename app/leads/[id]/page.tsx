@@ -760,11 +760,21 @@ export default function LeadRecordPage() {
                     </option>
                   ))}
                 </select>
+                {/* One click for the moment that matters most: the price went
+                    out. It is the same stage change as the dropdown — and it is
+                    what starts the quote bot's follow-ups (lib/quotebot.ts). */}
+                {(record.stage === 'new' || record.stage === 'contacted' || record.stage === 'follow_up') && (
+                  <button type="button" onClick={() => changeStage('quote_sent')}
+                    title="Mark the quote as sent: moves the stage to Quote Sent, and the bot follows the quote up every 3 days until the customer answers"
+                    className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
+                    ✓ Price sent
+                  </button>
+                )}
                 {/* Who changed it and when lives here, since the Details list
                     no longer repeats the stage. */}
                 <span className="text-[11px] text-gray-500">
                   {record.stageAt ? `changed ${timeAgo(record.stageAt)}` : 'never changed'}
-                  {record.stageBy && ` by ${record.stageBy.split('@')[0]}`}
+                  {record.stageBy && ` by ${record.stageBy === 'zeeops-bot' ? 'Quote bot' : record.stageBy.split('@')[0]}`}
                 </span>
               </div>
 

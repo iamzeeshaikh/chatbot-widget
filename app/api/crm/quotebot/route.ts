@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
-import { runQuoteBot, sendFollowUp, quoteBotEnabled } from '@/lib/quotebot'
+import { runQuoteBot, sendFollowUp, sendQuoteFollowUp, quoteBotEnabled } from '@/lib/quotebot'
 
 export const dynamic = 'force-dynamic'
 // Each lead costs one model call and, at most, one Gmail send; the per-run cap
@@ -16,6 +16,7 @@ export const maxDuration = 120
 //   ?followup=<id>    ADMIN ONLY: send that lead's next follow-up now, without
 //                     the 3-day wait (every other stop rule still applies) —
 //                     for testing the sequence on a lead
+//   ?quotefollowup=<id> ADMIN ONLY: the same for a follow-up after the quote
 //
 // Sending also needs QUOTE_BOT=on in the environment; without it every run is
 // a dry run, which is how the bot is switched off in an emergency.
@@ -43,6 +44,12 @@ export async function GET(req: NextRequest) {
     if (!auth.by.startsWith('admin:')) return NextResponse.json({ error: 'Follow-up test sends are for an admin' }, { status: 403 })
     if (!quoteBotEnabled()) return NextResponse.json({ error: 'The quote bot is switched off' }, { status: 409 })
     return NextResponse.json(await sendFollowUp(followup, new Date(), { force: true }))
+  }
+  const quoteFollowup = req.nextUrl.searchParams.get('quotefollowup')
+  if (quoteFollowup) {
+    if (!auth.by.startsWith('admin:')) return NextResponse.json({ error: 'Follow-up test sends are for an admin' }, { status: 403 })
+    if (!quoteBotEnabled()) return NextResponse.json({ error: 'The quote bot is switched off' }, { status: 409 })
+    return NextResponse.json(await sendQuoteFollowUp(quoteFollowup, new Date(), { force: true }))
   }
   const leadIds = (req.nextUrl.searchParams.get('lead') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 25)
   const dryRun = req.nextUrl.searchParams.get('dryRun') === '1' || leadIds.length > 0
