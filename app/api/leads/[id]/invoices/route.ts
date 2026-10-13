@@ -6,7 +6,7 @@ import { listInvoices, saveInvoice } from '@/lib/invoicestore'
 import { loadAgentSignatures } from '@/lib/signature'
 import { pktDayKey } from '@/lib/datetime'
 import {
-  blankInvoice, cleanInvoiceDoc, newInvoiceId, num, poNumber, sitePrefix, type InvoiceDoc,
+  blankInvoice, cleanInvoiceDoc, newInvoiceId, poNumber, sitePrefix, type InvoiceDoc,
 } from '@/lib/invoicedoc'
 
 export const dynamic = 'force-dynamic'
@@ -49,12 +49,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     name: sheet.billTo || sheet.name || record.contact.name || '',
     company: '', address: sheet.shipTo || '', phone: sheet.phone || record.contact.phone || '',
   }
+  // The rate is never guessed: a dollar figure in the thread may be a total, a
+  // budget or a competitor's price, and dividing it by a quantity once put
+  // $0.004 per box on an invoice. The agent types the rate they quoted.
   const qty = sheet.quantity.replace(/[^\d.,]/g, '').replace(/,/g, '')
-  const amount = num(sheet.amount)
-  prefill.items = [{
-    name: sheet.item || '', details: '', quantity: qty,
-    rate: qty && amount ? String(Math.round((amount / num(qty)) * 1000) / 1000) : '',
-  }]
+  prefill.items = [{ name: sheet.item || '', details: '', quantity: qty, rate: '' }]
   if (sheet.currency) prefill.currency = sheet.currency
 
   return NextResponse.json({
