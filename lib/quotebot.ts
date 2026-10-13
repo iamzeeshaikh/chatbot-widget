@@ -180,8 +180,8 @@ function siteAlias(aliases: SendAsAlias[], siteId: string, siteName: string): Se
   }) ?? null
 }
 
-/** Least-loaded agent this week, so neither inbox gets every bot lead. */
-async function balancedAgentOrder(now: Date): Promise<string[]> {
+/** How many leads the bot gave each agent this week, so neither inbox gets every one. */
+async function weeklyLoad(now: Date): Promise<Map<string, number>> {
   const since = new Date(now.getTime() - 7 * 864e5).toISOString()
   const { data } = await supabase.from('chat_logs').select('message')
     .eq('role', CRM_BOT_ROLE).gte('created_at', since).limit(2000)
@@ -190,7 +190,7 @@ async function balancedAgentOrder(now: Date): Promise<string[]> {
     const e = parseBotLedger(r.message)
     if (e?.state === 'sent' && e.agent && load.has(e.agent)) load.set(e.agent, load.get(e.agent)! + 1)
   }
-  return [...BOT_AGENTS].sort((a, b) => load.get(a)! - load.get(b)!)
+  return load
 }
 
 export async function assessQuote(message: string, name: string | null): Promise<QuoteAssessment | null> {
@@ -204,7 +204,7 @@ export async function assessQuote(message: string, name: string | null): Promise
   return parseAssessment(r.text)
 }
 
-export async function runQuoteBot(origin: string, now = new Date(), opts: { dryRun?: boolean; leadId?: string } = {}): Promise<BotRunResult> {
+export async function runQuoteBot(origin: string, now = new Date(), opts: { dryRun?: boolean; leadIds?: string[] } = {}): Promise<BotRunResult> {
   const enabled = quoteBotEnabled()
   const dryRun = !enabled || !!opts.dryRun
   const result: BotRunResult = { ok: true, enabled, dryRun, scanned: 0, actions: [] }
@@ -217,9 +217,11 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
   const ceiling = new Date(now.getTime() - MIN_AGE_MS).toISOString()
 
   let q = supabase.from('leads').select('id, site_id, name, email, message, created_at').in('site_id', sites)
-  // A named lead is a manual preview and ignores the time window, never the
+  // Named leads are a manual preview: they skip the time window, never the
   // safety checks below.
-  q = opts.leadId ? q.eq('id', opts.leadId.replace(/^quote-/, '')) : q.gte('created_at', floor).lte('created_at', ceiling)
+  q = opts.leadIds?.length
+    ? q.in('id', opts.leadIds.map((x) => x.replace(/^quote-/, '')))
+    : q.gte('created_at', floor).lte('created_at', ceiling)
   const { data: leadRows, error } = await q.order('created_at', { ascending: true }).limit(200)
   if (error) throw new Error(`leads query failed: ${error.message}`)
   const leads = (leadRows ?? []) as LeadRow[]
@@ -243,7 +245,9 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
   }
   const siteName = new Map((siteRes.data ?? []).map((s) => [s.site_id, String(s.name ?? s.site_id)]))
   const cfg = googleConfig(origin)
-  let agentOrder: string[] | null = null
+  // Counted up as this run hands leads out, not just read once — otherwise a
+  // run with five new leads gives all five to whoever was lighter at the start.
+  let load: Map<string, number> | null = null
   let sends = 0
 
   for (const lead of leads) {
@@ -289,8 +293,9 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       continue
     }
     if (!cfg) { act({ state: 'retry-later', why: 'Google OAuth is not configured' }); continue }
-    agentOrder ??= await balancedAgentOrder(now)
-    const candidates = preset ? [preset] : agentOrder
+    load ??= await weeklyLoad(now)
+    const tally = load
+    const candidates = preset ? [preset] : [...BOT_AGENTS].sort((a, b) => tally.get(a)! - tally.get(b)!)
     let agent: string | null = null
     let alias: SendAsAlias | null = null
     for (const who of candidates) {
@@ -306,6 +311,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     const mail = buildFirstEmail(assessment, { siteName: siteName.get(lead.site_id) ?? lead.site_id, fromChat: kind === 'chat' })
     const missing = missingOf(assessment)
     const preview = { agent, from: alias.email, to, subject: mail.subject, text: mail.text, complete: mail.complete, missing }
+    tally.set(agent, (tally.get(agent) ?? 0) + 1)
 
     if (dryRun) { act({ state: 'would-send', why: assessment.reason, ...preview }); continue }
     if (sends >= MAX_SENDS_PER_RUN) { act({ state: 'retry-later', why: 'per-run send cap reached' }); continue }

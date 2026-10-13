@@ -12,7 +12,7 @@ export const maxDuration = 120
 // Vercel Cron with CRON_SECRET, or a signed-in packaging admin by hand.
 //
 //   ?dryRun=1        decide everything, send nothing, write nothing
-//   ?lead=<id>       preview one lead (always a dry run), outside the time window
+//   ?lead=<id>[,<id>] preview named leads (always a dry run), outside the time window
 //
 // Sending also needs QUOTE_BOT=on in the environment; without it every run is
 // a dry run, which is how the bot is switched off in an emergency.
@@ -35,10 +35,10 @@ async function authorise(req: NextRequest): Promise<{ ok: boolean; by: string; w
 export async function GET(req: NextRequest) {
   const auth = await authorise(req)
   if (!auth.ok) return NextResponse.json({ error: auth.why }, { status: 401 })
-  const lead = req.nextUrl.searchParams.get('lead') || undefined
-  const dryRun = req.nextUrl.searchParams.get('dryRun') === '1' || !!lead
+  const leadIds = (req.nextUrl.searchParams.get('lead') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 25)
+  const dryRun = req.nextUrl.searchParams.get('dryRun') === '1' || leadIds.length > 0
   try {
-    const result = await runQuoteBot(req.nextUrl.origin, new Date(), { dryRun, leadId: lead })
+    const result = await runQuoteBot(req.nextUrl.origin, new Date(), { dryRun, leadIds })
     return NextResponse.json({ by: auth.by, ...result })
   } catch (err) {
     console.error('[quotebot] run failed:', err)
