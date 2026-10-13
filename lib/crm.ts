@@ -87,6 +87,8 @@ export const CRM_ROLES = [
   // The invoice worksheet on a lead (lib/invoice.ts) — what was sold, how many
   // and for how much. Lives on the lead and must never reach a transcript.
   'crm_invoice',
+  // Full invoices (lib/invoicedoc.ts) — one row per save, newest per id wins.
+  'crm_invoice_doc',
   // The payment link (lib/paylink.ts) — treated as PII in its own right,
   // because opening it shows the customer's address on PayPal's own page. On
   // the lead, and it must never reach a transcript.

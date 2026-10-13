@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
 import {
-  CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES, isInvoiceable,
+  CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES,
   CURRENCY_SYMBOL, isDeadStage, type CrmStage, type CrmCurrency,
 } from '@/lib/crm'
 import { isImageMime } from '@/lib/attachment'
@@ -34,7 +34,7 @@ import WhatsAppThread from './WhatsAppThread'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
-import Invoice from './Invoice'
+import Invoices from './Invoices'
 import EmailComposer, { type ReplyTo } from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
@@ -977,7 +977,12 @@ export default function LeadRecordPage() {
               exists to bill — and hidden on new, contacted and the dead
               outcomes. Not gated on `won`: won means the money arrived, and
               these details are what you need to ask for it. */}
-          {isInvoiceable(record.stage) && <Invoice leadId={record.id} />}
+          {/* The invoice card: a Create button and the invoices made so far.
+              The older "invoice details" sheet (./Invoice.tsx) now pre-fills
+              the new invoice page instead of sitting here, which kept the
+              record page from growing another long form. Shown at every
+              stage — an invoice is sometimes raised before the stage moves. */}
+          <Invoices leadId={record.id} />
 
           <Card>
             <div className="px-3 py-2">
