@@ -37,6 +37,8 @@ export default function InvoicePage() {
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [wordmark, setWordmark] = useState(false)
+  const [logoOk, setLogoOk] = useState(true)
   const leadId = decodeURIComponent(id)
   const api = `/api/leads/${encodeURIComponent(leadId)}/invoices`
 
@@ -250,8 +252,17 @@ export default function InvoicePage() {
             <div className="min-w-[560px]">
               <div className="flex items-start justify-between">
                 <div>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={data.logoUrl} alt={data.lead.siteName} className="max-h-12 max-w-[180px] object-contain" />
+                  {/* Name beside the logo, unless the logo is a wordmark that
+                      already spells it — the same rule as the PDF. */}
+                  <div className="flex items-center gap-2.5">
+                    {logoOk && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={data.logoUrl} alt="" className={wordmark ? 'max-h-12 max-w-[190px] object-contain' : 'max-h-11 max-w-[60px] object-contain'}
+                        onLoad={(e) => setWordmark(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight >= 2.2)}
+                        onError={() => setLogoOk(false)} />
+                    )}
+                    {!wordmark && <span className="text-xl font-bold text-gray-800">{data.lead.siteName}</span>}
+                  </div>
                   <p className="mt-5 font-bold">{doc.agentName}</p>
                 </div>
                 <div className="text-right">

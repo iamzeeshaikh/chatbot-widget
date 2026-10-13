@@ -52,11 +52,17 @@ export async function buildInvoicePdf(doc: InvoiceDoc, opts: { logo?: Uint8Array
       img = b[0] === 0x89 && b[1] === 0x50 ? await pdf.embedPng(b) : (b[0] === 0xff && b[1] === 0xd8 ? await pdf.embedJpg(b) : null)
     } catch { img = null }
   }
+  // The site's name sits beside its logo, as on the TDCS-019 sample — unless
+  // the logo is a wide wordmark that already spells the name out (TPC-017).
   if (img) {
-    const s = Math.min(170 / img.width, 48 / img.height)
-    page.drawImage(img, { x: L - 6, y: H - 44 - img.height * s, width: img.width * s, height: img.height * s })
+    const wordmark = img.width / img.height >= 2.2
+    const maxH = wordmark ? 48 : 44
+    const s = Math.min((wordmark ? 190 : 60) / img.width, maxH / img.height)
+    const w = img.width * s, h = img.height * s
+    page.drawImage(img, { x: L - 6, y: H - 44 - h, width: w, height: h })
+    if (!wordmark) t(opts.siteName, L + w + 6, H - 44 - h / 2 - 6, 16, bold)
   } else {
-    t(opts.siteName, L, H - 70, 16, bold)
+    t(opts.siteName, L, H - 70, 18, bold)
   }
   tr('INVOICE', R, H - 78, 34, font, INK)
   tr(`# ${doc.number}`, R, H - 100, 13, font, GREY)
