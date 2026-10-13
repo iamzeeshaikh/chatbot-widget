@@ -28,6 +28,13 @@ async function context(req: NextRequest, id: string) {
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
+  // The record page's card only needs the list. Loading the whole record for
+  // it (the prefill below) cost ~4s on every record open.
+  if (req.nextUrl.searchParams.get('list') === '1') {
+    const access = await guardLeadAccess(await getMember(req), id, 'records')
+    if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
+    return NextResponse.json({ ok: true, invoices: await listInvoices(id) })
+  }
   const c = await context(req, id)
   if ('error' in c) return c.error
   const { access, record } = c

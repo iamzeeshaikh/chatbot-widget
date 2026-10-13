@@ -15,7 +15,7 @@ export default function Invoices({ leadId }: { leadId: string }) {
   const base = `/leads/${encodeURIComponent(leadId)}/invoice`
   useEffect(() => {
     let alive = true
-    fetch(`/api/leads/${encodeURIComponent(leadId)}/invoices`)
+    fetch(`/api/leads/${encodeURIComponent(leadId)}/invoices?list=1`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (alive) setList(j?.invoices ?? []) })
       .catch(() => { if (alive) setList([]) })
