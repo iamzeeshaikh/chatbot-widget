@@ -14,7 +14,7 @@ import { ArrowLeft, Plus, X } from 'lucide-react'
 import GlobalSearch from '@/app/components/GlobalSearch'
 import { timeAgo } from '@/lib/datetime'
 import {
-  JOB_STATUSES, JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE,
+  JOB_STATUSES, JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, JOB_DESIGNERS,
   type Job, type JobType,
 } from '@/lib/jobs'
 
@@ -107,7 +107,8 @@ function JobsPage() {
         })}
       </div>
 
-      {open && <NewJob members={members} leadId={search.get('lead') ?? ''} onClose={() => setOpen(false)}
+      {/* Mounted once the member list is in, so the designer default lands. */}
+      {open && jobs !== null && <NewJob members={members} leadId={search.get('lead') ?? ''} onClose={() => setOpen(false)}
         onCreated={(j) => { window.location.href = `/jobs/${encodeURIComponent(j.id)}` }} />}
     </main>
   )
@@ -116,7 +117,9 @@ function JobsPage() {
 function NewJob({ members, leadId, onClose, onCreated }: { members: Member[]; leadId: string; onClose: () => void; onCreated: (j: Job) => void }) {
   const [title, setTitle] = useState('')
   const [type, setType] = useState<JobType>('estimate')
-  const [assignee, setAssignee] = useState('')
+  // The designer/estimator by default — that is who almost every job is for.
+  const designers = Object.values(JOB_DESIGNERS).flat()
+  const [assignee, setAssignee] = useState(() => members.find((m) => designers.includes(m.email))?.email ?? '')
   const [dueAt, setDueAt] = useState('')
   const [requirements, setRequirements] = useState('')
   const [busy, setBusy] = useState(false)
@@ -157,7 +160,7 @@ function NewJob({ members, leadId, onClose, onCreated }: { members: Member[]; le
             <label className={label} htmlFor="job-assignee">Assign to</label>
             <select id="job-assignee" className={input} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
               <option value="">Unassigned</option>
-              {members.map((m) => <option key={m.email} value={m.email}>{m.name}</option>)}
+              {members.map((m) => <option key={m.email} value={m.email}>{m.name}{designers.includes(m.email) ? ' — designer / estimator' : ''}</option>)}
             </select>
           </div>
           <div>

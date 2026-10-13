@@ -18,6 +18,16 @@ export const CRM_JOB_MSG_ROLE = 'crm_job_msg'
 export const JOB_SITE = 'zeeops-crm'
 export const jobSession = (workspace: string) => `zeeops-jobs-${workspace}`
 
+/**
+ * Who estimates, designs and runs production, per workspace. New jobs are
+ * assigned here by default (still changeable), and the name is labelled so a
+ * CSR picking an assignee knows who does the work. Owner, 2026-10-13: the
+ * designer/estimator works from the jenniferwright@ account.
+ */
+export const JOB_DESIGNERS: Record<string, string[]> = {
+  packaging: ['jenniferwright@shopcardboardboxes.com'],
+}
+
 export const JOB_TYPES = ['estimate', 'design_2d3d', 'print_ready', 'dieline', 'china_template', 'other'] as const
 export type JobType = (typeof JOB_TYPES)[number]
 export const JOB_TYPE_LABEL: Record<JobType, string> = {

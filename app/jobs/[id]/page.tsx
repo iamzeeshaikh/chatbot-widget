@@ -15,7 +15,7 @@ import { useParams } from 'next/navigation'
 import { ArrowLeft, Plus, Save, Send, Trash2 } from 'lucide-react'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
 import {
-  JOB_STATUSES, JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, NEXT_ACTION,
+  JOB_STATUSES, JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, NEXT_ACTION, JOB_DESIGNERS,
   blankEstimate, tierMath, type Estimate, type Job, type JobMessage, type JobStatus, type JobType,
 } from '@/lib/jobs'
 
@@ -173,7 +173,7 @@ export default function JobPage() {
                   <label className={label} htmlFor="j-assignee">Assigned to</label>
                   <select id="j-assignee" className={input} value={draft.assignee} onChange={(e) => set({ assignee: e.target.value })}>
                     <option value="">Unassigned</option>
-                    {members.map((m) => <option key={m.email} value={m.email}>{m.name}</option>)}
+                    {members.map((m) => <option key={m.email} value={m.email}>{m.name}{Object.values(JOB_DESIGNERS).flat().includes(m.email) ? ' — designer / estimator' : ''}</option>)}
                   </select>
                 </div>
                 <div>
