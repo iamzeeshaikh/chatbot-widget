@@ -121,13 +121,16 @@ export function workspaceSites(ws: Workspace): string[] {
 // lead's agent, asking for what is missing or saying the price is on its way
 // (lib/quotebot.ts). PACKAGING ONLY: it asks for a box size and style, which
 // is not how a jersey order is specified.
-export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony' | 'sales' | 'quotebot'
+// 'jobs' (2026-10-13) — estimates, designs and production handed from a CSR
+// to the estimator/designer, with statuses and messages (lib/jobs.ts).
+// Packaging only: it is the packaging team's estimator and designer.
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony' | 'sales' | 'quotebot' | 'jobs'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   // 'sales' (2026-09-16): each business keeps its own sales ledger — Model Town
   // direct and the old lead-partner orders here, jersey sales on sports — with
   // a master view across both for the owner accounts (lib/salescore.ts).
-  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony', 'sales', 'quotebot']),
+  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony', 'sales', 'quotebot', 'jobs']),
   // Sports carries the CRM as of 2026-08-29, at the user's request. The reason
   // it did not before was that it had nothing to run a CRM on: chat had been off
   // on all five sites since 2026-08-05 and the workspace had produced one lead

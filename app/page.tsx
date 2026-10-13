@@ -2216,6 +2216,7 @@ export default function Dashboard() {
   // The sales ledger is an owner's page like Billing: admins only, and the
   // API refuses everyone else regardless.
   const canSales = hasFeature(workspace, 'sales') && userRole === 'admin'
+  const canJobs = hasFeature(workspace, 'jobs')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
   // The product's name. Do not change it without asking — it was renamed to
@@ -2492,6 +2493,13 @@ export default function Dashboard() {
                 {taskBadge > 99 ? '99+' : taskBadge}
               </span>
             </a>
+          )}
+          {canJobs && (
+            // A real <a> like every tab here: middle-click opens a new tab, a
+            // plain click goes through navigateTo's stale-tab safety net.
+            // eslint-disable-next-line @next/next/no-html-link-for-pages
+            <a href="/jobs" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/jobs') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Estimates, designs and production">Jobs</a>
           )}
           {canSales && (
             <a href="/sales" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/sales') } }}

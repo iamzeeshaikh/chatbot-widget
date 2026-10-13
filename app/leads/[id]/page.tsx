@@ -35,6 +35,7 @@ import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
 import Invoices from './Invoices'
+import Jobs from './Jobs'
 import EmailComposer, { type ReplyTo } from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
@@ -983,6 +984,7 @@ export default function LeadRecordPage() {
               record page from growing another long form. Shown at every
               stage — an invoice is sometimes raised before the stage moves. */}
           <Invoices leadId={record.id} />
+          <Jobs leadId={record.id} />
 
           <Card>
             <div className="px-3 py-2">

@@ -109,6 +109,8 @@ export const CRM_ROLES = [
   // An address that unsubscribed from promotional email (lib/unsubscribe.ts).
   // On the reserved zeeops-crm site; registered as the second line of defence.
   'crm_unsub',
+  // Jobs and their messages (lib/jobs.ts) — reserved zeeops-crm site.
+  'crm_job', 'crm_job_msg',
   // Retired: the customer billing form was removed on 2026-09-08. Kept
   // registered so that if the feature ever comes back — or a stray row from it
   // turns up — the JSON can never surface as a transcript line or a preview.
