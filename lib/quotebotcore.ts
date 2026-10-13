@@ -206,3 +206,124 @@ export function quoteTextForAssessment(message: string, name: string | null): st
     .slice(0, 6000)
   return `Lead name on file: ${name || '(none)'}\n\n${body}`
 }
+
+// ── Follow-ups (Step 2) ─────────────────────────────────────────────────────
+// Every 3 days until the customer answers. Each one says something new — a
+// nudge, help with the size, style ideas, an offer, a check-in — because the
+// same "just following up" five times is what gets a domain marked as spam.
+// After five the cycle starts again in different words, with a bigger (still
+// capped) offer. Discount rule from the owner, 2026-10-13: 10–15%, never more
+// than 20%, and 20% only for a big holiday — the bot stays at 10 and 15.
+
+export const FOLLOW_UP_GAP_DAYS = 3
+/** A call task for the agent after every this-many unanswered follow-ups. */
+export const CALL_TASK_EVERY = 3
+
+export interface Holiday { name: string; date: Date }
+
+function nthWeekday(year: number, month: number, weekday: number, n: number): Date {
+  const first = new Date(Date.UTC(year, month, 1))
+  const shift = (weekday - first.getUTCDay() + 7) % 7
+  return new Date(Date.UTC(year, month, 1 + shift + (n - 1) * 7))
+}
+function lastWeekday(year: number, month: number, weekday: number): Date {
+  const last = new Date(Date.UTC(year, month + 1, 0))
+  return new Date(Date.UTC(year, month, last.getUTCDate() - ((last.getUTCDay() - weekday + 7) % 7)))
+}
+
+/** US shopping holidays a packaging buyer plans around, for one year. */
+export function holidaysOf(year: number): Holiday[] {
+  const thanksgiving = nthWeekday(year, 10, 4, 4)
+  return [
+    { name: "Valentine's Day", date: new Date(Date.UTC(year, 1, 14)) },
+    { name: "Mother's Day", date: nthWeekday(year, 4, 0, 2) },
+    { name: 'Memorial Day', date: lastWeekday(year, 4, 1) },
+    { name: 'the 4th of July', date: new Date(Date.UTC(year, 6, 4)) },
+    { name: 'Labor Day', date: nthWeekday(year, 8, 1, 1) },
+    { name: 'Columbus Day', date: nthWeekday(year, 9, 1, 2) },
+    { name: 'Halloween', date: new Date(Date.UTC(year, 9, 31)) },
+    { name: 'Thanksgiving', date: thanksgiving },
+    { name: 'Black Friday', date: new Date(thanksgiving.getTime() + 864e5) },
+    { name: 'Christmas', date: new Date(Date.UTC(year, 11, 25)) },
+  ]
+}
+
+/** The next holiday at least a week away — an offer needs time to be used. */
+export function nextHoliday(now: Date): Holiday {
+  const soon = now.getTime() + 7 * 864e5
+  const all = [...holidaysOf(now.getUTCFullYear()), ...holidaysOf(now.getUTCFullYear() + 1)]
+  return all.find((h) => h.date.getTime() >= soon) ?? all[all.length - 1]
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const dayLabel = (d: Date) => `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+
+function missingWords(missing: Missing[], a: QuoteAssessment): string {
+  const words = missing.map((m) => (m === 'size' ? 'size' : m === 'style' ? a.styleLabel : 'quantity'))
+  if (words.length <= 1) return words[0] ?? 'details'
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`
+}
+
+// Style ideas a customer can answer with one word. Products the model calls
+// cups get wall types; anything else sold as a box gets our common box styles.
+function styleIdeas(a: QuoteAssessment): string {
+  if (/cup/.test(a.product)) return 'single wall, double wall and ripple wall cups'
+  if (/sticker|label/.test(a.product)) return 'die cut, kiss cut and sheet stickers'
+  if (/bag|pouch|mailer/.test(a.product) && !/box/.test(a.product)) return 'flat, stand-up and zipper styles'
+  return 'tuck end boxes, mailer boxes, two-piece rigid boxes and sleeve-and-tray boxes'
+}
+
+export interface FollowUpContext {
+  /** 1-based number of this follow-up. */
+  n: number
+  missing: Missing[]
+  firstName: string | null
+  now: Date
+}
+
+/**
+ * Follow-up number n, for a customer who has not answered. While details are
+ * missing it asks for them; once nothing is missing (the price is with a
+ * person) it only keeps the conversation warm — it never quotes.
+ */
+export function buildFollowUp(a: QuoteAssessment, c: FollowUpContext): { text: string; offer: number | null } {
+  const greet = c.firstName ? `Hello ${c.firstName},` : 'Hello,'
+  const what = missingWords(c.missing, a)
+  const asking = c.missing.length > 0
+  const cycle = Math.floor((c.n - 1) / 5)
+  const step = (c.n - 1) % 5
+  const holiday = nextHoliday(c.now)
+  const offer = cycle === 0 ? 10 : 15
+  const bySize = c.missing.includes('size')
+
+  let body: string[]
+  let usedOffer: number | null = null
+  switch (step) {
+    case 0:
+      body = asking
+        ? [`Hope things are going well on your end! Whenever you get a chance to send over the ${what}, I'll have the price quote for your ${a.product} ready right away.`]
+        : [`Hope things are going well on your end! Just checking whether you had any questions about your ${a.product} while our team works on your price quote.`]
+      if (cycle > 0) body = [`I hope you're doing well! I'm still here whenever you're ready to move ahead with your ${a.product}.${asking ? ` Once I have the ${what}, the price quote follows right away.` : ''}`]
+      break
+    case 1:
+      body = bySize
+        ? [`If you're not sure about the exact size, that's completely fine. Just send the size of the product that goes inside, or a photo of it next to a ruler, and I'll work out the right box size for you.`, `Happy to jump on a quick call too, if that's easier than email.`]
+        : [`If it's easier, I'm happy to jump on a quick call and go over your ${a.product} together. Just let me know a good time and the best number to reach you.`]
+      break
+    case 2:
+      body = [`In case it helps you decide, the most popular choices for ${a.product} are ${styleIdeas(a)}. A picture of something you like works great too, and I'll take it from there.`]
+      if (!asking) body = [`I wanted to share a quick note: along with the box itself, our price includes free shipping to your doorstep and no extra or hidden charges, and we send 2D and 3D mockups before anything goes to print.`]
+      break
+    case 3:
+      usedOffer = offer
+      body = [`With ${holiday.name} coming up, I can offer ${offer}% off your order of ${a.product} if you're able to move forward before ${dayLabel(holiday.date)}.${asking ? ` Once I have the ${what}, I'll include it in your price quote.` : ''}`]
+      break
+    default:
+      body = [`I wanted to check in one more time: are you still interested in moving forward with your ${a.product}?`, `If the timing isn't right now, I totally understand. Just let me know and I'll follow up later instead.`]
+  }
+
+  return {
+    text: [greet, '', ...body.flatMap((p, i) => (i ? ['', p] : [p])), '', 'Looking forward to hearing from you.', '', 'Warm regards,'].join('\n'),
+    offer: usedOffer,
+  }
+}

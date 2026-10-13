@@ -39,19 +39,22 @@ import { notALeadSessions } from './notalead'
 import { ASSIGNMENT_ROLE, setAssignment } from './assignment'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import {
-  CRM_STAGE_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_TASK_ROLE,
+  CRM_STAGE_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_TASK_ROLE, CRM_WA_IN_ROLE,
   parseCrmStage, stageFromLeadStatus,
 } from './crm'
 import { applyStageChange } from './stagechange'
+import { threadContextFor, isNoiseSender } from './emailsweep'
+import { CRM_EMAIL_IN_ROLE, parseCrmEmailIn } from './emailreply'
 import { googleConfig, verifiedAliases, sendEmail, GmailAuthError, type SendAsAlias } from './gmail'
-import { makeSnippet, newEmailId, isAddress, type CrmEmailEntry } from './crmemail'
+import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
 import { buildSendSignature } from './sendsignature'
 import { newTaskId, type CrmTaskEntry } from './tasks'
 import { sendPushToMember } from './push'
 import { llmComplete, CLAUDE_CHAT_MODEL } from './llm'
 import {
-  ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf,
+  ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf, buildFollowUp,
+  FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, type Missing,
   quoteTextForAssessment, emailHtml, type QuoteAssessment,
 } from './quotebotcore'
 
@@ -79,11 +82,20 @@ const MAX_SENDS_PER_RUN = 8
 const LEASE_SESSION = 'zeeops-quotebot-lease'
 const LEDGER_SITE = 'zeeops-crm'
 const LEASE_MS = 4 * 60 * 1000
+/**
+ * Where a customer's mail client fetches the logo and the open pixel from.
+ * NEVER the request origin: Vercel Cron calls the deployment's own
+ * *.vercel.app URL, which sits behind deployment protection, so every image
+ * in the first bot emails came back 401 — a broken logo and no open tracking.
+ */
+const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.dev').replace(/\/$/, '')
 
 export type BotState = 'claimed' | 'sent' | 'skipped' | 'failed'
 
 export interface BotLedger {
-  step: 'first'
+  step: 'first' | 'followup'
+  /** Follow-up number, 1-based. */
+  n?: number
   state: BotState
   at: string
   why?: string
@@ -93,6 +105,8 @@ export interface BotLedger {
   complete?: boolean
   missing?: string[]
   emailId?: string
+  /** Discount offered in this follow-up, percent. */
+  offer?: number
 }
 
 export function parseBotLedger(message: string | null | undefined): BotLedger | null {
@@ -331,7 +345,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     }
     sends++
 
-    const base = (process.env.NEXT_PUBLIC_BASE_URL || origin).replace(/\/$/, '')
+    const base = PUBLIC_BASE
     const sig = await buildSendSignature({ memberEmail: agent, workspace: 'packaging', siteId: lead.site_id, from: alias.email, base })
     const emailId = newEmailId()
     const finalText = sig.text ? `${mail.text}\n\n${sig.text}` : mail.text
@@ -404,4 +418,123 @@ function lastAssignment(rows: LogRow[]): string | null {
   let who: string | null = null
   for (const r of rows) if (r.role === ASSIGNMENT_ROLE) who = r.message.trim().toLowerCase() || null
   return who
+}
+
+// ── Follow-ups (Step 2) ─────────────────────────────────────────────────────
+
+export interface FollowUpResult {
+  ok: boolean
+  state: 'sent' | 'stopped' | 'not-due' | 'failed'
+  why?: string
+  n?: number
+  text?: string
+  callTask?: boolean
+}
+
+/**
+ * The next follow-up on one lead the bot first emailed.
+ *
+ * Stops for good the moment the customer answers (email or WhatsApp) or a
+ * person on our side writes, calls or messages them — from then on the lead
+ * is a human conversation. `force` skips only the 3-day wait, never those
+ * checks; it is how an admin tests the sequence on a lead without waiting.
+ */
+export async function sendFollowUp(leadId: string, now = new Date(), opts: { force?: boolean } = {}): Promise<FollowUpResult> {
+  const id = leadId.startsWith('quote-') ? leadId : `quote-${leadId}`
+  const { data } = await supabase.from('chat_logs').select('session_id, site_id, role, message, created_at')
+    .eq('session_id', id)
+    .in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE])
+    .order('created_at', { ascending: true })
+  const rows = (data ?? []) as (LogRow & { site_id: string })[]
+  const ledgers = rows.filter((r) => r.role === CRM_BOT_ROLE).map((r) => parseBotLedger(r.message)).filter(Boolean) as BotLedger[]
+  const first = ledgers.find((e) => e.step === 'first' && e.state === 'sent')
+  if (!first || !first.agent || !first.from || !first.to) return { ok: false, state: 'stopped', why: 'the bot never emailed this lead' }
+  const siteId = rows[0].site_id
+  const firstAt = new Date(first.at).getTime()
+
+  // ── has anyone else spoken since? ────────────────────────────────────────
+  const after = rows.filter((r) => new Date(r.created_at).getTime() > firstAt - 1000)
+  const customer = after.find((r) => {
+    if (r.role === CRM_WA_IN_ROLE) return true
+    if (r.role !== CRM_EMAIL_IN_ROLE) return false
+    const e = parseCrmEmailIn(r.message)
+    return !!e && !isNoiseSender(e.from)
+  })
+  if (customer) return { ok: true, state: 'stopped', why: 'the customer replied — this is a conversation for a person now' }
+  const human = after.find((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
+    || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot))
+  if (human) return { ok: true, state: 'stopped', why: `an agent reached the customer themselves (${human.role})` }
+
+  const sentUps = ledgers.filter((e) => e.step === 'followup' && e.state === 'sent')
+  const n = sentUps.length + 1
+  const lastAt = Math.max(firstAt, ...sentUps.map((e) => new Date(e.at).getTime()))
+  if (!opts.force && now.getTime() - lastAt < FOLLOW_UP_GAP_DAYS * 864e5) {
+    return { ok: true, state: 'not-due', n, why: `next one is due ${new Date(lastAt + FOLLOW_UP_GAP_DAYS * 864e5).toISOString()}` }
+  }
+
+  // ── what to say ──────────────────────────────────────────────────────────
+  const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
+  const assessment = await assessQuote(lead?.message ?? '', lead?.name ?? null)
+  if (!assessment) return { ok: false, state: 'failed', why: 'could not read the enquiry (model unavailable)' }
+  const missing = (first.missing ?? []) as Missing[]
+  const fu = buildFollowUp(assessment, { n, missing, firstName: assessment.firstName, now })
+
+  // Threaded under the first email, in the customer's mail client and ours.
+  const sentRows = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
+  const original = sentRows.find((e) => e.id === first.emailId) ?? sentRows.find((e) => e.bot)
+  if (!original) return { ok: false, state: 'failed', why: 'the first email is missing from the timeline' }
+  const thread = await threadContextFor(id, original.gmailId)
+  const subject = /^re:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`
+
+  const cfg = googleConfig(PUBLIC_BASE)
+  if (!cfg) return { ok: false, state: 'failed', why: 'Google OAuth is not configured' }
+  const sig = await buildSendSignature({ memberEmail: first.agent, workspace: 'packaging', siteId, from: first.from, base: PUBLIC_BASE })
+  const emailId = newEmailId()
+  const finalText = sig.text ? `${fu.text}\n\n${sig.text}` : fu.text
+  const finalHtml = `${emailHtml(fu.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+
+  if (!(await ledger(id, siteId, { step: 'followup', n, state: 'claimed', at: now.toISOString(), to: first.to, agent: first.agent }))) {
+    return { ok: false, state: 'failed', why: 'ledger write failed' }
+  }
+  let sent
+  try {
+    sent = await sendEmail(first.agent, cfg, {
+      from: first.from, to: first.to, subject, body: finalText, html: finalHtml,
+      threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
+    })
+  } catch (e) {
+    const why = e instanceof GmailAuthError ? `${first.agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
+    await ledger(id, siteId, { step: 'followup', n, state: 'failed', at: new Date().toISOString(), why, to: first.to, agent: first.agent })
+    return { ok: false, state: 'failed', n, why }
+  }
+
+  const at = new Date().toISOString()
+  const entry: CrmEmailEntry = {
+    id: emailId, sentBy: first.agent, from: first.from, to: first.to, subject,
+    body: finalText, html: finalHtml, snippet: makeSnippet(fu.text), at,
+    gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
+    direction: 'outbound', bot: true,
+  }
+  await writeControlRow({ sessionId: id, siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
+
+  // Every third unanswered follow-up, a person picks up the phone.
+  const callTask = n % CALL_TASK_EVERY === 0
+  if (callTask) {
+    const who = lead?.name || first.to
+    const task: CrmTaskEntry = {
+      id: newTaskId(),
+      title: `Call ${who} — ${n} follow-ups and no reply yet (bot)`.slice(0, 200),
+      type: 'call', due_at: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
+      assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+    }
+    await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+    await sendPushToMember(first.agent, 'packaging', {
+      title: 'Call this customer',
+      body: `${who} has not answered ${n} follow-ups. A call usually gets the reply.`,
+      url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-call-${id}`,
+    }).catch(() => 0)
+  }
+
+  await ledger(id, siteId, { step: 'followup', n, state: 'sent', at, to: first.to, agent: first.agent, from: first.from, emailId, offer: fu.offer ?? undefined })
+  return { ok: true, state: 'sent', n, text: fu.text, callTask }
 }
