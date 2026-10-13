@@ -49,13 +49,14 @@ import { googleConfig, verifiedAliases, sendEmail, GmailAuthError, type SendAsAl
 import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
 import { buildSendSignature } from './sendsignature'
+import { unsubscribeUrl, unsubscribedSet } from './unsubscribe'
 import { newTaskId, type CrmTaskEntry } from './tasks'
 import { sendPushToMember } from './push'
 import { llmComplete, CLAUDE_CHAT_MODEL } from './llm'
 import {
   ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf, buildFollowUp,
   FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, REPLY_SYSTEM, parseReplyDecision, buildReplyAnswer,
-  buildQuoteFollowUp, type Missing,
+  buildQuoteFollowUp, currentOrNextCampaign, buildPromoEmail, promoFooterHtml, type Missing,
   quoteTextForAssessment, emailHtml, type QuoteAssessment,
 } from './quotebotcore'
 
@@ -94,7 +95,9 @@ const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.de
 export type BotState = 'claimed' | 'sent' | 'skipped' | 'failed'
 
 export interface BotLedger {
-  step: 'first' | 'followup' | 'reply' | 'quote' | 'quote_fu'
+  step: 'first' | 'followup' | 'reply' | 'quote' | 'quote_fu' | 'promo'
+  /** step 'promo': which campaign, e.g. "black-friday-2026". */
+  campaign?: string
   /** Follow-up number, 1-based. */
   n?: number
   state: BotState
@@ -1011,4 +1014,78 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   }
   await ledger(id, siteId, { step: 'quote_fu', n, state: 'sent', at, to, agent, from: lastMine.from, emailId, offer: fu.offer ?? undefined })
   return { ok: true, state: 'sent', n, text: fu.text, callTask }
+}
+
+// ── Holiday promotions (Step 4) ─────────────────────────────────────────────
+// Only the single-lead send exists so far, for the owner to see one before any
+// campaign runs on its own. It goes from the agent who last wrote to the
+// customer, on the site's own domain, and carries an unsubscribe link plus the
+// one-click List-Unsubscribe header Gmail shows as its own button.
+
+export async function sendPromo(leadId: string, now = new Date()): Promise<{ ok: boolean; why?: string; subject?: string; text?: string; campaign?: string; from?: string }> {
+  const id = leadId.startsWith('quote-') ? leadId : `quote-${leadId}`
+  const { data: lead } = await supabase.from('leads').select('site_id, name, product, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
+  if (!lead) return { ok: false, why: 'no such lead' }
+  const to = await leadRecipient(id)
+  if (!to || !isAddress(to)) return { ok: false, why: 'no valid email address' }
+  if ((await unsubscribedSet()).has(to.toLowerCase())) return { ok: false, why: `${to} unsubscribed from offers` }
+
+  const { data } = await supabase.from('chat_logs').select('role, message, created_at')
+    .eq('session_id', id).in('role', [CRM_EMAIL_ROLE, ASSIGNMENT_ROLE]).order('created_at', { ascending: true })
+  const rows = (data ?? []) as LogRow[]
+  const sent = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
+  const owner = lastAssignment(rows)
+  const lastByBotAgent = [...sent].reverse().find((e) => (BOT_AGENTS as readonly string[]).includes(e.sentBy.toLowerCase()))
+  const agent = lastByBotAgent?.sentBy.toLowerCase() ?? (owner && (BOT_AGENTS as readonly string[]).includes(owner) ? owner : null)
+  if (!agent) return { ok: false, why: 'no agent the bot writes for has this customer' }
+  const cfg = googleConfig(PUBLIC_BASE)
+  if (!cfg) return { ok: false, why: 'Google OAuth is not configured' }
+  const { data: site } = await supabase.from('sites').select('name').eq('site_id', lead.site_id).maybeSingle()
+  const siteName = String(site?.name ?? lead.site_id)
+  const alias = lastByBotAgent?.from
+    ? { email: lastByBotAgent.from }
+    : siteAlias(await verifiedAliases(agent, cfg), lead.site_id, siteName)
+  if (!alias) return { ok: false, why: `no verified ${lead.site_id} mailbox for ${agent}` }
+
+  const { campaign } = currentOrNextCampaign(now)
+  const assessment = await assessQuote(lead.message ?? '', lead.name ?? null)
+  const unsub = unsubscribeUrl(PUBLIC_BASE, to)
+  const promo = buildPromoEmail({
+    campaign, firstName: assessment?.firstName ?? null,
+    product: assessment?.isQuote ? assessment.product : null, siteName, unsubscribeUrl: unsub,
+  })
+  const sig = await buildSendSignature({ memberEmail: agent, workspace: 'packaging', siteId: lead.site_id, from: alias.email, base: PUBLIC_BASE })
+  const emailId = newEmailId()
+  // The footer goes under the signature: the offer reads as the agent's note,
+  // the unsubscribe line as the fine print it is.
+  const [bodyText, footer] = promo.text.split('\n\nYou\'re receiving this')
+  const finalText = `${bodyText}${sig.text ? `\n\n${sig.text}` : ''}\n\nYou're receiving this${footer}`
+  const finalHtml = `${promo.html}${sig.html}${promoFooterHtml(siteName, unsub)}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+
+  if (!(await ledger(id, lead.site_id, { step: 'promo', campaign: campaign.key, state: 'claimed', at: now.toISOString(), to, agent }))) {
+    return { ok: false, why: 'ledger write failed' }
+  }
+  let res
+  try {
+    // A new conversation, not a reply in the old quote thread: it is a new
+    // offer, and burying it under a months-old exchange hides it.
+    res = await sendEmail(agent, cfg, {
+      from: alias.email, to, subject: promo.subject, body: finalText, html: finalHtml,
+      headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+    })
+  } catch (e) {
+    const why = e instanceof GmailAuthError ? `${agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
+    await ledger(id, lead.site_id, { step: 'promo', campaign: campaign.key, state: 'failed', at: new Date().toISOString(), why, to, agent })
+    return { ok: false, why }
+  }
+  const at = new Date().toISOString()
+  const entry: CrmEmailEntry = {
+    id: emailId, sentBy: agent, from: alias.email, to, subject: promo.subject,
+    body: finalText, html: finalHtml, snippet: makeSnippet(bodyText), at,
+    gmailId: res.id, threadId: res.threadId, messageId: res.messageId,
+    direction: 'outbound', bot: true,
+  }
+  await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
+  await ledger(id, lead.site_id, { step: 'promo', campaign: campaign.key, state: 'sent', at, to, agent, from: alias.email, emailId, offer: campaign.discount })
+  return { ok: true, subject: promo.subject, text: finalText, campaign: campaign.key, from: alias.email }
 }

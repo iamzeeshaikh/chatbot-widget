@@ -413,3 +413,65 @@ export function buildQuoteFollowUp(c: { n: number; firstName: string | null; pro
     offer: used,
   }
 }
+
+// ── Holiday promotions (Step 4) ─────────────────────────────────────────────
+// One email per customer per campaign, sent from the 20th of the month before
+// the holiday until the holiday itself (owner, 2026-10-13). Discounts: 10% for
+// most, 15% at Christmas, 20% for Thanksgiving / Black Friday — the "big
+// occasion" the owner allowed 20% for.
+
+export interface Campaign { key: string; holiday: string; date: Date; start: Date; discount: number }
+
+export function campaignsOf(year: number): Campaign[] {
+  const mk = (key: string, holiday: string, date: Date, discount: number): Campaign => ({
+    key: `${key}-${year}`, holiday, date, discount,
+    start: new Date(Date.UTC(date.getUTCMonth() === 0 ? year - 1 : year, (date.getUTCMonth() + 11) % 12, 20)),
+  })
+  const tg = nthWeekday(year, 10, 4, 4)
+  return [
+    mk('valentines', "Valentine's Day", new Date(Date.UTC(year, 1, 14)), 10),
+    mk('mothers-day', "Mother's Day", nthWeekday(year, 4, 0, 2), 10),
+    mk('memorial-day', 'Memorial Day', lastWeekday(year, 4, 1), 10),
+    mk('july-4', 'the 4th of July', new Date(Date.UTC(year, 6, 4)), 10),
+    mk('labor-day', 'Labor Day', nthWeekday(year, 8, 1, 1), 10),
+    mk('black-friday', 'Thanksgiving and Black Friday', new Date(tg.getTime() + 864e5), 20),
+    mk('christmas', 'Christmas', new Date(Date.UTC(year, 11, 25)), 15),
+  ]
+}
+
+/** The campaign running on `now`, or else the next one to start. */
+export function currentOrNextCampaign(now: Date): { campaign: Campaign; running: boolean } {
+  const all = [...campaignsOf(now.getUTCFullYear()), ...campaignsOf(now.getUTCFullYear() + 1)]
+  const running = all.find((c) => now >= c.start && now <= new Date(c.date.getTime() + 864e5))
+  if (running) return { campaign: running, running: true }
+  return { campaign: all.filter((c) => c.start > now).sort((a, b) => +a.start - +b.start)[0], running: false }
+}
+
+export function buildPromoEmail(c: { campaign: Campaign; firstName: string | null; product: string | null; siteName: string; unsubscribeUrl: string }): { subject: string; text: string; html: string } {
+  const what = c.product ? `custom ${c.product.replace(/^custom\s+/i, '')}` : 'custom packaging'
+  const by = `${MONTHS[c.campaign.date.getUTCMonth()]} ${c.campaign.date.getUTCDate()}`
+  const subject = `${c.campaign.discount}% off for ${c.campaign.holiday} - ${c.siteName}`
+  const text = [
+    c.firstName ? `Hello ${c.firstName},` : 'Hello,',
+    '',
+    `With ${c.campaign.holiday} coming up, I wanted to let you know we're offering ${c.campaign.discount}% off orders of ${what} placed before ${by}.`,
+    '',
+    `It's the same as always: made from scratch to your size and design, free shipping to your doorstep, no extra or hidden charges, and 2D and 3D mockups before anything goes to print.`,
+    '',
+    `If you'd like a price quote, just reply with the size and quantity you need and I'll send it over right away.`,
+    '',
+    'Warm regards,',
+  ].join('\n')
+  const footer = `You're receiving this because you asked ${c.siteName} for a quote. Don't want offers like this? Unsubscribe: ${c.unsubscribeUrl}`
+  return {
+    subject,
+    text: `${text}\n\n${footer}`,
+    html: `${emailHtml(text)}`,
+  }
+}
+
+/** The small grey line under the signature in the HTML version. */
+export function promoFooterHtml(siteName: string, url: string): string {
+  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return `<p style="margin:22px 0 0 0;font-size:11px;line-height:16px;color:#9ca3af;">You're receiving this because you asked ${esc(siteName)} for a quote. Don't want offers like this? <a href="${esc(url)}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a>.</p>`
+}

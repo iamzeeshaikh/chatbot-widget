@@ -521,6 +521,9 @@ export interface OutgoingEmail {
   references?: string[]
   /** Files already fetched into memory, ready to be encoded into the MIME. */
   attachments?: { name: string; mime: string; bytes: Uint8Array }[]
+  /** Extra headers, e.g. List-Unsubscribe on a promotional email. Values are
+   *  stripped of CR/LF like every other header. */
+  headers?: Record<string, string>
 }
 
 export interface SentResult { id: string; threadId: string; messageId: string }
@@ -555,6 +558,9 @@ function buildMime(m: OutgoingEmail, messageId: string): string {
       const uniq = chain.filter((r) => (seen.has(r) ? false : (seen.add(r), true)))
       return uniq.length ? [`References: ${uniq.join(' ')}`] : []
     })(),
+    ...Object.entries(m.headers ?? {})
+      .filter(([k]) => /^[A-Za-z][A-Za-z0-9-]*$/.test(k))
+      .map(([k, v]) => `${k}: ${h(v)}`),
     'MIME-Version: 1.0',
   ]
 
