@@ -829,7 +829,48 @@ async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budg
     st.set(r.session_id, q)
   }
 
-  // ── 2. follow the quotes up ─────────────────────────────────────────────
+  // ── 2. an answer to a quote ends the bot's part at once ──────────────────
+  // Checked every run, in one batched query, not only when the next follow-up
+  // falls due: "let's start with 500" must reach the agent now, and the bot's
+  // "no reply yet — call them" task must not sit open for three days after a
+  // reply that says the opposite.
+  const live = [...st.entries()].filter(([, q]) => q.quotedAt && !q.stopped)
+  for (let i = 0; i < live.length; i += 100) {
+    const chunk = live.slice(i, i + 100)
+    const { data: inRows } = await supabase.from('chat_logs').select('session_id, role, message, created_at')
+      .in('role', [CRM_EMAIL_IN_ROLE, CRM_WA_IN_ROLE]).in('session_id', chunk.map(([id]) => id))
+      .gte('created_at', since).order('created_at', { ascending: true })
+    for (const r of inRows ?? []) {
+      const q = st.get(r.session_id)!
+      if (q.stopped || new Date(r.created_at).getTime() <= (q.quotedAt ?? 0) + 60 * 1000) continue
+      if (r.role === CRM_EMAIL_IN_ROLE && isNoiseSender(parseCrmEmailIn(r.message)?.from ?? '')) continue
+      q.stopped = true
+      result.quotes.push({ leadId: r.session_id, state: 'answered', why: 'the customer answered the quote' })
+      if (dryRun) continue
+      await closeBotCallTasks(r.session_id, q.siteId)
+      const { data: lead } = await supabase.from('leads').select('name, email').eq('id', r.session_id.replace(/^quote-/, '')).maybeSingle()
+      const { data: own } = await supabase.from('chat_logs').select('message').eq('session_id', r.session_id)
+        .eq('role', ASSIGNMENT_ROLE).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const agent = own?.message?.trim().toLowerCase() || ''
+      const who = lead?.name || lead?.email || 'The customer'
+      const at = new Date().toISOString()
+      if (agent) {
+        const task: CrmTaskEntry = {
+          id: newTaskId(), title: `${who} answered the quote — reply now (bot stopped its follow-ups)`.slice(0, 200),
+          type: 'email', due_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+          assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+        }
+        await writeControlRow({ sessionId: r.session_id, siteId: q.siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+        await sendPushToMember(agent, 'packaging', {
+          title: 'Customer answered the quote', body: `${who} replied to the quote. Over to you.`,
+          url: `/leads/${encodeURIComponent(r.session_id)}`, tag: `quotebot-answer-${r.session_id}`,
+        }).catch(() => 0)
+      }
+      await ledger(r.session_id, q.siteId, { step: 'quote_fu', state: 'skipped', at, why: 'stopped: the customer answered the quote' })
+    }
+  }
+
+  // ── 3. follow the quotes up ─────────────────────────────────────────────
   if (budget <= 0) return result
   const due = [...st.entries()]
     .filter(([, q]) => q.quotedAt && !q.stopped && now.getTime() - q.lastAt >= FOLLOW_UP_GAP_DAYS * 864e5)
