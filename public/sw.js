@@ -67,7 +67,8 @@ self.addEventListener('push', function (event) {
       renotify: soundOn,
       // A customer's reply stays on screen until somebody clicks it, instead
       // of sliding away after a few seconds while the agent is looking elsewhere.
-      requireInteraction: /^(reply-|quotebot-reply-|quotebot-answer-|intake-)/.test(data.tag || ''),
+      // Set by the server for packaging's customer-reply alerts only.
+      requireInteraction: data.sticky === true,
       data: { url: data.url || '/' },
     });
   }));

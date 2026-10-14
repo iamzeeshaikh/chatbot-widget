@@ -114,6 +114,8 @@ export interface PushPayload {
   body: string
   url: string
   tag?: string
+  /** Stays on screen until clicked (sw.js requireInteraction). */
+  sticky?: boolean
 }
 
 // Fire-and-forget: never throws (a push failure must never break chat).

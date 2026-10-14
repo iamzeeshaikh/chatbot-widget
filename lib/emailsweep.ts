@@ -697,6 +697,7 @@ async function notifyReplies(
         body: f.entry.snippet || f.entry.subject || 'New email reply',
         url: `/leads/${encodeURIComponent(f.sessionId)}`,
         tag: `reply-${f.entry.gmailId}`,
+        sticky: ws === 'packaging',
       })
       // Zero devices is not "sent": it is the agent with notifications off,
       // and it has to read as that or nobody ever finds out.
