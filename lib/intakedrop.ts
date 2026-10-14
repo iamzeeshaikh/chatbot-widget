@@ -21,7 +21,7 @@ import { REMINDER_SITE } from './reminders'
 export const INTAKE_DROP_ROLE = 'crm_intake_drop'
 export const INTAKE_DROP_SESSION = 'zeeops-crm-intake-drops'
 
-export type DropReason = 'spam' | 'retired' | 'duplicate'
+export type DropReason = 'spam' | 'retired' | 'duplicate' | 'unmatched'
 
 export interface IntakeDrop {
   at: string

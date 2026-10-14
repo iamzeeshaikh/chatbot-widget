@@ -701,7 +701,7 @@ function processQuoteLeads() {
       // A checkout thread whose store name isn't in STORE_NAME_CODES would
       // otherwise be re-scanned forever. Park it in Unmatched so it shows up as
       // something to fix (add the store name) rather than silently vanishing.
-      if (hasCheckoutLabel_(thread) && !isHandled_(thread)) { addLabel_(thread, skippedLabel); skipped++; }
+      if (hasCheckoutLabel_(thread) && !isHandled_(thread)) { alertUnmatched_(thread, null, 'checkout from a store name the script does not know'); addLabel_(thread, skippedLabel); skipped++; }
       else if (namesAForeignSite_(umsgs, thread.getFirstMessageSubject())) {
         // Somebody else's site, mailing into this inbox. It names its own
         // domain and that domain is not one of ours, so there is nothing to
@@ -735,8 +735,8 @@ function processQuoteLeads() {
     for (var m = 0; m < messages.length; m++) {
       var msg = messages[m];
       considered++;
-      var parsed = parseLeadBody_(msg.getPlainBody());
-      if (!parsed.email && !parsed.phone) continue;
+      var parsed = leadFromMessage_(msg);
+      if (!parsed) continue;
       if (postLead_(code, parsed, msg.getDate(), msg)) { sent++; handledAny = true; }
       // On failure, leave the watermark alone so a later run retries it.
     }
@@ -746,7 +746,7 @@ function processQuoteLeads() {
     // A thread that finally went through drops the Unmatched it got earlier,
     // or the label keeps listing leads that are already on the dashboard.
     if (handledAny) { try { thread.removeLabel(skippedLabel); } catch (e) {} addLabel_(thread, processedLabel); }
-    else { addLabel_(thread, skippedLabel); skipped++; }
+    else { alertUnmatched_(thread, code, 'the post to ZeeOps failed'); addLabel_(thread, skippedLabel); skipped++; }
   }
 
   // Safety net for the one failure the label model can't see: a genuine form
@@ -827,6 +827,9 @@ function dailyCatchUp() {
   Logger.log('dailyCatchUp: watermark pulled back to ' + new Date(target) +
     ' — re-covering ' + CATCHUP_DAYS + ' day(s), then running the normal pass.');
   processQuoteLeads();
+  // And once a day, give everything parked in Unmatched another go — a post
+  // that failed on a bad hour must not stay parked until somebody remembers.
+  try { retryUnmatched(); } catch (e) { Logger.log('dailyCatchUp retryUnmatched error: ' + e); }
 }
 
 // ONE run, not two. This used to move the watermark and then tell you to go
@@ -933,8 +936,8 @@ function clearNeedsSiteLabel() {
 // hand; that's what this does. (It found five real leads the first time, all
 // forwarded customer emails whose address lived only in the From: header.)
 //
-// Manual-only, never on a trigger. Threads it still can't read go straight back
-// to Unmatched, so running it twice costs nothing and changes nothing.
+// Also run once a day by dailyCatchUp. Threads it still can't post stay in
+// Unmatched, so running it twice costs nothing and changes nothing.
 function retryUnmatched() {
   var start = Date.now();
   var processedLabel = getOrCreateLabel_(PROCESSED_LABEL);
@@ -951,8 +954,8 @@ function retryUnmatched() {
     var messages = thread.getMessages();
     var handledAny = false;
     for (var m = 0; m < messages.length; m++) {
-      var parsed = parseLeadBody_(messages[m].getPlainBody());
-      if (!parsed.email && !parsed.phone) continue;
+      var parsed = leadFromMessage_(messages[m]);
+      if (!parsed) continue;
       if (postLead_(code, parsed, messages[m].getDate(), messages[m])) { sent++; handledAny = true; }
     }
     if (handledAny) { thread.removeLabel(skippedLabel); thread.addLabel(processedLabel); }
@@ -1182,13 +1185,13 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max, deep) {
     for (var m = 0; m < messages.length; m++) {
       considered++;
       if (!code) continue;
-      var parsed = parseLeadBody_(messages[m].getPlainBody());
-      if (!parsed.email && !parsed.phone) continue;
+      var parsed = leadFromMessage_(messages[m]);
+      if (!parsed) continue;
       if (postLead_(code, parsed, messages[m].getDate(), messages[m])) { out.sent++; handledAny = true; }
     }
     if (considered === 0) continue;
-    if (handledAny) addLabel_(thread, processedLabel);
-    else { addLabel_(thread, skippedLabel); out.skipped++; }
+    if (handledAny) { try { thread.removeLabel(skippedLabel); } catch (e) {} addLabel_(thread, processedLabel); }
+    else { alertUnmatched_(thread, code, code ? 'the post to ZeeOps failed' : 'checkout from a store name the script does not know'); addLabel_(thread, skippedLabel); out.skipped++; }
   }
   return out;
 }
@@ -1831,6 +1834,64 @@ function attachmentPlan_(msg) {
   return { files: out, left: left };
 }
 
+// ── Never park a lead silently (14 Oct 2026) ─────────────────────────────────
+// "ZeeOps/Unmatched" used to be where a site-labelled enquiry went when the
+// parser found no email or phone — and nobody looked there. Leads sat in it
+// for weeks. Now a site-labelled message ALWAYS becomes a lead:
+//   1. the form's own Email/Phone lines (parseLeadBody_), else
+//   2. the Reply-To / From address, when it is not one of ours (forms set
+//      Reply-To to the customer; a customer's direct email has them in From), else
+//   3. posted as `unreadable` — stored with no contact, flagged, and pushed to
+//      the dashboard so somebody opens it in Gmail.
+// The only message skipped is our OWN reply sitting in the thread.
+// Returns null for that, otherwise a parsed lead.
+function leadFromMessage_(msg) {
+  var plain = msg.getPlainBody();
+  var parsed = parseLeadBody_(plain);
+  if (parsed.email || parsed.phone) return parsed;
+  var emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+  var subject = String(msg.getSubject() || '');
+  var from = String(msg.getFrom() || '');
+  var fromAddr = (from.match(emailRe) || [''])[0].toLowerCase();
+  var me = '';
+  try { me = String(Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) {}
+  if (fromAddr && me && fromAddr === me) return null;              // our reply in the thread
+  if (fromAddr && isOwnAddress_(fromAddr) && /^\s*(re|fwd?|aw)\s*:/i.test(subject)) return null;
+  var heads = [String(msg.getReplyTo() || ''), from];
+  for (var i = 0; i < heads.length; i++) {
+    var hit = heads[i].match(emailRe);
+    if (hit && !isOwnAddress_(hit[0])) {
+      parsed.email = hit[0];
+      if (!parsed.name) {
+        var nm = heads[i].replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
+        if (nm && nm.indexOf('@') === -1) parsed.name = nm;
+      }
+      return parsed;
+    }
+  }
+  parsed.unreadable = true;
+  parsed.message = 'Needs a look: ZeeOps could not find an email or phone in this enquiry. Open it in Gmail.\n' +
+    'Subject: ' + subject + '\n\n' + String(parsed.message || plain || '').slice(0, 1800);
+  return parsed;
+}
+
+// Tells the dashboard a thread just went into ZeeOps/Unmatched, so it is seen
+// the same hour instead of whenever somebody next opens that label.
+function alertUnmatched_(thread, code, why) {
+  try {
+    var names = labelNamesOf_(thread);
+    if (names && names.indexOf(SKIPPED_LABEL) !== -1) return; // already alerted when it was first parked
+    UrlFetchApp.fetch(WEBHOOK_URL, {
+      method: 'post', contentType: 'application/json',
+      headers: { 'x-quote-secret': webhookSecret_() },
+      payload: JSON.stringify({ alert: true, siteCode: code || null, subject: String(thread.getFirstMessageSubject() || ''), why: why }),
+      muteHttpExceptions: true,
+    });
+  } catch (e) {
+    Logger.log('alertUnmatched_ error: ' + e);
+  }
+}
+
 function postLead_(siteCode, parsed, receivedDate, msg) {
   var plan = attachmentPlan_(msg);
   var note = plan.left.length
@@ -1849,6 +1910,7 @@ function postLead_(siteCode, parsed, receivedDate, msg) {
         product: parsed.product,
         message: String(parsed.message || '') + extra,
         receivedAt: receivedDate.toISOString(),
+        unreadable: parsed.unreadable === true,
         attachments: files,
       }),
       muteHttpExceptions: true,

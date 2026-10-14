@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     recentIntakeLags(sites, Math.min(limit, 100)),
   ])
 
-  const counts: Record<string, number> = { spam: 0, retired: 0, duplicate: 0 }
+  const counts: Record<string, number> = { spam: 0, retired: 0, duplicate: 0, unmatched: 0 }
   for (const d of drops) counts[d.reason] = (counts[d.reason] ?? 0) + 1
 
   return NextResponse.json({ drops, counts, total: drops.length, late, lateTotal: late.length })

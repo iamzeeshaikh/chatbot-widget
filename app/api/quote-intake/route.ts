@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllowedMime, parseAttachment, uniqueAttachmentPath, type AttachmentInfo } from '@/lib/attachment'
 import { supabase } from '@/lib/supabase'
 import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody } from '@/lib/quoteintake'
-import { isRetiredLeadSite } from '@/lib/workspaces'
+import { isRetiredLeadSite, siteWorkspace } from '@/lib/workspaces'
+import { sendPushToWorkspace } from '@/lib/push'
 import { recordIntakeDrop } from '@/lib/intakedrop'
 import { recordIntakeLag } from '@/lib/intakelag'
 import { phoneFromText } from '@/lib/identity'
@@ -78,6 +79,23 @@ export async function POST(req: NextRequest) {
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
 
   const { siteCode, name, email, phone, product, message, receivedAt } = body
+
+  // The intake script parked a thread in ZeeOps/Unmatched (a checkout from a
+  // store it cannot place, or a post that kept failing). That label used to be
+  // the only trace, and leads sat in it unseen for weeks. Now every one is
+  // recorded and pushed to the dashboard the moment it happens.
+  if (body.alert === true) {
+    const alertSite = typeof siteCode === 'string' ? siteIdFromQuoteCode(siteCode) : null
+    const subject = typeof body.subject === 'string' ? body.subject.slice(0, 200) : '(no subject)'
+    const why = typeof body.why === 'string' ? body.why.slice(0, 300) : 'could not be read'
+    await recordIntakeDrop({ siteId: alertSite ?? 'unknown', reason: 'unmatched', detail: why, excerpt: subject })
+    await sendPushToWorkspace((alertSite && siteWorkspace(alertSite)) || 'packaging', {
+      title: 'Enquiry stuck in Gmail', body: `${subject} — ${why}. Check the ZeeOps/Unmatched label.`,
+      url: '/', tag: `intake-unmatched-${subject.slice(0, 40)}`,
+    }).catch(() => undefined)
+    return NextResponse.json({ success: true, alerted: true })
+  }
+
   const siteId = typeof siteCode === 'string' ? siteIdFromQuoteCode(siteCode) : null
   if (!siteId) return NextResponse.json({ error: `Unknown siteCode: ${siteCode}` }, { status: 400 })
 
@@ -105,7 +123,11 @@ export async function POST(req: NextRequest) {
   // it on every run for ever.
   const rawPhone = typeof phone === 'string' ? phone.trim() : ''
   const cleanPhone = phoneFromText(rawPhone) ?? ''
-  if (!cleanEmail && !rawPhone) {
+  // `unreadable`: a site-labelled enquiry in which the script found no email
+  // or phone. It is still a lead — the team opens it in Gmail — so it is
+  // stored and flagged rather than refused into ZeeOps/Unmatched.
+  const unreadable = body.unreadable === true
+  if (!cleanEmail && !rawPhone && !unreadable) {
     return NextResponse.json({ error: 'email or phone required' }, { status: 400 })
   }
 
@@ -259,6 +281,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // No address to dedupe on, and the daily catch-up re-reads two days of
+  // mail: the same unreadable enquiry must not become a lead per pass.
+  if (unreadable && !cleanEmail && !rawPhone) {
+    const normalized = normalizeQuoteBody(`${tag}${bodyText}`)
+    const { data: prior } = await supabase.from('leads').select('id, message')
+      .eq('site_id', siteId).is('email', null).is('phone', null).ilike('message', `${tag}%`)
+      .gte('created_at', new Date(new Date(createdAt).getTime() - 60 * 86400000).toISOString()).limit(200)
+    const dupe = (prior ?? []).find((c) => isSameQuoteBody(normalizeQuoteBody(c.message ?? ''), normalized))
+    if (dupe) {
+      await recordIntakeDrop({ siteId, reason: 'duplicate', at: createdAt, detail: 'same unreadable enquiry already stored', excerpt: bodyText, mergedInto: dupe.id })
+      return NextResponse.json({ success: true, deduped: true })
+    }
+  }
+
   const { data: inserted, error } = await supabase.from('leads').insert([{
     site_id: siteId,
     name: leadName || null,
@@ -284,6 +320,12 @@ export async function POST(req: NextRequest) {
       name: leadName || undefined, email: cleanEmail || undefined,
       product: typeof product === 'string' ? product.trim() || undefined : undefined,
     })
+  }
+  if (inserted?.id && unreadable && !cleanEmail && !rawPhone) {
+    await sendPushToWorkspace(siteWorkspace(siteId) || 'packaging', {
+      title: 'New enquiry needs a look', body: `${leadName || 'An enquiry'} — no email or phone could be read. Open it in Gmail.`,
+      url: `/leads/quote-${inserted.id}`, tag: `intake-unreadable-${inserted.id}`,
+    }).catch(() => undefined)
   }
   return NextResponse.json({ success: true })
 }
