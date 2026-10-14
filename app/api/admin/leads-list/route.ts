@@ -17,6 +17,11 @@ import { waWaitingSessions } from '@/lib/wawaiting'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  // Server-Timing, so "the list is slow" can be answered from the browser's
+  // network panel instead of guessed at.
+  const t0 = Date.now()
+  const marks: string[] = []
+  const mark = (name: string) => marks.push(`${name};dur=${Date.now() - t0}`)
   const member = await getMember(req)
   if (!member) return NextResponse.json({ leads: [] }, { status: 401 })
   const scope = await siteScope(member)
@@ -130,6 +135,7 @@ export async function GET(req: NextRequest) {
     })
   }
 
+  mark('leads')
   const merged = [...leads, ...captureLeads].sort((a, b) =>
     String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
   )
@@ -214,6 +220,7 @@ export async function GET(req: NextRequest) {
   // database down once; scoping to the listed sessions keeps it small.
   // Samir and Steve are team leads (lib/teamlead.ts) and still see every lead.
   const listed = [...new Set((merged as Array<{ id: string; session_id?: string | null }>).map((l) => sessionForLead(l)))]
+  mark('merged')
   type OwnerRow = { session_id: string; role: string; message: string; created_at: string }
   const ownerChunks: string[][] = []
   for (let i = 0; i < listed.length; i += 150) ownerChunks.push(listed.slice(i, i + 150))
@@ -247,6 +254,7 @@ export async function GET(req: NextRequest) {
   // the oldest 1000 of ~1,900 stage rows (cut off at 2026-09-22), so every
   // lead moved after that — by an agent or by the quote bot — read "New" here
   // while its record showed the real stage (owner, 2026-10-14).
+  mark('owners')
   const stageRows = await fetchAllPages(
     () => supabase.from('chat_logs')
       .select('session_id, message, created_at')
@@ -273,6 +281,7 @@ export async function GET(req: NextRequest) {
     l.stage = pick?.stage ?? 'new'
   }
 
+  mark('stages')
   const excluded = await notALeadSessions(allowed)
   // Marked leads are flagged, not deleted from the response. Dropping them
   // outright made marking a one-way trip: the row vanished from every list and
@@ -283,6 +292,7 @@ export async function GET(req: NextRequest) {
   }
   const notALeadCount = (merged as Array<Record<string, unknown>>).filter((l) => l.notALead).length
 
+  mark('notalead')
   // Who answered each lead first, and how fast — packaging only (the quote
   // bot is packaging's; sports' list stays as it was). lib/firstresponse.ts.
   if (hasFeature(member.workspace, 'quotebot')) {
@@ -310,5 +320,6 @@ export async function GET(req: NextRequest) {
 
   // Said out loud rather than left to be discovered: a smaller number with no
   // explanation is exactly how a filter that went wrong stays hidden.
-  return NextResponse.json({ leads: merged, notALead: notALeadCount })
+  mark('first')
+  return NextResponse.json({ leads: merged, notALead: notALeadCount }, { headers: { 'Server-Timing': marks.join(', ') } })
 }
