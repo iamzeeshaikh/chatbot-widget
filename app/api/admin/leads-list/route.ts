@@ -204,15 +204,24 @@ export async function GET(req: NextRequest) {
   // Every row carries its owner — the Overview's agent filter reads it, and
   // the visibility rule below is applied from the same map, so the filter and
   // the rule can never disagree about whose lead something is.
-  // NOTE (2026-10-14): this single query returns only the OLDEST 1000 of ~21k
-  // packaging assignment rows (PostgREST max-rows), so owners written after
-  // late July are not seen here. Left as-is on purpose: paging it would change
-  // which leads non-admin agents can see — the owner's call, not a bug fix.
-  const { data: ownerRows } = await supabase.from('chat_logs')
-    .select('session_id, role, message, created_at')
-    .in('site_id', allowed).eq('role', ASSIGNMENT_ROLE)
-    .order('created_at', { ascending: true }).limit(5000)
-  const owned = deriveAssignments((ownerRows ?? []) as { session_id: string; role: string; message: string }[])
+  // Read for the leads in THIS list only, in chunks. The old single query got
+  // the oldest 1000 of ~21k assignment rows (PostgREST max-rows), so every
+  // owner set after late July was invisible here: the Owner column and the
+  // agent filter came up empty for recent leads (owner, 2026-10-14). Paging all
+  // 21k on every Overview load would be the unbounded scan that took this
+  // database down once; scoping to the listed sessions keeps it small.
+  // Samir and Steve are team leads (lib/teamlead.ts) and still see every lead.
+  const listed = [...new Set((merged as Array<{ id: string; session_id?: string | null }>).map((l) => sessionForLead(l)))]
+  const ownerRows: { session_id: string; role: string; message: string; created_at: string }[] = []
+  for (let i = 0; i < listed.length; i += 150) {
+    const { data } = await supabase.from('chat_logs')
+      .select('session_id, role, message, created_at')
+      .in('session_id', listed.slice(i, i + 150)).eq('role', ASSIGNMENT_ROLE)
+      .order('created_at', { ascending: true }).limit(1000)
+    ownerRows.push(...((data ?? []) as typeof ownerRows))
+  }
+  ownerRows.sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const owned = deriveAssignments(ownerRows)
   for (const l of merged as Array<Record<string, unknown>>) {
     l.owner = owned[sessionForLead(l as { id: string; session_id?: string | null })] ?? defaultOwnerForSite(String(l.site_id ?? ''))
   }
