@@ -83,6 +83,13 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
     let quoted = typeof o.quoted === 'string' && o.quoted ? stripImagePlaceholders(o.quoted) : null
     const textless = o.textless === true || isAllQuote(body)
     if (textless && body) { quoted = quoted ? `${body}\n${quoted}` : body; body = '' }
+    // Rows captured before the Outlook-header rule still carry the whole
+    // quoted email in `body`; split them on read, the same way, without ever
+    // touching a body that already had its quote separated.
+    if (!textless && !quoted && body) {
+      const split = splitQuoted(body)
+      if (split.quoted) { body = split.visible; quoted = split.quoted }
+    }
 
     return {
       gmailId: o.gmailId,
@@ -196,6 +203,14 @@ export function splitQuoted(raw: string): { visible: string; quoted: string | nu
     if (/^\s*>/.test(line)) { cut = i; break }
 
     if (SIGNATURE_RE.test(line)) { cut = i; certain = true; break }
+    // Outlook's reply header: a rule of underscores, then From: and Sent:/To:
+    // on the next lines. That block is written by the mail client, so it is as
+    // explicit as "-----Original Message-----". Treated as a guess, the quoted
+    // email under it (our own message, signature, Proofpoint-rewritten links)
+    // tripped the bottom-posting fail-safe and showed in full as if the
+    // customer had written it (2026-10-14).
+    if (/^\s*_{5,}\s*$/.test(line) && /^\s*From:\s/i.test(lines[i + 1] ?? '')
+      && /^\s*(Sent|Date|To):/i.test(lines[i + 2] ?? '')) { cut = i; certain = true; break }
     if (/^\s*-{2,}\s*(Original Message|Forwarded message)/i.test(line)) { cut = i; certain = true; break }
 
     // "On … wrote:" — accept the one-line form, or a first line that runs on

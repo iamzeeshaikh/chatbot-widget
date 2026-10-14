@@ -75,9 +75,14 @@ export function parseCrmTask(message: string | null | undefined): CrmTaskEntry |
     const o = JSON.parse(message)
     if (!o || typeof o.id !== 'string' || !o.id) return null
     const str = (v: unknown) => (typeof v === 'string' ? v : '')
+    // The quote bot's early reply-now tasks were cut at 200 characters in the
+    // middle of their "(bot stepped back)" ending. Rows are append-only, so
+    // the ending is restored here, on read.
+    let title = str(o.title)
+    if (o.created_by === 'zeeops-bot' && /\(bot s[^)]*$/.test(title)) title = title.replace(/\s*\(bot s[^)]*$/, ' (bot stepped back)')
     return {
       id: o.id,
-      title: str(o.title),
+      title,
       type: isTaskType(o.type) ? o.type : 'other',
       due_at: str(o.due_at),
       assignee: str(o.assignee),
