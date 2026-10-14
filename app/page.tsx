@@ -99,7 +99,7 @@ const SITE_ACCENT: Record<string, string> = {
 
 
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
-interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean; /** Somebody marked this "not a lead" — excluded from every count. */ notALead?: boolean; /** Who the lead is assigned to (the assignment control row). */ owner?: string | null; /** Where the deal has got to. Same value the pipeline board uses. */ stage?: CrmStage }
+interface Lead { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; budget?: string | null; timeline?: string | null; qualification_score?: number | null; session_id?: string | null; /** 'bot' when no agent ever replied in that conversation. */ handledBy?: 'bot' | 'agent' | null; /** The customer's WhatsApp message is the latest one and nobody has replied. */ waWaiting?: boolean; /** Somebody marked this "not a lead" — excluded from every count. */ notALead?: boolean; /** Who the lead is assigned to (the assignment control row). */ owner?: string | null; /** Where the deal has got to. Same value the pipeline board uses. */ stage?: CrmStage; /** Packaging: who answered first and how fast (lib/firstresponse.ts). */ firstResponse?: { by: string; name: string; at: string; minutes: number; via: 'email' | 'whatsapp' | 'call' | 'chat' } | null; /** Minutes since it arrived, when nobody has answered yet. */ waitingMinutes?: number }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface Visitor { session_id: string; site_id: string; site_name: string; primary_color: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -2217,6 +2217,7 @@ export default function Dashboard() {
   // API refuses everyone else regardless.
   const canSales = hasFeature(workspace, 'sales') && userRole === 'admin'
   const canJobs = hasFeature(workspace, 'jobs')
+  const showFirstResponse = hasFeature(workspace, 'quotebot')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
   // The product's name. Do not change it without asking — it was renamed to
@@ -3026,7 +3027,9 @@ export default function Dashboard() {
                               deal stage — an agent scanning this table could not
                               previously tell who had been spoken to without
                               opening every record. */}
-                          {['Type', 'Done', 'Stage', 'Details', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Site', 'Date', ''].map((h) => (
+                          {/* "First response" is packaging's: who reached the lead
+                              first, the quote bot or an agent, and how fast. */}
+                          {['Type', 'Done', 'Stage', ...(showFirstResponse ? ['First response'] : []), 'Details', 'Name', 'Email', 'Phone', 'Message', 'Product', 'Qty', 'Site', 'Date', ''].map((h) => (
                             <th key={h} className="text-left px-3 py-2.5 text-[11px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -3091,6 +3094,7 @@ export default function Dashboard() {
                                   rather than offering a second way to set them. */}
                               <td className="px-3 py-2" />
                               <td className="px-3 py-2" />
+                              {showFirstResponse && <td className="px-3 py-2" />}
                               <td className="px-3 py-2"><span title={`We have ${score} of the ${SCORE_OUT_OF} details needed to quote: name, email, phone, product, quantity`}
                                 className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= SCORE_OUT_OF ? 'bg-green-100 text-green-600 border border-green-200' : score >= 3 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/{SCORE_OUT_OF}</span></td>
                               <td className="px-3 py-2"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-gray-200 border border-gray-300 rounded px-2 py-1 text-xs text-gray-900 w-full min-w-[80px] focus:outline-none focus:border-blue-500" placeholder="Name" /></td>
@@ -3201,6 +3205,7 @@ export default function Dashboard() {
                                   ))}
                                 </select>
                               </td>
+                              {showFirstResponse && <td className="px-3 py-3 whitespace-nowrap"><FirstResponseCell lead={lead} /></td>}
 
                               <td className="px-3 py-3"><span title={`We have ${score} of the ${SCORE_OUT_OF} details needed to quote: name, email, phone, product, quantity`}
                                 className={`text-xs font-bold px-2 py-0.5 rounded-full ${score >= SCORE_OUT_OF ? 'bg-green-100 text-green-600 border border-green-200' : score >= 3 ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-200 text-gray-500'}`}>{score}/{SCORE_OUT_OF}</span></td>
@@ -5059,3 +5064,26 @@ export default function Dashboard() {
     </div>
   )
 }
+
+// Who reached a lead first and how long it took — the quote bot is meant to
+// write within ~5 minutes, an agent may beat it. Green within 5 minutes, amber
+// within the hour, red after that; a lead nobody has answered says so, with
+// how long it has waited.
+function FirstResponseCell({ lead }: { lead: Lead }) {
+  const f = lead.firstResponse
+  const age = (m: number) => (m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${Math.floor(m / 1440)}d`)
+  if (!f) {
+    const waited = lead.waitingMinutes ?? 0
+    return <span className="text-[11px] text-gray-500" title="Nobody has emailed, messaged, called or chatted with this lead since it arrived">No reply yet · {age(waited)}</span>
+  }
+  const tone = f.minutes <= 5 ? 'bg-green-100 text-green-700 border-green-300' : f.minutes <= 60 ? 'bg-amber-100 text-amber-700 border-amber-300' : 'bg-red-100 text-red-700 border-red-300'
+  const how = { email: 'email', whatsapp: 'WhatsApp', call: 'call', chat: 'chat' }[f.via]
+  return (
+    <span title={`${f.name} answered first by ${how}, ${age(f.minutes)} after the lead arrived`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tone}`}>
+      {f.by === 'bot' ? <Bot size={11} strokeWidth={2.2} aria-hidden /> : null}
+      {f.by === 'bot' ? 'Bot' : f.name.split(' ')[0]} · {age(f.minutes)}
+    </span>
+  )
+}
+

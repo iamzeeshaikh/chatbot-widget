@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { defaultOwnerForSite, siteWorkspace } from '@/lib/workspaces'
+import { defaultOwnerForSite, siteWorkspace, hasFeature } from '@/lib/workspaces'
+import { firstResponses } from '@/lib/firstresponse'
+import { loadAgentSignatures } from '@/lib/signature'
 import { quoteSessionId } from '@/lib/quoteintake'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
@@ -276,6 +278,27 @@ export async function GET(req: NextRequest) {
     l.notALead = excluded.has(sessionForLead(l as { id: string; session_id?: string | null }))
   }
   const notALeadCount = (merged as Array<Record<string, unknown>>).filter((l) => l.notALead).length
+
+  // Who answered each lead first, and how fast — packaging only (the quote
+  // bot is packaging's; sports' list stays as it was). lib/firstresponse.ts.
+  if (hasFeature(member.workspace, 'quotebot')) {
+    const rows = merged as Array<Record<string, unknown>>
+    const input = rows.map((l, i) => {
+      const own = sessionForLead(l as { id: string; session_id?: string | null })
+      const sessions = [own]
+      if (typeof l.id === 'string' && !l.id.startsWith('cap-')) sessions.push(quoteSessionId(l.id))
+      return { key: String(i), sessions: [...new Set(sessions)], createdAt: String(l.created_at ?? '') }
+    })
+    const [first, sigs] = await Promise.all([firstResponses(input), loadAgentSignatures()])
+    rows.forEach((l, i) => {
+      const f = first.get(String(i))
+      l.firstResponse = f ? { ...f, name: f.by === 'bot' ? 'Bot' : (sigs.get(f.by)?.name || f.by.split('@')[0]) } : null
+      if (!f) {
+        const c = String(l.created_at ?? '')
+        l.waitingMinutes = Math.max(0, Math.round((Date.now() - Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(c) ? c : `${c}Z`)) / 60000))
+      }
+    })
+  }
 
   // Said out loud rather than left to be discovered: a smaller number with no
   // explanation is exactly how a filter that went wrong stays hidden.
