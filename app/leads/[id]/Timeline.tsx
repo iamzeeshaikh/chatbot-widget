@@ -88,8 +88,10 @@ export interface ReplyContext {
   subject: string
 }
 
-export default function Timeline({ events, currency, leadId, onEditNote, onDeleteNote, canManageNote, onReply, onRetryFile }: {
+export default function Timeline({ events, currency, leadId, onEditNote, onDeleteNote, canManageNote, onReply, onRetryFile, quoteText }: {
   events: TimelineEvent[]
+  /** Packaging: the quote the customer sent, shown under "Quote request received". */
+  quoteText?: string | null
   currency: CrmCurrency
   /** Needed to fetch a voicemail back through our own guarded endpoint. */
   leadId: string
@@ -306,6 +308,8 @@ export default function Timeline({ events, currency, leadId, onEditNote, onDelet
                         className="mt-1 w-full max-w-sm h-9"
                         src={`/api/leads/${encodeURIComponent(e.callLeadId ?? leadId)}/call/recording?sid=${encodeURIComponent(e.call.recordingSid)}`}
                       />
+                    ) : e.kind === 'created' && quoteText ? (
+                      <QuoteEntry text={quoteText} from={e.body} />
                     ) : e.kind === 'task' && e.body ? (
                       <p className={`mt-0.5 text-xs break-words leading-snug ${e.taskDone ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
                         {e.body}
@@ -321,6 +325,27 @@ export default function Timeline({ events, currency, leadId, onEditNote, onDelet
             )
           })}
         </ol>
+      )}
+    </div>
+  )
+}
+
+// The quote the customer sent, where the work on it starts: the first event on
+// the timeline. It used to show only their email address there, and the quote
+// itself sat in a side panel — reading the activity top to bottom never showed
+// what they actually asked for (owner, 2026-10-14). Long forms fold.
+function QuoteEntry({ text, from }: { text: string; from?: string }) {
+  const [open, setOpen] = useState(false)
+  const lines = text.trim().split('\n')
+  const long = lines.length > 8 || text.length > 600
+  return (
+    <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5">
+      {from && <p className="text-[10px] text-gray-500 break-words">from {from}</p>}
+      <p className={`mt-0.5 text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug ${long && !open ? 'line-clamp-8' : ''}`}>{text.trim()}</p>
+      {long && (
+        <button type="button" onClick={() => setOpen((v) => !v)} className="mt-1 text-[11px] font-semibold text-emerald-700 hover:underline">
+          {open ? 'Show less' : 'Show the whole quote'}
+        </button>
       )}
     </div>
   )

@@ -858,6 +858,7 @@ export default function LeadRecordPage() {
               </div>
             )}
             <Timeline events={record.timeline} currency={record.value.currency} leadId={record.id}
+              quoteText={isPackagingLead ? record.quoteMessage : null}
               onReply={(ctx) => { setReplyTo(ctx); setComposing(true) }}
               onRetryFile={async (gmailId, name) => {
                 const res = await fetch(`/api/leads/${encodeURIComponent(record.id)}/email/attachment`, {
