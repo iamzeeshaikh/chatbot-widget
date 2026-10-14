@@ -21,11 +21,11 @@ import { useParams } from 'next/navigation'
 import {
   ArrowLeft, MessagesSquare, StickyNote, ListTodo, Mail, Phone, Target,
   Paperclip, Link2, Activity, FileText, Lock, Search, TriangleAlert, PlayCircle,
-  Repeat, Building2, Globe, Tag, Inbox, ChevronRight, MessageCircle, X,
+  Repeat, Building2, Globe, Tag, Inbox, ChevronRight, MessageCircle, X, CreditCard,
 } from 'lucide-react'
 import { formatDateTime, formatShortDateTime, timeAgo } from '@/lib/datetime'
 import {
-  CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES,
+  CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES, isInvoiceable,
   CURRENCY_SYMBOL, isDeadStage, type CrmStage, type CrmCurrency,
 } from '@/lib/crm'
 import { isImageMime } from '@/lib/attachment'
@@ -35,6 +35,8 @@ import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
 import Tasks, { type TaskDraft } from './Tasks'
 import Invoices from './Invoices'
+import Invoice, { PaymentLink } from './Invoice'
+import { siteWorkspace } from '@/lib/workspaces'
 import Jobs from './Jobs'
 import EmailComposer, { type ReplyTo } from './EmailComposer'
 import { Card, EmptyLine, EmptyState, InlineField, Prop, PropGroup, QuickAction, Skeleton } from './ui'
@@ -57,6 +59,9 @@ export default function LeadRecordPage() {
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : ''
 
   const [record, setRecord] = useState<LeadRecord | null>(null)
+  // The 2026-10-13 additions (Price sent, invoices page, payment-link card,
+  // jobs) are the packaging team's; a sports record stays as it was.
+  const isPackagingLead = !!record && siteWorkspace(record.siteId) === 'packaging'
   const [markingRead, setMarkingRead] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ok' | 'forbidden' | 'missing' | 'error'>('loading')
   const [me, setMe] = useState('')
@@ -764,7 +769,7 @@ export default function LeadRecordPage() {
                 {/* One click for the moment that matters most: the price went
                     out. It is the same stage change as the dropdown — and it is
                     what starts the quote bot's follow-ups (lib/quotebot.ts). */}
-                {(record.stage === 'new' || record.stage === 'contacted' || record.stage === 'follow_up') && (
+                {isPackagingLead && (record.stage === 'new' || record.stage === 'contacted' || record.stage === 'follow_up') && (
                   <button type="button" onClick={() => changeStage('quote_sent')}
                     title="Mark the quote as sent: moves the stage to Quote Sent, and the bot follows the quote up every 3 days until the customer answers"
                     className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
@@ -983,8 +988,22 @@ export default function LeadRecordPage() {
               the new invoice page instead of sitting here, which kept the
               record page from growing another long form. Shown at every
               stage — an invoice is sometimes raised before the stage moves. */}
-          <Invoices leadId={record.id} />
-          <Jobs leadId={record.id} />
+          {/* PACKAGING ONLY (owner, 2026-10-14: everything built on 10-13 was
+              for packaging, nothing for sports). Sports keeps the original
+              invoice-details panel, with its payment link, exactly as before. */}
+          {isPackagingLead ? (
+            <>
+              <Invoices leadId={record.id} />
+              {isInvoiceable(record.stage) && (
+                <Card title="Payment link" icon={CreditCard}>
+                  <div className="px-3 py-2.5"><PaymentLink leadId={record.id} /></div>
+                </Card>
+              )}
+              <Jobs leadId={record.id} />
+            </>
+          ) : (
+            isInvoiceable(record.stage) && <Invoice leadId={record.id} />
+          )}
 
           <Card>
             <div className="px-3 py-2">

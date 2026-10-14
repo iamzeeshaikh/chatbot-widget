@@ -290,7 +290,7 @@ function Suggest({ list, onPick }: { list?: Suggestion[]; onPick: (v: string) =>
  * what the workspace hides. The send happens on the server, which resolves
  * both the link and the recipient from our own rows.
  */
-function PaymentLink({ leadId }: { leadId: string }) {
+export function PaymentLink({ leadId }: { leadId: string }) {
   const [state, setState] = useState<LinkState | null>(null)
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
