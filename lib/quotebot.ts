@@ -742,7 +742,9 @@ async function answerReply(
     if (dryRun) return { state: 'would-send', why: `would hand over: ${decision.reason}` }
     const at = new Date().toISOString()
     const task: CrmTaskEntry = {
-      id: newTaskId(), title: `Reply to ${who} — ${decision.reason} (bot stepped back)`.slice(0, 200),
+      // The reason is cut, never the ending: "(bot stepped back)" is what tells
+      // the agent why this task exists, and a 200-char cap ate it.
+      id: newTaskId(), title: `Reply to ${who} — ${clip(decision.reason, 200 - who.length - 40)} (bot stepped back)`,
       type: 'email', due_at: new Date(Date.now() + 3600 * 1000).toISOString(),
       assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
@@ -1145,6 +1147,13 @@ export async function sendPromo(leadId: string, now = new Date()): Promise<{ ok:
   await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
   await ledger(id, lead.site_id, { step: 'promo', campaign: campaign.key, state: 'sent', at, to, agent, from: alias.email, emailId, offer: campaign.discount })
   return { ok: true, subject: promo.subject, text: finalText, campaign: campaign.key, from: alias.email }
+}
+
+/** Shorten to a word boundary with an ellipsis. */
+function clip(text: string, max: number): string {
+  const t = text.trim().replace(/\.$/, '')
+  if (t.length <= max) return t
+  return `${t.slice(0, Math.max(20, max - 1)).replace(/\s+\S*$/, '')}…`
 }
 
 // ── Chat twins ──────────────────────────────────────────────────────────────

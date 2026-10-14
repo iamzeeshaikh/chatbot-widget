@@ -602,6 +602,9 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const push = (e: TimelineEvent) => timeline.push(e)
   // Previous revision of each task id, rebuilt as the loop walks forward.
   const seenTask = new Map<string, CrmTaskEntry>()
+  // When the quote bot moved the stage — used to credit its assignments.
+  const botStageTimes = logs.filter((r) => r.role === CRM_STAGE_ROLE && parseCrmStage(r.message)?.changed_by === 'zeeops-bot')
+    .map((r) => Date.parse(asUtcIso(r.created_at) as string))
 
   push({
     id: 'created',
@@ -652,7 +655,12 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     }
     if (row.role === ASSIGNMENT_ROLE) {
       const email = (row.message ?? '').trim()
-      push({ id: `assign-${row.id ?? at}`, at, kind: 'assign', group: 'system', actor: email ? AGENT_LABEL(email) : 'System', title: email ? `Assigned to ${AGENT_LABEL(email)}` : 'Released — back to the unassigned pool' })
+      // An assignment row does not say who made it, so it used to read as the
+      // assignee assigning themselves. The quote bot assigns in the same second
+      // it moves the stage (lib/quotebot.ts), which is how it is told apart.
+      const t = Date.parse(at)
+      const byBot = botStageTimes.some((b) => Math.abs(b - t) < 5000)
+      push({ id: `assign-${row.id ?? at}`, at, kind: 'assign', group: 'system', actor: byBot ? AGENT_LABEL('zeeops-bot') : email ? AGENT_LABEL(email) : 'System', title: email ? `Assigned to ${AGENT_LABEL(email)}` : 'Released — back to the unassigned pool' })
       continue
     }
     if (row.role === CRM_FIELD_ROLE) {
