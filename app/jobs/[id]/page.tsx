@@ -59,7 +59,9 @@ export default function JobPage() {
   // The conversation refreshes on its own; the form never does, so nobody's
   // typing is overwritten.
   useEffect(() => { const t = setInterval(() => { void load() }, 15000); return () => clearInterval(t) }, [load])
-  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }) }, [messages.length])
+  // Scroll the message list, not the page: scrollIntoView moved the whole page
+  // to the bottom every time a job was opened.
+  useEffect(() => { const box = bottom.current?.parentElement; if (box) box.scrollTop = box.scrollHeight }, [messages.length])
 
   const nameOf = useCallback((email: string) => members.find((m) => m.email === email)?.name ?? (email ? email.split('@')[0] : 'Unassigned'), [members])
   const dirty = useMemo(() => JSON.stringify(job) !== JSON.stringify(draft), [job, draft])
