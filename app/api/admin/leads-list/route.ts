@@ -282,7 +282,11 @@ export async function GET(req: NextRequest) {
   // Who answered each lead first, and how fast — packaging only (the quote
   // bot is packaging's; sports' list stays as it was). lib/firstresponse.ts.
   if (hasFeature(member.workspace, 'quotebot')) {
-    const rows = merged as Array<Record<string, unknown>>
+    // Recent leads only: computing it for every lead ever made the list take
+    // 24s to load. Older rows simply carry no value (shown as a dash).
+    const cutoff = Date.now() - 14 * 864e5
+    const created = (l: Record<string, unknown>) => { const c = String(l.created_at ?? ''); return Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(c) ? c : `${c}Z`) }
+    const rows = (merged as Array<Record<string, unknown>>).filter((l) => created(l) >= cutoff)
     const input = rows.map((l, i) => {
       const own = sessionForLead(l as { id: string; session_id?: string | null })
       const sessions = [own]

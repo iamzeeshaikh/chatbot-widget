@@ -33,8 +33,8 @@ export async function firstResponses(
   const all = [...new Set(leads.flatMap((l) => l.sessions))]
   type Row = { session_id: string; role: string; message: string; created_at: string }
   const bySession = new Map<string, Row[]>()
-  for (let i = 0; i < all.length; i += 60) {
-    const chunk = all.slice(i, i + 60)
+  for (let i = 0; i < all.length; i += 150) {
+    const chunk = all.slice(i, i + 150)
     const rows = await fetchAllPages<Row>(
       () => supabase.from('chat_logs').select('session_id, role, message, created_at')
         .in('session_id', chunk).in('role', [CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, 'admin', REPLY_AUTHOR_ROLE])

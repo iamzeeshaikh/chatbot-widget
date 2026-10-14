@@ -5071,6 +5071,7 @@ export default function Dashboard() {
 // how long it has waited.
 function FirstResponseCell({ lead }: { lead: Lead }) {
   const f = lead.firstResponse
+  if (f === undefined) return <span className="text-gray-300" aria-label="Not tracked for leads older than two weeks">—</span>
   const age = (m: number) => (m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${Math.floor(m / 1440)}d`)
   if (!f) {
     const waited = lead.waitingMinutes ?? 0
