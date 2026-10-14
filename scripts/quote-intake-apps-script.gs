@@ -743,7 +743,9 @@ function processQuoteLeads() {
     // Nothing new in this thread — leave its labels exactly as they are, or an
     // old fully-handled thread would get re-flagged Unmatched on every run.
     if (considered === 0) continue;
-    if (handledAny) addLabel_(thread, processedLabel);
+    // A thread that finally went through drops the Unmatched it got earlier,
+    // or the label keeps listing leads that are already on the dashboard.
+    if (handledAny) { try { thread.removeLabel(skippedLabel); } catch (e) {} addLabel_(thread, processedLabel); }
     else { addLabel_(thread, skippedLabel); skipped++; }
   }
 
@@ -1788,36 +1790,54 @@ function parseLeadBody_(body) {
 }
 
 // The ARTWORK the form attached, base64 for the webhook. Only types the
-// dashboard can store (lib/attachment.ts's list), at most 5 files / 10MB each
-// / 20MB together — bigger ones stay in Gmail rather than failing the post.
+// dashboard can store (lib/attachment.ts's list), at most 5 files.
+//
+// SIZE: the webhook runs on Vercel, which refuses any request body over 4.5MB
+// with a 413 BEFORE our code sees it — and base64 adds a third. The old budget
+// (10MB a file, 20MB together) therefore turned every lead with a phone photo
+// or a print PDF into a failed post, and the thread into ZeeOps/Unmatched: four
+// real leads sat there on 14 Oct 2026 (an RFQ with two product photos, a Retail
+// Packaging quote with two images, a Coffee Sleeves quote with a PDF, a Paper
+// Cups quote with a PDF). Files now share a ~3MB raw budget; anything over it
+// stays in Gmail and is NAMED on the lead, so the agent knows to look there.
 // Costs Gmail calls ONLY on a message that is actually being posted as a lead,
 // so it cannot touch the quota story (§CLAUDE.md) for ordinary sweep runs.
 var ATTACH_MIMES = { 'image/jpeg': 1, 'image/jpg': 1, 'image/png': 1, 'image/gif': 1, 'image/webp': 1, 'image/svg+xml': 1, 'application/pdf': 1 };
+var ATTACH_BUDGET_BYTES = 3 * 1024 * 1024;
 function attachmentsFor_(msg) {
-  if (!msg) return [];
-  var out = [];
+  return attachmentPlan_(msg).files;
+}
+function attachmentPlan_(msg) {
+  var out = [], left = [];
+  if (!msg) return { files: out, left: left };
   var total = 0;
   try {
     var atts = msg.getAttachments();
-    for (var i = 0; i < atts.length && out.length < 5; i++) {
+    for (var i = 0; i < atts.length; i++) {
       var a = atts[i];
       var mime = String(a.getContentType() || '').toLowerCase().split(';')[0];
       var size = a.getSize();
-      if (!ATTACH_MIMES[mime]) continue;
-      if (size <= 0 || size > 10 * 1024 * 1024) continue;
-      if (total + size > 20 * 1024 * 1024) break;
+      if (!ATTACH_MIMES[mime] || size <= 0) continue;
+      if (out.length >= 5 || total + size > ATTACH_BUDGET_BYTES) {
+        left.push(a.getName() + ' (' + (Math.round(size / 104857.6) / 10) + ' MB)');
+        continue;
+      }
       total += size;
       out.push({ name: a.getName(), mime: mime, data: Utilities.base64Encode(a.getBytes()) });
     }
   } catch (err) {
     Logger.log('attachmentsFor_ error (lead still posted without files): ' + err);
   }
-  return out;
+  return { files: out, left: left };
 }
 
 function postLead_(siteCode, parsed, receivedDate, msg) {
-  try {
-    var res = UrlFetchApp.fetch(WEBHOOK_URL, {
+  var plan = attachmentPlan_(msg);
+  var note = plan.left.length
+    ? '\n\nAttachments too large to bring in (open the original email in Gmail): ' + plan.left.join(', ')
+    : '';
+  var send = function (files, extra) {
+    return UrlFetchApp.fetch(WEBHOOK_URL, {
       method: 'post',
       contentType: 'application/json',
       headers: { 'x-quote-secret': webhookSecret_() },
@@ -1827,13 +1847,23 @@ function postLead_(siteCode, parsed, receivedDate, msg) {
         email: parsed.email,
         phone: parsed.phone,
         product: parsed.product,
-        message: parsed.message,
+        message: String(parsed.message || '') + extra,
         receivedAt: receivedDate.toISOString(),
-        attachments: attachmentsFor_(msg),
+        attachments: files,
       }),
       muteHttpExceptions: true,
     });
+  };
+  try {
+    var res = send(plan.files, note);
     var code = res.getResponseCode();
+    // 413 = the body was still too big for Vercel. The lead matters more than
+    // its files: post it bare, naming every file, rather than lose it.
+    if (code === 413 && plan.files.length) {
+      var names = plan.files.map(function (f) { return f.name; }).concat(plan.left);
+      res = send([], '\n\nAttachments too large to bring in (open the original email in Gmail): ' + names.join(', '));
+      code = res.getResponseCode();
+    }
     if (code === 200) return true;
     Logger.log('postLead_ failed (' + code + '): ' + res.getContentText());
     return false;
