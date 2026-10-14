@@ -246,7 +246,12 @@ export async function assessQuote(message: string, name: string | null): Promise
     model: CLAUDE_CHAT_MODEL, timeoutMs: 25000,
   })
   if (r.error) return null
-  return parseAssessment(r.text)
+  const a = parseAssessment(r.text)
+  // A container's capacity is a size: "2ml vial", "10 oz tumbler", "750ml
+  // bottle" — the box is built around it, and our agents priced from it.
+  if (a && !a.hasSize && /\b\d+(\.\d+)?\s?(ml|oz|cl|l)\b/i.test(message) && /vial|bottle|jar|tumbler|candle|cup|tin|can\b/i.test(message)) a.hasSize = true
+  if (a && !a.hasSize && /\b(A[3-6]|letter[- ]size|business[- ]card[- ]size)\b/i.test(message)) a.hasSize = true
+  return a
 }
 
 export async function runQuoteBot(origin: string, now = new Date(), opts: { dryRun?: boolean; leadIds?: string[] } = {}): Promise<BotRunResult> {

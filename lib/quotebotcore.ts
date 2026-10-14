@@ -33,11 +33,15 @@ export interface QuoteAssessment {
 
 export type Missing = 'size' | 'style' | 'quantity'
 
+/**
+ * What the bot asks for: size and style only. Owner, 2026-10-14: "quantity
+ * nahi bh di to chale ga" — with size and style in hand the lead goes to a
+ * person to price, exactly as our agents quoted standard quantity tiers.
+ */
 export function missingOf(a: QuoteAssessment): Missing[] {
   const out: Missing[] = []
   if (!a.hasSize) out.push('size')
   if (!a.hasStyle) out.push('style')
-  if (!a.hasQuantity) out.push('quantity')
   return out
 }
 
@@ -54,8 +58,11 @@ Rules:
 - product: what they want, plural and lower case, 1 to 4 words, WITHOUT the word "custom" ("mailer boxes", "paper cups", "die cut stickers", "wax paper sheets"). Use the product page name if that is all there is.
 - style_label: 2 or 3 lower-case words naming what "style" means for this product: "box style" for boxes, "cup type" for cups, "sleeve style" for sleeves, "sticker shape" for stickers, "paper type" for papers.
 - size_label: how to ask THIS product's size, at most 45 characters, lower case: "box size (length x width x height)" for boxes and inserts, "cup size (8 oz, 12 oz, 16 oz...)" for cups, "sleeve size or the cup size it fits" for cup sleeves, "sheet size (width x length)" for papers, "sticker size (width x height)" for stickers, "mailer size (width x length)" for mailers and bags.
-- has_size: true when the customer picked a size option on our form, even a NAMED one ("Size: Slider", "Small", "Medium", "Large", "Regular", "Jumbo", "4 oz") — our forms offer named sizes and our team prices from them. Also true when we could work out the finished size: three dimensions for a box (with or without a unit), two for a flat item (paper, sticker, label, sleeve), a cup capacity in oz/ml, or the size of the product that goes inside plus how many go in one box. False for "what sizes do you have", a single number for a box, a weight or volume only for a box, "see attached" with nothing attached, or no size at all.
-- has_style: true when the style is clear: a named style (tuck end, mailer, rigid, two-piece, sleeve, pillow, window, gable, display, auto bottom, single/double wall cup, kiss cut, die cut...), a reference image they sent, or a product page name that is itself one specific style ("Pillow Boxes", "Mailer Boxes", "Cardboard Boxes With Lid"). False for a generic "custom boxes" or "packaging" with nothing more.
+- has_size — decide the way our sales agents did on ~360 real quotes:
+  * Boxes, sleeves, inserts, trays, tubes, displays, mailer/shipping boxes: TRUE when the customer gave the box dimensions (three, or two plus height for a round box), OR the size of the product that goes inside (e.g. "10 oz tumbler 3.5 in high", "2ml vial", "fits a 750ml bottle", "8x8x6"), OR picked a size OPTION from a field on our form ("Size: Slider", "Size: Large"). FALSE for vague words in their own message ("medium size", "small to large", "standard size"), a single number for a box ("12-15 inch round box" with no height), or no size at all.
+  * Standard sizes count: A4, A5, letter, legal, business-card size, a vial or bottle capacity ("2ml vial", "750ml bottle").
+  * Cups: TRUE when a capacity is given or picked (8 oz, 12 oz, 16 oz, 250 ml). Cup sleeves: TRUE when the cup size they fit is given. Papers, liners, stickers, labels, bags: TRUE when a width x length (or a picked size option) is given. Otherwise FALSE — our agents asked for it.
+- has_style — TRUE when the product type is clear from what they wrote, the product they picked, or the page they came from (shipping box, mailer box, candle box, tuck end, rigid box, pillow box, burger box, coffee cups, wax paper, sleeves, inserts, dividers…): our agents choose the usual construction for it and quote. Also TRUE with a reference image. FALSE only when all we have is generic "custom boxes", "packaging" or "a box" with no product, page or picture to go on.
 - has_quantity: true when a number of pieces or a range is given.
 - has_deadline: true when they said when they need it (a date, "in 3 weeks", "ASAP", an event date).
 - reason: one short English sentence saying what is there and what is missing.
@@ -287,6 +294,8 @@ export interface FollowUpContext {
  * person) it only keeps the conversation warm — it never quotes.
  */
 export function buildFollowUp(a: QuoteAssessment, c: FollowUpContext): { text: string; offer: number | null } {
+  // Older ledgers listed quantity as missing; it no longer is (missingOf).
+  c = { ...c, missing: c.missing.filter((m) => m !== 'quantity') }
   const greet = c.firstName ? `Hello ${c.firstName},` : 'Hello,'
   const what = missingWords(c.missing, a)
   const asking = c.missing.length > 0
