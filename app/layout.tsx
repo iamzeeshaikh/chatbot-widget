@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import DeployRefresh from "./components/DeployRefresh";
+import ReplyBell from "./components/ReplyBell";
 import Softphone from "./components/Softphone";
 import DialPad from "./components/DialPad";
 import WorkspaceChrome from "./components/WorkspaceChrome";
@@ -61,6 +62,7 @@ export default function RootLayout({
             tab and reloads it (hidden) or offers a reload (visible). In the
             root layout so pipeline, tasks and lead records inherit it too. */}
         <DeployRefresh />
+        <ReplyBell />
         {/* Tab icon, tab title and accent colour for whichever dashboard this
             is — on every route, not just the dashboard's own page. */}
         <WorkspaceChrome />

@@ -1323,6 +1323,47 @@ export default function Dashboard() {
     } catch { /* ignore */ }
   }, [soundOn, getDashCtx])
 
+  // THE BIG BELL — a customer answered (email reply or WhatsApp). The owner
+  // asked for a proper, heavy bell for these ("notification ki proper bell
+  // honi chahie moti wali", 2026-10-14): a reply is money waiting, and the
+  // light chat chime was easy to miss. A low church-bell "ding-dong" struck
+  // three times (~3s), built from inharmonic bell partials with a long decay,
+  // at full gain through the same soft limiter. Same mute switch as the rest.
+  const playReplyBell = useCallback(() => {
+    if (!soundOn) return
+    const ctx = getDashCtx()
+    if (!ctx) return
+    try {
+      if (ctx.state === 'suspended' && ctx.resume) ctx.resume()
+      const master = ctx.createGain()
+      master.gain.value = 1
+      const shaper = ctx.createWaveShaper()
+      const curve = new Float32Array(1024)
+      for (let c = 0; c < 1024; c++) { const x = (c / 1023) * 2 - 1; curve[c] = Math.tanh(x * 1.6) }
+      shaper.curve = curve
+      master.connect(shaper); shaper.connect(ctx.destination)
+      // Bell partials relative to the strike note (hum, prime, tierce, quint, nominal).
+      const partials: [number, number][] = [[0.5, 0.55], [1, 1], [1.2, 0.45], [1.5, 0.35], [2, 0.5], [2.74, 0.2]]
+      const strike = (freq: number, t: number) => {
+        partials.forEach(([ratio, peak]) => {
+          const osc = ctx.createOscillator(); const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(master)
+          osc.type = 'sine'; osc.frequency.value = freq * ratio
+          gain.gain.setValueAtTime(0, t)
+          gain.gain.linearRampToValueAtTime(peak, t + 0.008)
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 1.1)
+          osc.start(t); osc.stop(t + 1.15)
+        })
+      }
+      const t0 = ctx.currentTime
+      ;[0, 1].forEach((round) => {
+        strike(784, t0 + round * 1.0)          // ding (G5)
+        strike(587, t0 + round * 1.0 + 0.45)   // dong (D5)
+      })
+      strike(784, t0 + 2.0)
+    } catch { /* ignore */ }
+  }, [soundOn, getDashCtx])
+
   // The 3-second re-chime that used to live here (ring until somebody replies)
   // was removed on the owner's ask, 2026-09-04: "beep continues wali khatam
   // karden". A waiting chat now rings ONCE — the new-message chime and the
@@ -1521,7 +1562,7 @@ export default function Dashboard() {
         // unless somebody happened to refresh — which is exactly how it was
         // reported. Same chime as a waiting chat, through the same mute switch.
         if (unreadSeeded.current && nextUnread > prevUnreadReplies.current) {
-          playDashSound()
+          playReplyBell()
           awayAlert('A customer replied by email',
             `${nextUnread} repl${nextUnread === 1 ? 'y' : 'ies'} waiting on you`, '/inbox')
         }
@@ -1535,7 +1576,7 @@ export default function Dashboard() {
         // the dashboard moved. Same chime, same mute switch.
         const nextWa = typeof d.waWaiting === 'number' ? d.waWaiting : 0
         if (waSeeded.current && nextWa > prevWaWaiting.current) {
-          playDashSound()
+          playReplyBell()
           awayAlert('A customer wrote on WhatsApp',
             `${nextWa} conversation${nextWa === 1 ? '' : 's'} waiting on a reply`)
         }
@@ -1546,7 +1587,7 @@ export default function Dashboard() {
     pull()
     const iv = setInterval(whenVisible(pull), 60000)
     return () => clearInterval(iv)
-  }, [authReady, visibleTick, workspace, playDashSound])
+  }, [authReady, visibleTick, workspace, playReplyBell])
 
   // Load the IP blocklist once for admins, so the "Ban / Unban" state is correct
   // on the conversation panel too (not just the Visitors tab).

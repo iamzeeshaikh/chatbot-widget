@@ -1247,7 +1247,10 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
 
   // Every promo the bot has ever written down.
   const ledgerRows = await fetchAllPages<{ session_id: string; site_id: string; message: string; created_at: string }>(
+    // Bounded by time so the created_at index does the work: chat_logs has no
+    // role index, and an unbounded role filter walks the whole table.
     () => supabase.from('chat_logs').select('session_id, site_id, message, created_at').eq('role', CRM_BOT_ROLE)
+      .gte('created_at', new Date(Math.min(+campaign.start, +now) - (PROMO_ADDRESS_GAP_DAYS + 1) * 864e5).toISOString())
       .ilike('message', '%"step":"promo"%').order('created_at', { ascending: true }), 20000)
   warnIfCapped('promo ledger', ledgerRows.length, 20000)
   const doneSessions = new Set<string>()
@@ -1268,23 +1271,34 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
     }
   }
 
+  // Cheap gates FIRST. Everything below reads thousands of rows; run every
+  // five minutes around the clock it pinned the database (14 Oct 2026, pings
+  // of 30-130s until the drip was paused). Now the heavy part runs only when
+  // a send is actually due — at most PROMO_DAILY_CAP times a day.
+  const et = easternParts(now)
+  const preview = !!opts.dryRun
+  if (!preview) {
+    if (sentToday >= PROMO_DAILY_CAP) return { ...base, state: 'waiting', sentToday, why: `today's ${PROMO_DAILY_CAP} are sent` }
+    if (et.day === 'Sat' || et.day === 'Sun' || et.hour < 9 || et.hour >= 16) return { ...base, state: 'waiting', sentToday, why: 'outside US business hours (Mon–Fri 9am–4pm Eastern)' }
+    if (now.getTime() - lastSentAt < PROMO_GAP_MIN * 60 * 1000) return { ...base, state: 'waiting', sentToday, why: `spacing: next one ${PROMO_GAP_MIN} min after the last` }
+  }
+
   // Who is in a conversation right now, and who bounced.
   const since = new Date(now.getTime() - PROMO_QUIET_DAYS * 864e5).toISOString()
   const recent = await fetchAllPages<{ session_id: string }>(
-    () => supabase.from('chat_logs').select('session_id').in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_STAGE_ROLE, CRM_CALL_ROLE, CRM_WA_OUT_ROLE, CRM_WA_IN_ROLE, ASSIGNMENT_ROLE])
+    () => supabase.from('chat_logs').select('session_id').in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_STAGE_ROLE, CRM_CALL_ROLE, CRM_WA_OUT_ROLE, CRM_WA_IN_ROLE])
       .in('site_id', sites).gte('created_at', since).order('created_at', { ascending: true }), 20000)
   warnIfCapped('promo recent mail', recent.length, 20000)
   const active = new Set(recent.map((r) => r.session_id))
-  const bouncedSessions = await fetchAllPages<{ session_id: string }>(
-    () => supabase.from('chat_logs').select('session_id').eq('role', CRM_EMAIL_IN_ROLE).in('site_id', sites)
-      .or('message.ilike.%mailer-daemon%,message.ilike.%postmaster@%').order('created_at', { ascending: true }), 5000)
-  const bounced = new Set(bouncedSessions.map((r) => r.session_id))
   const [unsub, notALead] = await Promise.all([unsubscribedSet(), notALeadSessions(sites)])
 
-  const leads = await fetchAllPages<{ id: string; site_id: string; email: string | null; message: string | null; created_at: string }>(
-    () => supabase.from('leads').select('id, site_id, email, message, created_at').in('site_id', sites).not('email', 'is', null)
+  const leads = await fetchAllPages<{ id: string; site_id: string; email: string | null; created_at: string }>(
+    () => supabase.from('leads').select('id, site_id, email, created_at').in('site_id', sites).not('email', 'is', null)
       .order('created_at', { ascending: false }), 20000)
   warnIfCapped('promo leads', leads.length, 20000)
+  const buyerRows = await fetchAllPages<{ id: string }>(
+    () => supabase.from('leads').select('id').in('site_id', sites).ilike('message', '[Checkout]%').order('created_at', { ascending: false }), 5000)
+  const buyers = new Set(buyerRows.map((r) => r.id))
   const seenAddr = new Set<string>()
   const pool: { leadId: string; to: string; siteId: string; buyer: boolean; at: string }[] = []
   for (const l of leads) {
@@ -1292,7 +1306,7 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
     const id = quoteSessionId(l.id)
     if (!isAddress(to) || seenAddr.has(to)) continue
     seenAddr.add(to)  // newest lead per address only: one customer, one email
-    if (doneSessions.has(id) || recentAddrs.has(to) || unsub.has(to) || notALead.has(id) || active.has(id) || bounced.has(id)) continue
+    if (doneSessions.has(id) || recentAddrs.has(to) || unsub.has(to) || notALead.has(id) || active.has(id)) continue
     if (isNoiseSender(to) || isMerchantTestOrder(to)) continue
     const local = to.split('@')[0]
     if (/^(dmarc|no-?reply|donotreply|do-not-reply|postmaster|mailer-?daemon|bounce)/.test(local) || /^(notifications?|reports?|abuse)$/.test(local)) continue
@@ -1300,8 +1314,7 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
     // fills contact forms: a promo to either only costs reputation.
     const domain = to.split('@')[1] ?? ''
     if (sites.some((sid) => domain.replace(/[^a-z]/g, '').includes(sid.toLowerCase()))) continue
-    const kind = leadSource(l.message)
-    pool.push({ leadId: id, to, siteId: l.site_id, buyer: kind === 'checkout', at: l.created_at })
+    pool.push({ leadId: id, to, siteId: l.site_id, buyer: buyers.has(l.id), at: l.created_at })
   }
   // Sites take turns: each site's queue is buyers-then-newest, and the pool is
   // dealt one from each site in rotation, skipping any site at today's cap.
@@ -1323,15 +1336,19 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
   const out: PromoDripResult = { ...base, state: 'waiting', sentToday, remaining: pool.length, next: dealt.slice(0, PROMO_DAILY_CAP - Math.min(sentToday, PROMO_DAILY_CAP)).map(({ leadId, to, siteId }) => ({ leadId, to, siteId })) }
   if (!pool.length) return { ...out, state: 'done', why: 'everyone eligible has had this campaign' }
   if (!dealt.length) return { ...out, why: `every site has had its ${PROMO_SITE_DAILY_CAP} today` }
-  if (sentToday >= PROMO_DAILY_CAP) return { ...out, why: `today's ${PROMO_DAILY_CAP} are sent` }
-  const et = easternParts(now)
-  if (et.day === 'Sat' || et.day === 'Sun' || et.hour < 9 || et.hour >= 16) return { ...out, why: 'outside US business hours (Mon–Fri 9am–4pm Eastern)' }
-  if (now.getTime() - lastSentAt < PROMO_GAP_MIN * 60 * 1000) return { ...out, why: `spacing: next one ${PROMO_GAP_MIN} min after the last` }
-  if (opts.dryRun) return { ...out, why: 'dry run: would send the first of next' }
+  if (preview) return { ...out, why: 'dry run: would send the first of next' }
 
   // One send per run; a lead that cannot be sent (no mailbox for its site)
   // is written down by sendPromo as failed and not tried again this campaign.
   for (const c of dealt.slice(0, 5)) {
+    // Bounced before? Checked for this one customer only — a scan of every
+    // inbound email's text was the other heavy query.
+    const { data: bounce } = await supabase.from('chat_logs').select('id').eq('session_id', c.leadId).eq('role', CRM_EMAIL_IN_ROLE)
+      .or('message.ilike.%mailer-daemon%,message.ilike.%postmaster@%').limit(1)
+    if (bounce?.length) {
+      await ledger(c.leadId, c.siteId, { step: 'promo', campaign: campaign.key, state: 'skipped', at: now.toISOString(), why: 'an earlier email to this address bounced', to: c.to })
+      continue
+    }
     let r: Awaited<ReturnType<typeof sendPromo>>
     try { r = await sendPromo(c.leadId, now) } catch (e) { r = { ok: false, why: e instanceof Error ? e.message : 'send failed' } }
     if (r.ok) return { ...out, state: 'sent', sentToday: sentToday + 1, remaining: pool.length - 1, sent: { leadId: c.leadId, to: c.to, from: r.from } }

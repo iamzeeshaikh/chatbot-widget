@@ -51,7 +51,11 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
       .from('chat_logs')
       .select('session_id, site_id, role, message, created_at')
       .in('site_id', sites)
-      .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, ASSIGNMENT_ROLE, CRM_EMAIL_ROLE])
+      // NOT crm_email: our own sends carry full HTML bodies (and Gmail-side
+      // replies their whole quoted chain) — 8.6MB a poll by Oct 2026, read by
+      // every open dashboard every minute. Only the sender of an UNOWNED lead
+      // is needed from them, so that is fetched below for just those leads.
+      .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, ASSIGNMENT_ROLE])
       .gte('created_at', since)
       .order('created_at', { ascending: true })
       .range(from, from + 999)
@@ -96,6 +100,21 @@ export async function unreadRepliesFor(member: Member, now = new Date()): Promis
       // Ascending, so the last assignment row per session wins.
       const email = (r.message ?? '').trim()
       owner.set(r.session_id, email || null)
+    }
+  }
+
+  // Fallback recipient for leads nobody owns: who last emailed them. Asked
+  // only for leads that have an unread reply and no owner — a handful.
+  const needSender = [...inbound.entries()]
+    .filter(([id, msgs]) => !owner.get(id) && [...msgs.keys()].some((g) => !read.has(g)))
+    .map(([id]) => id)
+  for (let i = 0; i < needSender.length; i += 100) {
+    const { data: sent } = await supabase.from('chat_logs').select('session_id, message')
+      .in('session_id', needSender.slice(i, i + 100)).eq('role', CRM_EMAIL_ROLE)
+      .order('created_at', { ascending: true }).limit(1000)
+    for (const r of sent ?? []) {
+      const e = parseCrmEmail(r.message)
+      if (e?.sentBy) sender.set(r.session_id, e.sentBy.trim().toLowerCase())
     }
   }
 

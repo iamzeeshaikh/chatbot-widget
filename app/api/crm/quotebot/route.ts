@@ -4,6 +4,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { runQuoteBot, runPromoDrip, sendFollowUp, sendQuoteFollowUp, sendPromo, quoteBotEnabled } from '@/lib/quotebot'
 
 export const dynamic = 'force-dynamic'
+const PROMO_DRIP_PAUSED = false
 // Each lead costs one model call and, at most, one Gmail send; the per-run cap
 // in lib/quotebot.ts keeps a run well inside this.
 export const maxDuration = 120
@@ -70,7 +71,10 @@ export async function GET(req: NextRequest) {
     const result = await runQuoteBot(req.nextUrl.origin, new Date(), { dryRun, leadIds })
     // The holiday drip rides on the same run and the same lease: a run that
     // lost the lease to another is skipped whole, so two can never both send.
-    const promo = leadIds.length || result.skipped ? undefined
+    // PROMO_DRIP_PAUSED is the off switch. It was flipped on 14 Oct 2026 when
+    // the drip's every-5-minute scans helped pin the database; the drip now
+    // does its heavy reads only when a send is actually due.
+    const promo = leadIds.length || result.skipped || PROMO_DRIP_PAUSED ? undefined
       : await runPromoDrip(new Date(), { dryRun: result.dryRun }).catch((e) => ({ state: 'failed', why: e instanceof Error ? e.message : 'drip failed' }))
     return NextResponse.json({ by: auth.by, ...result, promo })
   } catch (err) {

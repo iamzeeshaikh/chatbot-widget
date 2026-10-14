@@ -383,11 +383,17 @@ export async function runEmailSweep(
           if (m.labelIds.includes('SENT') || from.email === agent.toLowerCase()) {
             // Packaging only: the sports dashboard was not asked for this.
             if (!m.labelIds.includes('SENT') || siteWorkspace(ref.siteId) !== 'packaging') continue
-            const body = (m.bodyText ?? '').slice(0, MAX_INBOUND_BODY)
+            // The agent's words plus a short tail of the quoted chain — the
+            // whole chain is already on the record as the customer's own
+            // messages, and storing it again made every mail poll heavier.
+            const sq = splitQuoted(m.bodyText ?? '')
+            const body = (sq.quoted && sq.visible.trim()
+              ? `${sq.visible}\n\n${sq.quoted.slice(0, 1500)}`
+              : (m.bodyText ?? '')).slice(0, 4000)
             const out: CrmEmailEntry = {
               id: newEmailId(), sentBy: agent, from: from.email || agent, fromName: from.name ?? undefined,
               to: m.to, subject: m.subject || '(no subject)',
-              body, snippet: makeSnippet(splitQuoted(body).visible || body),
+              body, snippet: makeSnippet(sq.visible || body),
               at: m.at || ranAt,
               gmailId: m.gmailId, threadId: m.threadId, messageId: m.messageId,
               direction: 'outbound', imported: true,

@@ -65,6 +65,9 @@ self.addEventListener('push', function (event) {
       // sound. It only makes sense while sound is on, and Chrome rejects the
       // combination of renotify with silent outright.
       renotify: soundOn,
+      // A customer's reply stays on screen until somebody clicks it, instead
+      // of sliding away after a few seconds while the agent is looking elsewhere.
+      requireInteraction: /^(reply-|quotebot-reply-|quotebot-answer-|intake-)/.test(data.tag || ''),
       data: { url: data.url || '/' },
     });
   }));
