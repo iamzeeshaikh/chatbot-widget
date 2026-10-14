@@ -214,14 +214,18 @@ export async function GET(req: NextRequest) {
   // database down once; scoping to the listed sessions keeps it small.
   // Samir and Steve are team leads (lib/teamlead.ts) and still see every lead.
   const listed = [...new Set((merged as Array<{ id: string; session_id?: string | null }>).map((l) => sessionForLead(l)))]
-  const ownerRows: { session_id: string; role: string; message: string; created_at: string }[] = []
-  for (let i = 0; i < listed.length; i += 150) {
+  type OwnerRow = { session_id: string; role: string; message: string; created_at: string }
+  const ownerChunks: string[][] = []
+  for (let i = 0; i < listed.length; i += 150) ownerChunks.push(listed.slice(i, i + 150))
+  // Side by side, not one after another — nine sequential round trips cost
+  // seconds on every Overview load.
+  const ownerRows: OwnerRow[] = (await Promise.all(ownerChunks.map(async (chunk) => {
     const { data } = await supabase.from('chat_logs')
       .select('session_id, role, message, created_at')
-      .in('session_id', listed.slice(i, i + 150)).eq('role', ASSIGNMENT_ROLE)
+      .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
       .order('created_at', { ascending: true }).limit(1000)
-    ownerRows.push(...((data ?? []) as typeof ownerRows))
-  }
+    return (data ?? []) as OwnerRow[]
+  }))).flat()
   ownerRows.sort((a, b) => a.created_at.localeCompare(b.created_at))
   const owned = deriveAssignments(ownerRows)
   for (const l of merged as Array<Record<string, unknown>>) {
