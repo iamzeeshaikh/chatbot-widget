@@ -31,9 +31,9 @@
 // is a ledger row with its reason, so "why didn't the bot answer this one?"
 // always has an answer.
 
-import { supabase, fetchAllPages } from './supabase'
+import { supabase, fetchAllPages, warnIfCapped } from './supabase'
 import { workspaceSites, hasFeature } from './workspaces'
-import { quoteSessionId, leadSource } from './quoteintake'
+import { quoteSessionId, leadSource, isMerchantTestOrder } from './quoteintake'
 import { leadRecipient, writeControlRow, markThreadRepliesRead } from './leadrecord'
 import { notALeadSessions, parseNotALead } from './notalead'
 import { ASSIGNMENT_ROLE, setAssignment } from './assignment'
@@ -1132,16 +1132,23 @@ export async function sendPromo(leadId: string, now = new Date()): Promise<{ ok:
   const sent = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
   const owner = lastAssignment(rows)
   const lastByBotAgent = [...sent].reverse().find((e) => (BOT_AGENTS as readonly string[]).includes(e.sentBy.toLowerCase()))
-  const agent = lastByBotAgent?.sentBy.toLowerCase() ?? (owner && (BOT_AGENTS as readonly string[]).includes(owner) ? owner : null)
-  if (!agent) return { ok: false, why: 'no agent the bot writes for has this customer' }
   const cfg = googleConfig(PUBLIC_BASE)
   if (!cfg) return { ok: false, why: 'Google OAuth is not configured' }
   const { data: site } = await supabase.from('sites').select('name').eq('site_id', lead.site_id).maybeSingle()
   const siteName = String(site?.name ?? lead.site_id)
-  const alias = lastByBotAgent?.from
-    ? { email: lastByBotAgent.from }
-    : siteAlias(await verifiedAliases(agent, cfg), lead.site_id, siteName)
-  if (!alias) return { ok: false, why: `no verified ${lead.site_id} mailbox for ${agent}` }
+  // Who writes it: the agent who last wrote to them, else the owner, else —
+  // an old lead whose owner has left — one of today's agents, picked by the
+  // address so the same customer always hears from the same person.
+  let agent: string | null = lastByBotAgent?.sentBy.toLowerCase() ?? (owner && (BOT_AGENTS as readonly string[]).includes(owner) ? owner : null)
+  let alias: { email: string } | null = lastByBotAgent?.from ? { email: lastByBotAgent.from } : null
+  const order = agent ? [agent] : [...BOT_AGENTS].sort((a, b) => hashOf(`${to}${a}`) - hashOf(`${to}${b}`))
+  if (!alias) {
+    for (const a of order) {
+      const hit = siteAlias(await verifiedAliases(a, cfg), lead.site_id, siteName)
+      if (hit) { agent = a; alias = hit; break }
+    }
+  }
+  if (!agent || !alias) return { ok: false, why: `no verified ${lead.site_id} mailbox for ${order.join(' or ')}` }
 
   const { campaign } = currentOrNextCampaign(now)
   const assessment = await assessQuote(lead.message ?? '', lead.name ?? null)
@@ -1184,6 +1191,161 @@ export async function sendPromo(leadId: string, now = new Date()): Promise<{ ok:
   await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
   await ledger(id, lead.site_id, { step: 'promo', campaign: campaign.key, state: 'sent', at, to, agent, from: alias.email, emailId, offer: campaign.discount })
   return { ok: true, subject: promo.subject, text: finalText, campaign: campaign.key, from: alias.email }
+}
+
+// ── The holiday drip (Step 4, owner OK 2026-10-14: "15-20 start kardo") ─────
+// Slow on purpose: a burst of promotional mail from a site's domain is how it
+// lands on a blocklist, and that would take the quote replies down with it.
+//   • at most PROMO_DAILY_CAP a day across all sites, one per run, spaced
+//     PROMO_GAP_MIN apart, Monday–Friday 9am–4pm US Eastern;
+//   • one promo per address per PROMO_ADDRESS_GAP_DAYS (campaigns overlap:
+//     Christmas opens on Nov 20 while Black Friday is still running);
+//   • never: unsubscribed, bounced, marked not-a-lead, a merchant test order,
+//     a system sender, or anyone being worked right now (any email, call,
+//     WhatsApp, stage or owner change in the last PROMO_QUIET_DAYS — their
+//     follow-ups carry the offer);
+//   • at most PROMO_SITE_DAILY_CAP a day from any one site's domain — sites
+//     take turns; within a site, buyers (checkout leads) first, then newest.
+// Runs for the campaign in progress, or one opening within PROMO_LEAD_DAYS —
+// the owner started Black Friday on 14 Oct rather than wait for the 20th.
+export const PROMO_DAILY_CAP = 20
+/** Per site domain, per day: twenty from one domain in a day is the burst to avoid. */
+const PROMO_SITE_DAILY_CAP = 3
+const PROMO_GAP_MIN = 20
+const PROMO_ADDRESS_GAP_DAYS = 30
+const PROMO_QUIET_DAYS = 21
+const PROMO_LEAD_DAYS = 7
+
+function hashOf(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return h >>> 0
+}
+
+function easternParts(d: Date): { day: string; hour: number; key: string } {
+  const f = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit' })
+  const p = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]))
+  return { day: p.weekday, hour: Number(p.hour), key: `${p.year}-${p.month}-${p.day}` }
+}
+
+export interface PromoDripResult {
+  campaign: string
+  state: 'sent' | 'waiting' | 'done' | 'off' | 'failed'
+  why?: string
+  sentToday: number
+  remaining: number
+  sent?: { leadId: string; to: string; from?: string }
+  next?: { leadId: string; to: string; siteId: string }[]
+}
+
+export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } = {}): Promise<PromoDripResult> {
+  const { campaign, running } = currentOrNextCampaign(now)
+  const opensSoon = !running && +campaign.start - +now <= PROMO_LEAD_DAYS * 864e5
+  const base = { campaign: campaign.key, sentToday: 0, remaining: 0 }
+  if (!running && !opensSoon) return { ...base, state: 'off', why: `next campaign ${campaign.key} opens ${campaign.start.toISOString().slice(0, 10)}` }
+  const sites = workspaceSites('packaging')
+
+  // Every promo the bot has ever written down.
+  const ledgerRows = await fetchAllPages<{ session_id: string; site_id: string; message: string; created_at: string }>(
+    () => supabase.from('chat_logs').select('session_id, site_id, message, created_at').eq('role', CRM_BOT_ROLE)
+      .ilike('message', '%"step":"promo"%').order('created_at', { ascending: true }), 20000)
+  warnIfCapped('promo ledger', ledgerRows.length, 20000)
+  const doneSessions = new Set<string>()
+  const recentAddrs = new Set<string>()
+  let sentToday = 0
+  let lastSentAt = 0
+  const siteToday = new Map<string, number>()
+  const today = easternParts(now).key
+  for (const r of ledgerRows) {
+    const e = parseBotLedger(r.message)
+    if (!e || e.step !== 'promo') continue
+    if (e.campaign === campaign.key) doneSessions.add(r.session_id)
+    const at = new Date(e.at).getTime()
+    if (e.state === 'sent' || e.state === 'claimed') {
+      if (e.to && now.getTime() - at < PROMO_ADDRESS_GAP_DAYS * 864e5) recentAddrs.add(e.to.toLowerCase())
+      if (easternParts(new Date(at)).key === today) { sentToday++; siteToday.set(r.site_id, (siteToday.get(r.site_id) ?? 0) + 1) }
+      lastSentAt = Math.max(lastSentAt, at)
+    }
+  }
+
+  // Who is in a conversation right now, and who bounced.
+  const since = new Date(now.getTime() - PROMO_QUIET_DAYS * 864e5).toISOString()
+  const recent = await fetchAllPages<{ session_id: string }>(
+    () => supabase.from('chat_logs').select('session_id').in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE, CRM_STAGE_ROLE, CRM_CALL_ROLE, CRM_WA_OUT_ROLE, CRM_WA_IN_ROLE, ASSIGNMENT_ROLE])
+      .in('site_id', sites).gte('created_at', since).order('created_at', { ascending: true }), 20000)
+  warnIfCapped('promo recent mail', recent.length, 20000)
+  const active = new Set(recent.map((r) => r.session_id))
+  const bouncedSessions = await fetchAllPages<{ session_id: string }>(
+    () => supabase.from('chat_logs').select('session_id').eq('role', CRM_EMAIL_IN_ROLE).in('site_id', sites)
+      .or('message.ilike.%mailer-daemon%,message.ilike.%postmaster@%').order('created_at', { ascending: true }), 5000)
+  const bounced = new Set(bouncedSessions.map((r) => r.session_id))
+  const [unsub, notALead] = await Promise.all([unsubscribedSet(), notALeadSessions(sites)])
+
+  const leads = await fetchAllPages<{ id: string; site_id: string; email: string | null; message: string | null; created_at: string }>(
+    () => supabase.from('leads').select('id, site_id, email, message, created_at').in('site_id', sites).not('email', 'is', null)
+      .order('created_at', { ascending: false }), 20000)
+  warnIfCapped('promo leads', leads.length, 20000)
+  const seenAddr = new Set<string>()
+  const pool: { leadId: string; to: string; siteId: string; buyer: boolean; at: string }[] = []
+  for (const l of leads) {
+    const to = (l.email ?? '').trim().toLowerCase()
+    const id = quoteSessionId(l.id)
+    if (!isAddress(to) || seenAddr.has(to)) continue
+    seenAddr.add(to)  // newest lead per address only: one customer, one email
+    if (doneSessions.has(id) || recentAddrs.has(to) || unsub.has(to) || notALead.has(id) || active.has(id) || bounced.has(id)) continue
+    if (isNoiseSender(to) || isMerchantTestOrder(to)) continue
+    const local = to.split('@')[0]
+    if (/^(dmarc|no-?reply|donotreply|do-not-reply|postmaster|mailer-?daemon|bounce)/.test(local) || /^(notifications?|reports?|abuse)$/.test(local)) continue
+    // Our own and test addresses, and the "search-<oursite>.com" spam that
+    // fills contact forms: a promo to either only costs reputation.
+    const domain = to.split('@')[1] ?? ''
+    if (sites.some((sid) => domain.replace(/[^a-z]/g, '').includes(sid.toLowerCase()))) continue
+    const kind = leadSource(l.message)
+    pool.push({ leadId: id, to, siteId: l.site_id, buyer: kind === 'checkout', at: l.created_at })
+  }
+  // Sites take turns: each site's queue is buyers-then-newest, and the pool is
+  // dealt one from each site in rotation, skipping any site at today's cap.
+  const bySite = new Map<string, typeof pool>()
+  for (const c of pool) { if (!bySite.has(c.siteId)) bySite.set(c.siteId, []); bySite.get(c.siteId)!.push(c) }
+  for (const q of bySite.values()) q.sort((a, b) => Number(b.buyer) - Number(a.buyer) || b.at.localeCompare(a.at))
+  const order = [...bySite.keys()].sort((a, b) => (siteToday.get(a) ?? 0) - (siteToday.get(b) ?? 0) || a.localeCompare(b))
+  const dealt: typeof pool = []
+  const quota = new Map(order.map((k) => [k, Math.max(0, PROMO_SITE_DAILY_CAP - (siteToday.get(k) ?? 0))]))
+  for (let round = 0; dealt.length < PROMO_DAILY_CAP && round < PROMO_SITE_DAILY_CAP; round++) {
+    for (const k of order) {
+      if ((quota.get(k) ?? 0) <= 0) continue
+      const c = bySite.get(k)![round]
+      if (!c) continue
+      dealt.push(c); quota.set(k, (quota.get(k) ?? 0) - 1)
+      if (dealt.length >= PROMO_DAILY_CAP) break
+    }
+  }
+  const out: PromoDripResult = { ...base, state: 'waiting', sentToday, remaining: pool.length, next: dealt.slice(0, PROMO_DAILY_CAP - Math.min(sentToday, PROMO_DAILY_CAP)).map(({ leadId, to, siteId }) => ({ leadId, to, siteId })) }
+  if (!pool.length) return { ...out, state: 'done', why: 'everyone eligible has had this campaign' }
+  if (!dealt.length) return { ...out, why: `every site has had its ${PROMO_SITE_DAILY_CAP} today` }
+  if (sentToday >= PROMO_DAILY_CAP) return { ...out, why: `today's ${PROMO_DAILY_CAP} are sent` }
+  const et = easternParts(now)
+  if (et.day === 'Sat' || et.day === 'Sun' || et.hour < 9 || et.hour >= 16) return { ...out, why: 'outside US business hours (Mon–Fri 9am–4pm Eastern)' }
+  if (now.getTime() - lastSentAt < PROMO_GAP_MIN * 60 * 1000) return { ...out, why: `spacing: next one ${PROMO_GAP_MIN} min after the last` }
+  if (opts.dryRun) return { ...out, why: 'dry run: would send the first of next' }
+
+  // One send per run; a lead that cannot be sent (no mailbox for its site)
+  // is written down by sendPromo as failed and not tried again this campaign.
+  for (const c of dealt.slice(0, 5)) {
+    let r: Awaited<ReturnType<typeof sendPromo>>
+    try { r = await sendPromo(c.leadId, now) } catch (e) { r = { ok: false, why: e instanceof Error ? e.message : 'send failed' } }
+    if (r.ok) return { ...out, state: 'sent', sentToday: sentToday + 1, remaining: pool.length - 1, sent: { leadId: c.leadId, to: c.to, from: r.from } }
+    if (!(await hasPromoLedger(c.leadId, campaign.key))) {
+      await ledger(c.leadId, c.siteId, { step: 'promo', campaign: campaign.key, state: 'failed', at: now.toISOString(), why: r.why, to: c.to })
+    }
+  }
+  return { ...out, state: 'failed', why: 'the next five candidates could not be sent — see their ledger rows' }
+}
+
+async function hasPromoLedger(sessionId: string, key: string): Promise<boolean> {
+  const { data } = await supabase.from('chat_logs').select('id').eq('session_id', sessionId).eq('role', CRM_BOT_ROLE)
+    .ilike('message', `%"campaign":"${key}"%`).limit(1)
+  return !!data?.length
 }
 
 /** Shorten to a word boundary with an ellipsis. */

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
-import { runQuoteBot, sendFollowUp, sendQuoteFollowUp, sendPromo, quoteBotEnabled } from '@/lib/quotebot'
+import { runQuoteBot, runPromoDrip, sendFollowUp, sendQuoteFollowUp, sendPromo, quoteBotEnabled } from '@/lib/quotebot'
 
 export const dynamic = 'force-dynamic'
 // Each lead costs one model call and, at most, one Gmail send; the per-run cap
@@ -18,7 +18,9 @@ export const maxDuration = 120
 //                     for testing the sequence on a lead
 //   ?quotefollowup=<id> ADMIN ONLY: the same for a follow-up after the quote
 //   ?promo=<id>       ADMIN ONLY: send that one lead the current (or next)
-//                     holiday promotion — no campaign runs on its own yet
+//                     holiday promotion
+//   ?drip=1           report the holiday drip (who is next, how many today)
+//                     without sending — every normal run also advances it
 //
 // Sending also needs QUOTE_BOT=on in the environment; without it every run is
 // a dry run, which is how the bot is switched off in an emergency.
@@ -62,8 +64,15 @@ export async function GET(req: NextRequest) {
   const leadIds = (req.nextUrl.searchParams.get('lead') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 25)
   const dryRun = req.nextUrl.searchParams.get('dryRun') === '1' || leadIds.length > 0
   try {
+    if (req.nextUrl.searchParams.get('drip') === '1') {
+      return NextResponse.json({ by: auth.by, promo: await runPromoDrip(new Date(), { dryRun: true }) })
+    }
     const result = await runQuoteBot(req.nextUrl.origin, new Date(), { dryRun, leadIds })
-    return NextResponse.json({ by: auth.by, ...result })
+    // The holiday drip rides on the same run and the same lease: a run that
+    // lost the lease to another is skipped whole, so two can never both send.
+    const promo = leadIds.length || result.skipped ? undefined
+      : await runPromoDrip(new Date(), { dryRun: result.dryRun }).catch((e) => ({ state: 'failed', why: e instanceof Error ? e.message : 'drip failed' }))
+    return NextResponse.json({ by: auth.by, ...result, promo })
   } catch (err) {
     console.error('[quotebot] run failed:', err)
     return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : 'The quote bot failed' }, { status: 500 })
