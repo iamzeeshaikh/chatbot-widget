@@ -6,7 +6,7 @@
 // lived on the dashboard. Same endpoint and cadence as the dashboard badge
 // (60s visible, every 4th tick hidden), same mute switch (localStorage
 // "zee-dash-sound"), and it stops for good on a 401/403: a public page has no
-// session, and a workspace without tasks (sports) has nothing to ring for.
+// session. Packaging only.
 
 import { useEffect } from 'react'
 import { usePathname } from 'next/navigation'
@@ -18,6 +18,18 @@ function audio(): AudioContext | null {
   if (!AC) return null
   if (!ctx) ctx = new AC()
   return ctx
+}
+
+// Packaging only: the sports dashboard was not asked for this and keeps its
+// own chime. Read from the same non-httpOnly zee-auth cookie WorkspaceChrome uses.
+function isPackaging(): boolean {
+  try {
+    const raw = document.cookie.split('; ').find((c) => c.startsWith('zee-auth='))?.split('=')[1]
+    if (!raw) return false
+    return JSON.parse(atob(decodeURIComponent(raw)))?.workspace === 'packaging'
+  } catch {
+    return false
+  }
 }
 
 function soundOn(): boolean {
@@ -58,7 +70,7 @@ export default function ReplyBell() {
   const pathname = usePathname()
   const onDashboard = pathname === '/'
   useEffect(() => {
-    if (onDashboard) return
+    if (onDashboard || !isPackaging()) return
     // Browsers only let a page make sound after a click or key press on it.
     const unlock = () => { const c = audio(); if (c && c.state === 'suspended') void c.resume() }
     window.addEventListener('pointerdown', unlock, { once: true })

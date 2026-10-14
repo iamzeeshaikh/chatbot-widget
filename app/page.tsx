@@ -1562,7 +1562,7 @@ export default function Dashboard() {
         // unless somebody happened to refresh — which is exactly how it was
         // reported. Same chime as a waiting chat, through the same mute switch.
         if (unreadSeeded.current && nextUnread > prevUnreadReplies.current) {
-          playReplyBell()
+          if (workspace === 'packaging') playReplyBell(); else playDashSound()
           awayAlert('A customer replied by email',
             `${nextUnread} repl${nextUnread === 1 ? 'y' : 'ies'} waiting on you`, '/inbox')
         }
@@ -1576,7 +1576,7 @@ export default function Dashboard() {
         // the dashboard moved. Same chime, same mute switch.
         const nextWa = typeof d.waWaiting === 'number' ? d.waWaiting : 0
         if (waSeeded.current && nextWa > prevWaWaiting.current) {
-          playReplyBell()
+          if (workspace === 'packaging') playReplyBell(); else playDashSound()
           awayAlert('A customer wrote on WhatsApp',
             `${nextWa} conversation${nextWa === 1 ? '' : 's'} waiting on a reply`)
         }
@@ -1587,7 +1587,7 @@ export default function Dashboard() {
     pull()
     const iv = setInterval(whenVisible(pull), 60000)
     return () => clearInterval(iv)
-  }, [authReady, visibleTick, workspace, playReplyBell])
+  }, [authReady, visibleTick, workspace, playReplyBell, playDashSound])
 
   // Load the IP blocklist once for admins, so the "Ban / Unban" state is correct
   // on the conversation panel too (not just the Visitors tab).
