@@ -686,13 +686,17 @@ async function notifyReplies(
 
     try {
       const who = f.entry.fromName || f.entry.from
-      await sendPushToMember(to, ws, {
+      const devices = await sendPushToMember(to, ws, {
         title: `${who} replied`,
         body: f.entry.snippet || f.entry.subject || 'New email reply',
         url: `/leads/${encodeURIComponent(f.sessionId)}`,
         tag: `reply-${f.entry.gmailId}`,
       })
-      out.push({ to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'sent' })
+      // Zero devices is not "sent": it is the agent with notifications off,
+      // and it has to read as that or nobody ever finds out.
+      out.push(devices > 0
+        ? { to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'sent' }
+        : { to, gmailId: f.entry.gmailId, leadId: f.sessionId, state: 'skipped', why: 'no-device-registered' })
     } catch (e) {
       // The claim stands: retrying would risk a double notification, and the
       // reply is on the record either way.

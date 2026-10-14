@@ -1165,7 +1165,30 @@ export default function Dashboard() {
   useEffect(() => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
     navigator.serviceWorker.ready.then(async (reg) => {
-      const sub = await reg.pushManager.getSubscription()
+      let sub = await reg.pushManager.getSubscription()
+      // SELF-HEAL, once a day per browser. A subscription the push service has
+      // since dropped stays in the browser looking alive, so the bell showed ON
+      // while the server had retired every one of Steve's and Samir's devices
+      // (found 14 Oct 2026: every reply alert since August reached nobody).
+      // Where the agent already allowed notifications, no click is needed to
+      // mint a fresh one — so do it quietly and re-register it.
+      let stamp = ''
+      try { stamp = localStorage.getItem('zee-push-refreshed') ?? '' } catch { /* ignore */ }
+      const today = new Date().toISOString().slice(0, 10)
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && stamp !== today) {
+        try {
+          const { publicKey } = await fetch('/api/admin/push-subscribe').then((r) => r.json())
+          if (publicKey) {
+            if (sub) await sub.unsubscribe().catch(() => false)
+            sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: publicKey })
+            await fetch('/api/admin/push-subscribe', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subscription: sub.toJSON(), deviceId: pushDeviceId() }),
+            })
+            try { localStorage.setItem('zee-push-refreshed', today) } catch { /* ignore */ }
+          }
+        } catch (err) { console.error('push refresh failed:', err) }
+      }
       setPushState(sub ? 'on' : 'off')
     }).catch(() => setPushState('off'))
   }, [])
