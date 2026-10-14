@@ -47,7 +47,7 @@ import {
 import { applyStageChange } from './stagechange'
 import { threadContextFor, isNoiseSender } from './emailsweep'
 import { CRM_EMAIL_IN_ROLE, parseCrmEmailIn } from './emailreply'
-import { googleConfig, verifiedAliases, sendEmail, GmailAuthError, type SendAsAlias } from './gmail'
+import { googleConfig, verifiedAliases, sendEmail, fetchThread, GmailAuthError, type SendAsAlias } from './gmail'
 import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
 import { buildSendSignature } from './sendsignature'
@@ -155,7 +155,7 @@ export interface BotRunResult {
   quotes?: { leadId: string; state: string; n?: number; why?: string }[]
 }
 
-export interface ReplyResult { state: 'sent' | 'handed-over' | 'failed' | 'would-send'; why?: string; complete?: boolean; text?: string }
+export interface ReplyResult { state: 'sent' | 'handed-over' | 'stood-down' | 'failed' | 'would-send'; why?: string; complete?: boolean; text?: string }
 
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; message: string | null; created_at: string }
 interface LogRow { session_id: string; role: string; message: string; created_at: string }
@@ -721,17 +721,49 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
  * more (and the agent gets the task to price it), or a short ask for whatever
  * is still missing. Anything else is handed to the agent with a task.
  */
-async function answerReply(
+export async function answerReply(
   id: string, siteId: string,
   all: { gmailId: string; at: number; from: string; body: string }[],
   latest: { gmailId: string; body: string },
   now: Date, dryRun: boolean,
 ): Promise<ReplyResult> {
   const { data: logRows } = await supabase.from('chat_logs').select('role, message, created_at')
-    .eq('session_id', id).in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE]).order('created_at', { ascending: true })
+    .eq('session_id', id).in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE]).order('created_at', { ascending: true })
   const ledgers = (logRows ?? []).filter((r) => r.role === CRM_BOT_ROLE).map((r) => parseBotLedger(r.message)).filter(Boolean) as BotLedger[]
   const first = ledgers.find((e) => e.step === 'first' && e.state === 'sent')
   if (!first?.agent || !first.from || !first.to) return { state: 'failed', why: 'no first email on record' }
+
+  // ── has a person already answered? ───────────────────────────────────────
+  // Once an agent writes, the conversation is theirs. On 2026-10-14 Steve
+  // answered Joel from Gmail at 8:03, Joel said "ok thank you", and the bot
+  // wrote again at 8:05 — Steve's Gmail reply reached the record three seconds
+  // AFTER the bot had read it. So the record is checked, and then the Gmail
+  // thread itself, live, right before anything is sent.
+  const standDown = async (why: string): Promise<ReplyResult> => {
+    if (!dryRun) await ledger(id, siteId, { step: 'reply', state: 'skipped', at: now.toISOString(), why: `stood down: ${why}`, inboundId: latest.gmailId, agent: first.agent })
+    return { state: 'stood-down', why }
+  }
+  // Row times are stored naive-UTC; read them as UTC whatever the host zone.
+  const utcMs = (t: string) => new Date(/(Z|[+-]\d\d:?\d\d)$/.test(t) ? t : `${t}Z`).getTime()
+  const firstAt = utcMs(first.at)
+  const ours = (logRows ?? []).filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
+  const person = (logRows ?? []).find((r) => utcMs(r.created_at) > firstAt - 1000 && (
+    r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
+    || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot)))
+  if (person) return standDown(`an agent already reached the customer (${person.role})`)
+  const botThread = ours.find((e) => e.bot && e.threadId)?.threadId
+  const gcfg = googleConfig(PUBLIC_BASE)
+  if (botThread && gcfg) {
+    const botIds = new Set(ours.filter((e) => e.bot).map((e) => e.gmailId))
+    let msgs
+    try { msgs = await fetchThread(first.agent, gcfg, botThread) } catch (e) {
+      // Not knowing is not permission: try again next run.
+      return { state: 'failed', why: `could not check Gmail for an agent's reply (${e instanceof Error ? e.message : 'error'})` }
+    }
+    const theirs = msgs.find((m) => m.labelIds.includes('SENT') && !botIds.has(m.gmailId)
+      && utcMs(m.at) > firstAt - 1000)
+    if (theirs) return standDown('an agent already replied from Gmail')
+  }
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   const who = lead?.name || first.to
   if (!dryRun) await closeBotCallTasks(id, siteId)
