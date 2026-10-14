@@ -373,11 +373,14 @@ export async function runEmailSweep(
           // agent's side only as quoted text inside the next reply, so nobody
           // could tell who had said what. Recorded as an outbound send marked
           // `imported` (the "sent from Gmail" badge), in the agent's name.
+          // SENT is the test, not the From address: agents send through
+          // per-site aliases (samirkhan@theburgerboxes.com from the
+          // shopcardboardboxes mailbox), so a reply from Gmail carries the alias.
           if (m.labelIds.includes('SENT') || from.email === agent.toLowerCase()) {
-            if (!m.labelIds.includes('SENT') || from.email !== agent.toLowerCase()) continue
+            if (!m.labelIds.includes('SENT')) continue
             const body = (m.bodyText ?? '').slice(0, MAX_INBOUND_BODY)
             const out: CrmEmailEntry = {
-              id: newEmailId(), sentBy: agent, from: agent, fromName: from.name ?? undefined,
+              id: newEmailId(), sentBy: agent, from: from.email || agent, fromName: from.name ?? undefined,
               to: m.to, subject: m.subject || '(no subject)',
               body, snippet: makeSnippet(splitQuoted(body).visible || body),
               at: m.at || ranAt,
