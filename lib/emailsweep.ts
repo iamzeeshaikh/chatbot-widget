@@ -381,7 +381,8 @@ export async function runEmailSweep(
           // per-site aliases (samirkhan@theburgerboxes.com from the
           // shopcardboardboxes mailbox), so a reply from Gmail carries the alias.
           if (m.labelIds.includes('SENT') || from.email === agent.toLowerCase()) {
-            if (!m.labelIds.includes('SENT')) continue
+            // Packaging only: the sports dashboard was not asked for this.
+            if (!m.labelIds.includes('SENT') || siteWorkspace(ref.siteId) !== 'packaging') continue
             const body = (m.bodyText ?? '').slice(0, MAX_INBOUND_BODY)
             const out: CrmEmailEntry = {
               id: newEmailId(), sentBy: agent, from: from.email || agent, fromName: from.name ?? undefined,
