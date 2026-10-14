@@ -31,12 +31,14 @@
 // is a ledger row with its reason, so "why didn't the bot answer this one?"
 // always has an answer.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPages } from './supabase'
 import { workspaceSites, hasFeature } from './workspaces'
 import { quoteSessionId, leadSource } from './quoteintake'
 import { leadRecipient, writeControlRow, markThreadRepliesRead } from './leadrecord'
 import { notALeadSessions, parseNotALead } from './notalead'
 import { ASSIGNMENT_ROLE, setAssignment } from './assignment'
+import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
+import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from './replyauthor'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import {
   CRM_STAGE_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_TASK_ROLE, CRM_WA_IN_ROLE,
@@ -216,10 +218,17 @@ function siteAlias(aliases: SendAsAlias[], siteId: string, siteName: string): Se
 /** How many leads the bot gave each agent this week, so neither inbox gets every one. */
 async function weeklyLoad(now: Date): Promise<Map<string, number>> {
   const since = new Date(now.getTime() - 7 * 864e5).toISOString()
-  const { data } = await supabase.from('chat_logs').select('message')
-    .eq('role', CRM_BOT_ROLE).gte('created_at', since).limit(2000)
+  // Lease rows (one per run, ~2,000 a week) are left out and the rest paged:
+  // PostgREST hands back at most 1000 rows, and with the lease rows in, the
+  // week's real first emails fell off the end within a few days.
+  const data = await fetchAllPages(
+    () => supabase.from('chat_logs').select('message')
+      .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }),
+    50000,
+  )
   const load = new Map<string, number>(BOT_AGENTS.map((a) => [a, 0]))
-  for (const r of data ?? []) {
+  for (const r of data) {
     const e = parseBotLedger(r.message)
     // New leads only. Counting follow-ups and replies too made one long
     // conversation (a test lead with a dozen follow-ups) push every new lead
@@ -308,6 +317,23 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (human) { await skip(`an agent already reached out (${human.role})`); continue }
     if (currentStage(rows) !== 'new') { await skip(`stage is already ${currentStage(rows)}`); continue }
 
+    // A chat lead is ALSO a live chat record — the one the dashboard lists and
+    // agents work. Its assignment, its stage and anything an agent did there
+    // count too. Before 2026-10-14 the bot looked only at quote-<id>, so it
+    // emailed Herman a minute before Steve did from the chat he was in, wrote
+    // to Karen as Steve while Samir owned her chat, and its "Contacted" never
+    // reached the record the list shows.
+    const chat = kind === 'chat' ? await chatSessionFor(lead) : null
+    if (chat) {
+      const cHuman = chat.rows.find((r) => r.role === CRM_EMAIL_ROLE || r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE)
+      if (cHuman) { await skip(`an agent already reached out on the chat (${cHuman.role})`); continue }
+      const cStage = currentStage(chat.rows)
+      if (cStage !== 'new') { await skip(`chat stage is already ${cStage}`); continue }
+      const talker = chat.rows.map((r) => r.role === REPLY_AUTHOR_ROLE ? (parseReplyAuthor(r.message)?.email ?? '').toLowerCase() : '')
+        .find((e) => (BOT_AGENTS as readonly string[]).includes(e))
+      if (talker) { await skip(`${talker} is already talking to them in the chat`); continue }
+    }
+
     const to = await leadRecipient(id)
     if (!to) { await skip('no email address on the lead'); continue }
     if (!isAddress(to)) { await skip(`"${to}" is not a valid email address`); continue }
@@ -321,7 +347,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (!assessment.language.startsWith('en')) { await skip(`customer wrote in "${assessment.language}" — left for a person`); continue }
 
     // ── whose lead, and which address ───────────────────────────────────────
-    const assigned = lastAssignment(rows)
+    const assigned = lastAssignment(rows) ?? (chat ? lastAssignment(chat.rows) : null)
     const preset = assigned && (BOT_AGENTS as readonly string[]).includes(assigned) ? assigned : null
     if (assigned && !preset) {
       // Assigned to somebody outside the bot's roster (a chat agent, a team
@@ -385,6 +411,13 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
     if (!preset) await setAssignment(id, lead.site_id, agent)
     await applyStageChange({ leadId: id, siteId: lead.site_id, stage: 'contacted', previous: 'new', actorEmail: BOT_ACTOR })
+    if (chat) {
+      // A chat lead is also its chat conversation — the record the dashboard's
+      // Recent Leads and the conversation list show. Same stage and owner
+      // there, or it keeps saying New and unassigned after the bot wrote.
+      if (!lastAssignment(chat.rows)) await setAssignment(chat.sessionId, lead.site_id, agent)
+      await applyStageChange({ leadId: chat.sessionId, siteId: lead.site_id, stage: 'contacted', previous: 'new', actorEmail: BOT_ACTOR })
+    }
 
     if (mail.complete) {
       const who = lead.name || to
@@ -509,6 +542,27 @@ function currentStage(rows: LogRow[]): string {
     }
   }
   return stage
+}
+
+/**
+ * The live chat a chat lead came from: the newest lead_capture row on the same
+ * site carrying the same address — the same match the dashboard's lead list
+ * makes, so the bot and the list agree on which record is the lead.
+ */
+export async function chatSessionFor(lead: LeadRow): Promise<{ sessionId: string; rows: LogRow[] } | null> {
+  const email = (lead.email ?? '').trim().toLowerCase()
+  if (!email) return null
+  const { data: caps } = await supabase.from('chat_logs').select('session_id, message')
+    .eq('role', LEAD_CAPTURE_ROLE).eq('site_id', lead.site_id)
+    .ilike('message', `%${email.replace(/%/g, '')}%`)
+    .order('created_at', { ascending: false }).limit(20)
+  const hit = (caps ?? []).find((r) => (parseLeadCapture(r.message)?.email ?? '').toLowerCase() === email)
+  if (!hit) return null
+  const { data } = await supabase.from('chat_logs').select('session_id, role, message, created_at')
+    .eq('session_id', hit.session_id)
+    .in('role', [CRM_STAGE_ROLE, LEAD_STATUS_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, ASSIGNMENT_ROLE, REPLY_AUTHOR_ROLE])
+    .order('created_at', { ascending: true }).limit(1000)
+  return { sessionId: hit.session_id, rows: (data ?? []) as LogRow[] }
 }
 
 function lastAssignment(rows: LogRow[]): string | null {
@@ -1091,4 +1145,31 @@ export async function sendPromo(leadId: string, now = new Date()): Promise<{ ok:
   await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
   await ledger(id, lead.site_id, { step: 'promo', campaign: campaign.key, state: 'sent', at, to, agent, from: alias.email, emailId, offer: campaign.discount })
   return { ok: true, subject: promo.subject, text: finalText, campaign: campaign.key, from: alias.email }
+}
+
+// ── Chat twins ──────────────────────────────────────────────────────────────
+/** The chat conversations that captured this same customer on this site. */
+export async function chatTwins(siteId: string, email: string, createdAt: string): Promise<string[]> {
+  const t = new Date(createdAt).getTime()
+  const { data } = await supabase.from('chat_logs').select('session_id, created_at')
+    .eq('role', LEAD_CAPTURE_ROLE).eq('site_id', siteId)
+    .gte('created_at', new Date(t - 2 * 864e5).toISOString()).lte('created_at', new Date(t + 864e5).toISOString())
+    .ilike('message', `%${email.trim().replace(/%/g, '')}%`).limit(10)
+  return [...new Set((data ?? []).map((r) => r.session_id).filter((s) => !s.startsWith('quote-')))]
+}
+
+/** Stage → Contacted and owner → the agent, on each twin that is still untouched. */
+export async function mirrorToChatTwins(siteId: string, email: string, createdAt: string, agent: string): Promise<string[]> {
+  const twins = await chatTwins(siteId, email, createdAt)
+  for (const sid of twins) {
+    const { data } = await supabase.from('chat_logs').select('role, message, created_at')
+      .eq('session_id', sid).in('role', [CRM_STAGE_ROLE, LEAD_STATUS_ROLE, ASSIGNMENT_ROLE]).order('created_at', { ascending: true })
+    const rows = (data ?? []) as LogRow[]
+    const stage = currentStage(rows)
+    if (stage === 'new') await applyStageChange({ leadId: sid, siteId, stage: 'contacted', previous: 'new', actorEmail: BOT_ACTOR })
+    // Only an unowned chat gets an owner. A chat a person already holds (the
+    // chat agent who answered it) keeps them.
+    if (!lastAssignment(rows)) await setAssignment(sid, siteId, agent)
+  }
+  return twins
 }

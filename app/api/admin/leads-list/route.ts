@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { defaultOwnerForSite } from '@/lib/workspaces'
+import { defaultOwnerForSite, siteWorkspace } from '@/lib/workspaces'
+import { quoteSessionId } from '@/lib/quoteintake'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
@@ -203,6 +204,10 @@ export async function GET(req: NextRequest) {
   // Every row carries its owner — the Overview's agent filter reads it, and
   // the visibility rule below is applied from the same map, so the filter and
   // the rule can never disagree about whose lead something is.
+  // NOTE (2026-10-14): this single query returns only the OLDEST 1000 of ~21k
+  // packaging assignment rows (PostgREST max-rows), so owners written after
+  // late July are not seen here. Left as-is on purpose: paging it would change
+  // which leads non-admin agents can see — the owner's call, not a bug fix.
   const { data: ownerRows } = await supabase.from('chat_logs')
     .select('session_id, role, message, created_at')
     .in('site_id', allowed).eq('role', ASSIGNMENT_ROLE)
@@ -222,19 +227,35 @@ export async function GET(req: NextRequest) {
   // from the same control rows; the Recent Leads table had no idea a stage
   // existed, so an agent scanning it could not tell who had been spoken to and
   // who had not without opening every record.
-  const { data: stageRows } = await supabase.from('chat_logs')
-    .select('session_id, message, created_at')
-    .in('site_id', allowed).eq('role', CRM_STAGE_ROLE)
-    .order('created_at', { ascending: true }).limit(20000)
-  const stageOf: Record<string, string> = {}
-  for (const r of stageRows ?? []) {
+  //
+  // Paged for the same reason as the owners above: the old single query got
+  // the oldest 1000 of ~1,900 stage rows (cut off at 2026-09-22), so every
+  // lead moved after that — by an agent or by the quote bot — read "New" here
+  // while its record showed the real stage (owner, 2026-10-14).
+  const stageRows = await fetchAllPages(
+    () => supabase.from('chat_logs')
+      .select('session_id, message, created_at')
+      .in('site_id', allowed).eq('role', CRM_STAGE_ROLE)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }),
+    100000,
+  )
+  const stageOf: Record<string, { stage: string; at: string }> = {}
+  for (const r of stageRows) {
     try {
       const v = JSON.parse(r.message)?.stage
-      if (isCrmStage(v)) stageOf[r.session_id] = v      // ascending → the last one wins
+      if (isCrmStage(v)) stageOf[r.session_id] = { stage: v, at: String(r.created_at) } // ascending → the last one wins
     } catch { /* not a stage row we understand */ }
   }
   for (const l of merged as Array<Record<string, unknown>>) {
-    l.stage = stageOf[sessionForLead(l as { id: string; session_id?: string | null })] ?? 'new'
+    const own = stageOf[sessionForLead(l as { id: string; session_id?: string | null })]
+    // Packaging only: a chat lead also has a `leads` row, and the quote bot
+    // works that row's quote-<id> record — so its "Contacted" lives there, not
+    // on the chat session this list resolves the lead to. The newer of the two
+    // wins. Sports is left exactly as it was.
+    const qid = typeof l.id === 'string' && !l.id.startsWith('cap-') ? quoteSessionId(l.id) : null
+    const viaQuote = qid && l.session_id && siteWorkspace(String(l.site_id ?? '')) === 'packaging' ? stageOf[qid] : undefined
+    const pick = own && viaQuote ? (viaQuote.at > own.at ? viaQuote : own) : (own ?? viaQuote)
+    l.stage = pick?.stage ?? 'new'
   }
 
   const excluded = await notALeadSessions(allowed)
