@@ -18,31 +18,42 @@ const ALLOWED = new Set([
 
 /** Strip everything we are not prepared to send or re-render. */
 export function sanitizeHtml(input: string): string {
-  let html = String(input ?? '')
+  // \u0000 is reserved below for the tags this function emits.
+  let html = String(input ?? '').replace(/\u0000/g, '')
   // Whole elements whose CONTENT is dangerous, not just their tags — removing
   // `<script>` alone would leave the code behind as text and then re-run it
   // the moment something re-wrapped it.
   html = html.replace(/<(script|style|iframe|object|embed|link|meta)\b[\s\S]*?<\/\1>/gi, '')
   html = html.replace(/<(script|style|iframe|object|embed|link|meta)\b[^>]*\/?>/gi, '')
 
+  // Every tag we keep is swapped for a placeholder, and whatever `<` or `>` is
+  // left afterwards is escaped. Stripping alone is not enough: removing an
+  // inner tag can assemble a new one out of its neighbours —
+  // `<<x>img onerror=…>` loses `<x>` and becomes `<img onerror=…>` — so the
+  // only markup that survives is markup this function wrote itself.
+  const kept: string[] = []
+  const keep = (tag: string) => `\u0000${kept.push(tag) - 1}\u0000`
   html = html.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>/g, (whole, rawTag: string, attrs: string) => {
     const tag = rawTag.toLowerCase()
     if (!ALLOWED.has(tag)) return ''
-    if (whole.startsWith('</')) return `</${tag}>`
+    if (whole.startsWith('</')) return keep(`</${tag}>`)
     if (tag === 'a') {
       // Only http(s) and mailto. `javascript:` in an href is the oldest trick
       // there is, and a relative link in an email goes nowhere anyway.
       const m = /href\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs)
       const href = (m?.[2] ?? m?.[3] ?? m?.[4] ?? '').trim()
-      if (!/^(https?:\/\/|mailto:)/i.test(href)) return '<a>'
-      const safe = href.replace(/"/g, '&quot;')
-      return `<a href="${safe}" target="_blank" rel="noopener noreferrer">`
+      if (!/^(https?:\/\/|mailto:)/i.test(href)) return keep('<a>')
+      const safe = href.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      return keep(`<a href="${safe}" target="_blank" rel="noopener noreferrer">`)
     }
     // Everything else keeps the tag and loses every attribute — no style, no
     // class, no event handler, nothing to audit.
-    return `<${tag}>`
+    return keep(`<${tag}>`)
   })
   return html
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\u0000(\d+)\u0000/g, (_, i: string) => kept[Number(i)] ?? '')
 }
 
 /** The text/plain twin of a formatted body. */

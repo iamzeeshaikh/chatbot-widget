@@ -70,6 +70,9 @@ export async function getBlockedIps(ws?: Workspace): Promise<Set<string>> {
     const { data } = await supabase
       .from('chat_logs')
       .select('message')
+      // Only rows setIpBlocked wrote — a role match alone would trust a row
+      // forged through the public widget endpoint.
+      .eq('site_id', BLOCKLIST_SITE)
       .eq('role', BLOCKED_ROLE)
       .order('created_at', { ascending: true })
     const byWs = new Map<Workspace, Set<string>>()

@@ -92,6 +92,9 @@ async function listSubscriptions(ws: Workspace): Promise<SubRow[]> {
   const { data } = await supabase
     .from('chat_logs')
     .select('message')
+    // Only rows WE wrote. chat_logs is also written by the public widget
+    // endpoint, so a role match alone would trust a row anyone could forge.
+    .eq('site_id', PUSH_SITE)
     .eq('role', PUSH_SUB_ROLE)
     .order('created_at', { ascending: true })
   const byEndpoint = new Map<string, SubRow>()

@@ -32,8 +32,18 @@ export async function POST(req: NextRequest) {
   try {
     const { siteId, messages, sessionId } = await req.json()
 
-    if (!siteId || !messages || !sessionId) {
+    if (!siteId || !Array.isArray(messages) || !messages.length || !sessionId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: corsHeaders })
+    }
+
+    // This endpoint is public — every site id is in the embed code — and the
+    // dashboard keeps its internal state as chat_logs rows told apart only by
+    // `role` (lib/controlroles.ts). So the role we store is NEVER the client's
+    // word: the widget only ever ends its list with the visitor's own message,
+    // and anything else (admin, push_sub, blocked_visitor, crm_*) is a forgery.
+    const lastRole = String(messages[messages.length - 1]?.role ?? '').toLowerCase()
+    if (lastRole !== 'user' && lastRole !== 'visitor') {
+      return NextResponse.json({ error: 'Invalid message' }, { status: 400, headers: corsHeaders })
     }
 
     // Geo-block, enforced HERE as well as at the widget and the visitor ping.
@@ -103,7 +113,9 @@ export async function POST(req: NextRequest) {
         .select('id', { count: 'exact', head: true }).eq('session_id', sessionId)
       if (!count && opener?.content) {
         await supabase.from('chat_logs').insert({
-          site_id: siteId, session_id: sessionId, role: 'assistant', message: opener.content,
+          // The widget's greeting is one short line; the cap stops a forged
+          // "opener" from planting a long fake agent message in a transcript.
+          site_id: siteId, session_id: sessionId, role: 'assistant', message: String(opener.content).slice(0, 300),
           // A second earlier, so it sorts above the reply it prompted rather
           // than tying with it and landing in whichever order the rows come back.
           created_at: new Date(Date.now() - 1000).toISOString(),
@@ -116,8 +128,8 @@ export async function POST(req: NextRequest) {
     await supabase.from('chat_logs').insert({
       site_id: siteId,
       session_id: sessionId,
-      role: lastUserMessage.role,
-      message: lastUserMessage.content,
+      role: lastRole,
+      message: String(lastUserMessage.content ?? ''),
     })
 
     // Auto lead-capture (billing): if the visitor typed an email on a
@@ -201,7 +213,13 @@ export async function POST(req: NextRequest) {
     }
 
     // Bot mode: Groq response
-    const { text: reply, error: replyError } = await generateReply(systemPrompt, messages)
+    // The history is the client's to send, so it is also the client's to
+    // inflate: bound it before it reaches a paid model.
+    const history = (messages as { role: string; content: string }[])
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: String(m.content ?? '').slice(0, 2000) }))
+    const { text: reply, error: replyError } = await generateReply(systemPrompt, history)
 
     after(async () => {
       await supabase.from('chat_logs').insert({
@@ -211,7 +229,7 @@ export async function POST(req: NextRequest) {
       const userMsgCount = (messages as { role: string }[]).filter((m) => m.role === 'user').length
       if (!replyError && userMsgCount >= 3 && !isRetiredLeadSite(siteId)) {
         try {
-          const allMessages = [...messages, { role: 'assistant', content: reply }]
+          const allMessages = [...history, { role: 'assistant', content: reply }]
           const fields = await extractLeadFields(allMessages)
           const score = Object.values(fields).filter((v) => v !== null).length
           if (score >= 7 && fields.email) {
