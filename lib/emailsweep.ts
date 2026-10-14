@@ -161,14 +161,18 @@ async function allThreads(now: Date): Promise<ThreadRef[]> {
     for (const r of data ?? []) {
       const e = parseCrmEmail(r.message)
       if (!e?.threadId || !e.sentBy) continue
+      // A Gmail-side send is written when the sweep finds it, possibly weeks
+      // late; its row time would mark a long-quiet thread fresh and crowd real
+      // replies out of the per-run cap. Its own send time is the activity.
+      const lastAt = e.imported && e.at ? e.at.replace(/Z$/, '') : r.created_at
       const prev = seen.get(e.threadId)
       if (prev) {
-        if (r.created_at > prev.lastAt) prev.lastAt = r.created_at
+        if (lastAt > prev.lastAt) prev.lastAt = lastAt
         continue
       }
       seen.set(e.threadId, {
         threadId: e.threadId, sessionId: r.session_id, siteId: r.site_id,
-        agent: e.sentBy, lastAt: r.created_at,
+        agent: e.sentBy, lastAt,
       })
     }
     if (!data || data.length < 1000) break
