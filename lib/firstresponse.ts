@@ -30,19 +30,22 @@ export async function firstResponses(
   leads: { key: string; sessions: string[]; createdAt: string }[],
 ): Promise<Map<string, FirstResponse>> {
   const out = new Map<string, FirstResponse>()
+  if (!leads.length) return out
   const all = [...new Set(leads.flatMap((l) => l.sessions))]
   type Row = { session_id: string; role: string; message: string; created_at: string }
   const bySession = new Map<string, Row[]>()
-  for (let i = 0; i < all.length; i += 150) {
-    const chunk = all.slice(i, i + 150)
-    const rows = await fetchAllPages<Row>(
-      () => supabase.from('chat_logs').select('session_id, role, message, created_at')
-        .in('session_id', chunk).in('role', [CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, 'admin', REPLY_AUTHOR_ROLE])
-        .order('created_at', { ascending: true }),
-      20000,
-    )
-    for (const r of rows) { const l = bySession.get(r.session_id) ?? []; l.push(r); bySession.set(r.session_id, l) }
-  }
+  // Nothing before the oldest lead can be an answer to it; and the chunks run
+  // side by side rather than one after another.
+  const since = new Date(Math.min(...leads.map((l) => ms(l.createdAt)).filter(Number.isFinite)) - 60 * 1000).toISOString()
+  const chunks: string[][] = []
+  for (let i = 0; i < all.length; i += 150) chunks.push(all.slice(i, i + 150))
+  const pages = await Promise.all(chunks.map((chunk) => fetchAllPages<Row>(
+    () => supabase.from('chat_logs').select('session_id, role, message, created_at')
+      .in('session_id', chunk).in('role', [CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, 'admin', REPLY_AUTHOR_ROLE])
+      .gte('created_at', since).order('created_at', { ascending: true }),
+    20000,
+  )))
+  for (const r of pages.flat()) { const l = bySession.get(r.session_id) ?? []; l.push(r); bySession.set(r.session_id, l) }
 
   for (const lead of leads) {
     const from = ms(lead.createdAt) - 60 * 1000
