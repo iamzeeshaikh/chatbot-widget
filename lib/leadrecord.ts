@@ -700,7 +700,9 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
           }
         }
         push({
-          id: `email-${row.id ?? at}`, at, kind: 'email', group: 'messages',
+          // An agent's Gmail-side send is recorded when the sweep finds it, so
+          // its row is later than the mail; place it by when it was sent.
+          id: `email-${row.id ?? at}`, at: e.imported ? (asUtcIso(e.at) ?? at) : at, kind: 'email', group: 'messages',
           actor: AGENT_LABEL(e.sentBy), title: `Emailed ${e.to}`,
           body: e.subject, email: e,
         })

@@ -30,7 +30,7 @@ import {
 import { sendPushToMember } from './push'
 import { siteWorkspace, hasFeature } from './workspaces'
 import { currentStateForIds } from './leadstate'
-import { CRM_EMAIL_ROLE, parseCrmEmail } from './crmemail'
+import { CRM_EMAIL_ROLE, parseCrmEmail, newEmailId, makeSnippet, type CrmEmailEntry } from './crmemail'
 import { harvestContact } from './contactharvest'
 import {
   CRM_EMAIL_IN_ROLE, parseCrmEmailIn, splitQuoted, inboundSnippet, parseFromHeader,
@@ -265,15 +265,17 @@ export async function activeThreads(now = new Date(), cursor: string | null = nu
 async function alreadyCaptured(sessionIds: string[]): Promise<Set<string>> {
   const out = new Set<string>()
   if (sessionIds.length === 0) return out
+  // Both directions: an agent's reply sent from Gmail itself is recorded as an
+  // outbound row, and a CRM send already is one — neither may be written twice.
   const { data } = await supabase
     .from('chat_logs')
-    .select('message')
-    .eq('role', CRM_EMAIL_IN_ROLE)
+    .select('role, message')
+    .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_ROLE])
     .in('session_id', sessionIds)
-    .limit(2000)
+    .limit(4000)
   for (const r of data ?? []) {
-    const e = parseCrmEmailIn(r.message)
-    if (e) out.add(e.gmailId)
+    const e = r.role === CRM_EMAIL_ROLE ? parseCrmEmail(r.message) : parseCrmEmailIn(r.message)
+    if (e?.gmailId) out.add(e.gmailId)
   }
   return out
 }
@@ -362,14 +364,39 @@ export async function runEmailSweep(
         const { ref, messages } = outcome.value
         for (const m of messages) {
           if (captured.has(m.gmailId)) continue
-          // Our own copy of the outbound message lives in the same thread.
-          if (m.labelIds.includes('SENT')) continue
           if (!m.from) continue
-
           const from = parseFromHeader(m.from)
-          // Belt and braces: never record something we sent as an inbound reply.
-          if (from.email === agent.toLowerCase()) continue
 
+          // A SENT message we have no row for is the agent answering from Gmail
+          // itself rather than from the record. Skipping those (as this once
+          // did) left the customer's side of the thread on the timeline and the
+          // agent's side only as quoted text inside the next reply, so nobody
+          // could tell who had said what. Recorded as an outbound send marked
+          // `imported` (the "sent from Gmail" badge), in the agent's name.
+          if (m.labelIds.includes('SENT') || from.email === agent.toLowerCase()) {
+            if (!m.labelIds.includes('SENT') || from.email !== agent.toLowerCase()) continue
+            const body = (m.bodyText ?? '').slice(0, MAX_INBOUND_BODY)
+            const out: CrmEmailEntry = {
+              id: newEmailId(), sentBy: agent, from: agent, fromName: from.name ?? undefined,
+              to: m.to, subject: m.subject || '(no subject)',
+              body, snippet: makeSnippet(splitQuoted(body).visible || body),
+              at: m.at || ranAt,
+              gmailId: m.gmailId, threadId: m.threadId, messageId: m.messageId,
+              direction: 'outbound', imported: true,
+            }
+            if (!dryRun) {
+              // created_at stays NOW for the same live-update reason as replies
+              // below; the timeline places an imported send by its own `at`.
+              const { error } = await writeControlRow({
+                sessionId: ref.sessionId, siteId: ref.siteId,
+                role: CRM_EMAIL_ROLE, message: JSON.stringify(out),
+              })
+              if (error) throw new Error(error)
+            }
+            captured.add(m.gmailId)
+            res.captured++
+            continue
+          }
           const grabbed = await grabAttachments(agent, cfg, m, ref.siteId, ref.sessionId)
           const split = splitQuoted(m.bodyText)
           const entry: CrmEmailInEntry = {
