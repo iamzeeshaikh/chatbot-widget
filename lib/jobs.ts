@@ -28,7 +28,7 @@ export const JOB_DESIGNERS: Record<string, string[]> = {
   packaging: ['jenniferwright@shopcardboardboxes.com'],
 }
 
-export const JOB_TYPES = ['estimate', 'design_2d3d', 'print_ready', 'dieline', 'china_template', 'other'] as const
+export const JOB_TYPES = ['estimate', 'design_2d3d', 'print_ready', 'dieline', 'china_template', 'production', 'other'] as const
 export type JobType = (typeof JOB_TYPES)[number]
 export const JOB_TYPE_LABEL: Record<JobType, string> = {
   estimate: 'Estimate',
@@ -36,6 +36,7 @@ export const JOB_TYPE_LABEL: Record<JobType, string> = {
   print_ready: 'Print-ready file',
   dieline: 'Open size (dieline)',
   china_template: 'China template',
+  production: 'Production order',
   other: 'Other',
 }
 // Standard -100/-300/-700 shades so globals.css can remap them for dark mode.
@@ -45,30 +46,61 @@ export const JOB_TYPE_STYLE: Record<JobType, string> = {
   print_ready: 'bg-blue-100 text-blue-700 border-blue-300',
   dieline: 'bg-teal-100 text-teal-700 border-teal-300',
   china_template: 'bg-rose-100 text-rose-700 border-rose-300',
+  production: 'bg-emerald-100 text-emerald-700 border-emerald-300',
   other: 'bg-gray-200 text-gray-700 border-gray-300',
 }
 
-export const JOB_STATUSES = ['pending', 'in_progress', 'verification', 'completed', 'in_production', 'shipped'] as const
+// ── Two tracks (Uzair, 2026-10-14) ──────────────────────────────────────────
+// Design work and production work move through different steps, so they are
+// two boards: Design & Estimates (the designer/estimator, checked by the CSR)
+// and Production (stock to shipped). An approved design job can open its own
+// production job with one button. Stages can grow later — add them here.
+export const JOB_TRACKS = ['design', 'production'] as const
+export type JobTrack = (typeof JOB_TRACKS)[number]
+export const JOB_TRACK_LABEL: Record<JobTrack, string> = { design: 'Design & Estimates', production: 'Production' }
+
+export const DESIGN_STATUSES = ['pending', 'in_process', 'verification', 'approved'] as const
+export const PRODUCTION_STATUSES = ['stock', 'printing', 'lamination', 'die_cutting', 'packing', 'shipped'] as const
+export const JOB_STATUSES = [...DESIGN_STATUSES, ...PRODUCTION_STATUSES] as const
 export type JobStatus = (typeof JOB_STATUSES)[number]
+
+export function statusesOf(track: JobTrack): readonly JobStatus[] {
+  return track === 'production' ? PRODUCTION_STATUSES : DESIGN_STATUSES
+}
+
 export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   pending: 'Pending',
-  in_progress: 'In Progress',
+  in_process: 'In Process',
   verification: 'Verification',
-  completed: 'Completed',
-  in_production: 'In Production',
+  approved: 'Approved',
+  stock: 'Stock',
+  printing: 'Printing',
+  lamination: 'Lamination',
+  die_cutting: 'Die cutting / Pasting',
+  packing: 'Packing',
   shipped: 'Shipped',
 }
 export const JOB_STATUS_DOT: Record<JobStatus, string> = {
-  pending: '#9ca3af', in_progress: '#2563eb', verification: '#d97706',
-  completed: '#16a34a', in_production: '#7c3aed', shipped: '#0f766e',
+  pending: '#9ca3af', in_process: '#2563eb', verification: '#d97706', approved: '#16a34a',
+  stock: '#78716c', printing: '#2563eb', lamination: '#0891b2', die_cutting: '#7c3aed', packing: '#d97706', shipped: '#0f766e',
 }
 /** What the button on a job says, to move it to the next status. */
-export const NEXT_ACTION: Partial<Record<JobStatus, { to: JobStatus; label: string; who: string }>> = {
-  pending: { to: 'in_progress', label: 'Start work', who: 'designer' },
-  in_progress: { to: 'verification', label: 'Send for verification', who: 'designer' },
-  verification: { to: 'completed', label: 'Verified — mark completed', who: 'CSR' },
-  completed: { to: 'in_production', label: 'Send to production', who: 'production' },
-  in_production: { to: 'shipped', label: 'Mark shipped', who: 'production' },
+export const NEXT_ACTION: Partial<Record<JobStatus, { to: JobStatus; label: string }>> = {
+  pending: { to: 'in_process', label: 'Start work' },
+  in_process: { to: 'verification', label: 'Send for verification' },
+  verification: { to: 'approved', label: 'Verified — approve' },
+  stock: { to: 'printing', label: 'Stock ready — start printing' },
+  printing: { to: 'lamination', label: 'Printing done' },
+  lamination: { to: 'die_cutting', label: 'Lamination done' },
+  die_cutting: { to: 'packing', label: 'Die cutting / pasting done' },
+  packing: { to: 'shipped', label: 'Mark shipped' },
+}
+
+// Jobs saved before the two tracks, read into the new names.
+const LEGACY_STATUS: Record<string, { status: JobStatus; track: JobTrack }> = {
+  in_progress: { status: 'in_process', track: 'design' },
+  completed: { status: 'approved', track: 'design' },
+  in_production: { status: 'stock', track: 'production' },
 }
 
 // ── the estimate sheet ──────────────────────────────────────────────────────
@@ -102,7 +134,12 @@ export interface Job {
   number: string
   title: string
   type: JobType
+  track: JobTrack
   status: JobStatus
+  /** Production job: the design job it was opened from. */
+  sourceJobId?: string
+  /** Design job: the production job it was sent on to. */
+  productionJobId?: string
   requirements: string
   assignee: string
   leadId: string
@@ -159,6 +196,7 @@ export function cleanJobInput(raw: unknown): Partial<Job> {
   if ('title' in o) out.title = s(o.title, 160).trim()
   if ('type' in o && (JOB_TYPES as readonly string[]).includes(String(o.type))) out.type = o.type as JobType
   if ('status' in o && (JOB_STATUSES as readonly string[]).includes(String(o.status))) out.status = o.status as JobStatus
+  if ('track' in o && (JOB_TRACKS as readonly string[]).includes(String(o.track))) out.track = o.track as JobTrack
   if ('requirements' in o) out.requirements = s(o.requirements, 4000)
   if ('assignee' in o) out.assignee = s(o.assignee, 200).trim().toLowerCase()
   if ('leadId' in o) out.leadId = s(o.leadId, 120).trim()
@@ -170,7 +208,15 @@ export function cleanJobInput(raw: unknown): Partial<Job> {
 export function parseJob(message: string | null | undefined): Job | null {
   try {
     const o = JSON.parse(String(message ?? ''))
-    return o && typeof o.id === 'string' && o.id ? (o as Job) : null
+    if (!o || typeof o.id !== 'string' || !o.id) return null
+    const j = o as Job
+    const legacy = LEGACY_STATUS[String(j.status)]
+    if (legacy) { j.status = legacy.status; j.track = legacy.track }
+    if (!(JOB_TRACKS as readonly string[]).includes(j.track)) {
+      j.track = (PRODUCTION_STATUSES as readonly string[]).includes(j.status) || j.type === 'production' ? 'production' : 'design'
+    }
+    if (!statusesOf(j.track).includes(j.status)) j.status = statusesOf(j.track)[0]
+    return j
   } catch { return null }
 }
 

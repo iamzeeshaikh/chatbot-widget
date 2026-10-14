@@ -3,7 +3,7 @@ import { getMember, canAccessSite } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
 import { isJobsOnly } from '@/lib/jobsonly'
 import { listJobs, writeJob, listMessages, workspaceMembers, notifyJob } from '@/lib/jobstore'
-import { cleanJobInput, JOB_STATUS_LABEL, type Job } from '@/lib/jobs'
+import { cleanJobInput, statusesOf, JOB_STATUS_LABEL, type Job } from '@/lib/jobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +31,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if ('error' in c) return c.error
   const input = cleanJobInput(await req.json().catch(() => ({})))
   delete input.leadId // a job's lead is set when it is created
+  delete input.track  // and its track: production opens as a job of its own
+  if (input.status && !statusesOf(c.job.track).includes(input.status)) {
+    return NextResponse.json({ error: 'That stage belongs to the other board.' }, { status: 400 })
+  }
   const now = new Date().toISOString()
   const next: Job = { ...c.job, ...input, updatedBy: c.m.email, updatedAt: now }
   if (input.status && input.status !== c.job.status) next.statusAt = now

@@ -41,7 +41,7 @@ export default function Jobs({ leadId }: { leadId: string }) {
                 <li key={j.id} className="flex items-center gap-2 py-1.5 text-xs">
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: JOB_STATUS_DOT[j.status] }} aria-hidden />
                   <a href={`/jobs/${encodeURIComponent(j.id)}`} target="_blank" rel="noopener" className="min-w-0 truncate font-semibold text-blue-700 hover:underline">{j.number} · {j.title}</a>
-                  <span className="ml-auto shrink-0 text-gray-500">{JOB_TYPE_LABEL[j.type]} · {JOB_STATUS_LABEL[j.status]}</span>
+                  <span className="ml-auto shrink-0 text-gray-500">{j.track === 'production' ? 'Production' : JOB_TYPE_LABEL[j.type]} · {JOB_STATUS_LABEL[j.status]}</span>
                 </li>
               ))}
             </ul>

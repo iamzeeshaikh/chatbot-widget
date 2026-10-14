@@ -15,7 +15,8 @@ import { useParams } from 'next/navigation'
 import { ArrowLeft, Plus, Save, Send, Trash2 } from 'lucide-react'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
 import {
-  JOB_STATUSES, JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, NEXT_ACTION, JOB_DESIGNERS,
+  JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, NEXT_ACTION, JOB_DESIGNERS,
+  JOB_TRACK_LABEL, statusesOf,
   blankEstimate, tierMath, type Estimate, type Job, type JobMessage, type JobStatus, type JobType,
 } from '@/lib/jobs'
 
@@ -88,6 +89,15 @@ export default function JobPage() {
     if (r.ok) setMessages((m) => [...m, j.message]); else { setText(body); setError(j.error ?? 'Not sent.') }
   }
 
+  async function toProduction() {
+    setBusy(true); setError('')
+    const r = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/production`, { method: 'POST' })
+    const j = await r.json().catch(() => ({}))
+    setBusy(false)
+    if (j.job?.id) { window.location.href = `/jobs/${encodeURIComponent(j.job.id)}`; return }
+    setError(j.error ?? 'Could not send it to production.')
+  }
+
   async function remove() {
     if (!job || !window.confirm(`Remove job ${job.number}?`)) return
     const r = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
@@ -99,14 +109,16 @@ export default function JobPage() {
   const set = (p: Partial<Job>) => setDraft((d) => (d ? { ...d, ...p } : d))
   const est: Estimate | null = draft.estimate
   const setEst = (p: Partial<Estimate>) => set({ estimate: { ...(est ?? blankEstimate()), ...p } })
-  const idx = JOB_STATUSES.indexOf(job.status)
+  const steps = statusesOf(job.track)
+  const idx = steps.indexOf(job.status)
   const next = NEXT_ACTION[job.status]
+  const canSendToProduction = job.track === 'design' && job.status === 'approved' && !job.productionJobId
 
   return (
     <main className="min-h-screen bg-gray-50">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
         <div className="max-w-[1300px] mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-3 flex-wrap">
-          <Link href="/jobs" aria-label="Back to jobs" className="shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100"><ArrowLeft size={16} aria-hidden /></Link>
+          <Link href={`/jobs?track=${job.track}`} aria-label="Back to jobs" className="shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100"><ArrowLeft size={16} aria-hidden /></Link>
           <span className="text-sm font-bold tabular-nums text-gray-500">{job.number}</span>
           <span className={`rounded-full border px-2 text-[11px] font-semibold ${JOB_TYPE_STYLE[job.type]}`}>{JOB_TYPE_LABEL[job.type]}</span>
           <h1 className="min-w-0 truncate text-base font-bold text-gray-900">{job.title}</h1>
@@ -124,8 +136,9 @@ export default function JobPage() {
       <div className="max-w-[1300px] mx-auto px-3 sm:px-5 py-4 space-y-4">
         {/* ── where it stands ─────────────────────────────────────────── */}
         <section className="rounded-xl border border-gray-200 bg-white p-4">
-          <ol className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-label="Job status">
-            {JOB_STATUSES.map((st, i) => (
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{JOB_TRACK_LABEL[job.track]}</p>
+          <ol className={`grid grid-cols-3 gap-2 ${steps.length > 4 ? 'sm:grid-cols-6' : 'sm:grid-cols-4'}`} aria-label="Job status">
+            {steps.map((st, i) => (
               <li key={st} className="min-w-0">
                 <div className="h-1.5 rounded-full" style={{ background: i <= idx ? JOB_STATUS_DOT[job.status] : '#e5e7eb' }} />
                 <p className={`mt-1 truncate text-[11px] ${i === idx ? 'font-bold text-gray-900' : 'text-gray-500'}`}>{JOB_STATUS_LABEL[st]}</p>
@@ -140,15 +153,27 @@ export default function JobPage() {
               </button>
             )}
             {job.status === 'verification' && (
-              <button type="button" disabled={busy} onClick={() => patch({ status: 'in_progress' })}
+              <button type="button" disabled={busy} onClick={() => patch({ status: 'in_process' })}
                 className="rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-sm font-semibold text-amber-700 hover:bg-amber-200">
-                Needs changes — back to In Progress
+                Needs changes — back to In Process
               </button>
+            )}
+            {canSendToProduction && (
+              <button type="button" disabled={busy} onClick={toProduction}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                Send to production
+              </button>
+            )}
+            {job.productionJobId && (
+              <a href={`/jobs/${encodeURIComponent(job.productionJobId)}`} className="text-xs font-semibold text-emerald-700 hover:underline">In production → open the production job</a>
+            )}
+            {job.sourceJobId && (
+              <a href={`/jobs/${encodeURIComponent(job.sourceJobId)}`} className="text-xs font-semibold text-blue-700 hover:underline">← the approved design job</a>
             )}
             <label className="ml-auto inline-flex items-center gap-1.5 text-xs text-gray-600">Status
               <select value={job.status} disabled={busy} onChange={(e) => patch({ status: e.target.value as JobStatus })}
                 className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs">
-                {JOB_STATUSES.map((st) => <option key={st} value={st}>{JOB_STATUS_LABEL[st]}</option>)}
+                {steps.map((st) => <option key={st} value={st}>{JOB_STATUS_LABEL[st]}</option>)}
               </select>
             </label>
             <span className="text-[11px] text-gray-500">since {timeAgo(job.statusAt || job.updatedAt)} · by {nameOf(job.updatedBy)}</span>

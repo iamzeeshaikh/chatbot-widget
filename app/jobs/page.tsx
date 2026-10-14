@@ -15,7 +15,8 @@ import GlobalSearch from '@/app/components/GlobalSearch'
 import PushButton from './PushButton'
 import { timeAgo } from '@/lib/datetime'
 import {
-  JOB_STATUSES, JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, JOB_DESIGNERS,
+  JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, JOB_DESIGNERS,
+  JOB_TRACKS, JOB_TRACK_LABEL, statusesOf, type JobTrack,
   type Job, type JobType,
 } from '@/lib/jobs'
 
@@ -50,7 +51,11 @@ function JobsPage() {
   useEffect(() => { load() }, [load])
 
   const nameOf = useCallback((email: string) => members.find((m) => m.email === email)?.name ?? (email ? email.split('@')[0] : 'Unassigned'), [members])
-  const shown = useMemo(() => (jobs ?? []).filter((j) => !mine || j.assignee === me || j.createdBy === me), [jobs, mine, me])
+  // Two boards — design work and production work move through different steps.
+  const [track, setTrack] = useState<JobTrack>(search.get('track') === 'production' ? 'production' : 'design')
+  const shown = useMemo(() => (jobs ?? []).filter((j) => j.track === track && (!mine || j.assignee === me || j.createdBy === me)), [jobs, mine, me, track])
+  const countOf = (t: JobTrack) => (jobs ?? []).filter((j) => j.track === t && j.status !== 'shipped' && j.status !== 'approved').length
+  const columns = statusesOf(track)
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -86,8 +91,19 @@ function JobsPage() {
 
       {error && <p className="max-w-[1500px] mx-auto px-5 pt-4 text-sm text-red-700">{error}</p>}
 
-      <div className="max-w-[1500px] mx-auto px-3 sm:px-5 py-4 grid gap-3 lg:grid-cols-6">
-        {JOB_STATUSES.map((st) => {
+      <div className="max-w-[1500px] mx-auto px-3 sm:px-5 pt-3 flex items-center gap-1.5" role="tablist" aria-label="Board">
+        {JOB_TRACKS.map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={track === t}
+            onClick={() => { setTrack(t); const u = new URL(window.location.href); u.searchParams.set('track', t); window.history.replaceState(null, '', u) }}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold ${track === t ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'}`}>
+            {JOB_TRACK_LABEL[t]}
+            {jobs && <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${track === t ? 'bg-white/20' : 'bg-gray-200 text-gray-600'}`}>{countOf(t)}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className={`max-w-[1500px] mx-auto px-3 sm:px-5 py-4 grid gap-3 ${track === 'production' ? 'lg:grid-cols-6' : 'lg:grid-cols-4'}`}>
+        {columns.map((st) => {
           const col = shown.filter((j) => j.status === st)
           return (
             <section key={st} className="rounded-xl border border-gray-200 bg-gray-100/60 min-w-0">
@@ -97,7 +113,7 @@ function JobsPage() {
                 <span className="ml-auto text-[11px] font-semibold tabular-nums text-gray-500">{jobs ? col.length : ''}</span>
               </header>
               <div className="space-y-2 px-2 pb-2">
-                {jobs === null && st === 'pending' && <p className="px-1 text-xs text-gray-400">Loading…</p>}
+                {jobs === null && st === columns[0] && <p className="px-1 text-xs text-gray-400">Loading…</p>}
                 {col.map((j) => (
                   <a key={j.id} href={`/jobs/${encodeURIComponent(j.id)}`}
                     className="block rounded-lg border border-gray-200 bg-white p-2.5 hover:border-gray-300 hover:shadow-sm">
@@ -121,15 +137,17 @@ function JobsPage() {
       </div>
 
       {/* Mounted once the member list is in, so the designer default lands. */}
-      {open && jobs !== null && <NewJob members={members} leadId={search.get('lead') ?? ''} onClose={() => setOpen(false)}
+      {open && jobs !== null && <NewJob members={members} track={track} leadId={search.get('lead') ?? ''} onClose={() => setOpen(false)}
         onCreated={(j) => { window.location.href = `/jobs/${encodeURIComponent(j.id)}` }} />}
     </main>
   )
 }
 
-function NewJob({ members, leadId, onClose, onCreated }: { members: Member[]; leadId: string; onClose: () => void; onCreated: (j: Job) => void }) {
+function NewJob({ members, track, leadId, onClose, onCreated }: { members: Member[]; track: JobTrack; leadId: string; onClose: () => void; onCreated: (j: Job) => void }) {
   const [title, setTitle] = useState('')
-  const [type, setType] = useState<JobType>('estimate')
+  // A production order goes straight onto the Production board (a reorder of
+  // an approved design); everything else starts as design work.
+  const [type, setType] = useState<JobType>(track === 'production' ? 'production' : 'estimate')
   // The designer/estimator by default — that is who almost every job is for.
   const designers = Object.values(JOB_DESIGNERS).flat()
   const [assignee, setAssignee] = useState(() => members.find((m) => designers.includes(m.email))?.email ?? '')
@@ -142,7 +160,7 @@ function NewJob({ members, leadId, onClose, onCreated }: { members: Member[]; le
     e.preventDefault()
     setBusy(true); setErr('')
     const r = await fetch('/api/jobs', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title, type, assignee, dueAt, requirements, leadId }) })
+      body: JSON.stringify({ title, type, track: type === 'production' ? 'production' : 'design', assignee, dueAt, requirements, leadId }) })
     const j = await r.json().catch(() => ({}))
     setBusy(false)
     if (!r.ok) { setErr(j.error ?? 'Could not create the job.'); return }
