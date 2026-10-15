@@ -429,6 +429,38 @@ export function isQuoteSessionId(sessionId: string | null | undefined): boolean 
 // The customer's own name from a form body — "Full Name Kaija" / "Name: Kaija".
 // The sports intake script took the mail's first line (the SITE's name) as the
 // lead name, so records read "The Volleyball Uniforms" where "Kaija" belonged.
+/**
+ * A "name" the intake parser pulled off the wrong line. Forwarded customer
+ * emails carry no "Name:" label, so the positional fallback took whatever
+ * line came first — "Regards,", "currently pricing.", "*   500 pcs",
+ * "receive this email." (53 of 448 packaging leads in the 30 days to
+ * 2026-10-15). The bot greets by this, so it has to be caught here.
+ */
+export function isGarbageName(name: string | null | undefined): boolean {
+  const n = (name ?? '').trim()
+  if (!n) return false
+  if (n.length > 40) return true
+  if (/[.,:;!?*]$/.test(n) || /^[*\-\[#>]/.test(n)) return true
+  if (/\b(regards|email|pricing|thank|hello|hi|please|quote|order|unsubscribe|forward|message|reply|moment|transportation|canada|looking|minimum)\b/i.test(n)) return true
+  if (/\d{3}/.test(n) || !/[a-z]/i.test(n)) return true
+  return false
+}
+
+/** The sender named in a forwarded mail's own "From: Jane Doe <jane@x.com>" line. */
+export function nameFromForwardHeader(body: string): string | null {
+  const m = String(body || '').match(/^\s*>?\s*From:\s*"?([^"<\n]{2,60}?)"?\s*(?:\||<)/im)
+  const v = m?.[1]?.trim().replace(/\s*\|.*$/, '') ?? ''
+  if (!v || /@/.test(v) || isGarbageName(v)) return null
+  return v
+}
+
+/** Machine mail that is never a lead: DMARC aggregate reports, ticket-system auto-replies. */
+export function isMachineMail(email: string, body: string): string | null {
+  if (/dmarc/i.test(email) || /^\s*This is a DMARC aggregate report/im.test(body)) return 'DMARC report'
+  if (/##-\s*Please type your reply above this line\s*-##/i.test(body)) return 'ticket-system auto-reply'
+  return null
+}
+
 export function customerNameFromBody(body: string): string | null {
   const m = String(body || '').match(/^\s*(?:Full\s+)?Name:?\s+(.+?)\s*$/im)
   const v = m?.[1]?.trim() ?? ''

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllowedMime, parseAttachment, uniqueAttachmentPath, type AttachmentInfo } from '@/lib/attachment'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody, isGarbageName, nameFromForwardHeader, isMachineMail } from '@/lib/quoteintake'
 import { isRetiredLeadSite, siteWorkspace } from '@/lib/workspaces'
 import { sendPushToWorkspace } from '@/lib/push'
 import { recordIntakeDrop } from '@/lib/intakedrop'
@@ -137,7 +137,11 @@ export async function POST(req: NextRequest) {
   const { data: siteNameRows } = await supabase.from('sites').select('name')
   const brandNames = new Set((siteNameRows ?? []).map((r) => String(r.name ?? '').trim().toLowerCase()).filter(Boolean))
   const rawName = typeof name === 'string' ? name.trim() : ''
-  const leadName = (!rawName || brandNames.has(rawName.toLowerCase())) ? (customerNameFromBody(bodyText) ?? (brandNames.has(rawName.toLowerCase()) ? '' : rawName)) : rawName
+  // A brand name or a line the parser grabbed by mistake is not the customer's
+  // name: the form's own Name line, else the forwarded From: header, else none.
+  const leadName = (!rawName || brandNames.has(rawName.toLowerCase()) || isGarbageName(rawName))
+    ? (customerNameFromBody(bodyText) ?? nameFromForwardHeader(bodyText) ?? '')
+    : rawName
   const files = parseIntakeAttachments(body.attachments)
   const createdAt = typeof receivedAt === 'string' && !isNaN(new Date(receivedAt).getTime())
     ? receivedAt : new Date().toISOString()
@@ -149,6 +153,12 @@ export async function POST(req: NextRequest) {
   // fails for Storebot gets the Shopping listings flagged. So the refusal lives
   // here, in the CRM, after the order has already succeeded, and it is recorded
   // like every other drop rather than vanishing.
+  const machine = isMachineMail(cleanEmail, bodyText)
+  if (machine) {
+    await recordIntakeDrop({ siteId, reason: 'spam', at: createdAt, detail: machine, email: cleanEmail || undefined, excerpt: bodyText })
+    return NextResponse.json({ success: true, spam: true })
+  }
+
   if (isMerchantTestOrder(cleanEmail)) {
     await recordIntakeDrop({
       siteId, reason: 'spam', at: createdAt, detail: 'Google Merchant Center test order (Storebot)',
