@@ -155,6 +155,9 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   TPM: 'thepolymailers',
   TFT: 'thefoodtrays',
   TPB: 'thepillowboxes',
+  // 2026-10-15: thecustomfolders.com (widget since 12 Oct) was in no intake
+  // map; its first two forms were skipped as not-a-form.
+  TCF: 'thecustomfolders',
 
   // 2026-08-29: the SPORTS workspace joins the quote intake. Nothing about the
   // routing changes — a lead's dashboard is decided by its site_id

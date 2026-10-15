@@ -265,6 +265,7 @@ var STORE_NAME_CODES = {
   'the die cut stickers': 'TDCS',
   'custom perfume boxes': 'CPB',
   'shop display boxes': 'SDB',
+  'the custom folders': 'TCF',
 };
 
 // Own domain per site code — used to make sure a lead's "email" is never the
@@ -310,6 +311,10 @@ var SITE_DOMAINS = {
   TPM: 'thepolymailers.com',
   TFT: 'thefoodtrays.com',
   TPB: 'thepillowboxes.com',
+  // 2026-10-15: thecustomfolders.com got the widget on 12 Oct but was never
+  // added here, so its first two quote forms (Monica Baalmann, Christine
+  // Azarmanesh, 15 Oct) resolved to no site and were skipped as not-a-form.
+  TCF: 'thecustomfolders.com',
 };
 
 /**
@@ -333,6 +338,7 @@ var SENDER_NAMES = {
   'the food trays': 'TFT',
   'the poly mailers': 'TPM',
   'lip boxes': 'LB',
+  'the custom folders': 'TCF',
 };
 
 function codeFromSenderName_(fromHeader) {
@@ -1688,6 +1694,15 @@ function parseLeadBody_(body) {
     // though every field was right there. Rewriting the line to the canonical
     // "Label: value" shape here fixes every matcher below at once.
     // A bullet ("* Item") can't match: the closing asterisk is required.
+    // thecustomfolders.com (15 Oct 2026) mails a two-column table with
+    // lower-case labels and no colon at all: "name Monica Baalmann", "phone
+    // 3168413025", "details 9 x 12, luxury finish…". Read as free text, the
+    // first line ("form Quick quote") became the name AND the product and the
+    // phone was lost. Exact lower-case field words only, so a sentence that
+    // happens to start with "Name" or "Email" is left alone.
+    var tm = line.match(/^(form|name|email|phone|product|quantity|details|company|message|page)\s+(\S.*)$/);
+    if (tm) line = tm[1].charAt(0).toUpperCase() + tm[1].slice(1) + ': ' + tm[2].trim();
+
     var em = line.match(/^\*{1,2}\s*([A-Za-z][A-Za-z \-&]{0,30}?)\s*:?\s*\*{1,2}\s*(.*)$/);
     if (em) {
       var emValue = em[2].trim();
