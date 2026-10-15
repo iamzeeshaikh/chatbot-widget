@@ -133,3 +133,15 @@ back to back)
 - Offer stock or premade boxes as a product.
 - Keep writing after "found another option", "remove us", or any reply at all
   — a reply hands the lead to the agent.
+
+## 2026-10-15 — the body is drafted per customer
+
+The fixed templates above are now the FALLBACK. `lib/quotebotdraft.ts` has the
+model (CLAUDE_WORK_MODEL, then CLAUDE_CHAT_MODEL) write the first email and the
+reply from the customer's own enquiry: restate their specifics, acknowledge
+every question they asked, ask only what the assessment marks missing. Hard
+checks (`draftProblem`) reject a price, percentage, turnaround, delivery
+promise, "absolutely/definitely", a wrong name, >160 words or a missing
+sign-off; a rejected draft is retried once with the reason, then falls back to
+the template. Steve's complaint that prompted it: "bot har customer ko same
+generic reply kiye jaa rha hai".
