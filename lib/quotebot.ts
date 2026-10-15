@@ -220,27 +220,43 @@ function siteAlias(aliases: SendAsAlias[], siteId: string, siteName: string): Se
   }) ?? null
 }
 
-/** How many leads the bot gave each agent this week, so neither inbox gets every one. */
-async function weeklyLoad(now: Date): Promise<Map<string, number>> {
+/**
+ * How many new leads the bot gave each agent today and this week, so neither
+ * inbox gets every one. Today (the agents' day, Pakistan time) is weighed
+ * first: balancing on the week alone let one day run 9–4 to Samir and the next
+ * 11–7 to Steve as the tally caught up — Steve: "ye assign bhi 50 50 nhi kar
+ * rha, kal almost 70-80% mjhe assign ki hain". Each day is now split within
+ * one lead; the week count only breaks the tie.
+ */
+async function weeklyLoad(now: Date): Promise<Map<string, { day: number; week: number }>> {
   const since = new Date(now.getTime() - 7 * 864e5).toISOString()
+  const today = agentDay(now)
   // Lease rows (one per run, ~2,000 a week) are left out and the rest paged:
   // PostgREST hands back at most 1000 rows, and with the lease rows in, the
   // week's real first emails fell off the end within a few days.
   const data = await fetchAllPages(
-    () => supabase.from('chat_logs').select('message')
+    () => supabase.from('chat_logs').select('message,created_at')
       .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
       .order('created_at', { ascending: true }).order('id', { ascending: true }),
     50000,
   )
-  const load = new Map<string, number>(BOT_AGENTS.map((a) => [a, 0]))
+  const load = new Map<string, { day: number; week: number }>(BOT_AGENTS.map((a) => [a, { day: 0, week: 0 }]))
   for (const r of data) {
     const e = parseBotLedger(r.message)
     // New leads only. Counting follow-ups and replies too made one long
     // conversation (a test lead with a dozen follow-ups) push every new lead
     // to the other agent for a week.
-    if (e?.step === 'first' && e.state === 'sent' && e.agent && load.has(e.agent)) load.set(e.agent, load.get(e.agent)! + 1)
+    if (e?.step !== 'first' || e.state !== 'sent' || !e.agent || !load.has(e.agent)) continue
+    const l = load.get(e.agent)!
+    l.week++
+    if (agentDay(new Date(e.at ?? r.created_at)) === today) l.day++
   }
   return load
+}
+
+/** The calendar day in Pakistan (UTC+5), where both agents sit. */
+function agentDay(d: Date): string {
+  return new Date(d.getTime() + 5 * 3600e3).toISOString().slice(0, 10)
 }
 
 export async function assessQuote(message: string, name: string | null): Promise<QuoteAssessment | null> {
@@ -302,7 +318,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
   const cfg = googleConfig(origin)
   // Counted up as this run hands leads out, not just read once — otherwise a
   // run with five new leads gives all five to whoever was lighter at the start.
-  let load: Map<string, number> | null = null
+  let load: Map<string, { day: number; week: number }> | null = null
   let sends = 0
   // Leads that reached the CRM late (lib/intakelag.ts: 45+ minutes after the
   // customer wrote). By then a person may already have answered from Gmail —
@@ -396,7 +412,10 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (!cfg) { act({ state: 'retry-later', why: 'Google OAuth is not configured' }); continue }
     load ??= await weeklyLoad(now)
     const tally = load
-    const candidates = preset ? [preset] : [...BOT_AGENTS].sort((a, b) => tally.get(a)! - tally.get(b)!)
+    const candidates = preset ? [preset] : [...BOT_AGENTS].sort((a, b) => {
+      const x = tally.get(a)!, y = tally.get(b)!
+      return (x.day - y.day) || (x.week - y.week)
+    })
     let agent: string | null = null
     let alias: SendAsAlias | null = null
     for (const who of candidates) {
@@ -419,7 +438,8 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (drafted) mail.text = drafted.text
     const missing = missingOf(assessment)
     const preview = { agent, from: alias.email, to, subject: mail.subject, text: mail.text, complete: mail.complete, missing }
-    tally.set(agent, (tally.get(agent) ?? 0) + 1)
+    const used = tally.get(agent) ?? { day: 0, week: 0 }
+    tally.set(agent, { day: used.day + 1, week: used.week + 1 })
 
     if (dryRun) { act({ state: 'would-send', why: assessment.reason, ...preview }); continue }
     if (sends >= MAX_SENDS_PER_RUN) { act({ state: 'retry-later', why: 'per-run send cap reached' }); continue }
