@@ -538,6 +538,15 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   const pick = (field: 'name' | 'email' | 'phone') =>
     overrides.get(field) ?? (contact[field] || capture[field] || (lead?.[field] ?? '') || '')
   const effective = { name: pick('name'), email: pick('email'), phone: pick('phone') }
+  // No name anywhere, but the customer has emailed us: their own mail client
+  // says who they are ("Travis Cole"). Without this a sports record whose
+  // address is masked showed "•••••• hidden" as the customer's name.
+  if (!effective.name) {
+    const named = [...emailsIn.values()]
+      .filter((e) => e.fromName && !e.fromName.includes('@') && !/mailer-daemon|postmaster|no-?reply/i.test(e.from))
+      .sort((a, b) => (b.at || '').localeCompare(a.at || ''))[0]
+    if (named?.fromName) effective.name = named.fromName.replace(/^["']|["']$/g, '').trim()
+  }
 
   // ── Messages ──────────────────────────────────────────────────────────────
   const messages = logs.filter((r) => r.role === 'user' || r.role === 'admin' || r.role === 'assistant' || r.role === 'visitor')
