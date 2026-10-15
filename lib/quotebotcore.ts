@@ -46,7 +46,7 @@ export function missingOf(a: QuoteAssessment): Missing[] {
 }
 
 // ── The model's instructions ────────────────────────────────────────────────
-export const ASSESS_SYSTEM = `You read one enquiry that reached a custom packaging company (boxes, cups, sleeves, wax paper, stickers, mailers, trays, inserts and similar) and report, as JSON only, what the customer has told us.
+export const ASSESS_SYSTEM = `You read one enquiry that reached a custom packaging company (boxes, cups, sleeves, wax paper, stickers, mailers, trays, inserts, presentation and tax-return folders and similar) and report, as JSON only, what the customer has told us. We run many websites, one per product line (thecustomfolders.com, thewaxpapers.co, shopcardboardboxes.com, …): the site named in a form, in a "Site:" line or in "New quote request from <site>" is OUR OWN site that the customer used, never another company.
 
 Return exactly this object and nothing else:
 {"is_quote": boolean, "language": "en", "first_name": string|null, "product": string, "style_label": string, "size_label": string, "has_size": boolean, "has_style": boolean, "has_quantity": boolean, "has_deadline": boolean, "reason": string}

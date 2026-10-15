@@ -367,24 +367,30 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       if (talker) { await skip(`${talker} is already talking to them in the chat`); continue }
     }
 
+    // The bot stands down but the lead must not sit there unowned: Samir gets
+    // it with a task and a push, so a person answers instead of nobody.
+    const handOver = async (why: string, title: string, push: { title: string; body: string }, tag: string) => {
+      await skip(why)
+      if (dryRun) return
+      await setAssignment(id, lead.site_id, LATE_LEAD_OWNER)
+      const task: CrmTaskEntry = {
+        id: newTaskId(), title: title.slice(0, 200),
+        type: 'email', due_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        assignee: LATE_LEAD_OWNER, status: 'open', created_by: BOT_ACTOR, created_at: now.toISOString(),
+      }
+      await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+      await sendPushToMember(LATE_LEAD_OWNER, 'packaging', { ...push, url: `/leads/${encodeURIComponent(id)}`, tag: `${tag}-${id}` }).catch(() => 0)
+    }
+    const who = lead.name || lead.email || 'This customer'
+
     const lateBy = late.get(lead.id)
     if (lateBy !== undefined) {
-      await skip(`reached the CRM ${lateBy} min after the customer wrote — a person may already have answered from Gmail`)
-      if (!dryRun) {
-        await setAssignment(id, lead.site_id, LATE_LEAD_OWNER)
-        const who = lead.name || lead.email || 'This customer'
-        const task: CrmTaskEntry = {
-          id: newTaskId(),
-          title: `${who} reached ZeeOps ${lateBy} min late — check Gmail (dev@) for a reply already sent, then answer from here`.slice(0, 200),
-          type: 'email', due_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-          assignee: LATE_LEAD_OWNER, status: 'open', created_by: BOT_ACTOR, created_at: now.toISOString(),
-        }
-        await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-        await sendPushToMember(LATE_LEAD_OWNER, 'packaging', {
-          title: 'Late enquiry — check Gmail first', body: `${who}: arrived ${lateBy} min late. The bot did not email them.`,
-          url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-late-${id}`,
-        }).catch(() => 0)
-      }
+      await handOver(
+        `reached the CRM ${lateBy} min after the customer wrote — a person may already have answered from Gmail`,
+        `${who} reached ZeeOps ${lateBy} min late — check Gmail (dev@) for a reply already sent, then answer from here`,
+        { title: 'Late enquiry — check Gmail first', body: `${who}: arrived ${lateBy} min late. The bot did not email them.` },
+        'quotebot-late',
+      )
       continue
     }
 
@@ -426,7 +432,18 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
         console.error(`[quotebot] aliases for ${who} unavailable:`, e instanceof Error ? e.message : e)
       }
     }
-    if (!agent || !alias) { await skip(`no verified ${lead.site_id} mailbox for ${candidates.join(' / ')}`); continue }
+    if (!agent || !alias) {
+      // A new site with no send-as alias yet (thecustomfolders.com, 15 Oct
+      // 2026: its first two leads would have been skipped in silence).
+      const host = siteName.get(lead.site_id) ?? lead.site_id
+      await handOver(
+        `no verified ${lead.site_id} mailbox for ${candidates.join(' / ')}`,
+        `${who} — ${host} has no sending mailbox in ZeeOps yet. Reply from Gmail (dev@) and ask the owner to add a send-as alias for ${lead.site_id}`,
+        { title: 'New enquiry — no mailbox for this site yet', body: `${who} (${host}): the bot cannot send from this site. Please reply from Gmail.` },
+        'quotebot-nomailbox',
+      )
+      continue
+    }
 
     const mail = buildFirstEmail(assessment, { siteName: siteName.get(lead.site_id) ?? lead.site_id, fromChat: kind === 'chat' })
     // Written for this customer from what they wrote (lib/quotebotdraft.ts);
