@@ -51,6 +51,7 @@ import { CRM_EMAIL_IN_ROLE, parseCrmEmailIn } from './emailreply'
 import { googleConfig, verifiedAliases, sendEmail, fetchThread, GmailAuthError, type SendAsAlias } from './gmail'
 import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
+import { draftCustomerEmail } from './quotebotdraft'
 import { buildSendSignature } from './sendsignature'
 import { unsubscribeUrl, unsubscribedSet } from './unsubscribe'
 import { newTaskId, type CrmTaskEntry } from './tasks'
@@ -409,6 +410,13 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (!agent || !alias) { await skip(`no verified ${lead.site_id} mailbox for ${candidates.join(' / ')}`); continue }
 
     const mail = buildFirstEmail(assessment, { siteName: siteName.get(lead.site_id) ?? lead.site_id, fromChat: kind === 'chat' })
+    // Written for this customer from what they wrote (lib/quotebotdraft.ts);
+    // the template above stays as the fallback and keeps the subject.
+    const drafted = await draftCustomerEmail({
+      kind: 'first', fromChat: kind === 'chat', enquiry: quoteTextForAssessment(lead.message ?? '', lead.name),
+      assessment, siteName: siteName.get(lead.site_id) ?? lead.site_id,
+    })
+    if (drafted) mail.text = drafted.text
     const missing = missingOf(assessment)
     const preview = { agent, from: alias.email, to, subject: mail.subject, text: mail.text, complete: mail.complete, missing }
     tally.set(agent, (tally.get(agent) ?? 0) + 1)
@@ -832,6 +840,14 @@ export async function answerReply(
   const assessment = await assessQuote(combined, lead?.name ?? null)
   if (!assessment) return { state: 'failed', why: 'could not read the enquiry (model unavailable)' }
   const answer = buildReplyAnswer(assessment, assessment.firstName)
+  const priorBot = (logRows ?? []).filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message))
+    .filter((e): e is CrmEmailEntry => !!e && e.bot === true).pop()
+  const drafted = await draftCustomerEmail({
+    kind: 'reply', fromChat: false, enquiry: quoteTextForAssessment(lead?.message ?? '', lead?.name ?? null),
+    weAsked: (priorBot?.body ?? '').split('\n--\n')[0], replies: all.map((m) => m.body),
+    assessment, siteName: (await supabase.from('sites').select('name').eq('site_id', siteId).maybeSingle()).data?.name ?? siteId,
+  })
+  if (drafted) answer.text = drafted.text
   if (dryRun) return { state: 'would-send', complete: answer.complete, text: answer.text }
 
   const cfg = googleConfig(PUBLIC_BASE)

@@ -93,7 +93,10 @@ async function callAnthropic(o: CompleteOpts): Promise<{ text: string; model: st
     body: JSON.stringify({
       model,
       max_tokens: o.anthropicMaxTokens ?? o.maxTokens,
-      temperature: o.temperature ?? 0.7,
+      // Claude 5 models reject `temperature` outright ("deprecated for this
+      // model", 400) — which silently sent every CLAUDE_WORK_MODEL call to the
+      // Haiku/Groq fallback until 2026-10-15. Only older models get one.
+      ...(/-5(-|$)/.test(model) ? {} : { temperature: o.temperature ?? 0.7 }),
       system: o.system,
       messages: o.messages,
     }),
