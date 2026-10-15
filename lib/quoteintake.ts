@@ -347,7 +347,7 @@ const FORM_BOT_TEMPLATE_RE = /i would like more information\.?\s*please contact 
 // code to a quote — but the executable check is deliberately confined to an
 // attachment/artwork LINE, because a forwarded old-site body can legitimately
 // carry ".php" inside a Page URL.
-const RESERVED_EMAIL_DOMAIN_RE = /@[A-Za-z0-9.-]*\.(?:local|test|invalid|example)\b|@localhost\b/i
+const RESERVED_EMAIL_DOMAIN_RE = /@[A-Za-z0-9.-]*\.(?:local|test|invalid|example)\b|@localhost\b|@example\.(?:com|net|org)\b/i
 const EXPLOIT_ATTACHMENT_RE = /^.*\b(?:attachment|attached|artwork|file)\b.*\.(?:php\d?|phtml|phar|asp|aspx|jsp|cgi|exe|bat)\b/im
 
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
@@ -455,6 +455,24 @@ export function nameFromForwardHeader(body: string): string | null {
 }
 
 /** Machine mail that is never a lead: DMARC aggregate reports, ticket-system auto-replies. */
+/**
+ * A test submission — ours or a security audit's — not a customer. On
+ * 15 Oct 2026 nine "[Security test] escape probe" forms (name "<b>x</b>",
+ * email a@b.com / probe-a@example.com, phone 0000000000) sat in the pipeline
+ * as New leads scored 3/5 and 4/5: example.com is reserved but the regex only
+ * knew ".example" as a TLD, and nothing looked at the name or the phone.
+ * Returns what gave it away, or null.
+ */
+export function isTestSubmission(name: string | null | undefined, email: string | null | undefined, phone: string | null | undefined, body: string): string | null {
+  const n = (name ?? '').trim(), e = (email ?? '').trim().toLowerCase()
+  if (/\[security test\]|security hardening probe|\bescape probe\b|\brelay probe\b|\bautoreply probe\b/i.test(body)) return 'security test probe'
+  if (/<\/?[a-z][^>]*>/i.test(n)) return 'HTML tag in the name'
+  if (/@example\.(com|net|org)$|@[a-z0-9.-]*\.(local|test|invalid|example)$|@localhost$/i.test(e) || /^[a-z]@[a-z]\.(com|net|org)$/i.test(e)) return `test address ${e}`
+  const digits = (phone ?? '').replace(/\D/g, '')
+  if (digits.length >= 7 && /^(\d)\1+$/.test(digits)) return `test phone ${phone}`
+  return null
+}
+
 export function isMachineMail(email: string, body: string): string | null {
   if (/dmarc/i.test(email) || /^\s*This is a DMARC aggregate report/im.test(body)) return 'DMARC report'
   if (/##-\s*Please type your reply above this line\s*-##/i.test(body)) return 'ticket-system auto-reply'

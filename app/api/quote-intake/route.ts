@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllowedMime, parseAttachment, uniqueAttachmentPath, type AttachmentInfo } from '@/lib/attachment'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody, isGarbageName, nameFromForwardHeader, isMachineMail } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody, isGarbageName, nameFromForwardHeader, isMachineMail, isTestSubmission } from '@/lib/quoteintake'
 import { isRetiredLeadSite, siteWorkspace } from '@/lib/workspaces'
 import { sendPushToWorkspace } from '@/lib/push'
 import { recordIntakeDrop } from '@/lib/intakedrop'
@@ -156,6 +156,12 @@ export async function POST(req: NextRequest) {
   const machine = isMachineMail(cleanEmail, bodyText)
   if (machine) {
     await recordIntakeDrop({ siteId, reason: 'spam', at: createdAt, detail: machine, email: cleanEmail || undefined, excerpt: bodyText })
+    return NextResponse.json({ success: true, spam: true })
+  }
+
+  const probe = isTestSubmission(rawName, cleanEmail, cleanPhone, bodyText)
+  if (probe) {
+    await recordIntakeDrop({ siteId, reason: 'spam', at: createdAt, detail: `test submission: ${probe}`, name: leadName || undefined, email: cleanEmail || undefined, excerpt: bodyText })
     return NextResponse.json({ success: true, spam: true })
   }
 
