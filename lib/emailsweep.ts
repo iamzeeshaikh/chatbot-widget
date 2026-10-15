@@ -28,7 +28,9 @@ import {
   parsePrefs, prefsFor, quietHoldUntil,
 } from './reminders'
 import { sendPushToMember } from './push'
-import { siteWorkspace, hasFeature } from './workspaces'
+import { siteWorkspace, hasFeature, SPORTS_SITES } from './workspaces'
+import { SITE_DOMAINS } from './sitedomains'
+import { QUOTE_TAG } from './quoteintake'
 import { currentStateForIds } from './leadstate'
 import { CRM_EMAIL_ROLE, parseCrmEmail, newEmailId, makeSnippet, type CrmEmailEntry } from './crmemail'
 import { harvestContact } from './contactharvest'
@@ -36,7 +38,7 @@ import {
   CRM_EMAIL_IN_ROLE, parseCrmEmailIn, splitQuoted, inboundSnippet, parseFromHeader,
   MAX_INBOUND_BODY, CRM_EMAIL_SWEEP_ROLE, type CrmEmailInEntry, CRM_EMAIL_READ_ROLE } from './emailreply'
 import {
-  googleConfig, fetchThread, fetchAttachment, connectionFor, GmailAuthError, GmailScopeError, searchCustomerMail,
+  googleConfig, fetchThread, fetchAttachment, connectionFor, GmailAuthError, GmailScopeError, searchCustomerMail, searchIntakeMessageIds,
   GmailRateError,
   type GoogleConfig, type InboundMessage,
 } from './gmail'
@@ -111,6 +113,9 @@ export interface SweepAgentResult {
   rateLimited?: boolean
   /** Threads a customer started themselves, found by the customer-mail search. */
   customerThreads?: number
+  /** Mirrored mailbox only: other inbound threads read this run, and leads created for strangers. */
+  mirrored?: number
+  newLeads?: number
 }
 
 export interface SweepResult {
@@ -149,7 +154,7 @@ export interface ThreadRef {
  * live threads the same 60 won every run forever and thread 61 was never
  * looked at again, so its replies were never captured and nothing said so.
  */
-async function allThreads(now: Date): Promise<ThreadRef[]> {
+async function allThreads(now: Date, inboundThreadIds?: Set<string>): Promise<ThreadRef[]> {
   const since = new Date(now.getTime() - THREAD_ACTIVE_DAYS * 86_400_000).toISOString()
 
   const seen = new Map<string, ThreadRef>()
@@ -194,6 +199,7 @@ async function allThreads(now: Date): Promise<ThreadRef[]> {
     for (const r of data ?? []) {
       const e = parseCrmEmailIn(r.message)
       if (!e?.threadId) continue
+      inboundThreadIds?.add(e.threadId)
       const t = seen.get(e.threadId)
       if (t && r.created_at > t.lastAt) t.lastAt = r.created_at
     }
@@ -350,6 +356,88 @@ async function customerThreads(
 }
 
 /**
+ * Mailboxes mirrored IN FULL: every email that lands there reaches the CRM
+ * Inbox, the way it reaches Gmail — a known customer's mail on their record, a
+ * stranger's as a new lead. Sports has exactly one mailbox and the owner asked
+ * for this on 2026-10-15 after Jennifer Overman's "Proof and payment" mails sat
+ * in Gmail for two weeks. Packaging agents keep the narrower customer search.
+ */
+export const MIRRORED_MAILBOXES: Record<string, { workspace: 'sports' | 'packaging'; fallbackSite: string }> = {
+  'info@thebaseballjerseys.com': { workspace: 'sports', fallbackSite: 'baseballjerseys' },
+}
+const OWN_DOMAINS = new Set([...Object.values(SITE_DOMAINS), 'zeeops.dev', 'zeesportswear.com', 'shopcardboardboxes.com', 'zeecustomboxes.com'])
+
+function isOurs(email: string, agent: string): boolean {
+  const e = email.toLowerCase()
+  if (!e || e === agent.toLowerCase()) return true
+  const d = e.split('@')[1] ?? ''
+  return OWN_DOMAINS.has(d) || isNoiseSender(e) || /dmarc|abuse@|postmaster|notification/.test(e)
+}
+
+/** The site an inbound mail belongs to, from the alias it was addressed to. */
+function siteFromRecipients(to: string, sites: readonly string[], fallback: string): string {
+  const lower = (to || '').toLowerCase()
+  for (const site of sites) {
+    const d = SITE_DOMAINS[site]
+    if (d && lower.includes(`@${d}`)) return site
+  }
+  return fallback
+}
+
+/** The lead this customer is already on in the workspace, newest first. */
+async function leadFor(email: string, sites: readonly string[]): Promise<{ sessionId: string; siteId: string } | null> {
+  const { data: rows } = await supabase.from('leads').select('id, site_id, created_at')
+    .ilike('email', email).in('site_id', sites).order('created_at', { ascending: false }).limit(1)
+  const { data: caps } = await supabase.from('chat_logs').select('session_id, site_id, message, created_at')
+    .eq('role', 'lead_capture').in('site_id', sites).ilike('message', `%${email.replace(/%/g, '')}%`)
+    .order('created_at', { ascending: false }).limit(5)
+  const cap = (caps ?? []).find((c) => { try { return String(JSON.parse(c.message)?.email ?? '').toLowerCase() === email } catch { return false } })
+  const lead = rows?.[0]
+  if (lead && (!cap || lead.created_at >= cap.created_at)) return { sessionId: `quote-${lead.id}`, siteId: lead.site_id }
+  if (cap) return { sessionId: cap.session_id, siteId: cap.site_id }
+  return null
+}
+
+async function mirrorThreads(
+  agent: string, cfg: NonNullable<ReturnType<typeof googleConfig>>,
+  known: Set<string>, days: number, deadline: number, dryRun: boolean,
+): Promise<{ refs: ThreadRef[]; newLeads: number }> {
+  const mb = MIRRORED_MAILBOXES[agent.toLowerCase()]
+  if (!mb) return { refs: [], newLeads: 0 }
+  const sites = mb.workspace === 'sports' ? SPORTS_SITES : []
+  const hits = await searchIntakeMessageIds(agent, cfg, `newer_than:${days}d -in:sent -in:chats -in:spam -in:trash`, 200)
+  const threadIds = [...new Set(hits.map((h) => h.threadId))].filter((t) => !known.has(t)).slice(0, 30)
+  const refs: ThreadRef[] = []
+  let newLeads = 0
+  for (const wave of chunks(threadIds, 5)) {
+    if (Date.now() > deadline) break
+    const read = await Promise.all(wave.map(async (threadId) => ({ threadId, msgs: await fetchThread(agent, cfg, threadId) })))
+    for (const { threadId, msgs } of read) {
+      const first = [...msgs].sort((a, b) => a.at.localeCompare(b.at)).find((m) => !isOurs(parseFromHeader(m.from).email, agent))
+      if (!first) continue   // our own outbound, a bounce, a system notice
+      const from = parseFromHeader(first.from)
+      const email = from.email.toLowerCase()
+      let lead = await leadFor(email, sites)
+      if (!lead && dryRun) { newLeads++; continue }   // would create a lead; a dry run writes nothing
+      if (!lead) {
+        const siteId = siteFromRecipients(first.to, sites, mb.fallbackSite)
+        const body = splitQuoted(first.bodyText ?? '').visible.trim().slice(0, 1500)
+        const { data: ins, error } = await supabase.from('leads').insert([{
+          site_id: siteId, name: from.name?.replace(/^["']|["']$/g, '').trim() || null, email, phone: null,
+          message: `${QUOTE_TAG}Emailed ${addressOf(first.to) ?? agent} directly — ${first.subject || '(no subject)'}\n\n${body}`,
+          created_at: first.at,
+        }]).select('id').single()
+        if (error || !ins?.id) continue
+        lead = { sessionId: `quote-${ins.id}`, siteId }
+        newLeads++
+      }
+      refs.push({ threadId, sessionId: lead.sessionId, siteId: lead.siteId, agent, lastAt: new Date().toISOString(), to: email })
+    }
+  }
+  return { refs, newLeads }
+}
+
+/**
  * One pass. `origin` is needed only to build the Google redirect URI, which the
  * token refresh requires; nothing here depends on the request.
  */
@@ -368,7 +456,8 @@ export async function runEmailSweep(
   // Rotation state rides on the previous run's status row, so no new storage
   // and nothing to keep in sync.
   const prev = await lastSweepStatus()
-  const all = await allThreads(now)
+  const inboundThreadIds = new Set<string>()
+  const all = await allThreads(now, inboundThreadIds)
   const sel = selectThreads(all, { now, cursor: prev?.cursor ?? null })
   const threads = sel.picked
   const captured = await alreadyCaptured([...new Set(threads.map((t) => t.sessionId))])
@@ -377,8 +466,9 @@ export async function runEmailSweep(
   // rather than per thread.
   const byAgent = new Map<string, ThreadRef[]>()
   for (const t of all) if (!byAgent.has(t.agent)) byAgent.set(t.agent, [])
+  for (const a of Object.keys(MIRRORED_MAILBOXES)) if (!byAgent.has(a)) byAgent.set(a, [])
   for (const t of threads) byAgent.get(t.agent)!.push(t)
-  const knownThreads = new Set(all.map((t) => t.threadId))
+  const knownThreads = new Set([...all.map((t) => t.threadId), ...inboundThreadIds])
 
   const results: SweepAgentResult[] = []
   // Replies captured THIS run — the only ones worth notifying about. Anything
@@ -414,6 +504,22 @@ export async function runEmailSweep(
       }
     } catch (e) {
       res.error = `customer-mail search: ${e instanceof Error ? e.message : 'failed'}`
+    }
+    // A mirrored mailbox: everything else that arrived, too (see MIRRORED_MAILBOXES).
+    if (MIRRORED_MAILBOXES[agent.toLowerCase()]) {
+      try {
+        const m = await mirrorThreads(agent, cfg, new Set([...knownThreads, ...refs.map((r) => r.threadId)]),
+          Math.max(1, Math.min(60, opts.customerDays ?? CUSTOMER_SEARCH_DAYS)), Date.now() + 15_000, dryRun)
+        if (m.refs.length) {
+          for (const id of await alreadyCaptured([...new Set(m.refs.map((t) => t.sessionId))])) captured.add(id)
+          refs.push(...m.refs)
+          res.threads = refs.length
+          res.mirrored = m.refs.length
+          res.newLeads = m.newLeads
+        }
+      } catch (e) {
+        res.error = `mailbox mirror: ${e instanceof Error ? e.message : 'failed'}`
+      }
     }
 
     // Fetches run in waves rather than one after another: sequentially, 240
