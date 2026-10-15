@@ -4,7 +4,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { runEmailSweep, lastSweepStatus } from '@/lib/emailsweep'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 120
 
 // The scheduled inbound-reply sweep.
 //
@@ -56,7 +56,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const dryRun = req.nextUrl.searchParams.get('dryRun') === '1'
-    const result = await runEmailSweep(req.nextUrl.origin, new Date(), { dryRun })
+    // ?customerDays=N (admin only): look N days back for customer-started
+    // mail instead of the routine 2 — the one-off catch-up after a gap.
+    const cd = Number(req.nextUrl.searchParams.get('customerDays') || '')
+    const customerDays = auth.by.startsWith('admin:') && cd > 0 ? cd : undefined
+    const onlyAgent = auth.by.startsWith('admin:') ? req.nextUrl.searchParams.get('agent') || undefined : undefined
+    const result = await runEmailSweep(req.nextUrl.origin, new Date(), { dryRun, customerDays, onlyAgent })
     return NextResponse.json({ ok: true, by: auth.by, ...result })
   } catch (err) {
     // A total failure is still reported rather than swallowed — the cron log

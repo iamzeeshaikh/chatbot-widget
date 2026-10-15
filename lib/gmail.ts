@@ -797,6 +797,16 @@ export async function searchIntakeMessageIds(agentEmail: string, cfg: GoogleConf
   return ((j as { messages?: { id: string; threadId: string }[] }).messages ?? [])
 }
 
+/**
+ * Message ids from a search of an AGENT mailbox. Only lib/emailsweep.ts calls
+ * it, and only with `from:(<addresses this agent has emailed>)` — mail a known
+ * customer started under a new subject. Never a general inbox read.
+ */
+export async function searchCustomerMail(agentEmail: string, cfg: GoogleConfig, q: string): Promise<{ id: string; threadId: string }[]> {
+  if (!/^from:\(/.test(q)) throw new Error('customer-mail search must be scoped to customer addresses')
+  return searchIntakeMessageIds(agentEmail, cfg, q, 100)
+}
+
 /** Every message in one thread we started. Throws rather than returning []. */
 export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadId: string): Promise<InboundMessage[]> {
   const token = await accessTokenFor(agentEmail, cfg)

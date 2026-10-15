@@ -36,7 +36,7 @@ import {
   CRM_EMAIL_IN_ROLE, parseCrmEmailIn, splitQuoted, inboundSnippet, parseFromHeader,
   MAX_INBOUND_BODY, CRM_EMAIL_SWEEP_ROLE, type CrmEmailInEntry, CRM_EMAIL_READ_ROLE } from './emailreply'
 import {
-  googleConfig, fetchThread, fetchAttachment, connectionFor, GmailAuthError, GmailScopeError,
+  googleConfig, fetchThread, fetchAttachment, connectionFor, GmailAuthError, GmailScopeError, searchCustomerMail,
   GmailRateError,
   type GoogleConfig, type InboundMessage,
 } from './gmail'
@@ -109,6 +109,8 @@ export interface SweepAgentResult {
   needsReconnect?: boolean
   /** Gmail throttled us. Nothing is broken; the next run retries. */
   rateLimited?: boolean
+  /** Threads a customer started themselves, found by the customer-mail search. */
+  customerThreads?: number
 }
 
 export interface SweepResult {
@@ -135,6 +137,8 @@ export interface ThreadRef {
   threadId: string; sessionId: string; siteId: string; agent: string
   /** Newest activity on the thread, sent OR received. */
   lastAt: string
+  /** The customer address our send went to — feeds the customer-mail search. */
+  to?: string
 }
 
 /**
@@ -172,7 +176,7 @@ async function allThreads(now: Date): Promise<ThreadRef[]> {
       }
       seen.set(e.threadId, {
         threadId: e.threadId, sessionId: r.session_id, siteId: r.site_id,
-        agent: e.sentBy, lastAt,
+        agent: e.sentBy, lastAt, to: addressOf(e.to),
       })
     }
     if (!data || data.length < 1000) break
@@ -284,6 +288,67 @@ async function alreadyCaptured(sessionIds: string[]): Promise<Set<string>> {
   return out
 }
 
+function addressOf(v: string | undefined): string | undefined {
+  const m = (v ?? '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)
+  return m ? m[0].toLowerCase() : undefined
+}
+
+/** How far back the customer-mail search looks on a routine run. */
+const CUSTOMER_SEARCH_DAYS = 2
+const CUSTOMER_SEARCH_BATCH = 20
+
+/**
+ * Mail a customer started THEMSELVES — a new subject, a forward — rather than
+ * a reply in a thread we began. The thread-only read below never saw it:
+ * Jennifer Overman wrote six times between 29 Sep and 12 Oct under new
+ * subjects ("Proof and payment", "Update"), every one sat unread in Gmail, and
+ * she nearly opened a payment dispute (2026-10-15). So each agent's mailbox is
+ * searched for mail FROM the customers that agent has emailed — that exact
+ * address list and nothing else; the rest of the inbox stays unread by us.
+ * Returns the threads to read, as refs on the customer's lead.
+ */
+async function customerThreads(
+  agent: string, cfg: NonNullable<ReturnType<typeof googleConfig>>, refsOfAgent: ThreadRef[],
+  known: Set<string>, captured: Set<string>, days: number, deadline: number,
+): Promise<ThreadRef[]> {
+  // Newest send per address wins: that is the lead the conversation is on.
+  const byAddr = new Map<string, ThreadRef>()
+  for (const r of [...refsOfAgent].sort((a, b) => a.lastAt.localeCompare(b.lastAt))) {
+    if (r.to && !isNoiseSender(r.to)) byAddr.set(r.to, r)
+  }
+  const out = new Map<string, ThreadRef>()
+  const addrs = [...byAddr.keys()]
+  const batches: string[][] = []
+  for (let i = 0; i < addrs.length; i += CUSTOMER_SEARCH_BATCH) batches.push(addrs.slice(i, i + CUSTOMER_SEARCH_BATCH))
+  const found: { id: string; threadId: string }[] = []
+  for (const wave of chunks(batches, 5)) {
+    if (Date.now() > deadline) break
+    const got = await Promise.all(wave.map((b) => searchCustomerMail(agent, cfg, `from:(${b.join(' OR ')}) newer_than:${days}d -in:sent -in:chats`)))
+    for (const g of got) found.push(...g)
+  }
+  {
+    for (const h of found) {
+      if (known.has(h.threadId) || captured.has(h.id) || out.has(h.threadId)) continue
+      // Which customer? The search does not say, so the thread is read and the
+      // lead picked from its first customer message (below, via `pickLead`).
+      out.set(h.threadId, { threadId: h.threadId, sessionId: '', siteId: '', agent, lastAt: new Date().toISOString() })
+    }
+  }
+  // Attach each new thread to the lead of whichever listed customer wrote it.
+  const resolved: ThreadRef[] = []
+  for (const wave of chunks([...out.values()].slice(0, 30), 5)) {
+    if (Date.now() > deadline) break
+    const read = await Promise.all(wave.map(async (ref) => ({ ref, msgs: await fetchThread(agent, cfg, ref.threadId) })))
+    for (const { ref, msgs } of read) {
+      const first = msgs.find((m) => byAddr.has(parseFromHeader(m.from).email))
+      if (!first) continue
+      const lead = byAddr.get(parseFromHeader(first.from).email)!
+      resolved.push({ ...ref, sessionId: lead.sessionId, siteId: lead.siteId, to: lead.to })
+    }
+  }
+  return resolved
+}
+
 /**
  * One pass. `origin` is needed only to build the Google redirect URI, which the
  * token refresh requires; nothing here depends on the request.
@@ -291,7 +356,7 @@ async function alreadyCaptured(sessionIds: string[]): Promise<Set<string>> {
 export async function runEmailSweep(
   origin: string,
   now = new Date(),
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; customerDays?: number; onlyAgent?: string } = {},
 ): Promise<SweepResult> {
   const dryRun = opts.dryRun === true
   const ranAt = now.toISOString()
@@ -311,16 +376,16 @@ export async function runEmailSweep(
   // Group by agent: one connection check and one token refresh per agent
   // rather than per thread.
   const byAgent = new Map<string, ThreadRef[]>()
-  for (const t of threads) {
-    if (!byAgent.has(t.agent)) byAgent.set(t.agent, [])
-    byAgent.get(t.agent)!.push(t)
-  }
+  for (const t of all) if (!byAgent.has(t.agent)) byAgent.set(t.agent, [])
+  for (const t of threads) byAgent.get(t.agent)!.push(t)
+  const knownThreads = new Set(all.map((t) => t.threadId))
 
   const results: SweepAgentResult[] = []
   // Replies captured THIS run — the only ones worth notifying about. Anything
   // already on the record was notified when it arrived.
   const fresh: { entry: CrmEmailInEntry; sessionId: string; siteId: string; agent: string }[] = []
   for (const [agent, refs] of byAgent) {
+    if (opts.onlyAgent && agent.toLowerCase() !== opts.onlyAgent.toLowerCase()) continue
     const res: SweepAgentResult = { agent, threads: refs.length, captured: 0 }
     const conn = await connectionFor(agent)
     if (!conn || conn.revoked) {
@@ -334,6 +399,21 @@ export async function runEmailSweep(
       res.needsReconnect = true
       results.push(res)
       continue
+    }
+
+    // Customer-started mail (see customerThreads). Its threads join this
+    // agent's list and go through exactly the same capture below.
+    try {
+      const extra = await customerThreads(agent, cfg, all.filter((t) => t.agent === agent), knownThreads, captured,
+        Math.max(1, Math.min(60, opts.customerDays ?? CUSTOMER_SEARCH_DAYS)), Date.now() + 12_000)
+      if (extra.length) {
+        for (const id of await alreadyCaptured([...new Set(extra.map((t) => t.sessionId))])) captured.add(id)
+        refs.push(...extra)
+        res.threads = refs.length
+        res.customerThreads = extra.length
+      }
+    } catch (e) {
+      res.error = `customer-mail search: ${e instanceof Error ? e.message : 'failed'}`
     }
 
     // Fetches run in waves rather than one after another: sequentially, 240
