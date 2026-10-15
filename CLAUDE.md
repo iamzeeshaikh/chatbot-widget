@@ -425,6 +425,25 @@ to mint a `sports@zeeops.dev` session locally (the recipe is in §"Verifying an
 auth-protected production page") and diff every endpoint against `packaging@zeeops.dev` —
 reading the code is what missed the three gaps that audit found.
 
+### Quote intake is PULLED by ZeeOps too (2026-10-15)
+`lib/gmailintake.ts` + `/api/intake/pull` (cron `*/5`) read the intake mailbox
+`dev@zeecustomboxes.com` (every packaging form mail is delivered there too) and
+file leads through the same `/api/quote-intake` handler. It exists because the
+Apps Script stopped overnight on 14–15 Oct and six hours of leads never arrived;
+that script lives in an account we cannot see, has no logs we can read, and only
+changes when the owner pastes it by hand. The pull **loads the Apps Script file
+itself in a `vm` context** and calls its `codeFromMessageText_` /
+`leadFromMessage_`, so the two intakes cannot parse a form differently — fix the
+parser in the .gs and both pick it up (`outputFileTracingIncludes` ships the
+file). Both run side by side; the handler's dedupe makes the second one a no-op.
+Processed message ids are `crm_intake_pull` rows; a failed post is not recorded,
+so the next run retries it. `searchIntakeMessageIds` in `lib/gmail.ts` is the ONE
+mailbox search in this codebase and is for the intake mailbox only — the
+thread-only rule above still holds for every agent mailbox.
+Late leads (a `crm_intake_lag` row, 45+ min) are never emailed first by the quote
+bot: Samir may already have answered from dev@ Gmail, so the bot assigns him and
+opens a "check Gmail first" task instead.
+
 ## 4. Conventions
 
 - **Timestamps: Asia/Karachi, 12-hour format, always via `lib/datetime.ts`.** Never

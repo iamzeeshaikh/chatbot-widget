@@ -1,6 +1,10 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // lib/gmailintake.ts runs the Apps Script's own parser; ship the file with it.
+  outputFileTracingIncludes: {
+    '/api/intake/pull': ['./scripts/quote-intake-apps-script.gs'],
+  },
   async headers() {
     return [
       {

@@ -12,6 +12,10 @@
     {
       "path": "/api/crm/quotebot",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/intake/pull",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

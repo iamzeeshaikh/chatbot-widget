@@ -766,6 +766,9 @@ function htmlToText(html: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n')
+    // Table cells: "<td>Name</td><td>AHA W</td>" must read "Name AHA W", not
+    // "NameAHA W" — HTML-only form mails are laid out as label/value tables.
+    .replace(/<\/t[dh]>/gi, ' ')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
@@ -775,6 +778,23 @@ function htmlToText(html: string): string {
 
 export class GmailScopeError extends Error {
   constructor(message: string) { super(message); this.name = 'GmailScopeError' }
+}
+
+/**
+ * Message ids matching a Gmail search, newest first. ONLY for the quote-intake
+ * pull (lib/gmailintake.ts), on the one intake mailbox, with a query that
+ * targets our own sites' form notifications. Added 2026-10-15 after the Apps
+ * Script intake stopped overnight and leads sat in Gmail for six hours; the
+ * thread-only rule in CLAUDE.md still holds for every agent mailbox.
+ */
+export async function searchIntakeMessageIds(agentEmail: string, cfg: GoogleConfig, q: string, max = 100): Promise<{ id: string; threadId: string }[]> {
+  const token = await accessTokenFor(agentEmail, cfg)
+  const { res, json: j } = await gapi(`${API}/messages?maxResults=${Math.min(max, 500)}&q=${encodeURIComponent(q)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }, 'the intake mailbox could not be searched')
+  if (res.status === 401) { forgetAccessToken(agentEmail); throw new GmailAuthError('Gmail refused the request. Reconnect Gmail.') }
+  if (!res.ok) throw new Error(`Intake search failed (${res.status})`)
+  return ((j as { messages?: { id: string; threadId: string }[] }).messages ?? [])
 }
 
 /** Every message in one thread we started. Throws rather than returning []. */

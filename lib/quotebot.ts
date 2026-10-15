@@ -32,6 +32,7 @@
 // always has an answer.
 
 import { supabase, fetchAllPages, warnIfCapped } from './supabase'
+import { recentIntakeLags } from './intakelag'
 import { workspaceSites, hasFeature } from './workspaces'
 import { quoteSessionId, leadSource, isMerchantTestOrder } from './quoteintake'
 import { leadRecipient, writeControlRow, markThreadRepliesRead } from './leadrecord'
@@ -65,6 +66,9 @@ import {
 export const CRM_BOT_ROLE = 'crm_bot'
 
 /** The agents the bot writes for. The owner's roster on 2026-10-13. */
+/** Team lead with dev@ access: owner of leads that reached the CRM late. */
+const LATE_LEAD_OWNER = 'samirkhan@shopcardboardboxes.com'
+
 export const BOT_AGENTS = [
   'samirkhan@shopcardboardboxes.com',
   'stevehayes@shopcardboardboxes.com',
@@ -299,6 +303,13 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
   // run with five new leads gives all five to whoever was lighter at the start.
   let load: Map<string, number> | null = null
   let sends = 0
+  // Leads that reached the CRM late (lib/intakelag.ts: 45+ minutes after the
+  // customer wrote). By then a person may already have answered from Gmail —
+  // the form mail also lands in dev@, which Samir works — and a bot email on
+  // top reads to the customer as two companies talking at once (owner,
+  // 2026-10-15). The bot never writes first to these; Samir gets the lead and
+  // a task to check Gmail and carry on from the record.
+  const late = new Map((await recentIntakeLags(undefined, 200)).map((l) => [l.leadId, l.minutesLate]))
 
   for (const lead of leads) {
     const id = quoteSessionId(lead.id)
@@ -337,6 +348,27 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       const talker = chat.rows.map((r) => r.role === REPLY_AUTHOR_ROLE ? (parseReplyAuthor(r.message)?.email ?? '').toLowerCase() : '')
         .find((e) => (BOT_AGENTS as readonly string[]).includes(e))
       if (talker) { await skip(`${talker} is already talking to them in the chat`); continue }
+    }
+
+    const lateBy = late.get(lead.id)
+    if (lateBy !== undefined) {
+      await skip(`reached the CRM ${lateBy} min after the customer wrote — a person may already have answered from Gmail`)
+      if (!dryRun) {
+        await setAssignment(id, lead.site_id, LATE_LEAD_OWNER)
+        const who = lead.name || lead.email || 'This customer'
+        const task: CrmTaskEntry = {
+          id: newTaskId(),
+          title: `${who} reached ZeeOps ${lateBy} min late — check Gmail (dev@) for a reply already sent, then answer from here`.slice(0, 200),
+          type: 'email', due_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+          assignee: LATE_LEAD_OWNER, status: 'open', created_by: BOT_ACTOR, created_at: now.toISOString(),
+        }
+        await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+        await sendPushToMember(LATE_LEAD_OWNER, 'packaging', {
+          title: 'Late enquiry — check Gmail first', body: `${who}: arrived ${lateBy} min late. The bot did not email them.`,
+          url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-late-${id}`,
+        }).catch(() => 0)
+      }
+      continue
     }
 
     const to = await leadRecipient(id)
