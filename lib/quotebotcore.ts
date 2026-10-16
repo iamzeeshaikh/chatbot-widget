@@ -27,6 +27,9 @@ export interface QuoteAssessment {
   hasSize: boolean
   hasStyle: boolean
   hasQuantity: boolean
+  /** A dimension beyond what we normally produce ("50 x 30 x 20 in"), or undefined. The
+   *  bot must not promise a price for it; a person checks with production first. */
+  oversize?: string
   /** One line, for the ledger and the person reading it. */
   reason: string
 }
@@ -38,6 +41,57 @@ export type Missing = 'size' | 'style' | 'quantity'
  * nahi bh di to chale ga" — with size and style in hand the lead goes to a
  * person to price, exactly as our agents quoted standard quantity tiers.
  */
+/**
+ * The largest single dimension we quote without asking production first.
+ * Shazzy (15 Oct 2026): a customer wrote 50 x 30 x 20 inches, which cannot be
+ * made, and the bot still told them the price quote was in process. Boxes,
+ * mailers and sleeves all come off sheets well under this; anything bigger is
+ * a question for the factory, not a promise.
+ */
+export const OVERSIZE_IN = 30
+
+/**
+ * A dimension in the customer's text that is beyond OVERSIZE_IN, written back
+ * the way they gave it ("50 x 30 x 20 in"), or null. Reads "L x W x H" triples
+ * and pairs with or without a unit (unitless means inches, as US customers
+ * write), and single values with an explicit unit (50", 50 inch, 120 cm).
+ * Quantities, prices, zip codes and phone numbers never carry a unit or an
+ * "x", so they do not match.
+ */
+export function oversizeIn(text: string): string | null {
+  const t = String(text || '').replace(/[×*]/g, 'x').replace(/[“”″]/g, '"')
+  // No metres: nobody orders a box in them, and "30M" in a marketing pitch is
+  // thirty million.
+  const unitIn = (u: string) => /^(cm|centimet)/i.test(u) ? 1 / 2.54 : /^(mm|millimet)/i.test(u) ? 1 / 25.4 : /^(ft|feet|foot)/i.test(u) ? 12 : 1
+  const UNIT_RE = '"|in(?:ch(?:es)?)?\\b|cm\\b|mm\\b|ft\\b|feet\\b|foot\\b'
+  const UNIT = `(?:${UNIT_RE})?`
+  // Not preceded by a digit, a letter or a dot: "2.625"" is a decimal tail,
+  // "1440x812" a screen size in a form footer, "gxB89X4" part of a URL.
+  const NUM = '(?<![\\w.])(\\d{1,3}(?:[.,]\\d{1,2})?)'
+  // L x W x H, each number optionally followed by its own unit. Pairs without a
+  // unit are left alone ("36x24 laser cutter", "9 x 12 folders" are fine;
+  // "72x100" is tape in mm by yards).
+  const dims = new RegExp(`${NUM}\\s*${UNIT}\\s*x\\s*(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*${UNIT}\\s*x\\s*(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*${UNIT}`, 'gi')
+  let m: RegExpExecArray | null
+  while ((m = dims.exec(t))) {
+    const u = (m[0].match(new RegExp(UNIT_RE, 'i')) ?? [''])[0]
+    const vals = [m[1], m[2], m[3]].map((v) => parseFloat(v.replace(',', '.')))
+    // No unit and a value of 100 or more: millimetres (500x300x300), not inches.
+    const f = u ? unitIn(u) : Math.max(...vals) >= 100 ? 1 / 25.4 : 1
+    if (vals.some((v) => v * f > OVERSIZE_IN)) return m[0].replace(/\s+/g, ' ').trim()
+  }
+  // A pair or a single measurement with an explicit unit: 48" x 24", 50 inch, 120 cm.
+  const single = new RegExp(`${NUM}\\s*(${UNIT_RE})`, 'gi')
+  while ((m = single.exec(t))) {
+    const v = parseFloat(m[1].replace(',', '.')) * unitIn(m[2])
+    if (v > OVERSIZE_IN) {
+      const pair = t.slice(m.index).match(new RegExp(`^${NUM.replace('(?<![\\\\w.])', '')}\\s*(?:${UNIT_RE})\\s*x\\s*\\d{1,3}(?:[.,]\\d{1,2})?\\s*(?:${UNIT_RE})?`, 'i'))
+      return (pair ? pair[0] : m[0]).replace(/\s+/g, ' ').trim()
+    }
+  }
+  return null
+}
+
 export function missingOf(a: QuoteAssessment): Missing[] {
   const out: Missing[] = []
   if (!a.hasSize) out.push('size')
@@ -141,7 +195,12 @@ export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fro
   const product = a.product
 
   const parts: string[] = [greet, '']
-  if (complete) {
+  if (complete && a.oversize) {
+    parts.push(
+      `${thanks} I've noted the size you gave (${a.oversize}). That is larger than what we usually produce, so I'm checking with our production team whether your ${product} can be made at this size, and I'll come back to you with the answer and the price quote.`,
+    )
+    if (!a.hasDeadline) parts.push('', 'In the meantime, could you please let me know how soon you need these?')
+  } else if (complete) {
     parts.push(
       `${thanks} I have everything I need, and the price quote for your ${product} is in process. I'll share it with you shortly.`,
     )

@@ -61,7 +61,7 @@ import {
   ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf, buildFollowUp,
   FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, REPLY_SYSTEM, parseReplyDecision, buildReplyAnswer,
   buildQuoteFollowUp, currentOrNextCampaign, buildPromoEmail, promoFooterHtml, type Missing,
-  quoteTextForAssessment, emailHtml, type QuoteAssessment,
+  quoteTextForAssessment, emailHtml, type QuoteAssessment, oversizeIn,
 } from './quotebotcore'
 
 export const CRM_BOT_ROLE = 'crm_bot'
@@ -272,6 +272,9 @@ export async function assessQuote(message: string, name: string | null): Promise
   // bottle" — the box is built around it, and our agents priced from it.
   if (a && !a.hasSize && /\b\d+(\.\d+)?\s?(ml|oz|cl|l)\b/i.test(message) && /vial|bottle|jar|tumbler|candle|cup|tin|can\b/i.test(message)) a.hasSize = true
   if (a && !a.hasSize && /\b(A[3-6]|letter[- ]size|business[- ]card[- ]size)\b/i.test(message)) a.hasSize = true
+  // A size we may not be able to make at all: no price promise, a person
+  // checks with production first (oversizeIn, lib/quotebotcore.ts).
+  if (a) { const big = oversizeIn(message); if (big) a.oversize = big }
   return a
 }
 
@@ -505,7 +508,9 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       const who = lead.name || to
       const task: CrmTaskEntry = {
         id: newTaskId(),
-        title: `Send the price quote — ${who} gave size, style and quantity (bot replied)`.slice(0, 200),
+        title: (assessment.oversize
+          ? `Check with production first — ${who} wants ${assessment.product} at ${assessment.oversize}; the bot said we are confirming the size, then send the price quote or an alternative`
+          : `Send the price quote — ${who} gave size, style and quantity (bot replied)`).slice(0, 200),
         type: 'email',
         due_at: new Date(Date.now() + 3 * 3600 * 1000).toISOString(),
         assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,

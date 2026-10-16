@@ -47,6 +47,7 @@ Content rules — the point of this email is that it is about THEM:
 6. If they gave a deadline, you may say "I've noted you need these by …" — never promise that we will deliver, ship or finish by it; the agent decides that with the price quote.
 7. Never say "absolutely", "definitely", "guarantee" or "we can" about a specific request (printing a particular area, lids on their own, cutouts, a sample). Say "I'll confirm that with our production team and include it in the price quote."
 8. Keep it under 120 words. Short beats complete.
+9. If the brief has a SIZE CHECK line, the size they gave is beyond what we normally produce. Then NEVER say the price quote is in process or that you have everything you need. Say you have noted their size (quote it), that it is larger than what we usually make, and that you are checking with our production team whether it can be made at this size before coming back with the price quote. Do not suggest a different size or say it is impossible.
 
 Examples of our agents' real emails (match the tone, not the facts):
 
@@ -80,6 +81,7 @@ function brief(i: DraftInput): string {
     `PRODUCT (as we would name it): ${a.product}`,
     `MISSING: ${missing.length ? missing.map((m) => (m === 'size' ? `size — ask for the ${a.sizeLabel}` : `style — ask for the ${a.styleLabel} (a reference image works)`)).join('; ') : 'nothing'}`,
     `DEADLINE GIVEN: ${a.hasDeadline ? 'yes — do not ask' : 'no'}`,
+    ...(a.oversize ? [`SIZE CHECK: ${a.oversize} is beyond what we normally produce — no price promise; say we are confirming with production whether it can be made`] : []),
     '',
     'THE CUSTOMER WROTE:',
     i.enquiry.trim().slice(0, 3500),
@@ -109,7 +111,12 @@ export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[
   if (!a.firstName && !/^Hello,/.test(t)) return 'invented a name'
   if (!/Warm regards,$/.test(t)) return 'no sign-off'
   if (/[$€£]|\bUSD\b|\d+\s?%|\bpercent\b/i.test(t)) return 'contains a price or percentage'
-  if (/\b(\d+)\s*(business\s+)?(days?|weeks?)\b/i.test(t)) return 'contains a turnaround'
+  // A turnaround is OUR promise ("ready in 2 weeks"). The customer's own
+  // deadline echoed back ("I've noted you need these in 3 weeks") is allowed
+  // by rule 6 — the sentence has to be about what THEY said.
+  for (const sm of t.matchAll(/[^.!?\n]*\b\d+\s*(?:business\s+)?(?:days?|weeks?)\b[^.!?\n]*/gi)) {
+    if (!/\byou(?:'d| would)? (?:need|mentioned|require|want|like|asked|said)|\bnoted\b|\byour (?:deadline|timeline|target)/i.test(sm[0])) return 'contains a turnaround'
+  }
   // Their own deadline may be acknowledged ("I've noted you need these by
   // December 14"); what is forbidden is OUR promise against it. "2 1/2 x 6"
   // is a size, not a date, so there is no bare-date check.
@@ -120,6 +127,11 @@ export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[
   if ((t.match(/!/g) ?? []).length > 1) return 'too many exclamation marks'
   if (missing.includes('size') && !/\bsize|dimension|measure/i.test(t)) return 'did not ask for the size'
   if (missing.includes('style') && !/\bstyle|type|shape|reference/i.test(t)) return 'did not ask for the style'
+  if (a.oversize) {
+    if (/in process|everything I need|is being prepared|working on (the|your) price/i.test(t)) return 'promised a price quote for an oversized request'
+    if (!/production team|can be made|possible at|feasib|able to make|whether we can/i.test(t)) return 'oversized request but no production check mentioned'
+    return null
+  }
   if (!missing.length && !/price quote/i.test(t)) return 'complete brief but no mention of the price quote'
   if (!missing.length && !/process|shortly|work|get back|put .{0,12}together|prepar|ready|send|share|calculat|numbers/i.test(t)) return 'complete brief but no "quote in process"'
   if (missing.length && /everything I need/i.test(t)) return 'claims everything is in hand'
