@@ -145,3 +145,6 @@ promise, "absolutely/definitely", a wrong name, >160 words or a missing
 sign-off; a rejected draft is retried once with the reason, then falls back to
 the template. Steve's complaint that prompted it: "bot har customer ko same
 generic reply kiye jaa rha hai".
+
+## Oversized requests (2026-10-16)
+When any dimension the customer gives is over 30 inches (`OVERSIZE_IN`, lib/quotebotcore.ts), the bot never says the price quote is in process. It quotes their size back, says it is larger than what we usually produce, and that we are confirming with the production team before the price quote. The agent's task becomes "Check with production first". Shazzy's case: 50 x 30 x 20 in.
