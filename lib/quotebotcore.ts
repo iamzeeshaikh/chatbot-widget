@@ -67,13 +67,19 @@ export function oversizeIn(text: string): string | null {
   const UNIT = `(?:${UNIT_RE})?`
   // Not preceded by a digit, a letter or a dot: "2.625"" is a decimal tail,
   // "1440x812" a screen size in a form footer, "gxB89X4" part of a URL.
-  const NUM = '(?<![\\w.])(\\d{1,3}(?:[.,]\\d{1,2})?)'
+  // Up to four digits: millimetre sizes are written 1266 x 990 x 940 mm
+  // (Anthony, 16 Oct 2026 — with three digits only "940 mm" matched, and the
+  // email singled out the SMALLEST side as the problem).
+  const NUM = '(?<![\\w.])(\\d{1,4}(?:[.,]\\d{1,2})?)'
   // L x W x H, each number optionally followed by its own unit. Pairs without a
   // unit are left alone ("36x24 laser cutter", "9 x 12 folders" are fine;
   // "72x100" is tape in mm by yards).
-  const dims = new RegExp(`${NUM}\\s*${UNIT}\\s*x\\s*(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*${UNIT}\\s*x\\s*(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*${UNIT}`, 'gi')
+  const dims = new RegExp(`${NUM}\\s*${UNIT}\\s*x\\s*(\\d{1,4}(?:[.,]\\d{1,2})?)\\s*${UNIT}\\s*x\\s*(\\d{1,4}(?:[.,]\\d{1,2})?)\\s*${UNIT}`, 'gi')
   let m: RegExpExecArray | null
   while ((m = dims.exec(t))) {
+    // "1000 x 12 x 12 x 12" is a quantity in front of the size: drop the first
+    // number and read on from the second.
+    if (/^\s*x\s*\d/.test(t.slice(m.index + m[0].length))) { dims.lastIndex = m.index + m[1].length; continue }
     const u = (m[0].match(new RegExp(UNIT_RE, 'i')) ?? [''])[0]
     const vals = [m[1], m[2], m[3]].map((v) => parseFloat(v.replace(',', '.')))
     // No unit and a value of 100 or more: millimetres (500x300x300), not inches.
@@ -85,7 +91,7 @@ export function oversizeIn(text: string): string | null {
   while ((m = single.exec(t))) {
     const v = parseFloat(m[1].replace(',', '.')) * unitIn(m[2])
     if (v > OVERSIZE_IN) {
-      const pair = t.slice(m.index).match(new RegExp(`^${NUM.replace('(?<![\\\\w.])', '')}\\s*(?:${UNIT_RE})\\s*x\\s*\\d{1,3}(?:[.,]\\d{1,2})?\\s*(?:${UNIT_RE})?`, 'i'))
+      const pair = t.slice(m.index).match(new RegExp(`^${NUM.replace('(?<![\\\\w.])', '')}\\s*(?:${UNIT_RE})\\s*x\\s*\\d{1,4}(?:[.,]\\d{1,2})?\\s*(?:${UNIT_RE})?`, 'i'))
       return (pair ? pair[0] : m[0]).replace(/\s+/g, ' ').trim()
     }
   }

@@ -148,3 +148,7 @@ generic reply kiye jaa rha hai".
 
 ## Oversized requests (2026-10-16)
 When any dimension the customer gives is over 30 inches (`OVERSIZE_IN`, lib/quotebotcore.ts), the bot never says the price quote is in process. It quotes their size back, says it is larger than what we usually produce, and that we are confirming with the production team before the price quote. The agent's task becomes "Check with production first". Shazzy's case: 50 x 30 x 20 in.
+
+## Chat leads reach the bot (2026-10-16)
+
+A chat that yields an email now gets a `leads` row on packaging sites (lib/chatleads.ts, transcript as the message) the moment the address appears — before, only the widget's lead form or a seven-field extraction did, so Anthony (300 pallet boxes, 1266 × 990 × 940 mm) and Damon Scott (foil-stamped folders) never reached the bot. For a chat the brief is the transcript: the customer's words are the "user:" lines, and every question the chat bot left to "a specialist" is the email's to acknowledge (rule 10). Oversize sizes are quoted whole, never one dimension singled out.

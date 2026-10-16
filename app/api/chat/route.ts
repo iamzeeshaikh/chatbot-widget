@@ -2,7 +2,8 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { generateReply, extractLeadFields } from '@/lib/gemini'
 import { getMode } from '@/lib/mode'
-import { maybeCaptureLead } from '@/lib/leadtracking'
+import { maybeCaptureLead, extractEmail, extractPhone, isValidEmail } from '@/lib/leadtracking'
+import { ensureChatLeadRow, capturedEmail } from '@/lib/chatleads'
 import { isBotOffBySchedule } from '@/lib/botschedule'
 import { isWidgetBlocked } from '@/lib/workspaces'
 import { SPORTS_SALES_RULES } from '@/lib/sportsbot'
@@ -232,7 +233,24 @@ export async function POST(req: NextRequest) {
           const allMessages = [...history, { role: 'assistant', content: reply }]
           const fields = await extractLeadFields(allMessages)
           const score = Object.values(fields).filter((v) => v !== null).length
-          if (score >= 7 && fields.email) {
+          // Packaging: a chat that gives an email IS a lead for the quote bot,
+          // which reads only the `leads` table (lib/chatleads.ts has the
+          // story). The seven-field rule below stays for every other
+          // workspace, so sports is untouched.
+          if (siteWorkspace(siteId) === 'packaging') {
+            const typed = history.filter((m) => m.role === 'user').map((m) => m.content).join('\n')
+            const email = (fields.email && isValidEmail(fields.email) ? fields.email.trim().toLowerCase() : null)
+              ?? extractEmail(typed)
+              // A long chat: the address may sit beyond the 20 messages sent.
+              ?? (userMsgCount > 18 ? await capturedEmail(sessionId) : null)
+            if (email) {
+              const name = fields.name ?? null
+              const phone = fields.phone ?? extractPhone(typed)
+              await ensureChatLeadRow({ siteId, sessionId, email, name, phone })
+              // The billing row gets the same name/phone (merge-only, never a re-count).
+              await maybeCaptureLead({ sessionId, siteId, email, name, phone })
+            }
+          } else if (score >= 7 && fields.email) {
             const { data: existing } = await supabase
               .from('leads').select('id').eq('site_id', siteId).eq('email', fields.email).limit(1)
             if (!existing || existing.length === 0) {

@@ -47,7 +47,8 @@ Content rules — the point of this email is that it is about THEM:
 6. If they gave a deadline, you may say "I've noted you need these by …" — never promise that we will deliver, ship or finish by it; the agent decides that with the price quote.
 7. Never say "absolutely", "definitely", "guarantee" or "we can" about a specific request (printing a particular area, lids on their own, cutouts, a sample). Say "I'll confirm that with our production team and include it in the price quote."
 8. Keep it under 120 words. Short beats complete.
-9. If the brief has a SIZE CHECK line, the size they gave is beyond what we normally produce. Then NEVER say the price quote is in process or that you have everything you need. Say you have noted their size (quote it), that it is larger than what we usually make, and that you are checking with our production team whether it can be made at this size before coming back with the price quote. Do not suggest a different size or say it is impossible.
+9. If the brief has a SIZE CHECK line, the size they gave is beyond what we normally produce. Then NEVER say the price quote is in process or that you have everything you need. Say you have noted their size (quote the whole size exactly as they gave it — never single out one dimension as the problem), that it is larger than what we usually make, and that you are checking with our production team whether it can be made at this size before coming back with the price quote. Do not suggest a different size or say it is impossible.
+10. When the enquiry is a chat transcript, the customer's words are the "user:" lines; the "assistant:" lines are our chat bot. Any question the customer asked that the bot left to "a specialist" (stock, similar sizes, timing, whether something is doable) is now yours to acknowledge under rule 2 — the customer is waiting on exactly that.
 
 Examples of our agents' real emails (match the tone, not the facts):
 
@@ -76,7 +77,7 @@ function brief(i: DraftInput): string {
   const missing = missingOf(a)
   const lines = [
     `SITE: ${i.siteName}`,
-    `SOURCE: ${i.fromChat ? 'website chat' : 'quote form / email'}`,
+    `SOURCE: ${i.fromChat ? 'website chat (the enquiry below is the transcript)' : 'quote form / email'}`,
     `FIRST NAME: ${a.firstName ?? '(unknown — use "Hello,")'}`,
     `PRODUCT (as we would name it): ${a.product}`,
     `MISSING: ${missing.length ? missing.map((m) => (m === 'size' ? `size — ask for the ${a.sizeLabel}` : `style — ask for the ${a.styleLabel} (a reference image works)`)).join('; ') : 'nothing'}`,
