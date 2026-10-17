@@ -737,6 +737,7 @@ function processQuoteLeads() {
     siteLabeled++;
 
     var messages = lookbackMessages_(thread, cutoff);
+    if (machineOnly_(messages)) { addLabel_(thread, ignoreLabel_()); continue; } // DMARC & co.: silenced, never posted
     var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
       var msg = messages[m];
@@ -958,6 +959,7 @@ function retryUnmatched() {
     if (!code) { stillStuck++; continue; } // no site label at all — leave it alone
 
     var messages = thread.getMessages();
+    if (machineOnly_(messages)) { addLabel_(thread, ignoreLabel_()); continue; } // DMARC & co.: silenced, never posted
     var handledAny = false;
     for (var m = 0; m < messages.length; m++) {
       var parsed = leadFromMessage_(messages[m]);
@@ -1132,6 +1134,31 @@ function isIgnored_(thread) {
   return labelNamesOf_(thread).indexOf(IGNORE_LABEL) !== -1;
 }
 
+// Mail no person wrote and no customer sent: DMARC aggregate reports
+// (Microsoft, Yahoo, Google — "Report Domain: thewaxpapers.co.uk Submitter:
+// …"), bounces, postmaster notices. A Gmail filter files them under the site
+// whose domain they name, so they carried a site label, parsed to the
+// reporter's address and were posted; ZeeOps dropped them as spam, the post
+// "succeeded", and the thread got ZeeOps/Processed — which read, in the
+// mailbox, as if ZeeOps had taken a DMARC report as a lead (owner, 17 Oct
+// 2026: "ye zeeops men nahi ana chahie"). Now the thread is never posted and
+// gets ZeeOps/Ignore instead, so it is never opened again either.
+function isMachineMessage_(msg) {
+  var from = String(msg.getFrom() || '').toLowerCase();
+  var subject = String(msg.getSubject() || '');
+  if (/dmarc|mailer-daemon|postmaster@/.test(from)) return true;
+  if (/report[- ]domain\s*:[^\n]*submitter\s*:|\bDMARC\b/i.test(subject)) return true;
+  var head = String(msg.getPlainBody() || '').slice(0, 800);
+  return /DMARC (aggregate )?report|aggregate DMARC report|This domain has a DMARC record/i.test(head);
+}
+function machineOnly_(messages) {
+  if (!messages.length) return false;
+  for (var i = 0; i < messages.length; i++) if (!isMachineMessage_(messages[i])) return false;
+  return true;
+}
+var ignoreLabelCache_ = null;
+function ignoreLabel_() { return ignoreLabelCache_ || (ignoreLabelCache_ = getOrCreateLabel_(IGNORE_LABEL)); }
+
 function isHandled_(thread) {
   var names = labelNamesOf_(thread);
   for (var i = 0; i < names.length; i++) {
@@ -1187,6 +1214,7 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max, deep) {
     // A site-code label on the thread still wins over the subject's store name.
     var code = matchSiteCode_(thread);
     var messages = lookbackMessages_(thread, cutoff);
+    if (machineOnly_(messages)) { addLabel_(thread, ignoreLabel_()); continue; } // DMARC & co.: silenced, never posted
     var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
       considered++;

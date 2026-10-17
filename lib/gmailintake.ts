@@ -23,7 +23,7 @@ import vm from 'node:vm'
 import { NextRequest } from 'next/server'
 import { supabase } from './supabase'
 import { REMINDER_SITE } from './reminders'
-import { siteIdFromQuoteCode } from './quoteintake'
+import { siteIdFromQuoteCode, isMachineMessage } from './quoteintake'
 import { siteWorkspace } from './workspaces'
 import { googleConfig, searchIntakeMessageIds, fetchThread, fetchAttachment, type InboundMessage } from './gmail'
 import { POST as intakePost } from '@/app/api/quote-intake/route'
@@ -105,6 +105,10 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean } =
       const m = threads.get(ref.threadId)!.find((x) => x.gmailId === ref.id)
       out.opened++
       if (!m) { if (!dryRun) await remember(ref.id, 'gone'); out.skipped++; continue }
+      // DMARC reports and bounces name our domains and so look like ours;
+      // they are nobody's enquiry. Dropped here, before a parse or a post.
+      const machine = isMachineMessage(m.from, m.subject, m.bodyText)
+      if (machine) { if (!dryRun) await remember(ref.id, 'machine', { detail: machine }); out.skipped++; continue }
       const code = g.codeFromMessageText_(m.bodyText, m.from, m.to)
       const siteId = code ? siteIdFromQuoteCode(code) : null
       if (!code || !siteId || siteWorkspace(siteId) !== 'packaging') {
