@@ -42,7 +42,7 @@ export const PACKAGING_SITES = [
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
 // Its quote form mails the same inbox as the rest of sports, so its leads belong
 // in the same workspace and the same counts.
-export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys', 'zeesportswear']
+export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californiasoccer', 'floridabasketball', 'baseballjerseys', 'zeesportswear', 'californiabaseball']
 
 // Sites whose leads are counted (auto lead detection + the Billing tab and the
 // Overview tiles, which are computed from the same lead_capture dataset).

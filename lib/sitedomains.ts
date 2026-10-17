@@ -52,6 +52,7 @@ export const SITE_DOMAINS: Record<string, string> = {
   californiasoccer: 'californiasoccerjerseys.com',
   baseballjerseys: 'thebaseballjerseys.com',
   floridabasketball: 'floridabasketballjerseys.com',
+  californiabaseball: 'californiabaseballjerseys.com',
 }
 
 export function siteDomain(siteId: string): string | null {
