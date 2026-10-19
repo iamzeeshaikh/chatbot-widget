@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, inChunks } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, LEAD_TRACKED_SITES } from '@/lib/leadtracking'
@@ -86,13 +86,14 @@ export async function GET(req: NextRequest) {
     ? Array.from(new Set([...rows.map((r) => r.session_id), ...quoteSessionIds])) : ['-']
   const prevFrom = new Date(new Date(from).getTime() - (new Date(to).getTime() - new Date(from).getTime())).toISOString()
   const [statusRes, authorRes, visRes, prevRes, prevQuoteRes, prevCheckoutRes] = await Promise.all([
-    supabase.from('chat_logs').select('session_id, message, created_at')
-      .eq('role', LEAD_STATUS_ROLE).in('session_id', sessionIds)
-      .order('created_at', { ascending: true }),
-    supabase.from('chat_logs').select('session_id, message')
-      .eq('role', REPLY_AUTHOR_ROLE).in('session_id', sessionIds),
-    supabase.from('active_visitors').select('session_id, country, page_url')
-      .in('session_id', sessionIds),
+    // Chunked: a period's worth of ids is far too long for one URL (lib/supabase.ts).
+    inChunks(sessionIds, (ids) => supabase.from('chat_logs').select('session_id, message, created_at')
+      .eq('role', LEAD_STATUS_ROLE).in('session_id', ids)
+      .order('created_at', { ascending: true })),
+    inChunks(sessionIds, (ids) => supabase.from('chat_logs').select('session_id, message')
+      .eq('role', REPLY_AUTHOR_ROLE).in('session_id', ids)),
+    inChunks(sessionIds, (ids) => supabase.from('active_visitors').select('session_id, country, page_url')
+      .in('session_id', ids)),
     // Previous period's lead count, for the month-over-month comparison.
     supabase.from('chat_logs').select('session_id, site_id')
       .eq('role', LEAD_CAPTURE_ROLE).gte('created_at', prevFrom).lt('created_at', from),

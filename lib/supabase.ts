@@ -88,3 +88,26 @@ export async function fetchAllPages<T>(makeQuery: () => PageQuery<T>, maxRows: n
   }
   return all
 }
+
+// ── Long .in() lists ──────────────────────────────────────────────────────────
+// PostgREST carries an .in() filter in the URL. ~1,500 session ids is a ~74KB
+// URL: Supabase answers 414 (no rows, so every lead read as status 'new' with
+// no agent or origin), and from Vercel's iad1 the oversized request hung instead
+// — the Overview waited ~186s on /api/admin/leads-billing (2026-10-19).
+// inChunks runs the query once per slice of ids and concatenates the rows.
+const IN_CHUNK = 150
+
+export async function inChunks<T>(
+  ids: string[],
+  makeQuery: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const slices: string[][] = []
+  for (let i = 0; i < ids.length; i += IN_CHUNK) slices.push(ids.slice(i, i + IN_CHUNK))
+  const results = await Promise.all(slices.map((s) => makeQuery(s)))
+  const data: T[] = []
+  for (const r of results) {
+    if (r.error) return { data, error: r.error }
+    data.push(...(r.data ?? []))
+  }
+  return { data, error: null }
+}
