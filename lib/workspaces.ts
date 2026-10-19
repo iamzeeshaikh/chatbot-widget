@@ -41,6 +41,9 @@ export const PACKAGING_SITES = [
   'thehangtags',
   'thecookiebags',
   'shopmailerboxes',
+  // 2026-10-19: two UK packaging sites.
+  'ordercardboardboxes',
+  'thepapercupsuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.

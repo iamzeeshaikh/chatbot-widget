@@ -49,6 +49,8 @@ export const SITE_DOMAINS: Record<string, string> = {
   thehangtags: 'thehangtags.com',
   thecookiebags: 'thecookiebags.com',
   shopmailerboxes: 'shopmailerboxes.com',
+  ordercardboardboxes: 'ordercardboardboxes.co.uk',
+  thepapercupsuk: 'thepapercups.co.uk',
   // Sports workspace
   texasfootball: 'texasfootballuniforms.com',
   volleyballuniforms: 'thevolleyballuniforms.com',
