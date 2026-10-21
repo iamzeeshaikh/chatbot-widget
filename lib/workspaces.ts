@@ -44,6 +44,9 @@ export const PACKAGING_SITES = [
   // 2026-10-19: two UK packaging sites.
   'ordercardboardboxes',
   'thepapercupsuk',
+  // 2026-10-22: paper bags (US) and food packaging (UK).
+  'paperbagsupply',
+  'thefoodpackaginguk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
