@@ -4471,7 +4471,7 @@ export default function Dashboard() {
                   a site in either card switches the table to that type.
                   Checkout keeps its single card. */}
               {(() => {
-                const bySiteCard = (type: 'chat' | 'quote' | 'checkout', leads: typeof allLeads) => {
+                const bySiteCard = (type: 'chat' | 'quote' | 'checkout', leads: typeof allLeads, pair = false) => {
                   const m: Record<string, { name: string; count: number }> = {}
                   for (const l of leads) {
                     if (!m[l.site_id]) m[l.site_id] = { name: l.site_name, count: 0 }
@@ -4481,7 +4481,7 @@ export default function Dashboard() {
                   const active = billingLeadType === type
                   const maxCount = rows.length ? Math.max(...rows.map(([, info]) => info.count)) : 0
                   return (
-                    <div key={type} className={`bg-gray-100 rounded-2xl p-5 border mb-5 ${active && billingLeadType !== 'checkout' ? 'border-gray-300 ring-1 ring-gray-300' : 'border-gray-200'}`}>
+                    <div key={type} className={`bg-gray-100 rounded-2xl p-5 border mb-5 ${pair && active ? 'border-gray-300 ring-1 ring-gray-300' : 'border-gray-200'}`}>
                       <div className="flex items-center justify-between mb-3">
                         <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
                           By site — <span className="inline-flex items-center gap-1 align-middle">{type === 'chat'
@@ -4489,7 +4489,7 @@ export default function Dashboard() {
                             : type === 'quote'
                               ? <><Mail size={11} strokeWidth={2} aria-hidden /> Quote</>
                               : <><ShoppingCart size={11} strokeWidth={2} aria-hidden /> Checkout</>}</span>
-                          <span className="ml-1.5 tabular-nums normal-case text-gray-400">{leads.length}</span>
+                          {pair && <span className="ml-1.5 tabular-nums normal-case text-gray-400">{leads.length}</span>}
                         </p>
                         {active && billingSiteFilter && (
                           <button onClick={() => setBillingSiteFilter(null)}
@@ -4499,7 +4499,7 @@ export default function Dashboard() {
                       {rows.length === 0 ? (
                         <p className="text-xs text-gray-500">No {type} leads in this period.</p>
                       ) : (
-                        <div className={`grid grid-cols-1 sm:grid-cols-2 ${type === 'checkout' ? 'lg:grid-cols-3' : ''} gap-2.5`}>
+                        <div className={`grid grid-cols-1 sm:grid-cols-2 ${pair ? '' : 'lg:grid-cols-3'} gap-2.5`}>
                           {rows.map(([siteId, info]) => {
                             const accent = SITE_ACCENT[siteId] ?? '#6366f1'
                             const selected = active && billingSiteFilter === siteId
@@ -4528,10 +4528,13 @@ export default function Dashboard() {
                   )
                 }
                 if (billingLeadType === 'checkout') return bySiteCard('checkout', checkoutLeads)
+                // Sports keeps its single card that follows the active tile —
+                // the side-by-side view was asked for by packaging only.
+                if (workspace !== 'packaging') return bySiteCard(billingLeadType, billingLeadType === 'chat' ? chatLeads : quoteLeads)
                 return (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-4">
-                    {bySiteCard('chat', chatLeads)}
-                    {bySiteCard('quote', quoteLeads)}
+                    {bySiteCard('chat', chatLeads, true)}
+                    {bySiteCard('quote', quoteLeads, true)}
                   </div>
                 )
               })()}
