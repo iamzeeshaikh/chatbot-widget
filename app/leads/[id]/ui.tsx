@@ -17,7 +17,7 @@
 // Hierarchy comes from weight and colour, not from size alone.
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, Pencil, type LucideIcon } from 'lucide-react'
+import { Check, Copy, Pencil, Plus, type LucideIcon } from 'lucide-react'
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 // Tighter than before: 10px header padding rather than 12–16, and the body
@@ -121,6 +121,7 @@ export function InlineField({ label, value, placeholder, href, overridden, readO
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   // Seeded when editing STARTS rather than synced from the prop: a background
@@ -128,17 +129,21 @@ export function InlineField({ label, value, placeholder, href, overridden, readO
   function startEdit() {
     if (readOnly) return
     setDraft(value)
+    setError('')
     setEditing(true)
   }
 
   useEffect(() => { if (editing) inputRef.current?.focus() }, [editing])
 
+  // A refused save used to revert silently, which read as "I can't add an
+  // email here" (Samir, 2026-10-22, on a WhatsApp lead). The reason is shown
+  // under the field now, and the value stays visible until the next refresh.
   async function commit() {
     const next = draft.trim()
     setEditing(false)
     if (next === value.trim()) return
     setSaving(true)
-    try { await onSave(next) } finally { setSaving(false) }
+    try { await onSave(next); setError('') } catch (e) { setError(e instanceof Error ? e.message : 'Could not save') } finally { setSaving(false) }
   }
 
   return (
@@ -181,24 +186,32 @@ export function InlineField({ label, value, placeholder, href, overridden, readO
             ) : (
               <span className="text-sm text-gray-900 break-words leading-snug min-w-0" title={value}>{value}</span>
             )
+          ) : readOnly ? (
+            <span className="text-sm text-gray-400">—</span>
           ) : (
+            /* An empty field reads as an ACTION, not a label: "+ Add an email"
+               in link blue with a plus, so nobody has to guess that the grey
+               text is clickable. */
             <button type="button" onClick={startEdit}
-              className="text-sm text-gray-400 italic hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
-              {placeholder}
+              className="inline-flex items-center gap-1 text-sm text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+              <Plus size={13} strokeWidth={2.5} aria-hidden="true" />{placeholder}
             </button>
           )}
-          <span className="flex items-center gap-0.5 ml-auto shrink-0 opacity-0 group-hover/field:opacity-100 focus-within:opacity-100 transition-opacity">
+          {/* The pencil is always visible (not hover-only): on a laptop trackpad
+              or a touch screen a hover-revealed control is a control nobody finds. */}
+          <span className="flex items-center gap-0.5 ml-auto shrink-0 opacity-70 group-hover/field:opacity-100 focus-within:opacity-100 transition-opacity">
             {value && <CopyButton value={value} label={label.toLowerCase()} />}
-            {value && (
+            {value && !readOnly && (
               <button type="button" onClick={startEdit} title={`Edit ${label.toLowerCase()}`}
                 aria-label={`Edit ${label.toLowerCase()}`}
-                className="p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors">
+                className="p-1 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors">
                 <Pencil size={12} strokeWidth={2} />
               </button>
             )}
           </span>
         </div>
       )}
+      {error && <p className="mt-0.5 text-[11px] text-red-600">Could not save: {error}</p>}
     </div>
   )
 }

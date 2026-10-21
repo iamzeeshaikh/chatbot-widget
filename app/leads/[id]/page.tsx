@@ -300,7 +300,9 @@ export default function LeadRecordPage() {
   async function saveField(field: 'name' | 'email' | 'phone', value: string) {
     if (!record) return
     setRecord({ ...record, contact: { ...record.contact, [field]: value }, overriddenFields: Array.from(new Set([...record.overriddenFields, field])) })
-    try { await post('/field', { field, value }); load() } catch { load() }
+    // Rethrown so the field can show WHY a save was refused instead of just
+    // snapping back to the old value.
+    try { await post('/field', { field, value }); load() } catch (e) { load(); throw e }
   }
 
   async function saveValue(next: { estimated: number | null; won: number | null; currency: CrmCurrency }) {
