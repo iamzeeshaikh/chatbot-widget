@@ -78,8 +78,20 @@ export function workspaceForBusinessNumber(to: string | null | undefined): Works
   for (const ws of Object.keys(WORKSPACE_NUMBERS) as Workspace[]) {
     const n = WORKSPACE_NUMBERS[ws]
     if (phoneKeyOf(n.phone) === key || phoneKeyOf(n.whatsapp) === key) return ws
+    if (extraNumbers(ws).some((x) => phoneKeyOf(x) === key)) return ws
   }
   return null
+}
+
+// Further inbound-only lines a workspace owns, e.g. the UK packaging mobile
+// (2026-10-22) printed on the .co.uk sites. Comma-separated env lists:
+//   TWILIO_PACKAGING_EXTRA_NUMBERS="+447578382054"
+//   TWILIO_SPORTS_EXTRA_NUMBERS=""
+// They only decide whose customer an inbound call/message belongs to; outbound
+// still uses the workspace's main number above.
+function extraNumbers(ws: Workspace): string[] {
+  const raw = ws === 'packaging' ? process.env.TWILIO_PACKAGING_EXTRA_NUMBERS : process.env.TWILIO_SPORTS_EXTRA_NUMBERS
+  return String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 }
 
 // Compared on the last nine digits, like every other phone in this codebase:
