@@ -44,7 +44,15 @@ export default function OpportunitiesPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [showAllOlder, setShowAllOlder] = useState(false)
   const [tab, setTab] = useState<TabKey>('waiting')
-  const [focus, setFocus] = useState<{ agent: string; kind: FocusKind } | null>(null)
+  // Deep link from an alert: ?agent=<key>&list=waiting|hot|pipeline|won opens
+  // that agent's list straight away (agent= empty means Unassigned).
+  const [focus, setFocus] = useState<{ agent: string; kind: FocusKind } | null>(() => {
+    if (typeof window === 'undefined') return null
+    const q = new URLSearchParams(window.location.search)
+    const list = q.get('list')
+    if (!q.has('agent') || !list || !(list in FOCUS_LABEL)) return null
+    return { agent: (q.get('agent') ?? '').toLowerCase(), kind: list as FocusKind }
+  })
 
   useEffect(() => {
     try {

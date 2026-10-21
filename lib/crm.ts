@@ -115,6 +115,8 @@ export const CRM_ROLES = [
   // PayPal "paid for your invoice" mails already handled (lib/paypalpaid.ts) —
   // reserved zeeops-crm site; registered as the second line of defence.
   'crm_paypal_paid',
+  // Opportunities alerts already pushed (lib/oppalerts.ts) — reserved site.
+  'crm_opp_alert',
   // Retired: the customer billing form was removed on 2026-09-08. Kept
   // registered so that if the feature ever comes back — or a stray row from it
   // turns up — the JSON can never surface as a transcript line or a preview.

@@ -369,6 +369,22 @@ carries the import time in `created_at` — events are timed by the JSON `at`.
 Alcohol / religious orders are flagged "decline", never counted as chances.
 The result is cached 3 minutes per site scope (it reads ~20MB of mail bodies).
 
+### Opportunities alerts (packaging only, 2026-10-21)
+`/api/crm/opp-alerts` (cron `*/5`, `?dry=1`, `?dry=1&at=<iso>` to preview a
+window) → `lib/oppalertsweep.ts` → the pure decisions in `lib/oppalerts.ts`
+(`npm run test:oppalerts`). Numbers come from `loadOpportunities()` — the same
+loader the page uses — so a push says what the page says. Three alerts, each to
+an agent BY NAME with a link into `/opportunities?agent=<key>&list=…`: the
+10:00 PKT morning summary (one per agent with anything; unassigned waiting
+customers as a line to every agent; admins get the totals), the 2 h "customer
+waiting" nudge to the owner and the 24 h escalation to admins, and the month-end
+leaderboard (last day, 18:00). Quiet hours 23:00–08:00 PKT hold (nothing is
+queued — the state is recomputed and sent at the first run after 08:00).
+At-most-once is a `crm_opp_alert` ledger row per key on `zeeops-opp-alerts`,
+written BEFORE the push. A wait older than 72 h is backlog (digest only, no
+nudge) and nudges are capped at 5 per recipient per run — both exist so the
+first live run cannot push 139 notifications at once, which the dry run showed.
+
 ### Enforce access server-side
 Workspace isolation and per-member site access are decided **on the server**, in the
 API route — never only by hiding UI. A member without access to a lead's site gets
