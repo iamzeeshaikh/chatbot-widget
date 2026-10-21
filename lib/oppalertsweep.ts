@@ -11,6 +11,12 @@
 //   4. asks planAlerts() what is owed now;
 //   5. for each plan: writes the ledger row FIRST, then pushes (claim-then-send
 //      — a crash between the two loses one push rather than repeating it).
+//   6. an agent with NO push device (never pressed the dashboard bell) gets
+//      the same alert as an email in their own inbox instead, sent through
+//      their connected Gmail (owner, 2026-10-22: "turn Steve's on yourself" —
+//      a browser subscription cannot be made for someone else, their mailbox
+//      can). No connected Gmail either → recorded as unreachable, not lost
+//      silently.
 // `?dry=1` runs 1–4 and returns the plans without writing or pushing.
 
 import { supabase, fetchAllPages, warnIfCapped } from './supabase'
@@ -19,6 +25,7 @@ import { HARDCODED_ACCOUNTS, type Member } from './auth'
 import { storedMemberNames } from './membername'
 import { agentDisplayName } from './agentname'
 import { sendPushToMember } from './push'
+import { connectionFor, googleConfig, sendEmail } from './gmail'
 import { loadOpportunities } from './opportunityload'
 import { agentKey } from './opportunities'
 import {
@@ -36,7 +43,8 @@ export interface OppAlertRun {
   pktTime: string
   agents: { email: string; name: string; role: string; devices?: number }[]
   counts: Record<string, AgentCounts>
-  sent: (Plan & { devices: number })[]
+  /** `devices` = push endpoints reached; `email` = delivered to the agent's inbox instead. */
+  sent: (Plan & { devices: number; email?: boolean; unreachable?: string })[]
   would: Plan[]
   held: Held[]
   alreadySent: number
@@ -83,6 +91,29 @@ async function packagingAgents(): Promise<AgentInfo[]> {
   return out
 }
 
+const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.dev').replace(/\/$/, '')
+
+// No push device for this agent: put the alert in their own inbox, from their
+// own connected Gmail (a note to self — the only mailbox we can send from on
+// their behalf). Gmail on a phone rings for it, which is the point.
+async function emailFallback(p: Plan): Promise<{ email?: boolean; unreachable?: string }> {
+  const cfg = googleConfig(PUBLIC_BASE)
+  if (!cfg) return { unreachable: 'Google OAuth is not configured' }
+  const conn = await connectionFor(p.to)
+  if (!conn) return { unreachable: 'no push device and no connected Gmail' }
+  const link = `${PUBLIC_BASE}${p.url}`
+  try {
+    await sendEmail(p.to, cfg, {
+      from: p.to, to: p.to,
+      subject: `ZeeOps: ${p.title}`,
+      body: `${p.body}\n\nOpen: ${link}\n\n(You are getting this by email because notifications are not turned on in your ZeeOps dashboard — click the bell there to get these as push alerts instead.)`,
+    })
+    return { email: true }
+  } catch (e) {
+    return { unreachable: `email failed: ${e instanceof Error ? e.message : String(e)}` }
+  }
+}
+
 export async function runOppAlerts(opts: { dry?: boolean; now?: Date } = {}): Promise<OppAlertRun> {
   const now = opts.now ?? new Date()
   const dry = !!opts.dry
@@ -124,7 +155,9 @@ export async function runOppAlerts(opts: { dry?: boolean; now?: Date } = {}): Pr
     if (err) { result.errors.push(`${p.key}: ${err}`); continue }
     try {
       const devices = await sendPushToMember(p.to, 'packaging', { title: p.title, body: p.body, url: p.url, tag: `opp-${p.kind}-${p.to}`, sticky: p.kind !== 'morning' })
-      result.sent.push({ ...p, devices })
+      if (devices > 0) { result.sent.push({ ...p, devices }); continue }
+      const fallback = await emailFallback(p)
+      result.sent.push({ ...p, devices: 0, ...fallback })
     } catch (e) {
       result.errors.push(`${p.key}: ${e instanceof Error ? e.message : String(e)}`)
     }

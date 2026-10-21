@@ -2,10 +2,13 @@
 //
 // Three alerts, all pushed to each agent BY NAME and linking into
 // /opportunities pre-filtered to that agent (owner's request, 2026-10-21):
-//   morning   10:00 PKT daily — "Good morning Samir. 16 customers are waiting
+//   morning   20:00 PKT daily — "Good evening Samir. 16 customers are waiting
 //             for your reply, 1 quote can close this month." One per agent
 //             with anything; unassigned waiting customers go to every agent
-//             as their own line; admins get the totals.
+//             as their own line; admins get the totals. (The kind is still
+//             called "morning" — the ledger keys depend on it — but the team
+//             works evenings, so the owner moved it from 10:00 to 20:00 on
+//             2026-10-22.)
 //   waiting   a customer has had no reply for 2 h → the assigned agent, once;
 //             still unanswered at 24 h → admins too, once.
 //   monthend  last day of the month, 18:00 PKT — the leaderboard to everyone.
@@ -14,8 +17,9 @@
 // same module the page uses, so the numbers match it) and asks these functions
 // what is owed; a `crm_opp_alert` ledger row per key, written BEFORE the push,
 // is what makes each alert fire at most once — across runs, retries and
-// redeploys. Quiet hours (23:00–08:00 PKT) hold, never drop: the state is
-// still there at 08:00 and the next run sends it then.
+// redeploys. Quiet hours (04:00–12:00 PKT — the team works US hours, so its
+// night is our morning) hold, never drop: the state is still there at 12:00
+// and the next run sends it then.
 //
 // Everything here is pure so scripts/oppalerts.test.ts can drive it with a
 // fake clock and a fake ledger. The loading and sending live in
@@ -26,9 +30,9 @@ import { pktDayKey, pktPartsOf } from './datetime'
 export const CRM_OPP_ALERT_ROLE = 'crm_opp_alert'
 export const OPP_ALERT_SESSION = 'zeeops-opp-alerts'
 
-export const QUIET_START = 23
-export const QUIET_END = 8
-export const MORNING_HOUR = 10
+export const QUIET_START = 4
+export const QUIET_END = 12
+export const MORNING_HOUR = 20
 export const MONTHEND_HOUR = 18
 export const WAIT_FIRST_H = 2
 export const WAIT_ESCALATE_H = 24
@@ -41,10 +45,11 @@ export const WAIT_PER_RUN = 5
 
 export type AlertKind = 'morning' | 'waiting' | 'waiting24' | 'monthend'
 
-/** 08:00–22:59 PKT is open; 23:00–07:59 is quiet. */
+/** 12:00–03:59 PKT is open; 04:00–11:59 is quiet. */
 export function inQuiet(now: Date): boolean {
   const h = pktHour(now)
-  return h >= QUIET_START || h < QUIET_END
+  // The window may or may not wrap midnight (23→8 did; 4→12 does not).
+  return QUIET_START < QUIET_END ? h >= QUIET_START && h < QUIET_END : h >= QUIET_START || h < QUIET_END
 }
 
 export function pktHour(now: Date): number {
@@ -128,7 +133,7 @@ export function morningCopy(name: string, c: AgentCounts): string | null {
   if (c.hot) parts.push(`${plural(c.hot, 'quote')} can close this month`)
   if (c.invoices) parts.push(`${plural(c.invoices, 'invoice')} ${c.invoices === 1 ? 'is' : 'are'} due`)
   if (parts.length === 0) return null
-  return `Good morning ${firstName(name)}. ${parts.join(', ')}.`
+  return `Good evening ${firstName(name)}. ${parts.join(', ')}.`
 }
 
 export function adminMorningCopy(name: string, total: AgentCounts, unassigned: number): string | null {
@@ -138,7 +143,7 @@ export function adminMorningCopy(name: string, total: AgentCounts, unassigned: n
   if (total.invoices) parts.push(`${plural(total.invoices, 'invoice')} due`)
   if (parts.length === 0) return null
   const g = greet(name)
-  return `Good morning${g ? ` ${g.slice(0, -2)}` : ''}. Across the team: ${parts.join(', ')}.`
+  return `Good evening${g ? ` ${g.slice(0, -2)}` : ''}. Across the team: ${parts.join(', ')}.`
 }
 
 export function unassignedCopy(n: number): string {
@@ -179,8 +184,8 @@ export function planAlerts(input: AlertInput): { plans: Plan[]; held: Held[] } {
   const want = (p: Plan) => { if (!sent.has(p.key)) plans.push(p) }
   const unassigned = counts.get('')?.waiting ?? 0
 
-  // ── morning summary: from 10:00, once a day, held through quiet hours ──
-  // (10:00 is never quiet, but the guard is what the test pins down.)
+  // ── daily summary: from 20:00, once a day, held through quiet hours ──
+  // (20:00 is never quiet, but the guard is what the test pins down.)
   if (hour >= MORNING_HOUR) {
     for (const a of standard) {
       const key = morningKey(a.email, now)

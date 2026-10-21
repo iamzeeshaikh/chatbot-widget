@@ -31,41 +31,42 @@ let n = 0
 const ok = (label: string, fn: () => void) => { fn(); n++; console.log('  ok', label) }
 
 // ── quiet hours ──
-ok('23:00 PKT is quiet, 08:00 is not, 22:59 is not, 07:59 is', () => {
-  assert.equal(inQuiet(pkt('2026-10-21', '23:00')), true)
-  assert.equal(inQuiet(pkt('2026-10-21', '08:00')), false)
-  assert.equal(inQuiet(pkt('2026-10-21', '22:59')), false)
-  assert.equal(inQuiet(pkt('2026-10-21', '07:59')), true)
+ok('04:00 PKT is quiet, 12:00 is not, 03:59 is not, 11:59 is; 23:00 is working time', () => {
+  assert.equal(inQuiet(pkt('2026-10-21', '04:00')), true)
+  assert.equal(inQuiet(pkt('2026-10-21', '12:00')), false)
+  assert.equal(inQuiet(pkt('2026-10-21', '03:59')), false)
+  assert.equal(inQuiet(pkt('2026-10-21', '11:59')), true)
+  assert.equal(inQuiet(pkt('2026-10-21', '23:00')), false)
 })
 
-// ── morning summary ──
-ok('09:55 PKT: no morning summary yet; waiting nudges still fire', () => {
-  const { plans } = planAlerts(base(pkt('2026-10-21', '09:55')))
+// ── daily (evening) summary — kind 'morning' for the ledger keys ──
+ok('19:55 PKT: no summary yet; waiting nudges still fire', () => {
+  const { plans } = planAlerts(base(pkt('2026-10-21', '19:55')))
   assert.deepEqual(kinds(plans), ['waiting→stevehayes', 'waiting24→dev'].sort())
 })
-ok('10:05 PKT: one summary per agent with anything + admin totals; Steve gets only the unassigned line', () => {
-  const { plans } = planAlerts(base(pkt('2026-10-21', '10:05')))
+ok('20:05 PKT: one summary per agent with anything + admin totals; Steve gets only the unassigned line', () => {
+  const { plans } = planAlerts(base(pkt('2026-10-21', '20:05')))
   assert.deepEqual(kinds(plans), ['morning→dev', 'morning→samirkhan', 'morning→stevehayes', 'waiting→stevehayes', 'waiting24→dev'].sort())
   const samir = plans.find((p) => p.kind === 'morning' && p.to.startsWith('samir'))!
-  assert.equal(samir.body, 'Good morning Samir. 16 customers are waiting for your reply, 1 quote can close this month. 10 unassigned customers are waiting for a reply — accept one.')
+  assert.equal(samir.body, 'Good evening Samir. 16 customers are waiting for your reply, 1 quote can close this month. 10 unassigned customers are waiting for a reply — accept one.')
   assert.equal(samir.url, '/opportunities?agent=samirkhan&list=waiting')
   const steve = plans.find((p) => p.kind === 'morning' && p.to.startsWith('steve'))!
   assert.equal(steve.body, '10 unassigned customers are waiting for a reply — accept one.')
   assert.equal(steve.url, '/opportunities?agent=&list=waiting')
   const dev = plans.find((p) => p.kind === 'morning' && p.to.startsWith('dev'))!
-  assert.equal(dev.body, 'Good morning. Across the team: 26 customers waiting for a reply (10 unassigned), 1 quote that can close this month.')
+  assert.equal(dev.body, 'Good evening. Across the team: 26 customers waiting for a reply (10 unassigned), 1 quote that can close this month.')
 })
 ok('zero parts are omitted; nothing at all → no summary', () => {
-  assert.equal(morningCopy('Steve Hayes', { waiting: 0, hot: 2, invoices: 1 }), 'Good morning Steve. 2 quotes can close this month, 1 invoice is due.')
+  assert.equal(morningCopy('Steve Hayes', { waiting: 0, hot: 2, invoices: 1 }), 'Good evening Steve. 2 quotes can close this month, 1 invoice is due.')
   assert.equal(morningCopy('Steve Hayes', { waiting: 0, hot: 0, invoices: 0 }), null)
 })
-ok('the summary fires once a day: ledger key blocks the 10:10 and 15:00 runs, a new day fires again', () => {
-  const first = planAlerts(base(pkt('2026-10-21', '10:05'))).plans.filter((p) => p.kind === 'morning')
+ok('the summary fires once a day: ledger key blocks the 20:10 and 23:00 runs, a new day fires again', () => {
+  const first = planAlerts(base(pkt('2026-10-21', '20:05'))).plans.filter((p) => p.kind === 'morning')
   const sent = first.map((p) => p.key)
-  assert.equal(planAlerts(base(pkt('2026-10-21', '10:10'), sent)).plans.filter((p) => p.kind === 'morning').length, 0)
-  assert.equal(planAlerts(base(pkt('2026-10-21', '15:00'), sent)).plans.filter((p) => p.kind === 'morning').length, 0)
-  assert.equal(planAlerts(base(pkt('2026-10-22', '10:02'), sent)).plans.filter((p) => p.kind === 'morning').length, 3)
-  assert.equal(morningKey('Samir@X.com', pkt('2026-10-21', '10:05')), 'morning:samir@x.com:2026-10-21')
+  assert.equal(planAlerts(base(pkt('2026-10-21', '20:10'), sent)).plans.filter((p) => p.kind === 'morning').length, 0)
+  assert.equal(planAlerts(base(pkt('2026-10-21', '23:00'), sent)).plans.filter((p) => p.kind === 'morning').length, 0)
+  assert.equal(planAlerts(base(pkt('2026-10-22', '20:02'), sent)).plans.filter((p) => p.kind === 'morning').length, 3)
+  assert.equal(morningKey('Samir@X.com', pkt('2026-10-21', '20:05')), 'morning:samir@x.com:2026-10-21')
 })
 
 // ── waiting nudges ──
@@ -95,12 +96,12 @@ ok('a new unanswered message from the same lead is a new episode', () => {
   const later = base(pkt('2026-10-23', '12:00'), [k1], { waiting: [{ id: 'quote-1', name: 'Carly Blake', owner: 'stevehayes', hours: 3, since: '2026-10-23T04:00:00.000Z' }] })
   assert.equal(planAlerts(later).plans.filter((p) => p.kind === 'waiting').length, 1)
 })
-ok('quiet hours hold everything and nothing is lost: it fires at 08:00', () => {
-  const night = planAlerts(base(pkt('2026-10-21', '23:30')))
+ok('quiet hours hold everything and nothing is lost: it fires at 12:00', () => {
+  const night = planAlerts(base(pkt('2026-10-22', '05:30')))
   assert.equal(night.plans.length, 0)
   assert.ok(night.held.some((h) => h.kind === 'waiting'))
-  const morning = planAlerts(base(pkt('2026-10-22', '08:01')))
-  assert.deepEqual(kinds(morning.plans), ['waiting→stevehayes', 'waiting24→dev'].sort())
+  const noon = planAlerts(base(pkt('2026-10-22', '12:01')))
+  assert.deepEqual(kinds(noon.plans), ['waiting→stevehayes', 'waiting24→dev'].sort())
 })
 
 // ── month end ──

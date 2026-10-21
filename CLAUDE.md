@@ -375,11 +375,16 @@ window) → `lib/oppalertsweep.ts` → the pure decisions in `lib/oppalerts.ts`
 (`npm run test:oppalerts`). Numbers come from `loadOpportunities()` — the same
 loader the page uses — so a push says what the page says. Three alerts, each to
 an agent BY NAME with a link into `/opportunities?agent=<key>&list=…`: the
-10:00 PKT morning summary (one per agent with anything; unassigned waiting
-customers as a line to every agent; admins get the totals), the 2 h "customer
-waiting" nudge to the owner and the 24 h escalation to admins, and the month-end
-leaderboard (last day, 18:00). Quiet hours 23:00–08:00 PKT hold (nothing is
-queued — the state is recomputed and sent at the first run after 08:00).
+20:00 PKT daily summary (kind `morning` in the ledger keys; the team works
+evenings, so the owner moved it from 10:00 on 2026-10-22 — "Good evening
+Samir…"; one per agent with anything; unassigned waiting customers as a line
+to every agent; admins get the totals), the 2 h "customer waiting" nudge to
+the owner and the 24 h escalation to admins, and the month-end leaderboard
+(last day, 18:00). Quiet hours 04:00–12:00 PKT hold (US working hours are
+our night; nothing is queued — the state is recomputed and sent at the first
+run after 12:00). **An agent with no push device gets the alert as an email
+in their own inbox instead**, sent from their own connected Gmail
+(`emailFallback` in the sweep); neither → `unreachable` on the `sent` row.
 At-most-once is a `crm_opp_alert` ledger row per key on `zeeops-opp-alerts`,
 written BEFORE the push. A wait older than 72 h is backlog (digest only, no
 nudge) and nudges are capped at 5 per recipient per run — both exist so the

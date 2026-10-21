@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 // Opportunities alerts for the packaging sales team (lib/oppalertsweep.ts):
-// the 10:00 morning summary, the 2 h / 24 h "customer waiting" nudges and the
+// the 20:00 daily summary, the 2 h / 24 h "customer waiting" nudges and the
 // month-end leaderboard. Vercel Cron every 5 minutes with CRON_SECRET, or a
 // packaging admin by hand; ?dry=1 returns what would be sent without writing
 // or pushing anything. Packaging only — never gated on the cron path.
