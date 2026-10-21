@@ -2285,6 +2285,7 @@ export default function Dashboard() {
   // API refuses everyone else regardless.
   const canSales = hasFeature(workspace, 'sales') && userRole === 'admin'
   const canJobs = hasFeature(workspace, 'jobs')
+  const canOpportunities = hasFeature(workspace, 'opportunities')
   const showFirstResponse = hasFeature(workspace, 'quotebot')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
@@ -2551,6 +2552,12 @@ export default function Dashboard() {
           {canPipeline && (
             <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/pipeline') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`}>Pipeline</a>
+          )}
+          {canOpportunities && (
+            // Which deals can close (packaging only) — a real <a> like the
+            // other routes, so it middle-clicks into a new tab.
+            <a href="/opportunities" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/opportunities') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Deals that can close, invoices due, customers waiting">Opportunities</a>
           )}
           {canTasks && (
             <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}

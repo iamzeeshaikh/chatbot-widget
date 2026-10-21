@@ -358,6 +358,21 @@ partner owes that money, not the end customer. Never fold it into direct sales.
   paid on the 3rd is last month's) and the card shows net-after-expenses for the month
   the table is filtered to. `scratch/payouts.test.ts` covers the arithmetic.
 
+### Opportunities (packaging only, 2026-10-21)
+`/opportunities` + `/api/opportunities` (`WORKSPACE_FEATURES` 'opportunities').
+Four derived lists — customer waiting on us, invoice sent / payment due, can
+close this month (hot), older opportunities — plus a month strip and a
+leaderboard. **Everyone in the workspace sees every lead and every amount**
+(owner's rule), so there is no owner narrowing. The scoring is pure
+(`lib/opportunities.ts`) and the loader (`lib/opportunityload.ts`) only folds
+rows through it, so `scratch/opps-backtest.ts` (winds the clock back over real
+history, reports precision/recall against Sales-ledger wins) tests exactly what
+ships. Two data traps it handles: an agent's own Gmail reply arrives as a
+`crm_email_in` from an @site-domain address (that is OURS), and imported mail
+carries the import time in `created_at` — events are timed by the JSON `at`.
+Alcohol / religious orders are flagged "decline", never counted as chances.
+The result is cached 3 minutes per site scope (it reads ~20MB of mail bodies).
+
 ### Enforce access server-side
 Workspace isolation and per-member site access are decided **on the server**, in the
 API route — never only by hiding UI. A member without access to a lead's site gets
