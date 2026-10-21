@@ -455,6 +455,15 @@ Processed message ids are `crm_intake_pull` rows; a failed post is not recorded,
 so the next run retries it. `searchIntakeMessageIds` in `lib/gmail.ts` is the ONE
 mailbox search in this codebase and is for the intake mailbox only — the
 thread-only rule above still holds for every agent mailbox.
+**Second, narrower exception (2026-10-21):** `searchPaypalPaidMail` reads the
+SPORTS shared mailbox `info@thebaseballjerseys.com` with a FIXED query
+(`subject:("paid for your invoice") newer_than:30d`) — the owner's Gmail filter
+forwards PayPal's payment notices there. `lib/paypalpaid.ts` + `/api/crm/paypal-paid`
+(cron `*/10`, `?dryRun=1`) match each to a sports lead (PayPal INV2 code vs the
+lead's `crm_pay_link` / a sent link; fallback payer name + amount, unique hits
+only), write a note, stage Won, an `sp_direct` payment and a sports push.
+Handled mails are `crm_paypal_paid` rows on `zeeops-paypal-paid`; unmatched ones
+are recorded and pushed, never guessed.
 Late leads (a `crm_intake_lag` row, 45+ min) are never emailed first by the quote
 bot: Samir may already have answered from dev@ Gmail, so the bot assigns him and
 opens a "check Gmail first" task instead.
