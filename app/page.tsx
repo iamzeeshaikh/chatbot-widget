@@ -1013,6 +1013,10 @@ export default function Dashboard() {
   const [summaryLeads, setSummaryLeads] = useState<BillingLead[]>([])
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [sessions, setSessions] = useState<Session[]>([])
+  // False until the first conversations poll has answered. The nav counts
+  // show "…" until then: a grey 0 before any data has arrived reads as "no
+  // chats", which the owner took for a broken dashboard (2026-10-21).
+  const [countsReady, setCountsReady] = useState(false)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
   // Global bot kill switch (lib/botflag.ts). Initialised from the code default;
   // every conversations poll refreshes it with the server's view (which also
@@ -1497,12 +1501,17 @@ export default function Dashboard() {
     // before the bot went live, and shouldn't count toward Overview totals.
     const trackingStart = '2026-06-01T00:00:00Z'
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    // The tiles and chart need only sites + the billing summary. The full
+    // leads list (~1.5 MB, the slowest of the three) fills the table when it
+    // lands; blocking the whole tab on it left the skeleton up for 20 s+ on a
+    // slow connection and read as "nothing shows" (2026-10-21).
     Promise.all([
       fetch('/api/admin/sites').then((r) => r.json()).catch(() => ({ sites: [] })),
-      fetch('/api/admin/leads-list').then((r) => r.json()).catch(() => ({ leads: [] })),
       fetch(`/api/admin/leads-billing?from=${encodeURIComponent(trackingStart)}&to=${encodeURIComponent(tomorrow)}`)
         .then((r) => r.json()).catch(() => ({ leads: [] })),
-    ]).then(([s, l, b]) => { setSites(s.sites ?? []); setLeads(l.leads ?? []); setSummaryLeads(b.leads ?? []); setOverviewLoading(false) })
+    ]).then(([s, b]) => { setSites(s.sites ?? []); setSummaryLeads(b.leads ?? []); setOverviewLoading(false) })
+    fetch('/api/admin/leads-list').then((r) => r.json()).catch(() => ({ leads: [] }))
+      .then((l) => setLeads(l.leads ?? []))
   }, [tab, authReady])
 
   // Analytics (visitors + chats over time), scoped server-side to the workspace.
@@ -1631,6 +1640,7 @@ export default function Dashboard() {
     dashSoundReady.current = true
 
     setSessions(incoming)
+    setCountsReady(true)
     // Keep the OPEN conversation's assignment + mode in sync with the poll, so
     // when another agent claims/releases the chat you're viewing, your header
     // and the reply-box lock update within one poll (without this, selectedSession
@@ -2632,7 +2642,7 @@ export default function Dashboard() {
                 is what made the spacing here look wrong in the first place. A
                 grey zero costs nothing and says something true. tabular-nums
                 and a min-width keep 1, 2 and 3 digits the same width. */}
-            <span className={`${NAV_COUNT} ${roleSessions.length > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{roleSessions.length > 999 ? '999+' : roleSessions.length}</span>
+            <span className={`${NAV_COUNT} ${roleSessions.length > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{!countsReady ? '…' : roleSessions.length > 999 ? '999+' : roleSessions.length}</span>
           </a>
           <a href="/?tab=visitors" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('visitors') }} aria-current={tab === 'visitors' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'visitors' ? NAV_TAB_ON : NAV_TAB_OFF}`}
             title={`${roleVisitors.length} visitor${roleVisitors.length === 1 ? '' : 's'} on your sites right now`}>
@@ -2642,7 +2652,7 @@ export default function Dashboard() {
                 was most of why the spacing round here read as uneven. */}
             <span className={`${NAV_COUNT} !min-w-[2.5rem] gap-1 ${roleVisitors.length > 0 ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-white/90' : 'bg-gray-400'}`} aria-hidden />
-              {roleVisitors.length > 999 ? '999+' : roleVisitors.length}
+              {!countsReady ? '…' : roleVisitors.length > 999 ? '999+' : roleVisitors.length}
             </span>
           </a>
           {canEmail && (
@@ -2652,7 +2662,7 @@ export default function Dashboard() {
               <span className="truncate">Inbox</span>
               {/* Same always-rendered pattern as the Chats count: hiding a badge
                   that later appears widens the strip and moves every tab. */}
-              <span className={`${NAV_COUNT} ${unreadReplies > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{unreadReplies > 999 ? '999+' : unreadReplies}</span>
+              <span className={`${NAV_COUNT} ${unreadReplies > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{!countsReady ? '…' : unreadReplies > 999 ? '999+' : unreadReplies}</span>
             </a>
           )}
           {/* Billing is the month's revenue view and it carries the CSV export
