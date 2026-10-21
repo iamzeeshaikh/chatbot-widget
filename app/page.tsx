@@ -275,9 +275,15 @@ function cleanReferrer(r: string | null): string {
 // NAV_TAB_ON is a background and a shadow ONLY — no border, no extra padding.
 // An active state that changes a tab's footprint moves its neighbours, and a
 // click already aimed at one of them then lands somewhere else.
-const NAV_TAB = 'relative h-8 px-2 xl:px-3 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 min-w-0 whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
-const NAV_TAB_ON = 'bg-white text-gray-900 shadow-sm'
-const NAV_TAB_OFF = 'text-gray-500 hover:text-gray-900 hover:bg-white/60'
+// 2026-10-21 (owner): an underline tab bar instead of the grey segmented
+// pill. Active = dark text + a 2px accent underline drawn by ::after, which
+// is absolutely positioned, so selecting a tab still cannot change its
+// footprint (see the note above). Same weight in both states for the same
+// reason. Keyboard focus shows a thin offset ring via :focus-visible only —
+// never on a mouse click.
+const NAV_TAB = 'relative shrink-0 h-10 px-3 text-[13px] font-medium whitespace-nowrap flex items-center gap-1.5 rounded-md transition-colors outline-none focus-visible:ring-1 focus-visible:ring-gray-500 focus-visible:ring-offset-2 after:absolute after:left-3 after:right-3 after:bottom-0 after:h-[2px] after:rounded-full'
+const NAV_TAB_ON = 'text-gray-900 after:bg-[var(--nav-accent)]'
+const NAV_TAB_OFF = 'text-gray-500 hover:text-gray-900 after:bg-transparent hover:after:bg-gray-300'
 // Wide enough for the largest value each badge is allowed to display, which is
 // why the values are capped at 999+/99+ below. A reserve narrower than the
 // content is not a reserve: this strip moved 5px the moment a 3-digit chat count
@@ -289,7 +295,7 @@ const NAV_TAB_OFF = 'text-gray-500 hover:text-gray-900 hover:bg-white/60'
 // third row. Absolutely positioned it costs no width at all — which also means
 // it can be hidden at zero on mobile without moving anything, while from `sm`
 // up it goes back in the flow and is always present.
-const NAV_COUNT = 'absolute -top-1 -right-1 sm:static text-[10px] leading-none px-1.5 py-1 rounded-full font-semibold tabular-nums text-center min-w-[1.9rem] shrink-0'
+const NAV_COUNT = 'inline-flex items-center justify-center h-[18px] min-w-[1.6rem] px-1.5 rounded-full text-[10px] leading-none font-semibold tabular-nums shrink-0'
 // A stable id for THIS browser profile, minted once and kept forever.
 // The server uses it to retire whatever subscription this profile held before,
 // so re-subscribing replaces rather than adds. Without it a profile could hold
@@ -2608,10 +2614,10 @@ export default function Dashboard() {
             away — which a "More" menu or a horizontal scroller would both cost.
             Pipeline and Tasks are routes, not tabs, so they keep real hrefs and
             can be middle-clicked into their own window. */}
-        <nav aria-label="Sections"
-          className="order-last w-full mt-1.5 grid grid-cols-4 gap-1 sm:flex sm:flex-wrap sm:gap-0.5 xl:order-none xl:mt-0 xl:w-auto xl:flex-nowrap bg-gray-100 p-1 pt-2.5 sm:pt-1 rounded-xl border border-gray-200 min-w-0">
-          <button onClick={() => setTab('overview')} className={`${NAV_TAB} ${tab === 'overview' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Overview</button>
-          <button onClick={() => setTab('conversations')} className={`${NAV_TAB} ${tab === 'conversations' ? NAV_TAB_ON : NAV_TAB_OFF}`}>
+        <nav aria-label="Sections" style={{ '--nav-accent': accentColor } as React.CSSProperties}
+          className="order-last w-full -mb-2 sm:-mb-2.5 flex flex-nowrap items-stretch gap-0.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden 2xl:order-none 2xl:w-auto 2xl:mb-0 min-w-0">
+          <a href="/?tab=overview" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('overview') }} aria-current={tab === 'overview' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'overview' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Overview</a>
+          <a href="/?tab=conversations" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('conversations') }} aria-current={tab === 'conversations' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'conversations' ? NAV_TAB_ON : NAV_TAB_OFF}`}>
             <span className="truncate">Chats</span>
             {/* Always present, and merely muted at zero. Hiding it would be
                 tidier for about a second and then the count would arrive, widen
@@ -2621,19 +2627,19 @@ export default function Dashboard() {
                 is what made the spacing here look wrong in the first place. A
                 grey zero costs nothing and says something true. tabular-nums
                 and a min-width keep 1, 2 and 3 digits the same width. */}
-            <span className={`${NAV_COUNT} ${roleSessions.length > 0 ? 'bg-blue-600 text-white' : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}>{roleSessions.length > 999 ? '999+' : roleSessions.length}</span>
-          </button>
-          <button onClick={() => setTab('visitors')} className={`${NAV_TAB} ${tab === 'visitors' ? NAV_TAB_ON : NAV_TAB_OFF}`}
+            <span className={`${NAV_COUNT} ${roleSessions.length > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{roleSessions.length > 999 ? '999+' : roleSessions.length}</span>
+          </a>
+          <a href="/?tab=visitors" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('visitors') }} aria-current={tab === 'visitors' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'visitors' ? NAV_TAB_ON : NAV_TAB_OFF}`}
             title={`${roleVisitors.length} visitor${roleVisitors.length === 1 ? '' : 's'} on your sites right now`}>
             <span className="truncate">Visitors</span>
             {/* A dot carries "live" in a fraction of the width the word did —
                 the old "N live" pill was half again as wide as any other tab and
                 was most of why the spacing round here read as uneven. */}
-            <span className={`${NAV_COUNT} !min-w-[2.5rem] items-center justify-center gap-1 ${roleVisitors.length > 0 ? 'inline-flex bg-green-600 text-white' : 'hidden sm:inline-flex bg-gray-200 text-gray-500'}`}>
+            <span className={`${NAV_COUNT} !min-w-[2.5rem] gap-1 ${roleVisitors.length > 0 ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-white/90' : 'bg-gray-400'}`} aria-hidden />
               {roleVisitors.length > 999 ? '999+' : roleVisitors.length}
             </span>
-          </button>
+          </a>
           {canEmail && (
             <a href="/inbox" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/inbox') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`}
@@ -2641,7 +2647,7 @@ export default function Dashboard() {
               <span className="truncate">Inbox</span>
               {/* Same always-rendered pattern as the Chats count: hiding a badge
                   that later appears widens the strip and moves every tab. */}
-              <span className={`${NAV_COUNT} ${unreadReplies > 0 ? 'bg-blue-600 text-white' : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}>{unreadReplies > 999 ? '999+' : unreadReplies}</span>
+              <span className={`${NAV_COUNT} ${unreadReplies > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{unreadReplies > 999 ? '999+' : unreadReplies}</span>
             </a>
           )}
           {/* Billing is the month's revenue view and it carries the CSV export
@@ -2649,10 +2655,10 @@ export default function Dashboard() {
               in the view below, and in the endpoint, so there is no address bar
               to type past. */}
           {hasTrackedSite && userRole === 'admin' && (
-            <button onClick={() => setTab('billing')} className={`${NAV_TAB} ${tab === 'billing' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Billing</button>
+            <a href="/?tab=billing" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('billing') }} aria-current={tab === 'billing' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'billing' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Billing</a>
           )}
           {userRole === 'admin' && (
-            <button onClick={() => setTab('performance')} className={`${NAV_TAB} ${tab === 'performance' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Reports</button>
+            <a href="/?tab=performance" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('performance') }} aria-current={tab === 'performance' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'performance' ? NAV_TAB_ON : NAV_TAB_OFF}`}>Reports</a>
           )}
           {canPipeline && (
             <a href="/pipeline" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/pipeline') } }}
@@ -2669,7 +2675,7 @@ export default function Dashboard() {
               className={`${NAV_TAB} ${NAV_TAB_OFF}`}>
               <span className="truncate">Tasks</span>
               {/* Overdue + due today for this member, in Pakistan time. */}
-              <span className={`${NAV_COUNT} ${taskBadge > 0 ? (taskBadgeOverdue > 0 ? 'bg-red-600 text-white' : 'bg-amber-500 text-white') : 'hidden sm:inline-block bg-gray-200 text-gray-500'}`}
+              <span className={`${NAV_COUNT} ${taskBadge > 0 ? (taskBadgeOverdue > 0 ? 'bg-red-600 text-white' : 'bg-amber-500 text-white') : 'bg-gray-100 text-gray-500'}`}
                 title={taskBadge > 0 ? `${taskBadgeOverdue} overdue · ${taskBadge - taskBadgeOverdue} due today` : 'Nothing due'}>
                 {taskBadge > 99 ? '99+' : taskBadge}
               </span>

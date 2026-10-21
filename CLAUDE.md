@@ -242,24 +242,20 @@ rendered from first paint and merely `invisible` until they have a value, with
 `tabular-nums` and a `min-w-` so a count going 9 → 10 → 100 does not move
 anything either. Keep any new header chrome to that pattern.
 
-The tab strip **wraps, it does not scroll**. As a horizontal scroller it was
-678px of tabs in a 364px box on a phone, so Billing, Performance, Pipeline and
-Tasks sat past the right edge with nothing to suggest they existed.
-
-The bar is one `<nav>` element re-laid out at two breakpoints, never two copies:
-four equal columns below `sm`, a wrapped full-width row up to `xl`, and inline
-beside the brand from `xl`. Duplicating it for mobile would put two Pipeline
-links in the DOM and the first `querySelector` would find the hidden one.
-Below `xl` it is the **nav** that takes its own row, not the controls — when the
-controls wrapped instead, Members and Sign out ended up orphaned on a second
-line while the first still had space.
-
-Counts are always rendered and go grey at zero rather than being hidden: an
-invisible reservation is stable but leaves a conspicuous hole, which is what
-made the spacing look wrong. They are capped (`999+`, `99+`) so the value can
-never outgrow its `min-w-`. On mobile only, the count is absolutely positioned
-on the tab's corner — out of flow, so it costs no width and may be hidden at
-zero for free; four columns in the flow ellipsised every label.
+**Redesigned 2026-10-21 at the owner's request** (supersedes the wrapped
+grid / segmented pill described in earlier history): the nav is an underline
+tab bar — no container, active tab = dark text + a 2px accent underline drawn
+by `::after` (absolutely positioned, so the footprint never changes), muted
+inactive tabs, counts as small rounded counters in the flow and always
+rendered (grey at zero). Keyboard focus is a thin offset ring via
+`:focus-visible` only. Below `2xl` the nav takes its own row under the brand
+and controls and **scrolls horizontally** (hidden scrollbar) instead of
+wrapping; from `2xl` it sits inline. **Every entry is a real `<a href>`**:
+the dashboard tabs are `/?tab=overview|conversations|visitors|billing|performance`
+(loading that URL opens the tab — the restore effect reads `?tab=`), the rest
+are their routes. A plain left click is intercepted (`setTab`, no reload);
+Cmd/Ctrl/Shift/Alt-click, middle-click and the context menu fall through to
+the browser, so "open in new tab" works everywhere.
 
 Account-level things (identity, Members, Sign out) belong in the avatar menu,
 not loose in the bar. That is also what bought the space to fit one row.
