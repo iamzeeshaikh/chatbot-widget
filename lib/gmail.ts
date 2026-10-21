@@ -798,6 +798,16 @@ export async function searchIntakeMessageIds(agentEmail: string, cfg: GoogleConf
 }
 
 /**
+ * PayPal's "paid for your invoice" mails in the SPORTS shared mailbox — the
+ * owner's Gmail filter forwards them there (lib/paypalpaid.ts). The query is
+ * fixed here, not passed in, so this can never become a general inbox read:
+ * it sees those payment notices and nothing else.
+ */
+export async function searchPaypalPaidMail(mailbox: string, cfg: GoogleConfig): Promise<{ id: string; threadId: string }[]> {
+  return searchIntakeMessageIds(mailbox, cfg, 'subject:("paid for your invoice") newer_than:30d', 100)
+}
+
+/**
  * Message ids from a search of an AGENT mailbox. Only lib/emailsweep.ts calls
  * it, and only with `from:(<addresses this agent has emailed>)` — mail a known
  * customer started under a new subject. Never a general inbox read.
