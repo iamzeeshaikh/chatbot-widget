@@ -4367,17 +4367,9 @@ export default function Dashboard() {
             const chatLeads = allLeads.filter((l) => l.source === 'chat')
             const quoteLeads = allLeads.filter((l) => l.source === 'quote')
             const checkoutLeads = allLeads.filter((l) => l.source === 'checkout')
-            const activeLeads = billingLeadType === 'chat' ? chatLeads : billingLeadType === 'quote' ? quoteLeads : checkoutLeads
-            // By-site breakdown recomputed for whichever type is showing, so the
-            // numbers on screen always add up to what's in the table below —
-            // the server's combined billing.bySite mixed both types together,
-            // which was the confusing part.
-            const bySiteMap: Record<string, { name: string; count: number }> = {}
-            for (const l of activeLeads) {
-              if (!bySiteMap[l.site_id]) bySiteMap[l.site_id] = { name: l.site_name, count: 0 }
-              bySiteMap[l.site_id].count++
-            }
-            const bySiteActive = Object.entries(bySiteMap).sort((a, b) => b[1].count - a[1].count)
+            // By-site breakdowns are computed per type in the cards below, so
+            // the numbers on screen always add up to what's in the table — the
+            // server's combined billing.bySite mixed the types together.
             const chatLeadsShown = billingSiteFilter ? chatLeads.filter((l) => l.site_id === billingSiteFilter) : chatLeads
             // The non-chat table branch renders whichever email-sourced type is
             // active — quote and checkout leads have the identical shape.
@@ -4469,56 +4461,80 @@ export default function Dashboard() {
                 </button>
               </div>
 
-              {/* By site (for whichever tab is active) — click a site to
-                  filter the table below to just that site. Each card wears
-                  the site's own accent color (SITE_ACCENT, same as the rest
-                  of the dashboard) with a proportional bar so relative
-                  volume reads at a glance, not just the raw number. */}
-              <div className="bg-gray-100 rounded-2xl p-5 border border-gray-200 mb-5">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
-                    By site — <span className="inline-flex items-center gap-1 align-middle">{billingLeadType === 'chat'
-                      ? <><MessageSquare size={11} strokeWidth={2} aria-hidden /> Chat</>
-                      : billingLeadType === 'quote'
-                        ? <><Mail size={11} strokeWidth={2} aria-hidden /> Quote</>
-                        : <><ShoppingCart size={11} strokeWidth={2} aria-hidden /> Checkout</>}</span>
-                  </p>
-                  {billingSiteFilter && (
-                    <button onClick={() => setBillingSiteFilter(null)}
-                      className="text-[11px] font-medium text-indigo-700 hover:text-indigo-800 hover:underline"><span className="inline-flex items-center gap-1">Clear filter <X size={11} strokeWidth={2} aria-hidden /></span></button>
-                  )}
-                </div>
-                {bySiteActive.length === 0 ? (
-                  <p className="text-xs text-gray-500">No {billingLeadType} leads in this period.</p>
-                ) : (() => {
-                  const maxCount = Math.max(...bySiteActive.map(([, info]) => info.count))
+              {/* By site — click a site to filter the table below to just
+                  that site. Each card wears the site's own accent color
+                  (SITE_ACCENT, same as the rest of the dashboard) with a
+                  proportional bar so relative volume reads at a glance.
+                  Chat and Quote sit SIDE BY SIDE (owner, 2026-10-20): the
+                  quote breakdown used to appear only after clicking the
+                  Quote tile, so it read as though there was none. Clicking
+                  a site in either card switches the table to that type.
+                  Checkout keeps its single card. */}
+              {(() => {
+                const bySiteCard = (type: 'chat' | 'quote' | 'checkout', leads: typeof allLeads) => {
+                  const m: Record<string, { name: string; count: number }> = {}
+                  for (const l of leads) {
+                    if (!m[l.site_id]) m[l.site_id] = { name: l.site_name, count: 0 }
+                    m[l.site_id].count++
+                  }
+                  const rows = Object.entries(m).sort((x, y) => y[1].count - x[1].count)
+                  const active = billingLeadType === type
+                  const maxCount = rows.length ? Math.max(...rows.map(([, info]) => info.count)) : 0
                   return (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                      {bySiteActive.map(([siteId, info]) => {
-                        const accent = SITE_ACCENT[siteId] ?? '#6366f1'
-                        const selected = billingSiteFilter === siteId
-                        const pct = Math.max(8, Math.round((info.count / maxCount) * 100))
-                        return (
-                          <button key={siteId} onClick={() => setBillingSiteFilter(selected ? null : siteId)}
-                            style={selected ? { backgroundColor: `${accent}14`, borderColor: accent, boxShadow: `0 0 0 1px ${accent}` } : undefined}
-                            className={`group text-left rounded-xl px-3.5 py-3 border transition-all ${selected ? '' : 'bg-white border-gray-200 hover:border-gray-300 hover:-translate-y-0.5 hover:shadow-sm'}`}>
-                            <div className="flex items-center justify-between gap-2 mb-1.5">
-                              <span className="flex items-center gap-2 min-w-0">
-                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: accent }} />
-                                <span className={`text-sm truncate ${selected ? 'font-semibold' : 'text-gray-800 group-hover:text-gray-900'}`} style={selected ? { color: accent } : undefined}>{info.name}</span>
-                              </span>
-                              <span className="text-lg font-extrabold tabular-nums flex-shrink-0" style={{ color: selected ? accent : '#111827' }}>{info.count}</span>
-                            </div>
-                            <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
-                              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent, opacity: selected ? 1 : 0.55 }} />
-                            </div>
-                          </button>
-                        )
-                      })}
+                    <div key={type} className={`bg-gray-100 rounded-2xl p-5 border mb-5 ${active && billingLeadType !== 'checkout' ? 'border-gray-300 ring-1 ring-gray-300' : 'border-gray-200'}`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
+                          By site — <span className="inline-flex items-center gap-1 align-middle">{type === 'chat'
+                            ? <><MessageSquare size={11} strokeWidth={2} aria-hidden /> Chat</>
+                            : type === 'quote'
+                              ? <><Mail size={11} strokeWidth={2} aria-hidden /> Quote</>
+                              : <><ShoppingCart size={11} strokeWidth={2} aria-hidden /> Checkout</>}</span>
+                          <span className="ml-1.5 tabular-nums normal-case text-gray-400">{leads.length}</span>
+                        </p>
+                        {active && billingSiteFilter && (
+                          <button onClick={() => setBillingSiteFilter(null)}
+                            className="text-[11px] font-medium text-indigo-700 hover:text-indigo-800 hover:underline"><span className="inline-flex items-center gap-1">Clear filter <X size={11} strokeWidth={2} aria-hidden /></span></button>
+                        )}
+                      </div>
+                      {rows.length === 0 ? (
+                        <p className="text-xs text-gray-500">No {type} leads in this period.</p>
+                      ) : (
+                        <div className={`grid grid-cols-1 sm:grid-cols-2 ${type === 'checkout' ? 'lg:grid-cols-3' : ''} gap-2.5`}>
+                          {rows.map(([siteId, info]) => {
+                            const accent = SITE_ACCENT[siteId] ?? '#6366f1'
+                            const selected = active && billingSiteFilter === siteId
+                            const pct = Math.max(8, Math.round((info.count / maxCount) * 100))
+                            return (
+                              <button key={siteId}
+                                onClick={() => { setBillingLeadType(type); setBillingSiteFilter(selected ? null : siteId) }}
+                                style={selected ? { backgroundColor: `${accent}14`, borderColor: accent, boxShadow: `0 0 0 1px ${accent}` } : undefined}
+                                className={`group text-left rounded-xl px-3.5 py-3 border transition-all ${selected ? '' : 'bg-white border-gray-200 hover:border-gray-300 hover:-translate-y-0.5 hover:shadow-sm'}`}>
+                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                  <span className="flex items-center gap-2 min-w-0">
+                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: accent }} />
+                                    <span className={`text-sm truncate ${selected ? 'font-semibold' : 'text-gray-800 group-hover:text-gray-900'}`} style={selected ? { color: accent } : undefined}>{info.name}</span>
+                                  </span>
+                                  <span className="text-lg font-extrabold tabular-nums flex-shrink-0" style={{ color: selected ? accent : '#111827' }}>{info.count}</span>
+                                </div>
+                                <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
+                                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent, opacity: selected ? 1 : 0.55 }} />
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )
-                })()}
-              </div>
+                }
+                if (billingLeadType === 'checkout') return bySiteCard('checkout', checkoutLeads)
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-4">
+                    {bySiteCard('chat', chatLeads)}
+                    {bySiteCard('quote', quoteLeads)}
+                  </div>
+                )
+              })()}
 
               {/* Detail table — columns differ by tab: Chat has a real
                   conversation (Source/Agent/View chat); Quote has no chat
