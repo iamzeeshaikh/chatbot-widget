@@ -608,6 +608,8 @@ function AnalyticsChart({ points, accent, totalUnique, onPick }: {
 interface BreakdownSite { siteId: string; name: string; visits: number; unique: number; chats: number; picked: number; notPicked: number }
 interface Breakdown {
   label: string
+  range?: string
+  bucket?: number
   sites: BreakdownSite[]
   total: { visits: number; unique: number; chats: number; picked: number; notPicked: number } | null
 }
@@ -617,9 +619,64 @@ interface Breakdown {
 // A modal rather than a section under the chart: the answer is a table that can
 // run to twenty-odd rows, and pushing the rest of the Overview down every time
 // somebody checked a month would make the page jump under their cursor.
-function SiteBreakdown({ data, loading, error, accent, onClose }: {
-  data: Breakdown | null; loading: boolean; error: string; accent: string; onClose: () => void
+// One site's drill-down (packaging, 'trafficdetail'): the same point on the
+// chart, that site only, by country / source / page / device. Counted on the
+// server (lib/trafficdetail.ts) — only the totals come back.
+interface TrafficCount { key: string; label: string; visits: number; picked: number }
+interface SiteDetail {
+  siteId: string; name: string; label: string; chats: number
+  detail: {
+    visits: number; unique: number; picked: number; notPicked: number
+    newVisitors: number; returning: number; crawler: number
+    countries: TrafficCount[]; sources: TrafficCount[]; landingPages: TrafficCount[]; pagesViewed: TrafficCount[]; devices: TrafficCount[]
+  }
+}
+
+function TrafficList({ title, rows, accent }: { title: string; rows: TrafficCount[]; accent: string }) {
+  const max = Math.max(1, ...rows.map((r) => r.visits))
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white">
+      <p className="px-3 py-2 border-b border-gray-200 text-[10px] font-semibold uppercase tracking-wide text-gray-500">{title}</p>
+      {rows.length === 0 ? <p className="px-3 py-3 text-xs text-gray-500">Nothing recorded.</p> : (
+        <ul className="divide-y divide-gray-100">
+          {rows.map((r) => (
+            <li key={r.key} className="px-3 py-1.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="truncate text-gray-800" title={r.label}>{r.label}</span>
+                <span className="shrink-0 tabular-nums font-semibold text-gray-900">{r.visits.toLocaleString('en-US')}
+                  {r.picked > 0 && <span className="ml-1.5 font-normal text-green-700" title="Visits an agent picked up">{r.picked} picked</span>}
+                </span>
+              </div>
+              <span className="mt-1 block h-1 rounded-full bg-gray-100" aria-hidden>
+                <span className="block h-1 rounded-full" style={{ width: `${(r.visits / max) * 100}%`, backgroundColor: accent, opacity: 0.7 }} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function SiteBreakdown({ data, loading, error, accent, onClose, canDrill = false }: {
+  data: Breakdown | null; loading: boolean; error: string; accent: string; onClose: () => void; canDrill?: boolean
 }) {
+  const [drill, setDrill] = useState<{ siteId: string; name: string } | null>(null)
+  const [detail, setDetail] = useState<SiteDetail | null>(null)
+  const [detailError, setDetailError] = useState('')
+  const openSite = async (siteId: string, name: string) => {
+    if (!data || data.range === undefined || data.bucket === undefined) return
+    setDrill({ siteId, name }); setDetail(null); setDetailError('')
+    try {
+      const res = await fetch(`/api/admin/analytics/breakdown?range=${data.range}&bucket=${data.bucket}&site=${encodeURIComponent(siteId)}`)
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setDetailError(d.error || 'That site could not be broken down.'); return }
+      setDetail(d as SiteDetail)
+    } catch {
+      setDetailError('That site could not be broken down.')
+    }
+  }
+
   // Escape closes it, like every other dismissable layer.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -638,9 +695,16 @@ function SiteBreakdown({ data, loading, error, accent, onClose }: {
       <div className="relative w-full max-w-3xl rounded-xl border border-gray-200 bg-white shadow-xl">
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-200">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Traffic by site</h3>
+            <h3 className="text-sm font-semibold text-gray-900">
+              {drill ? (
+                <button onClick={() => { setDrill(null); setDetail(null) }} className="inline-flex items-center gap-1 text-gray-900 hover:text-blue-700">
+                  <ChevronLeft size={14} strokeWidth={2} aria-hidden /> Traffic by site <span className="text-gray-400">/</span> {drill.name}
+                </button>
+              ) : 'Traffic by site'}
+            </h3>
             <p className="mt-0.5 text-xs text-gray-500">
               {data?.label ? `For ${data.label}` : 'For the point you picked'}
+              {canDrill && !drill && rows.length > 0 ? ' · click a site for countries, sources and pages' : ''}
             </p>
           </div>
           <button onClick={onClose} aria-label="Close"
@@ -649,7 +713,44 @@ function SiteBreakdown({ data, loading, error, accent, onClose }: {
           </button>
         </div>
 
-        {loading ? (
+        {drill ? (
+          detailError ? <p role="alert" className="px-5 py-10 text-center text-xs text-red-700">{detailError}</p>
+          : !detail ? (
+            <div className="flex items-center justify-center gap-2 py-14 text-gray-500">
+              <Loader2 size={18} strokeWidth={2} className="animate-spin" aria-hidden />
+              <span className="text-xs">Breaking {drill.name} down…</span>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-px bg-gray-200 border-b border-gray-200">
+                {([
+                  ['Visits', detail.detail.visits],
+                  ['Unique', detail.detail.unique],
+                  ['Chats', detail.chats],
+                  ['Picked', detail.detail.picked],
+                  ['Not picked', detail.detail.notPicked],
+                  ['New / returning', `${detail.detail.newVisitors.toLocaleString('en-US')} / ${detail.detail.returning.toLocaleString('en-US')}`],
+                ] as [string, number | string][]).map(([k, v]) => (
+                  <div key={k} className="bg-white px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-500">{k}</p>
+                    <p className="mt-0.5 text-lg font-semibold text-gray-900 tabular-nums">{typeof v === 'number' ? v.toLocaleString('en-US') : v}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="max-h-[60vh] overflow-y-auto p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50">
+                <TrafficList title="Country" rows={detail.detail.countries} accent={accent} />
+                <TrafficList title="Source / referrer" rows={detail.detail.sources} accent={accent} />
+                <TrafficList title="Landing page" rows={detail.detail.landingPages} accent={accent} />
+                <TrafficList title="Pages viewed" rows={detail.detail.pagesViewed} accent={accent} />
+                <TrafficList title="Device" rows={detail.detail.devices} accent={accent} />
+              </div>
+              <p className="px-5 py-3 border-t border-gray-200 text-[11px] text-gray-500">
+                Returning = the browser had visited this site before.
+                {detail.detail.crawler > 0 ? ` ${detail.detail.crawler.toLocaleString('en-US')} of these visits came from Google's own crawler addresses (66.249.x) — counted like the chart counts them, but they are not customers.` : ''}
+              </p>
+            </>
+          )
+        ) : loading ? (
           <div className="flex items-center justify-center gap-2 py-14 text-gray-500">
             <Loader2 size={18} strokeWidth={2} className="animate-spin" aria-hidden />
             <span className="text-xs">Working it out…</span>
@@ -690,9 +791,13 @@ function SiteBreakdown({ data, loading, error, accent, onClose }: {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.siteId} className="border-t border-gray-200">
+                    <tr key={r.siteId} className={`border-t border-gray-200 ${canDrill ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={canDrill ? () => { void openSite(r.siteId, r.name) } : undefined}>
                       <td className="px-5 py-2">
-                        <span className="block text-gray-900">{r.name}</span>
+                        {canDrill
+                          ? <button type="button" className="block text-left text-gray-900 hover:text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                              onClick={(e) => { e.stopPropagation(); void openSite(r.siteId, r.name) }}>{r.name}</button>
+                          : <span className="block text-gray-900">{r.name}</span>}
                         {/* A bar, so the biggest site is obvious without reading
                             every number in the column. */}
                         <span className="mt-1 block h-1 rounded-full bg-gray-200" aria-hidden>
@@ -2875,7 +2980,8 @@ export default function Dashboard() {
                 )}
                 {breakdownOpen && (
                   <SiteBreakdown data={breakdown} loading={breakdownLoading} error={breakdownError}
-                    accent={accentColor} onClose={() => setBreakdownOpen(false)} />
+                    accent={accentColor} onClose={() => setBreakdownOpen(false)}
+                    canDrill={hasFeature(workspace, 'trafficdetail')} />
                 )}
               </div>
 

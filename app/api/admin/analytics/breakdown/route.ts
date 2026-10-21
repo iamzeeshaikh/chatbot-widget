@@ -3,6 +3,9 @@ import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { findBurstKeys } from '@/lib/botfilter'
 import { buildBuckets, isRange, tally, toPktMs, PKT_MS, type Range } from '@/lib/analytics'
+import { hasFeature } from '@/lib/workspaces'
+import { siteDomain } from '@/lib/sitedomains'
+import { siteTrafficDetail } from '@/lib/trafficdetail'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -59,13 +62,24 @@ export async function GET(req: NextRequest) {
   }
   const bucket = buckets[idx]
 
+  // ?site=<id>: the drill-down for ONE row — that site's visits in this same
+  // bucket by country, source, page and device (packaging only,
+  // 'trafficdetail'). Aggregated here; the browser never gets the raw rows.
+  const siteParam = req.nextUrl.searchParams.get('site')
+  if (siteParam !== null) {
+    if (!hasFeature(member.workspace, 'trafficdetail')) {
+      return NextResponse.json({ error: 'Not available on this dashboard.' }, { status: 403 })
+    }
+    if (!allowed.includes(siteParam)) return NextResponse.json({ error: 'That site is not yours.' }, { status: 403 })
+  }
+
   // Bucket bounds are in PKT-epoch space; the DB stores UTC.
   const fromISO = new Date(bucket.start - PKT_MS).toISOString()
   const toISO = new Date(bucket.end - PKT_MS).toISOString()
 
   const [visRows, agentRows, chatRows, siteRows] = await Promise.all([
-    fetchAllPages<{ created_at: string; user_agent: string | null; session_id: string; page_url: string | null; site_id: string }>(
-      () => supabase.from('active_visitors').select('created_at, user_agent, session_id, page_url, site_id')
+    fetchAllPages<{ created_at: string; user_agent: string | null; session_id: string; page_url: string | null; site_id: string; country: string | null; device_type: string | null }>(
+      () => supabase.from('active_visitors').select('created_at, user_agent, session_id, page_url, site_id, country, device_type')
         .in('site_id', allowed).gte('created_at', fromISO).lt('created_at', toISO)
         .order('created_at', { ascending: true }),
       VISITOR_ROW_CAP),
@@ -94,6 +108,22 @@ export async function GET(req: NextRequest) {
 
   const names = new Map<string, string>()
   for (const s of siteRows.data ?? []) names.set(s.site_id, s.name ?? s.site_id)
+
+  if (siteParam !== null) {
+    const v = visRows.filter((r) => r.site_id === siteParam)
+    const c = chatRows.filter((r) => r.site_id === siteParam)
+    const t = tally([bucket], v, agentSessions, c, bursts)
+    const detail = siteTrafficDetail(
+      v.map((r) => ({ created_at: r.created_at, user_agent: r.user_agent, session_id: r.session_id, page_url: r.page_url, country: r.country, device_type: r.device_type })),
+      agentSessions, bursts, siteDomain(siteParam) ?? '',
+    )
+    return NextResponse.json({
+      range, bucket: idx, label: bucket.label,
+      siteId: siteParam, name: names.get(siteParam) ?? siteParam,
+      chats: t.chats[0],
+      detail,
+    })
+  }
 
   const one = [bucket]
   const sites: SiteRow[] = []
