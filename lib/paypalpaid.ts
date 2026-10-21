@@ -220,6 +220,10 @@ async function recordInLedger(p: PaypalPaid, leadId: string, paidOn: string, gma
   const now = new Date().toISOString()
   if (existing) {
     if (existing.payments.some((x) => x.note.includes(gmailId))) return { saleId: existing.id, error: null }
+    // Already entered by hand (the owner records some payments himself): the
+    // same amount within a few days of this one is that payment, not a second.
+    const near = (d: string) => Math.abs(new Date(d).getTime() - new Date(paidOn).getTime()) <= 4 * 86_400_000
+    if (existing.payments.some((x) => Math.abs(x.amount - (p.amount as number)) <= 1 && (!x.date || near(x.date)))) return { saleId: existing.id, error: null }
     const next: Sale = {
       ...existing,
       payments: [...existing.payments, { id: newId('pay'), date: paidOn, amount: p.amount, fee: 0, method: 'paypal', rate: null, note: tag }],
