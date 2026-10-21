@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft, RefreshCw, TriangleAlert, Lock, Clock, Receipt, Flame, History, Trophy,
-  Mail, MessageCircle, Ban, CircleDollarSign,
+  Mail, MessageCircle, Ban, CircleDollarSign, X,
 } from 'lucide-react'
 import { Card, EmptyState } from '@/app/leads/[id]/ui'
 import { CRM_STAGE_LABEL, CRM_STAGE_STYLE } from '@/lib/crm'
@@ -25,11 +25,17 @@ const BTN = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs fon
 const usd = (n: number | null | undefined) =>
   n === null || n === undefined ? '—' : `$${Math.round(n).toLocaleString('en-US')}`
 
-function waitLabel(hours: number): string {
-  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m`
-  if (hours < 48) return `${Math.round(hours)}h`
-  return `${Math.round(hours / 24)}d`
+type TabKey = 'waiting' | 'invoices' | 'hot' | 'older'
+type FocusKind = 'won' | 'pipeline' | 'hot' | 'waiting'
+const FOCUS_LABEL: Record<FocusKind, string> = { won: 'Won this month', pipeline: 'Pipeline (hot quotes + unpaid invoices)', hot: 'Can close this month', waiting: 'Customers waiting on us' }
+
+function waitLong(hours: number): string {
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} min`
+  if (hours < 48) { const h = Math.round(hours); return `${h} hour${h === 1 ? '' : 's'}` }
+  const d = Math.floor(hours / 24)
+  return `${d} day${d === 1 ? '' : 's'}`
 }
+
 
 export default function OpportunitiesPage() {
   const [data, setData] = useState<OpportunitiesResult | null>(null)
@@ -37,6 +43,8 @@ export default function OpportunitiesPage() {
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [showAllOlder, setShowAllOlder] = useState(false)
+  const [tab, setTab] = useState<TabKey>('waiting')
+  const [focus, setFocus] = useState<{ agent: string; kind: FocusKind } | null>(null)
 
   useEffect(() => {
     try {
@@ -102,7 +110,62 @@ export default function OpportunitiesPage() {
   }
 
   const s = data.strip
-  const older = showAllOlder ? data.older : data.older.slice(0, 25)
+  const olderAll = data.older
+  const older = showAllOlder ? olderAll : olderAll.slice(0, 25)
+  const ownerKey = (i: { owner: string | null }) => i.owner ?? ''
+  const agentName = (k: string) => data.leaderboard.find((r) => r.agent === k)?.name ?? 'Unassigned'
+
+  // A leaderboard cell picked: exactly the leads behind that number.
+  const filtered = focus && (() => {
+    const mine = <T extends { owner: string | null }>(xs: T[]) => xs.filter((i) => ownerKey(i) === focus.agent)
+    if (focus.kind === 'won') return { won: mine(data.won), items: [] as OppItem[] }
+    if (focus.kind === 'waiting') return { won: [], items: mine(data.waiting) }
+    if (focus.kind === 'hot') return { won: [], items: mine(data.hot) }
+    return { won: [], items: [...mine(data.invoices), ...mine(data.hot)] }
+  })()
+
+  const tabs: { key: TabKey; label: string; count: number; icon: typeof Clock; tone: string }[] = [
+    { key: 'waiting', label: 'Customer waiting on us', count: data.waiting.length, icon: Clock, tone: 'bg-red-600' },
+    { key: 'invoices', label: 'Invoice sent · payment due', count: data.invoices.length, icon: Receipt, tone: 'bg-amber-500' },
+    { key: 'hot', label: 'Can close this month', count: data.hot.length, icon: Flame, tone: 'bg-orange-500' },
+    { key: 'older', label: 'Older opportunities (before this month)', count: olderAll.length, icon: History, tone: 'bg-gray-600' },
+  ]
+
+  const waitingRow = (i: OppItem) => (
+    <Row key={i.id} item={i} ownerFirst
+      badge={<span className={`shrink-0 rounded-md px-2 py-1 text-xs font-bold tabular-nums ${(i.hours ?? 0) >= 24 ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-800 border border-amber-300'}`}
+        title="How long the customer has been waiting">waiting {waitLong(i.hours ?? 0)}</span>}
+      extra={<>{i.channel === 'whatsapp' ? <MessageCircle className="w-3 h-3" aria-label="WhatsApp" /> : <Mail className="w-3 h-3" aria-label="Email" />}{i.hot && <Chip tone="hot">hot</Chip>}</>} />
+  )
+  const invoiceRow = (i: OppItem) => (
+    <Row key={i.id} item={i} amount={i.invoice?.amount ?? null}
+      extra={<>
+        <span className="text-gray-600">{i.invoice?.label} · sent {timeAgo(i.invoice?.sentAt)}</span>
+        {i.invoice?.customerSaysPaid && <Chip tone="good">customer says paid — record it in Sales</Chip>}
+        {i.invoice?.wonNoSale && <Chip tone="warn">Won, not in the Sales ledger</Chip>}
+        {i.invoice?.partial && <Chip tone="warn">part paid</Chip>}
+        {i.waiting && <Chip tone="bad">waiting on us</Chip>}
+      </>} />
+  )
+  const hotRow = (i: OppItem) => (
+    <Row key={i.id} item={i} amount={i.quote}
+      extra={<>{i.reason && <Chip tone="hot">{i.reason}</Chip>}{i.waiting && <Chip tone="bad">waiting on us</Chip>}</>} />
+  )
+  const olderRow = (i: OppItem) => (
+    <Row key={i.id} item={i} amount={i.quote} extra={<>{i.waiting && <Chip tone="bad">waiting on us</Chip>}</>} />
+  )
+  const cell = (agent: string, kind: FocusKind, value: React.ReactNode, cls: string) => {
+    const on = focus?.agent === agent && focus.kind === kind
+    return (
+      <td className="px-1 py-1 text-right">
+        <button type="button" onClick={() => setFocus(on ? null : { agent, kind })}
+          title="Show these leads"
+          className={`w-full rounded-md px-2 py-1 text-right tabular-nums underline-offset-2 hover:underline hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${on ? 'bg-blue-100 ring-1 ring-blue-400' : ''} ${cls}`}>
+          {value}
+        </button>
+      </td>
+    )
+  }
 
   return (
     <Shell
@@ -124,7 +187,8 @@ export default function OpportunitiesPage() {
         <Stat label="Waiting on us" value={String(s.waitingCount)} hint={s.waitingOver24 ? `${s.waitingOver24} over 24 hours` : 'none over 24 hours'} tone={s.waitingOver24 ? 'bad' : 'default'} />
       </div>
 
-      {/* Leaderboard — visible to everyone, by the owner's decision. */}
+      {/* Leaderboard — visible to everyone, by the owner's decision. Every
+          number opens exactly the leads behind it. */}
       <Card title={`Leaderboard — ${data.monthLabel}`} icon={Trophy} className="mb-4">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -144,74 +208,94 @@ export default function OpportunitiesPage() {
                   <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap">
                     <span className="inline-block w-5 text-gray-400 tabular-nums">{i + 1}</span>{r.name}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-gray-700">{r.wonCount}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-green-700">{usd(r.wonUsd)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-gray-700">{usd(r.pipelineUsd)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-gray-700">{r.hot}</td>
-                  <td className={`px-3 py-2 text-right tabular-nums ${r.waiting ? 'font-semibold text-red-700' : 'text-gray-700'}`}>{r.waiting}</td>
+                  {cell(r.agent, 'won', r.wonCount, 'text-gray-700')}
+                  {cell(r.agent, 'won', usd(r.wonUsd), 'font-semibold text-green-700')}
+                  {cell(r.agent, 'pipeline', usd(r.pipelineUsd), 'text-gray-700')}
+                  {cell(r.agent, 'hot', r.hot, 'text-gray-700')}
+                  {cell(r.agent, 'waiting', r.waiting, r.waiting ? 'font-semibold text-red-700' : 'text-gray-700')}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="px-3 py-2 text-[10px] text-gray-500">Won = sales booked this month in the Sales ledger. Pipeline = hot quotes plus unpaid invoices on that agent&apos;s leads.</p>
+        <p className="px-3 py-2 text-[10px] text-gray-500">Click any number to see those leads. Won = sales booked this month in the Sales ledger. Pipeline = hot quotes plus unpaid invoices on that agent&apos;s leads.</p>
       </Card>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Section title="Customer waiting on us" icon={Clock} count={data.waiting.length}
-          hint="The customer wrote last and nobody has answered yet. Red after 24 hours."
-          empty="Nobody is waiting on a reply.">
-          {data.waiting.map((i) => (
-            <Row key={i.id} item={i}
-              badge={<span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ${(i.hours ?? 0) >= 24 ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-800 border border-amber-300'}`}>{waitLabel(i.hours ?? 0)}</span>}
-              extra={<>{i.channel === 'whatsapp' ? <MessageCircle className="w-3 h-3" aria-label="WhatsApp" /> : <Mail className="w-3 h-3" aria-label="Email" />}{i.hot && <Chip tone="hot">hot</Chip>}</>} />
-          ))}
-        </Section>
-
-        <Section title="Invoice sent — payment due" icon={Receipt} count={data.invoices.length}
-          hint="An invoice or payment link went out and no paid sale in the Sales ledger matches it."
-          empty="No unpaid invoices.">
-          {data.invoices.map((i) => (
-            <Row key={i.id} item={i} amount={i.invoice?.amount ?? null}
-              extra={<>
-                <span className="text-gray-600">{i.invoice?.label} · sent {timeAgo(i.invoice?.sentAt)}</span>
-                {i.invoice?.customerSaysPaid && <Chip tone="good">customer says paid — record it in Sales</Chip>}
-                {i.invoice?.wonNoSale && <Chip tone="warn">Won, not in the Sales ledger</Chip>}
-                {i.invoice?.partial && <Chip tone="warn">part paid</Chip>}
-                {i.waiting && <Chip tone="bad">waiting on us</Chip>}
-              </>} />
-          ))}
-        </Section>
-
-        <Section title="Can close this month" icon={Flame} count={data.hot.length}
-          hint="A price went out and the customer answered it with a buying signal in the last two weeks."
-          empty="No hot quotes right now.">
-          {data.hot.map((i) => (
-            <Row key={i.id} item={i} amount={i.quote}
-              extra={<>{i.reason && <Chip tone="hot">{i.reason}</Chip>}{i.waiting && <Chip tone="bad">waiting on us</Chip>}</>} />
-          ))}
-        </Section>
-
-        <Section title="Older opportunities — before this month" icon={History} count={data.older.length}
-          hint="Still open, and the customer engaged at some point. Biggest quotes first."
-          empty="Nothing older to revive.">
-          {older.map((i) => (
-            <Row key={i.id} item={i} amount={i.quote}
-              extra={<>{i.waiting && <Chip tone="bad">waiting on us</Chip>}</>} />
-          ))}
-          {data.older.length > 25 && !showAllOlder && (
-            <li className="px-3 py-2">
-              <button type="button" onClick={() => setShowAllOlder(true)} className="text-xs font-semibold text-blue-700 hover:underline">Show all {data.older.length}</button>
-            </li>
+      {filtered && focus ? (
+        <Card title={`${agentName(focus.agent)} · ${FOCUS_LABEL[focus.kind]} · ${focus.kind === 'won' ? filtered.won.length : filtered.items.length}`} icon={Trophy} tone="primary" className="mb-4"
+          action={<button type="button" onClick={() => setFocus(null)} className={`${BTN} border border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}><X className="w-3.5 h-3.5" aria-hidden />Back to all</button>}>
+          {focus.kind === 'won' ? (
+            filtered.won.length === 0 ? <EmptyState icon={CircleDollarSign} title="No sales booked this month" /> : (
+              <ul className="divide-y divide-gray-100">
+                {filtered.won.map((w) => (
+                  <li key={w.saleId}>
+                    <a href={w.leadId ? `/leads/${encodeURIComponent(w.leadId)}` : `/sales?sale=${encodeURIComponent(w.saleId)}`} className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
+                      <span className="font-semibold text-sm text-gray-900 truncate">{w.customer}</span>
+                      <span className="text-[11px] text-gray-500 truncate">{w.reference} · {w.orderDate}</span>
+                      <span className="ml-auto text-sm font-bold tabular-nums text-green-700">{w.currency === 'USD' ? usd(w.amount) : `${w.currency} ${w.amount}`}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : filtered.items.length === 0 ? <EmptyState icon={CircleDollarSign} title="Nothing here" /> : (
+            <ul className="divide-y divide-gray-100">
+              {filtered.items.map((i) => focus.kind === 'waiting' ? waitingRow(i) : i.invoice ? invoiceRow(i) : hotRow(i))}
+            </ul>
           )}
-        </Section>
-      </div>
+        </Card>
+      ) : (
+        <>
+          {/* Tabs — big, bold, with the count; "waiting on us" first because
+              it is the one that costs customers. */}
+          <div role="tablist" aria-label="Opportunity lists" className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+            {tabs.map((t) => {
+              const on = tab === t.key
+              return (
+                <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => setTab(t.key)}
+                  className={`flex items-center gap-2.5 rounded-xl border-2 px-3.5 py-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${on ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-300 bg-white hover:border-gray-400'}`}>
+                  <t.icon className={`w-5 h-5 shrink-0 ${on ? 'text-blue-700' : 'text-gray-600'}`} aria-hidden />
+                  <span className={`text-sm sm:text-base font-bold leading-tight ${on ? 'text-blue-900' : 'text-gray-900'}`}>{t.label}</span>
+                  <span className={`ml-auto shrink-0 rounded-full px-2.5 py-0.5 text-base font-extrabold tabular-nums text-white ${t.count ? t.tone : 'bg-gray-400'}`}>{t.count}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {tab === 'waiting' && (
+            <Section hint="The customer wrote last and nobody has answered yet — longest wait first. Red after 24 hours." count={data.waiting.length} empty="Nobody is waiting on a reply.">
+              {data.waiting.map(waitingRow)}
+            </Section>
+          )}
+          {tab === 'invoices' && (
+            <Section hint="An invoice or payment link went out and no paid sale in the Sales ledger matches it." count={data.invoices.length} empty="No unpaid invoices.">
+              {data.invoices.map(invoiceRow)}
+            </Section>
+          )}
+          {tab === 'hot' && (
+            <Section hint="A price went out and the customer answered it with a buying signal in the last two weeks." count={data.hot.length} empty="No hot quotes right now.">
+              {data.hot.map(hotRow)}
+            </Section>
+          )}
+          {tab === 'older' && (
+            <Section hint="Created before this month, still open, and the customer engaged at some point. Biggest quotes first." count={olderAll.length} empty="Nothing older to revive.">
+              {older.map(olderRow)}
+              {olderAll.length > 25 && !showAllOlder && (
+                <li className="px-3 py-2">
+                  <button type="button" onClick={() => setShowAllOlder(true)} className="text-xs font-semibold text-blue-700 hover:underline">Show all {olderAll.length}</button>
+                </li>
+              )}
+            </Section>
+          )}
+        </>
+      )}
 
       <p className="mt-4 text-[11px] text-gray-500 flex items-start gap-1.5">
         <Ban className="w-3.5 h-3.5 shrink-0 mt-px" aria-hidden />
         Left out: deals where the customer said they went with another company, found it too expensive or are not going ahead
         {data.excluded.restricted ? `, and ${data.excluded.restricted} alcohol or religious order${data.excluded.restricted === 1 ? '' : 's'} (decline those)` : ''}
-        {data.excluded.notALead ? ` · ${data.excluded.notALead} marked “not a lead”` : ''}.
+        {data.excluded.notALead ? ` · ${data.excluded.notALead} marked “not a lead”` : ''}
+        {data.excluded.ownTests ? ` · ${data.excluded.ownTests} test lead${data.excluded.ownTests === 1 ? '' : 's'} from our own addresses` : ''}.
         Covers leads since {formatDateTime(data.windowFrom).split(',')[0]}.
       </p>
     </Shell>
@@ -249,15 +333,15 @@ function Stat({ label, value, hint, tone = 'default' }: { label: string; value: 
   )
 }
 
-function Section({ title, icon, count, hint, empty, children }: {
-  title: string; icon: typeof Clock; count: number; hint: string; empty: string; children: React.ReactNode
+function Section({ count, hint, empty, children }: {
+  count: number; hint: string; empty: string; children: React.ReactNode
 }) {
   return (
-    <Card title={`${title} · ${count}`} icon={icon}>
-      <p className="px-3 pt-2 text-[11px] text-gray-500">{hint}</p>
+    <Card>
+      <p className="px-3 pt-2.5 pb-1 text-xs text-gray-600">{hint}</p>
       {count === 0
         ? <EmptyState icon={CircleDollarSign} title={empty} />
-        : <ul className="divide-y divide-gray-100 max-h-[640px] overflow-y-auto">{children}</ul>}
+        : <ul className="divide-y divide-gray-100">{children}</ul>}
     </Card>
   )
 }
@@ -270,7 +354,7 @@ function Chip({ tone, children }: { tone: 'hot' | 'good' | 'warn' | 'bad'; child
   return <span className={`rounded-full border px-1.5 py-px text-[10px] font-semibold ${cls}`}>{children}</span>
 }
 
-function Row({ item: i, amount, badge, extra }: { item: OppItem; amount?: number | null; badge?: React.ReactNode; extra?: React.ReactNode }) {
+function Row({ item: i, amount, badge, extra, ownerFirst = false }: { item: OppItem; amount?: number | null; badge?: React.ReactNode; extra?: React.ReactNode; ownerFirst?: boolean }) {
   return (
     <li>
       <a href={`/leads/${encodeURIComponent(i.id)}`} className="block px-3 py-2.5 hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50">
@@ -278,11 +362,12 @@ function Row({ item: i, amount, badge, extra }: { item: OppItem; amount?: number
           {badge}
           <span className="font-semibold text-sm text-gray-900 truncate">{i.name}</span>
           <span className="text-[11px] text-gray-500 truncate">{i.siteName}</span>
+          {ownerFirst && <span className={`ml-auto shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${i.owner ? 'bg-gray-100 text-gray-800 border border-gray-300' : 'bg-red-50 text-red-700 border border-red-300'}`}>{i.ownerName}</span>}
           {amount !== undefined && <span className="ml-auto shrink-0 text-sm font-bold tabular-nums text-gray-900">{usd(amount)}</span>}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-600">
           <span className={`rounded-full border px-1.5 py-px text-[10px] font-semibold ${CRM_STAGE_STYLE[i.stage] ?? ''}`}>{CRM_STAGE_LABEL[i.stage] ?? i.stage}</span>
-          <span className="text-gray-500">{i.ownerName}</span>
+          {!ownerFirst && <span className="text-gray-500">{i.ownerName}</span>}
           {i.restricted && <Chip tone="bad">decline — {i.restricted}</Chip>}
           {extra}
         </div>

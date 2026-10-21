@@ -21,12 +21,12 @@ import { quoteSessionId } from './quoteintake'
 import { pktMonthOf, pktMonthRange } from './datetime'
 import { SITE_DOMAINS } from './sitedomains'
 import { readSales } from './sales'
-import { figures } from './salescore'
+import { figures, SALES_OWNERS } from './salescore'
 import { storedMemberNames } from './membername'
 import { agentDisplayName } from './agentname'
 import { canSeeContacts, scrubText } from './pii'
 import {
-  foldLeads, readHot, readWaiting, readInvoiceDue, readOlder, agentKey, oneLine,
+  foldLeads, readHot, readWaiting, readInvoiceDue, readOlder, agentKey, oneLine, ourAddress,
   type OppLead, type OppRow, type OppSale, type OppContext, type LeadState,
 } from './opportunities'
 import type { CrmStage } from './crm'
@@ -73,6 +73,13 @@ export interface LeaderRow {
   waiting: number
 }
 
+/** A sale booked this month — what the leaderboard's Won cells open. */
+export interface WonItem { saleId: string; leadId: string | null; customer: string; amount: number; currency: string; orderDate: string; reference: string; owner: string | null }
+
+/** Addresses that are never a customer: the owner's own (his test leads) — on
+ *  top of every member address and our own domains, which ourAddress() covers. */
+const OWNER_ADDRESSES = ['shanzeeshan571@gmail.com', ...SALES_OWNERS]
+
 export interface OpportunitiesResult {
   generatedAt: string
   month: string
@@ -84,11 +91,12 @@ export interface OpportunitiesResult {
     waitingCount: number; waitingOver24: number
   }
   leaderboard: LeaderRow[]
+  won: WonItem[]
   waiting: OppItem[]
   invoices: OppItem[]
   hot: OppItem[]
   older: OppItem[]
-  excluded: { restricted: number; notALead: number }
+  excluded: { restricted: number; notALead: number; ownTests: number }
   windowFrom: string
   truncated: boolean
 }
@@ -118,7 +126,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   const empty: OpportunitiesResult = {
     generatedAt: now.toISOString(), month: `${year}-${String(month).padStart(2, '0')}`, monthLabel: monthName(year, month),
     strip: { bookedUsd: 0, bookedCount: 0, invoicesDueUsd: 0, invoicesDueCount: 0, hotUsd: 0, hotCount: 0, waitingCount: 0, waitingOver24: 0 },
-    leaderboard: [], waiting: [], invoices: [], hot: [], older: [], excluded: { restricted: 0, notALead: 0 }, windowFrom, truncated: false,
+    leaderboard: [], won: [], waiting: [], invoices: [], hot: [], older: [], excluded: { restricted: 0, notALead: 0, ownTests: 0 }, windowFrom, truncated: false,
   }
   if (sites.length === 0) return empty
 
@@ -152,26 +160,33 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   const siteName: Record<string, string> = {}
   for (const s of siteRes.data ?? []) siteName[s.site_id] = s.name
 
-  const leads: OppLead[] = []
-  let notALead = 0
-  for (const l of leadRows) {
-    const id = quoteSessionId(l.id)
-    if (notLeads.has(id)) { notALead++; continue }
-    leads.push({ id, siteId: l.site_id, name: (l.name || '').trim(), email: l.email, phone: l.phone, createdAt: l.created_at, text: l.message || '' })
-  }
-  for (const r of captureRows) {
-    if (notLeads.has(r.session_id)) { notALead++; continue }
-    const c = parseLeadCapture(r.message)
-    leads.push({ id: r.session_id, siteId: r.site_id, name: (c?.name || '').trim(), email: c?.email ?? null, phone: c?.phone ?? null, createdAt: c?.at || r.created_at, text: '' })
-  }
-
-  const ourAddresses = new Set<string>()
+  const ourAddresses = new Set<string>(OWNER_ADDRESSES.map((e) => e.toLowerCase()))
   for (const m of members.data ?? []) if (m.email) ourAddresses.add(String(m.email).toLowerCase())
   const ctx: OppContext = {
     now, monthStart: monthRange.from,
     ourDomains: new Set([...Object.values(SITE_DOMAINS), ...TEAM_DOMAINS]),
     ourAddresses,
   }
+  // A lead whose address is ours — the owner testing a form, an agent writing
+  // to themselves — is not a customer and never reaches a list or a total.
+  let ownTests = 0
+  const isOurs = (email: string | null | undefined) => !!email && ourAddress(email, ctx)
+
+  const leads: OppLead[] = []
+  let notALead = 0
+  for (const l of leadRows) {
+    const id = quoteSessionId(l.id)
+    if (notLeads.has(id)) { notALead++; continue }
+    if (isOurs(l.email)) { ownTests++; continue }
+    leads.push({ id, siteId: l.site_id, name: (l.name || '').trim(), email: l.email, phone: l.phone, createdAt: l.created_at, text: l.message || '' })
+  }
+  for (const r of captureRows) {
+    if (notLeads.has(r.session_id)) { notALead++; continue }
+    const c = parseLeadCapture(r.message)
+    if (isOurs(c?.email)) { ownTests++; continue }
+    leads.push({ id: r.session_id, siteId: r.site_id, name: (c?.name || '').trim(), email: c?.email ?? null, phone: c?.phone ?? null, createdAt: c?.at || r.created_at, text: '' })
+  }
+
   const states = foldLeads(leads, rows, ctx)
 
   // ── names ──
@@ -248,6 +263,18 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   const monthKey = empty.month
   const booked = oppSales.filter((s) => s.orderDate.startsWith(monthKey) && s.status !== 'refunded' && s.status !== 'cancelled')
   const usd = (s: OppSale) => (s.currency === 'USD' ? s.orderAmount : 0)
+  // Who booked it: the sales person on the sale (an address or a display
+  // name), else the owner of the lead it was won from.
+  const agentOfSale = (sale: OppSale): string | null => {
+    const sp = sale.salesPerson.trim()
+    if (sp.includes('@')) return agentKey(sp)
+    return keyByName.get(sp.toLowerCase()) ?? (sale.leadId ? ownerOfLead.get(sale.leadId) ?? null : null)
+  }
+
+  const won: WonItem[] = booked.map((sale) => ({
+    saleId: sale.id, leadId: sale.leadId, customer: sale.customer, amount: sale.orderAmount, currency: sale.currency,
+    orderDate: sale.orderDate, reference: sale.reference, owner: agentOfSale(sale),
+  }))
 
   // ── leaderboard ──
   const board = new Map<string, LeaderRow>()
@@ -264,12 +291,10 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
     if (!e.endsWith('@shopcardboardboxes.com')) continue
     row(agentKey(e))
   }
-  for (const s of booked) {
-    const sp = s.salesPerson.trim()
-    const k = sp.includes('@') ? agentKey(sp) : keyByName.get(sp.toLowerCase()) ?? (s.leadId ? ownerOfLead.get(s.leadId) ?? null : null)
-    const r = row(k)
+  for (const w of won) {
+    const r = row(w.owner)
     r.wonCount++
-    r.wonUsd += usd(s)
+    r.wonUsd += w.currency === 'USD' ? w.amount : 0
   }
   for (const i of hot) { const r = row(i.owner); r.hot++; r.pipelineUsd += i.quote ?? 0 }
   for (const i of invoices) row(i.owner).pipelineUsd += i.invoice?.amount ?? 0
@@ -291,9 +316,10 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
       waitingOver24: waiting.filter((w) => (w.hours ?? 0) >= 24).length,
     },
     leaderboard,
+    won,
     waiting, invoices, hot,
     older: older.slice(0, 150),
-    excluded: { restricted, notALead },
+    excluded: { restricted, notALead, ownTests },
     truncated,
   }
 }
