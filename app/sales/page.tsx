@@ -33,7 +33,7 @@ import {
 } from '@/lib/salescore'
 import { Card, Skeleton, EmptyState } from '@/app/leads/[id]/ui'
 import GlobalSearch from '@/app/components/GlobalSearch'
-import { PayoutsCard, ExpensesCard } from './money'
+import { PayoutsCard, ExpensesCard, NetProfitCard } from './money'
 
 interface Payload {
   scope: string
@@ -147,6 +147,7 @@ export default function SalesPage() {
   const [filters, setFilters] = useState<SaleFilters>(NO_FILTERS)
   const [editing, setEditing] = useState<SaleForm | null>(null)
   const [viewing, setViewing] = useState<SaleView | null>(null)
+  const [expVersion, setExpVersion] = useState(0)
 
   useEffect(() => {
     try {
@@ -342,7 +343,28 @@ export default function SalesPage() {
       {/* The two side ledgers. Both act on the member's own workspace, so on
           the owner's master tab they still show that owner's business. */}
       <PayoutsCard onChanged={() => { void load() }} />
-      <ExpensesCard month={filters.month} monthProfitPkr={filters.month ? t.profitPkr : null} />
+      {/* Net profit after the office's expenses — Model Town direct only,
+          on its own tab and the owner's master tab. Follows the Month filter
+          and nothing else: expenses belong to the office, not to a website
+          or an agent, so narrowing them by those would be meaningless. */}
+      {(tab === 'pk_direct' || tab === 'master') && data.workspace === 'packaging' && (() => {
+        const direct = data.sales.filter((v) => v.sale.stream === 'pk_direct' && (!filters.month || monthKey(v.sale.orderDate) === filters.month))
+        const dt = totals(direct, data.rates?.rates ?? null)
+        let costedProfit = 0, costedRevenue = 0, awaitingRevenue = 0
+        for (const v of direct) {
+          if (v.fig.closed) continue
+          if (v.fig.profitKnown) { costedProfit += v.fig.profitPkr; costedRevenue += v.fig.revenuePkr }
+          // Only money actually received is estimated on — an unpaid order
+          // (Carly Blake's $3,700) is not profit yet, costed or not.
+          else awaitingRevenue += v.fig.netPkr
+        }
+        return (
+          <NetProfitCard month={filters.month} t={dt} version={expVersion}
+            avgMargin={costedRevenue > 0 ? costedProfit / costedRevenue : null}
+            awaitingRevenuePkr={awaitingRevenue} />
+        )
+      })()}
+      <ExpensesCard month={filters.month} monthProfitPkr={filters.month ? t.profitPkr : null} onChanged={() => setExpVersion((n) => n + 1)} />
 
       <Card title={tab === 'master' ? 'All sales' : `${STREAMS[tab].short} — sales`} icon={Receipt}
         action={

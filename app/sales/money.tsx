@@ -159,11 +159,13 @@ export function PayoutsCard({ onChanged }: { onChanged: () => void }) {
 
 type ExpenseRow = Expense & { pkr: { value: number; estimated: boolean; missing: boolean } }
 
-export function ExpensesCard({ month, monthProfitPkr }: {
+export function ExpensesCard({ month, monthProfitPkr, onChanged }: {
   /** The month the sales table is filtered to, if any — the summary follows it. */
   month: string
   /** Profit (PKR) of the sales shown for that month, so net-after-expenses can be shown. */
   monthProfitPkr: number | null
+  /** Called after an expense is added or deleted, so the net-profit card refreshes. */
+  onChanged?: () => void
 }) {
   const [rows, setRows] = useState<ExpenseRow[] | null>(null)
   const [open, setOpen] = useState(false)
@@ -198,7 +200,7 @@ export function ExpensesCard({ month, monthProfitPkr }: {
     setBusy(false)
     if (!r.ok) { setError(j.error || 'That did not save.'); return }
     setForm((f) => ({ ...f, payee: '', amount: '', note: '' }))
-    await load()
+    await load(); onChanged?.()
   }
 
   const remove = async (e: ExpenseRow) => {
@@ -207,7 +209,7 @@ export function ExpensesCard({ month, monthProfitPkr }: {
     const r = await fetch(`/api/sales/expenses?id=${encodeURIComponent(e.id)}`, { method: 'DELETE' })
     setBusy(false)
     if (!r.ok) { setError((await r.json().catch(() => ({}))).error || 'That did not delete.'); return }
-    await load()
+    await load(); onChanged?.()
   }
 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
@@ -297,6 +299,79 @@ export function ExpensesCard({ month, monthProfitPkr }: {
             </table>
           </div>
         )}
+    </Card>
+  )
+}
+
+// ── Net profit (without SEO cost) ───────────────────────────────────────────
+// The Profit card is per-sale: revenue minus that order's own costs. The
+// office — salaries, rent, equipment, vendors — is paid out of the same money
+// and never appeared against it, so the owner read a Rs 538k "profit" for a
+// quarter the business was down on. This card subtracts the expenses of the
+// same period from Model Town's direct-sales profit. Hamdan's partner stream
+// is not in it (that money is the partner's to pay), and the SEO the owner
+// runs himself is deliberately not an expense here — hence the label.
+//
+// Refunded and cancelled sales are already out of `t.profitPkr` (totals()
+// skips closed sales), so nothing is subtracted a second time here.
+export function NetProfitCard({ month, t, avgMargin, awaitingRevenuePkr, version }: {
+  /** YYYY-MM, or '' for every month on record. */
+  month: string
+  /** Model Town direct totals for the same period. */
+  t: { profitPkr: number; profitSales: number; awaitingCosting: number; revenuePkr: number; profitEstimated: boolean }
+  /** Profit ÷ revenue over the costed sales of the period — used to estimate the rest. */
+  avgMargin: number | null
+  /** Net money received (PKR) on the sales still awaiting costing. */
+  awaitingRevenuePkr: number
+  /** Bumped when expenses change. */
+  version: number
+}) {
+  const [rows, setRows] = useState<ExpenseRow[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    void fetch('/api/sales/expenses').then((r) => (r.ok ? r.json() : null)).then((j) => { if (alive && j) setRows(j.expenses) })
+    return () => { alive = false }
+  }, [version])
+
+  const shown = (rows ?? []).filter((e) => !month || e.month === month)
+  const expenses = Math.round(shown.reduce((a, e) => a + e.pkr.value, 0))
+  const expEstimated = shown.some((e) => e.pkr.estimated || e.pkr.missing)
+  const net = t.profitPkr - expenses
+  const estExtra = avgMargin !== null && t.awaitingCosting > 0 ? Math.round(awaitingRevenuePkr * avgMargin) : null
+  const period = month ? monthLabel(month) : 'All months'
+  const tone = (n: number) => (n >= 0 ? 'text-green-700' : 'text-red-700')
+
+  return (
+    <Card title={`Net profit (without SEO cost) — Model Town Direct · ${period}`} icon={Wallet} className="mb-4">
+      {rows === null ? <p className="px-3 py-4 text-xs text-gray-500">Loading…</p> : (
+        <div className="px-3 py-3 grid grid-cols-1 md:grid-cols-[repeat(3,auto)_1fr] gap-x-6 gap-y-2 items-baseline text-sm">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Sales profit</p>
+            <p className="tabular-nums font-semibold text-gray-900">{money(t.profitPkr, 'PKR')}{t.profitEstimated && <i className="text-gray-500 text-xs"> est.</i>}</p>
+            <p className="text-[10px] text-gray-500">{t.profitSales} costed sale{t.profitSales === 1 ? '' : 's'}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">− Expenses</p>
+            <p className="tabular-nums font-semibold text-gray-900">{money(expenses, 'PKR')}{expEstimated && <i className="text-gray-500 text-xs"> est.</i>}</p>
+            <p className="text-[10px] text-gray-500">{shown.length} line{shown.length === 1 ? '' : 's'} · salaries, office, vendors</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">= Net profit</p>
+            <p className={`tabular-nums text-xl font-bold ${tone(net)}`}>{money(net, 'PKR')}</p>
+            <p className="text-[10px] text-gray-500">without SEO cost</p>
+          </div>
+          <div className="text-xs text-gray-600 md:text-right">
+            {t.awaitingCosting > 0 ? (
+              estExtra !== null ? (
+                <>
+                  <p>{t.awaitingCosting} sale{t.awaitingCosting === 1 ? '' : 's'} still awaiting costing — about <b className="tabular-nums">{money(estExtra, 'PKR')}</b> more profit on the {money(Math.round(awaitingRevenuePkr), 'PKR')} received so far, at the {Math.round((avgMargin ?? 0) * 100)}% average margin of the costed ones.</p>
+                  <p className={`mt-0.5 font-semibold tabular-nums ${tone(net + estExtra)}`}>Estimated net once costed: {money(net + estExtra, 'PKR')}</p>
+                </>
+              ) : <p>{t.awaitingCosting} sale{t.awaitingCosting === 1 ? '' : 's'} awaiting costing — not counted yet (no costed sale to estimate a margin from).</p>
+            ) : <p>Every sale in this period is costed.</p>}
+          </div>
+        </div>
+      )}
     </Card>
   )
 }
