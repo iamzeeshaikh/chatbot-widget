@@ -314,7 +314,7 @@ function pushDeviceId(): string {
 // Shape only — no colour. Each utility button supplies its own, because a
 // state colour appended after a base string that already sets `text-…` is a
 // coin toss on which utility CSS puts last, not an override.
-const ICON_BTN = 'shrink-0 inline-flex items-center justify-center h-8 min-w-8 px-1.5 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
+const ICON_BTN = 'shrink-0 inline-flex items-center justify-center h-8 min-w-8 px-1.5 rounded-md transition-colors outline-none focus-visible:ring-1 focus-visible:ring-gray-500 focus-visible:ring-offset-1'
 // The resting look: a switch you set once, not something to be drawn to.
 const ICON_BTN_IDLE = 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
 
@@ -506,7 +506,7 @@ function AnalyticsChart({ points, accent, totalUnique, onPick }: {
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-3 text-[11px]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-3 text-[11px]">
         <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: accent }} /><span className="text-gray-700">Visits</span><span className="text-gray-500">({totalVisitors})</span></span>
         <span className="flex items-center gap-1.5" title="Distinct people (persistent browser id; a returning person counts once) — the dashed line">
           <span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: UNIQUE_COLOR }} /><span className="text-gray-700">Unique visitors</span><span className="text-gray-500">({totalUnique})</span>
@@ -2591,12 +2591,17 @@ export default function Dashboard() {
           reserved at a fixed width and merely hidden until it has a value, and
           the active tab is a background change only — no border, no extra
           padding — so selecting a tab cannot re-flow the row. See CLAUDE.md. */}
-      <div ref={headerRef} className="border-b border-gray-200 bg-white/95 backdrop-blur px-3 sm:px-5 py-2 sm:py-2.5 flex items-center flex-wrap gap-x-2 xl:gap-x-3 sticky top-0 z-10">
+      <div ref={headerRef}
+        className="border-b border-gray-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] px-3 sm:px-5 pt-2.5 pb-2 sm:pt-3 sm:pb-2.5 flex items-center flex-wrap gap-x-2 xl:gap-x-3 sticky top-0 z-10">
+        {/* The workspace accent, once, as a hairline across the top of the
+            app bar — a div rather than a border, because the dark theme's
+            border remaps are !important and would grey it out. */}
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[3px]" style={{ backgroundColor: accentColor }} />
 
         {/* ── 1. Brand ── */}
         <button onClick={() => setTab('overview')} title="Go to Overview"
-          className="flex items-center gap-2.5 shrink-0 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group cursor-pointer">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-md transition-transform group-hover:scale-105" style={{ backgroundColor: accentColor }}>
+          className="flex items-center gap-2.5 shrink-0 text-left rounded-md outline-none focus-visible:ring-1 focus-visible:ring-gray-500 focus-visible:ring-offset-2 group cursor-pointer">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: accentColor }}>
             <svg viewBox="0 0 24 24" className="w-4.5 h-4.5 fill-white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
           </div>
           {/* Shown from `sm` up, not just `xl`. Hiding it left the logo alone
@@ -2695,7 +2700,7 @@ export default function Dashboard() {
         </nav>
 
         {/* ── 3. Controls ── */}
-        <div className="ml-auto flex items-center gap-1 lg:gap-1.5 shrink-0">
+        <div className="ml-auto flex items-center gap-1 lg:gap-1.5 shrink-0 h-10">
 
           {/* Whether the AI is answering customers on the live sites. It is a
               standing fact about the product rather than a per-page detail, so
@@ -2714,7 +2719,7 @@ export default function Dashboard() {
               : botOffNow
                 ? 'The AI bot is off right now — it answers Saturday 10am through Monday 4pm, and Tue–Fri 11am–4pm (PKT). Outside those hours every chat goes straight to a human.'
                 : 'The AI bot is ON and answering visitors on your live sites'}
-            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2 lg:px-2.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap ${botOffNow ? 'bg-gray-100 border-gray-300 text-gray-600' : 'bg-green-50 border-green-300 text-green-800'}`}>
+            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[11px] font-semibold whitespace-nowrap ${botOffNow ? 'bg-white border-gray-200 text-gray-600' : 'bg-green-50 border-green-200 text-green-800'}`}>
             {botOffNow
               ? <BotOff size={14} strokeWidth={2} className="shrink-0" aria-hidden />
               : <Bot size={14} strokeWidth={2} className="shrink-0" aria-hidden />}
@@ -2729,7 +2734,7 @@ export default function Dashboard() {
           {canTasks && (
             <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}
               title={unreadReplies > 0 ? `${unreadReplies} customer repl${unreadReplies === 1 ? 'y' : 'ies'} you have not opened` : 'No unread customer replies'}
-              className={`shrink-0 inline-flex items-center justify-center gap-1 h-8 px-2 rounded-lg text-[11px] font-bold tabular-nums transition-colors ${unreadReplies > 0 ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}>
+              className={`shrink-0 inline-flex items-center justify-center gap-1 h-8 min-w-8 px-2 rounded-md text-[11px] font-bold tabular-nums transition-colors ${unreadReplies > 0 ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}>
               <Inbox size={15} strokeWidth={2} aria-hidden />
               {unreadReplies > 99 ? '99+' : unreadReplies}
             </a>
@@ -2809,7 +2814,7 @@ export default function Dashboard() {
           <div className="relative">
             <button onClick={() => setShowAccount((v) => !v)} aria-expanded={showAccount}
               title={`${userEmail} — account`} aria-label="Account menu"
-              className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full text-white text-[11px] font-bold uppercase shadow-md hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full text-white text-[11px] font-bold uppercase hover:opacity-90 transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-gray-500 focus-visible:ring-offset-2"
               style={{ backgroundColor: accentColor }}>
               {(userEmail || '?').slice(0, 2)}
             </button>

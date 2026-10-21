@@ -253,9 +253,9 @@ export default function OpportunitiesPage() {
               const on = tab === t.key
               return (
                 <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => setTab(t.key)}
-                  className={`flex items-center gap-2.5 rounded-xl border-2 px-3.5 py-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${on ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-300 bg-white hover:border-gray-400'}`}>
-                  <t.icon className={`w-5 h-5 shrink-0 ${on ? 'text-blue-700' : 'text-gray-600'}`} aria-hidden />
-                  <span className={`text-sm sm:text-base font-bold leading-tight ${on ? 'text-blue-900' : 'text-gray-900'}`}>{t.label}</span>
+                  className={`min-w-0 flex items-center gap-2 sm:gap-2.5 rounded-xl border-2 px-2.5 sm:px-3.5 py-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${on ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-300 bg-white hover:border-gray-400'}`}>
+                  <t.icon className={`hidden sm:block w-5 h-5 shrink-0 ${on ? 'text-blue-700' : 'text-gray-600'}`} aria-hidden />
+                  <span className={`min-w-0 text-sm sm:text-base font-bold leading-tight ${on ? 'text-blue-900' : 'text-gray-900'}`}>{t.label}</span>
                   <span className={`ml-auto shrink-0 rounded-full px-2.5 py-0.5 text-base font-extrabold tabular-nums text-white ${t.count ? t.tone : 'bg-gray-400'}`}>{t.count}</span>
                 </button>
               )
