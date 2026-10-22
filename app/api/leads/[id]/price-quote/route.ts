@@ -75,10 +75,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const finalHtml = `${quoteHtml(q)}${sig.html}${openPixelHtml(base, id, emailId)}`
   let sent
   try {
-    sent = await sendEmail(access.member.email, cfg, {
-      from, to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
-      threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
-    })
+    const msg = { from, to, cc: cc || undefined, subject, body: finalText, html: finalHtml, inReplyTo: thread?.inReplyTo, references: thread?.references }
+    try {
+      sent = await sendEmail(access.member.email, cfg, { ...msg, threadId: thread?.threadId })
+    } catch (e) {
+      // The thread lives in another agent's mailbox (the customer wrote to
+      // Steve, Samir sends the quote): Gmail answers 404. The headers still
+      // thread it in the customer's mail client, so send without the id.
+      if (!thread?.threadId || !/not found/i.test(e instanceof Error ? e.message : '')) throw e
+      sent = await sendEmail(access.member.email, cfg, msg)
+    }
   } catch (e) {
     if (e instanceof GmailRateError) return NextResponse.json({ error: e.message }, { status: 429 })
     if (e instanceof GmailAuthError) return NextResponse.json({ error: e.message, needsReconnect: true }, { status: 401 })
