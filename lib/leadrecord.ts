@@ -50,7 +50,7 @@ import { dialable } from './identity'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 import { payLinksInRows, redactLinks } from './paylink'
 
-export type LeadKind = 'chat' | 'quote' | 'checkout' | 'call' | 'whatsapp'
+export type LeadKind = 'chat' | 'quote' | 'checkout' | 'call' | 'whatsapp' | 'reorder'
 
 export interface TimelineEvent {
   id: string
@@ -981,7 +981,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     siteId,
     siteName,
     kind,
-    sourceLabel: kind === 'checkout' ? 'Checkout order (email)' : kind === 'call' ? 'Phone call' : kind === 'whatsapp' ? 'WhatsApp message' : kind === 'quote' ? 'Custom quote (email)' : 'Chat widget',
+    sourceLabel: kind === 'reorder' ? 'Reorder (existing customer)' : kind === 'checkout' ? 'Checkout order (email)' : kind === 'call' ? 'Phone call' : kind === 'whatsapp' ? 'WhatsApp message' : kind === 'quote' ? 'Custom quote (email)' : 'Chat widget',
     hasConversation: realMessages.length > 0,
     contact: effective,
     captured: {

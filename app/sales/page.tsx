@@ -719,6 +719,7 @@ const LEAD_KIND_STYLE: Record<SaleLeadKind, string> = {
   chat_bot: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200',
   chat: 'bg-violet-50 text-violet-800 border-violet-200',
   quote: 'bg-sky-50 text-sky-800 border-sky-200',
+  reorder: 'bg-indigo-50 text-indigo-800 border-indigo-200',
   call: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   whatsapp: 'bg-green-50 text-green-800 border-green-200',
   checkout: 'bg-amber-50 text-amber-800 border-amber-200',

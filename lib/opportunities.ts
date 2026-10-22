@@ -459,7 +459,8 @@ export function foldLeads(leads: OppLead[], rows: OppRow[], ctx: OppContext): Le
   const loose: LeadState[] = []
   for (const s of byId.values()) {
     s.customer.sort((a, b) => a.at.localeCompare(b.at))
-    if (!s.email) { loose.push(s); continue }
+    // A reorder is its own deal (lib/quoteintake.ts REORDER_TAG).
+    if (!s.email || s.leadText.startsWith('[Reorder] ')) { loose.push(s); continue }
     const key = `${s.siteId}|${s.email}`
     const prev = merged.get(key)
     merged.set(key, prev ? mergeStates(prev, s) : s)

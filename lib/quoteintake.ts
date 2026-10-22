@@ -20,6 +20,15 @@ export const QUOTE_TAG = '[Custom Quote] '
 // which it can't, because Billing only ever queries for QUOTE_TAG.
 export const CHECKOUT_TAG = '[Checkout] '
 
+// A repeat order from a customer we already have, opened by an agent from the
+// old record (Saifullah, 2026-10-22: "reorder portal pe kaise show karwayen?").
+// Its own tag, so it is never billed as a newly sourced lead, the quote bot
+// leaves it alone, and the pipeline does not fold it into the old won card.
+export const REORDER_TAG = '[Reorder] '
+export function isReorderLeadMessage(message: string | null | undefined): boolean {
+  return !!message && message.startsWith(REORDER_TAG)
+}
+
 export function isQuoteLeadMessage(message: string | null | undefined): boolean {
   return !!message && message.startsWith(QUOTE_TAG)
 }
@@ -66,12 +75,13 @@ export function isWhatsAppLeadMessage(message: string | null | undefined): boole
 }
 
 // Where a lead came from, for the badge in the leads table and the type filter.
-export type LeadSource = 'quote' | 'checkout' | 'chat' | 'call' | 'whatsapp'
+export type LeadSource = 'quote' | 'checkout' | 'chat' | 'call' | 'whatsapp' | 'reorder'
 
 export function leadSource(message: string | null | undefined): LeadSource {
   // Calls first, and it matters: a customer who pressed Call inside WhatsApp
   // opens with "Called on WhatsApp…", which is a CALL, not a message thread.
   // Both tests are true of it and only this order gives the right answer.
+  if (isReorderLeadMessage(message)) return 'reorder'
   if (isCallLeadMessage(message)) return 'call'
   if (isWhatsAppLeadMessage(message)) return 'whatsapp'
   // Both of the above are QUOTE_TAG'd too, so this has to come after them.
@@ -84,6 +94,7 @@ export function stripQuoteTag(message: string | null | undefined): string {
   if (!message) return ''
   if (isQuoteLeadMessage(message)) return message.slice(QUOTE_TAG.length)
   if (isCheckoutLeadMessage(message)) return message.slice(CHECKOUT_TAG.length)
+  if (isReorderLeadMessage(message)) return message.slice(REORDER_TAG.length)
   return message
 }
 

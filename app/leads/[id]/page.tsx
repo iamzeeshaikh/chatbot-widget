@@ -661,6 +661,7 @@ export default function LeadRecordPage() {
               {markingSpam ? 'Saving…' : record.notALead ? 'This is a real lead — count it again' : 'Not a lead (promotional, duplicate…) — stop counting it'}
             </button>
           </div>
+          {isPackagingLead && <ReorderBox leadId={id} />}
 
           {/* Properties list — quiet labels, strong values, grouped. */}
           <Card title="Details" icon={FileText} bodyClass="py-1">
@@ -1304,6 +1305,51 @@ function NotAvailable({ status }: { status: 'forbidden' | 'missing' | 'error' | 
             Back to the dashboard
           </Link>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// A repeat order from this customer: opens a new [Reorder] lead (its own card
+// on the board and in Opportunities) and takes the agent to it.
+function ReorderBox({ leadId }: { leadId: string }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  async function create() {
+    setBusy(true); setErr('')
+    const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/reorder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ details: text }),
+    })
+    const j = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok || !j.id) { setErr(j.error || 'Could not create the reorder'); return }
+    window.location.href = `/leads/${encodeURIComponent(j.id)}`
+  }
+  if (!open) {
+    return (
+      <div className="px-1 pb-2">
+        <button type="button" onClick={() => setOpen(true)}
+          className="text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 underline decoration-dotted underline-offset-2">
+          + New order from this customer (reorder)
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+      <p className="text-[12px] font-semibold text-indigo-900">New order from this customer</p>
+      <p className="text-[11px] text-indigo-800 mt-0.5">Opens a separate Reorder lead with the same contact, owned by you, so it shows on the board and in Opportunities as a new deal. The bot will not email it.</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} autoFocus
+        placeholder="What are they reordering? e.g. Same 1200 Maitake cartons as ZCB-024, new artwork, need by Dec 10"
+        className="mt-2 w-full rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-[12px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      {err && <p className="text-[11px] text-red-700 mt-1" role="alert">{err}</p>}
+      <div className="mt-2 flex gap-2">
+        <button type="button" disabled={busy || !text.trim()} onClick={() => void create()}
+          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{busy ? 'Creating…' : 'Create reorder'}</button>
+        <button type="button" onClick={() => { setOpen(false); setText(''); setErr('') }}
+          className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-[12px] text-indigo-900 hover:bg-indigo-100">Cancel</button>
       </div>
     </div>
   )

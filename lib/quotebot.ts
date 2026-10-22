@@ -77,6 +77,12 @@ export const CRM_BOT_ROLE = 'crm_bot'
  */
 export const BOT_EMAIL_MODE: 'send' | 'draft' = 'draft'
 
+/** After a price goes out, the first follow-up the NEXT day; then every
+ *  FOLLOW_UP_GAP_DAYS (Saifullah, 2026-10-22: "quote sent ko 1st followup next
+ *  day laazmi jana chahiye agar response nahi aata"). */
+export const QUOTE_FIRST_FU_DAYS = 1
+const quoteGapDays = (sentSoFar: number) => (sentSoFar === 0 ? QUOTE_FIRST_FU_DAYS : FOLLOW_UP_GAP_DAYS)
+
 /** The agents the bot writes for. The owner's roster on 2026-10-13. */
 /** Team lead with dev@ access: owner of leads that reached the CRM late. */
 const LATE_LEAD_OWNER = 'samirkhan@shopcardboardboxes.com'
@@ -1072,16 +1078,16 @@ async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budg
   const { data: ledgerRows } = await supabase.from('chat_logs').select('session_id, site_id, message')
     .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
     .order('created_at', { ascending: true }).limit(20000)
-  interface Q { siteId: string; awaitingPrice: number | null; quotedAt: number | null; lastAt: number; stopped: boolean }
+  interface Q { siteId: string; awaitingPrice: number | null; quotedAt: number | null; lastAt: number; stopped: boolean; ups?: number }
   const st = new Map<string, Q>()
   for (const r of ledgerRows ?? []) {
     const e = parseBotLedger(r.message)
     if (!e) continue
-    const q = st.get(r.session_id) ?? { siteId: r.site_id, awaitingPrice: null, quotedAt: null, lastAt: 0, stopped: false }
+    const q: Q = st.get(r.session_id) ?? { siteId: r.site_id, awaitingPrice: null, quotedAt: null, lastAt: 0, stopped: false }
     const at = new Date(e.at).getTime()
     if ((e.step === 'first' || e.step === 'reply') && e.state === 'sent' && e.complete) q.awaitingPrice = at
     if (e.step === 'quote' && e.state === 'sent') { q.quotedAt = at; q.lastAt = Math.max(q.lastAt, at) }
-    if (e.step === 'quote_fu' && (e.state === 'sent' || e.state === 'failed')) q.lastAt = Math.max(q.lastAt, at)
+    if (e.step === 'quote_fu' && (e.state === 'sent' || e.state === 'failed')) { q.lastAt = Math.max(q.lastAt, at); if (e.state === 'sent') q.ups = (q.ups ?? 0) + 1 }
     if (e.step === 'quote_fu' && e.state === 'skipped') q.stopped = true
     st.set(r.session_id, q)
   }
@@ -1149,7 +1155,7 @@ async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budg
   // ── 3. follow the quotes up ─────────────────────────────────────────────
   if (budget <= 0) return result
   const due = [...st.entries()]
-    .filter(([, q]) => q.quotedAt && !q.stopped && now.getTime() - q.lastAt >= FOLLOW_UP_GAP_DAYS * 864e5)
+    .filter(([, q]) => q.quotedAt && !q.stopped && now.getTime() - q.lastAt >= quoteGapDays(q.ups ?? 0) * 864e5)
     .sort((a, b) => a[1].lastAt - b[1].lastAt)
   let sent = 0
   for (const [id, q] of due) {
@@ -1231,8 +1237,9 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   const ups = ledgers.filter((e) => e.step === 'quote_fu' && e.state === 'sent')
   const n = ups.length + 1
   const lastAt = Math.max(anchor, ...ups.map((e) => new Date(e.at).getTime()))
-  if (!opts.force && now.getTime() - lastAt < FOLLOW_UP_GAP_DAYS * 864e5) {
-    return { ok: true, state: 'not-due', n, why: `next one is due ${new Date(lastAt + FOLLOW_UP_GAP_DAYS * 864e5).toISOString()}` }
+  const gap = quoteGapDays(ups.length)
+  if (!opts.force && now.getTime() - lastAt < gap * 864e5) {
+    return { ok: true, state: 'not-due', n, why: `next one is due ${new Date(lastAt + gap * 864e5).toISOString()}` }
   }
 
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()

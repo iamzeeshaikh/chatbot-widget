@@ -371,11 +371,12 @@ export interface SaleView { sale: Sale; fig: SaleFigures }
 // conversation over and replied in it, `chat_bot` when the bot alone handled
 // it (and the lead went on by email). Plain `chat` is the fallback for a
 // session whose rows could not be read.
-export type SaleLeadKind = 'chat_human' | 'chat_bot' | 'chat' | 'quote' | 'checkout' | 'call' | 'whatsapp'
-export const SALE_LEAD_KIND_ORDER: readonly SaleLeadKind[] = ['chat_human', 'chat_bot', 'chat', 'quote', 'call', 'whatsapp', 'checkout']
+export type SaleLeadKind = 'chat_human' | 'chat_bot' | 'chat' | 'quote' | 'checkout' | 'call' | 'whatsapp' | 'reorder'
+export const SALE_LEAD_KIND_ORDER: readonly SaleLeadKind[] = ['chat_human', 'chat_bot', 'chat', 'quote', 'call', 'whatsapp', 'checkout', 'reorder']
 export const SALE_LEAD_KIND_LABEL: Record<SaleLeadKind, string> = {
   chat_human: 'Chat · human agent', chat_bot: 'Chat · bot only', chat: 'Chat',
   quote: 'Quote form', call: 'Phone call', whatsapp: 'WhatsApp', checkout: 'Checkout',
+  reorder: 'Reorder (existing customer)',
 }
 
 export interface StreamTotals {

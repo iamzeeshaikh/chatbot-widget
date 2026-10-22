@@ -430,6 +430,8 @@ const LEAD_SOURCE_BADGE: Record<LeadSource, { label: string; Icon: LucideIcon; c
   // A customer who wrote on WhatsApp. Same reason as the Call badge: these
   // share the Quote tag (they must, for Billing) and so wore its label.
   whatsapp: { label: 'WhatsApp', Icon: MessageCircle, cls: 'text-green-700 bg-green-100 border-green-200' },
+  // A repeat order opened from an existing customer's record.
+  reorder: { label: 'Reorder', Icon: Repeat, cls: 'text-indigo-700 bg-indigo-100 border-indigo-200' },
 }
 
 function LeadSourceBadge({ message, className = '' }: { message: string | null | undefined; className?: string }) {

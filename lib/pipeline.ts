@@ -388,7 +388,8 @@ export async function loadPipeline(
   const loose: PipelineCard[] = []
   for (const c of cards.values()) {
     const email = (c.email ?? '').trim().toLowerCase()
-    if (!email) { loose.push(c); continue }
+    // A reorder is its own deal: never folded into the customer's old card.
+    if (!email || c.kind === 'reorder') { loose.push(c); continue }
     const key = `${c.siteId}|${email}`
     const first = merged.get(key)
     if (!first) { merged.set(key, c); continue }
