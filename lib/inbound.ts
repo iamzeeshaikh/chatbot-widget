@@ -20,7 +20,8 @@ import { supabase } from './supabase'
 import { SITE_DOMAINS } from './sitedomains'
 import { siteFromRecentTap } from './callintent'
 import { phoneKey } from './identity'
-import { quoteSessionId, QUOTE_TAG } from './quoteintake'
+import { quoteSessionId, QUOTE_TAG, isLikelySpamQuote } from './quoteintake'
+import { recordIntakeDrop, INTAKE_DROP_ROLE, INTAKE_DROP_SESSION } from './intakedrop'
 import { SPORTS_SITES, PACKAGING_SITES, type Workspace } from './workspaces'
 
 // ── Which SITE did they contact? ────────────────────────────────────────────
@@ -118,6 +119,21 @@ export async function leadForCaller(
   const match = await findLeadByPhone(from, workspace)
   if (match) return { sessionId: match.sessionId, siteId: match.siteId, created: false }
 
+  // A factory, freight broker or guest-post seller messaging the shared line
+  // is not a lead (owner, 2026-10-22: ZeeOps must stay clean). Same filter as
+  // the quote forms; the message is kept as an intake drop, never lost, and
+  // their next message from the same number is dropped too instead of
+  // opening a record because "ok?" alone looks innocent.
+  const pitch = isLikelySpamQuote(newLeadMessage, null)
+  if (pitch || await droppedRecently(from)) {
+    await recordIntakeDrop({
+      siteId: siteForCalledNumber(extra?.calledNumber, workspace) ?? siteFromMessageText(newLeadMessage, workspace) ?? sitesOf(workspace)[0] ?? '',
+      reason: 'spam', detail: pitch ? 'whatsapp/call: vendor or spam pitch' : 'whatsapp/call: number dropped before',
+      name: extra?.name, phone: from, excerpt: newLeadMessage,
+    })
+    return null
+  }
+
   const known = siteForCalledNumber(extra?.calledNumber, workspace)
     // Every site's WhatsApp button prefills "Hi <site>! … https://<domain>/",
     // so the FIRST message usually names its own site — a lead about vial
@@ -146,4 +162,15 @@ export async function leadForCaller(
   }]).select('id').maybeSingle()
   if (!created?.id) return null
   return { sessionId: quoteSessionId(created.id), siteId, created: true }
+}
+
+// Was this number's opening message dropped as a pitch in the last 30 days?
+async function droppedRecently(phone: string): Promise<boolean> {
+  const key = phoneKey(phone)
+  if (!key) return false
+  const since = new Date(Date.now() - 30 * 86400_000).toISOString()
+  const { data } = await supabase.from('chat_logs').select('id')
+    .eq('session_id', INTAKE_DROP_SESSION).eq('role', INTAKE_DROP_ROLE)
+    .gte('created_at', since).like('message', `%"phone":"%${key}%`).limit(1)
+  return !!data?.length
 }

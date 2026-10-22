@@ -365,6 +365,35 @@ const FORM_BOT_TEMPLATE_RE = /i would like more information\.?\s*please contact 
 const RESERVED_EMAIL_DOMAIN_RE = /@[A-Za-z0-9.-]*\.(?:local|test|invalid|example)\b|@localhost\b|@example\.(?:com|net|org)\b/i
 const EXPLOIT_ATTACHMENT_RE = /^.*\b(?:attachment|attached|artwork|file)\b.*\.(?:php\d?|phtml|phar|asp|aspx|jsp|cgi|exe|bat)\b/im
 
+// Everything else that is not a customer (owner, 2026-10-22: "koi bhi
+// manufacturing, guest posting ya spam lead ZeeOps mein nahi aani chahiye").
+// Built from the 45 records cleaned out of October by hand: freight brokers,
+// China factories and DDP shippers on WhatsApp, review-site and search-index
+// scams, "send me updates" form spam, product-review submissions, ingredient
+// sellers and freelance designers pitching.
+const NOT_A_CUSTOMER_RE = new RegExp([
+  String.raw`truck(load)? capacity|\bOTR and drayage|drayage trucking|are you moving any freight|competitive (freight )?quote for your (load|shipment)|reliable carriers|\bfreight (broker|forwarding|services)\b`,
+  String.raw`\bDDP shipping\b|shipping from china to the usa|customs clearance procedures`,
+  String.raw`left a \d-star review|review(s)? (platform|site) where consumers|\bwillro\b`,
+  String.raw`submit [a-z0-9.-]+\.[a-z]{2,} in google'?s search index|google'?s search index to be visible|search[- ]index (submission|registration)`,
+  String.raw`please send me updates about|send me (company news|email updates)|i look forward to updates`,
+  String.raw`\bproduct id:\s*\d+\s*rating:\s*name:|\brating:\s*name:.*\breview:`,
+  String.raw`(peptides?|sarms) (and|&) (sarms|peptides?) over \d+ years|high quality peptides and sarms`,
+  String.raw`china[- ]based (source )?factory|source factory specializ|leading packing co|we supply disposable tableware|potential cooperation with|dear purchasing manager`,
+  String.raw`bulk supply as well as private[- ]label|sourcing essential oils`,
+  String.raw`manual vector tracing|logo recreation|i'?m a graphic designer specializ`,
+  String.raw`in google'?s search index|\bindexhelper\.|^email:\s*domains@search-`,
+  String.raw`visual case[- ]study series|can i show you a few ideas in`,
+  String.raw`targeted visitors coming to your site|we launch campaigns in less than`,
+  String.raw`share your pitch deck|explore business opportunities for your company`,
+  String.raw`looks after systems, feel free to pass this on|software that works for the people using it`,
+].join('|'), 'im')
+
+export function notACustomerReason(bodyText: string): string | null {
+  const m = NOT_A_CUSTOMER_RE.exec(String(bodyText || ''))
+  return m ? `not a customer: "${m[0].slice(0, 60)}"` : null
+}
+
 export function isLikelySpamQuote(bodyText: string, phone?: string | null): boolean {
   const cleanPhone = phone?.trim()
   if (isOwnNumber(cleanPhone)) return true
@@ -374,6 +403,7 @@ export function isLikelySpamQuote(bodyText: string, phone?: string | null): bool
   if (RESERVED_EMAIL_DOMAIN_RE.test(bodyText) || EXPLOIT_ATTACHMENT_RE.test(bodyText)) return true
   return SPAM_SIGNATURE_RE.test(bodyText) || SELLER_PITCH_RE.test(bodyText)
     || MARKETING_PITCH_RE.test(bodyText) || SUPPLIER_PITCH_RE.test(bodyText)
+    || NOT_A_CUSTOMER_RE.test(bodyText)
 }
 
 // Strip the QUOTE_TAG, any forwarded-message header block, and the

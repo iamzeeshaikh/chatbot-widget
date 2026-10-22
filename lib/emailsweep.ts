@@ -30,7 +30,8 @@ import {
 import { sendPushToMember } from './push'
 import { siteWorkspace, hasFeature, SPORTS_SITES } from './workspaces'
 import { SITE_DOMAINS } from './sitedomains'
-import { QUOTE_TAG } from './quoteintake'
+import { QUOTE_TAG, isLikelySpamQuote } from './quoteintake'
+import { recordIntakeDrop, INTAKE_DROP_ROLE, INTAKE_DROP_SESSION } from './intakedrop'
 import { currentStateForIds } from './leadstate'
 import { CRM_EMAIL_ROLE, parseCrmEmail, newEmailId, makeSnippet, type CrmEmailEntry } from './crmemail'
 import { harvestContact } from './contactharvest'
@@ -422,6 +423,16 @@ async function mirrorThreads(
       if (!lead) {
         const siteId = siteFromRecipients(first.to, sites, mb.fallbackSite)
         const body = splitQuoted(first.bodyText ?? '').visible.trim().slice(0, 1500)
+        // Factory / sourcing / SEO pitches mailed straight to a site inbox are
+        // not leads. Recorded once as an intake drop (keyed on the thread) and
+        // the thread is then skipped on every later run.
+        if (isLikelySpamQuote(`${first.subject ?? ''}\n${body}`, null)) {
+          const tag = `mirror thread ${threadId}`
+          const { data: seen } = await supabase.from('chat_logs').select('id')
+            .eq('session_id', INTAKE_DROP_SESSION).eq('role', INTAKE_DROP_ROLE).like('message', `%${tag}%`).limit(1)
+          if (!seen?.length) await recordIntakeDrop({ siteId, reason: 'spam', detail: tag, name: from.name ?? undefined, email, excerpt: `${first.subject ?? ''} — ${body}` })
+          continue
+        }
         const { data: ins, error } = await supabase.from('leads').insert([{
           site_id: siteId, name: from.name?.replace(/^["']|["']$/g, '').trim() || null, email, phone: null,
           message: `${QUOTE_TAG}Emailed ${addressOf(first.to) ?? agent} directly — ${first.subject || '(no subject)'}\n\n${body}`,
@@ -469,6 +480,15 @@ export async function runEmailSweep(
   for (const a of Object.keys(MIRRORED_MAILBOXES)) if (!byAgent.has(a)) byAgent.set(a, [])
   for (const t of threads) byAgent.get(t.agent)!.push(t)
   const knownThreads = new Set([...all.map((t) => t.threadId), ...inboundThreadIds])
+  // Mirrored-mailbox threads already dropped as pitches: never re-read them, or
+  // they would fill the 30-thread budget of every run and starve real mail.
+  {
+    const { data: drops } = await supabase.from('chat_logs').select('message')
+      .eq('session_id', INTAKE_DROP_SESSION).eq('role', INTAKE_DROP_ROLE)
+      .gte('created_at', new Date(now.getTime() - 60 * 86400_000).toISOString())
+      .like('message', '%mirror thread %').limit(2000)
+    for (const d of drops ?? []) { const m = /mirror thread ([\w-]+)/.exec(d.message ?? ''); if (m) knownThreads.add(m[1]) }
+  }
 
   const results: SweepAgentResult[] = []
   // Replies captured THIS run — the only ones worth notifying about. Anything
