@@ -4,6 +4,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { isJobsOnly } from '@/lib/jobsonly'
 import { listJobs, writeJob, listMessages, workspaceMembers, notifyJob } from '@/lib/jobstore'
 import { cleanJobInput, statusesOf, JOB_STATUS_LABEL, type Job } from '@/lib/jobs'
+import { buildJobBrief } from '@/lib/jobbrief'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,8 +21,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params
   const c = await load(req, id)
   if ('error' in c) return c.error
-  const [messages, members] = await Promise.all([listMessages(c.m.workspace, id), workspaceMembers(c.m.workspace)])
-  return NextResponse.json({ ok: true, me: c.m.email, jobsOnly: isJobsOnly(c.m.email), job: c.job, messages, members })
+  const [messages, members, brief] = await Promise.all([
+    listMessages(c.m.workspace, id), workspaceMembers(c.m.workspace),
+    c.job.leadId ? buildJobBrief(c.job.leadId, c.m.workspace).catch(() => null) : Promise.resolve(null),
+  ])
+  return NextResponse.json({ ok: true, me: c.m.email, jobsOnly: isJobsOnly(c.m.email), job: c.job, messages, members, brief })
 }
 
 // Every change is a new snapshot, so the trail of who moved what stays.

@@ -34,6 +34,7 @@ export default function JobPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [me, setMe] = useState('')
   const [jobsOnly, setJobsOnly] = useState(false)
+  const [brief, setBrief] = useState<{ site: string; text: string; customerSaid: string[]; files: { url: string; name: string; mime: string; size: number; at: string; from: string }[] } | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
@@ -52,7 +53,7 @@ export default function JobPage() {
       const j = await r.json().catch(() => ({}))
       if (!alive) return
       if (!r.ok) { setError(j.error ?? 'Could not load this job.'); return }
-      setMessages(j.messages); setMembers(j.members); setMe(j.me); setJob(j.job); setDraft(j.job); setJobsOnly(!!j.jobsOnly)
+      setMessages(j.messages); setMembers(j.members); setMe(j.me); setJob(j.job); setDraft(j.job); setJobsOnly(!!j.jobsOnly); setBrief(j.brief ?? null)
     }).catch(() => { if (alive) setError('Could not load this job.') })
     return () => { alive = false }
   }, [jobId])
@@ -220,6 +221,40 @@ export default function JobPage() {
                 <textarea id="j-req" className={input} rows={7} value={draft.requirements} onChange={(e) => set({ requirements: e.target.value })} />
               </div>
             </section>
+
+            {/* ── what the customer asked for (lib/jobbrief.ts) ─────── */}
+            {brief && (brief.text || brief.customerSaid.length > 0 || brief.files.length > 0) && (
+              <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-gray-800">Customer brief</h2>
+                  <span className="text-[11px] text-gray-500">{brief.site} · what the customer sent us (contact details hidden)</span>
+                </div>
+                {brief.text && <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-gray-800 bg-white rounded-lg border border-indigo-100 p-3 max-h-72 overflow-y-auto">{brief.text}</pre>}
+                {brief.customerSaid.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold text-gray-600 mb-1">Customer&apos;s messages</p>
+                    <ul className="space-y-1 max-h-60 overflow-y-auto">
+                      {brief.customerSaid.map((m, i) => <li key={i} className="text-[13px] text-gray-800 bg-white rounded-lg border border-indigo-100 px-3 py-1.5 whitespace-pre-wrap">{m}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {brief.files.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold text-gray-600 mb-1">Customer&apos;s files · {brief.files.length}</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {brief.files.map((f, i) => (
+                        <a key={i} href={f.url} target="_blank" rel="noopener" className="block rounded-lg border border-indigo-100 bg-white p-1.5 hover:border-indigo-400" title={f.name}>
+                          {/^image\//.test(f.mime)
+                            ? <img src={f.url} alt={f.name} className="h-24 w-full object-contain rounded" />
+                            : <div className="h-24 flex items-center justify-center text-[11px] font-semibold text-indigo-700 bg-indigo-50 rounded">{(f.name.split('.').pop() || 'file').toUpperCase()}</div>}
+                          <p className="mt-1 truncate text-[11px] text-gray-700">{f.name}</p>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
 
             {/* ── the estimate sheet ────────────────────────────────── */}
             <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
