@@ -52,6 +52,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
 
   const text = String(body.text ?? '').trim() || draft.text
+  // The agent may trim the Cc list on the card; only addresses, at most six.
+  const cc = (typeof body.cc === 'string' ? body.cc : draft.cc ?? '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)?.slice(0, 6).join(', ') ?? ''
   const subject = String(body.subject ?? '').trim().slice(0, 200) || draft.subject
   if (text.length > 20000) return NextResponse.json({ error: 'That message is too long to send.' }, { status: 400 })
   const cfg = googleConfig(PUBLIC_BASE)
@@ -66,7 +68,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   let sent
   try {
     sent = await sendEmail(draft.agent, cfg, {
-      from: draft.from, to: draft.to, subject, body: finalText, html: finalHtml,
+      from: draft.from, to: draft.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
       threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
     })
   } catch (e) {
@@ -78,14 +80,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // bot:true keeps the follow-up chain alive (a human email would stop it);
   // sentBy is the mailbox it left from. The reviewer is on the draft row.
   const entry: CrmEmailEntry = {
-    id: emailId, sentBy: draft.agent, from: draft.from, to: draft.to, subject,
+    id: emailId, sentBy: draft.agent, from: draft.from, to: draft.to, cc: cc || undefined, subject,
     body: finalText, html: finalHtml, snippet: makeSnippet(text), at,
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
     direction: 'outbound', bot: true,
   }
   // reviewedBy: a person read and sent it — Opportunities counts it as a human reply.
   await writeControlRow({ sessionId: id, siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify({ ...entry, reviewedBy: by }) })
-  await revise({ status: 'sent', by, decidedAt: at, sentEmailId: emailId, text, subject })
+  await revise({ status: 'sent', by, decidedAt: at, sentEmailId: emailId, text, subject, cc: cc || undefined })
   await ledger({ step: draft.step, state: 'sent', at, to: draft.to, agent: draft.agent, from: draft.from, complete: draft.complete, missing: draft.missing, emailId, inboundId: draft.inboundId })
 
   if (draft.step === 'first') {

@@ -27,6 +27,7 @@ import { siteIdFromQuoteCode, isMachineMessage } from './quoteintake'
 import { siteWorkspace } from './workspaces'
 import { googleConfig, searchIntakeMessageIds, fetchThread, fetchAttachment, type InboundMessage } from './gmail'
 import { POST as intakePost } from '@/app/api/quote-intake/route'
+import { isOurAddress } from './customercc'
 
 export const INTAKE_MAILBOX = 'dev@zeecustomboxes.com'
 export const CRM_INTAKE_PULL_ROLE = 'crm_intake_pull'
@@ -138,9 +139,13 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean } =
         if (bytes) files.push({ name: a.name, mime, data: Buffer.from(bytes).toString('base64') })
       }
       const note = left.length ? `\n\nAttachments too large to bring in (open the original email in Gmail): ${left.join(', ')}` : ''
+      // Who the customer copied, kept on the lead so replies can copy them too
+      // (lib/customercc.ts). Only addresses that are not ours.
+      const ccKeep = (m.cc.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []).filter((a) => !isOurAddress(a))
+      const ccNote = ccKeep.length ? `\n\nCc: ${ccKeep.join(', ')}` : ''
       const payload = {
         siteCode: code, name: parsed.name, email: parsed.email, phone: parsed.phone, product: parsed.product,
-        message: String(parsed.message ?? '') + note, receivedAt: m.at,
+        message: String(parsed.message ?? '') + note + ccNote, receivedAt: m.at,
         unreadable: parsed.unreadable === true, attachments: files,
       }
       if (dryRun) {

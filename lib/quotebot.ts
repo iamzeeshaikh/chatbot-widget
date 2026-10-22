@@ -53,6 +53,7 @@ import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry }
 import { openPixelHtml } from './emailtrack'
 import { draftCustomerEmail } from './quotebotdraft'
 import { CRM_BOT_DRAFT_ROLE, newDraftId, type BotDraft } from './botdraft'
+import { customerCc } from './customercc'
 import { buildSendSignature } from './sendsignature'
 import { unsubscribeUrl, unsubscribedSet } from './unsubscribe'
 import { newTaskId, type CrmTaskEntry } from './tasks'
@@ -174,6 +175,19 @@ export interface ReplyResult { state: 'sent' | 'drafted' | 'handed-over' | 'stoo
 
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; message: string | null; created_at: string }
 interface LogRow { session_id: string; role: string; message: string; created_at: string }
+
+/**
+ * Everyone the customer copied, as a Cc header value ('' when nobody): the
+ * enquiry's own Cc line plus the Cc of every email they have sent on this
+ * lead. Owner, 2026-10-22: "bot ko chahie ke CC walon ko bhi email karde."
+ */
+async function ccForLead(sessionId: string, leadText: string | null | undefined, customer: string): Promise<string> {
+  const { data } = await supabase.from('chat_logs').select('message')
+    .eq('session_id', sessionId).eq('role', CRM_EMAIL_IN_ROLE).limit(200)
+  const inbound = (data ?? []).map((r) => parseCrmEmailIn(r.message))
+    .filter((e): e is NonNullable<typeof e> => !!e && e.from.toLowerCase() === customer.toLowerCase()).map((e) => e.cc ?? '')
+  return customerCc({ customer, leadText, inboundCc: inbound }).join(', ')
+}
 
 async function ledger(sessionId: string, siteId: string, entry: BotLedger): Promise<boolean> {
   const { error } = await writeControlRow({ sessionId, siteId, role: CRM_BOT_ROLE, message: JSON.stringify(entry) })
@@ -474,6 +488,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (dryRun) { act({ state: 'would-send', why: assessment.reason, ...preview }); continue }
     if (sends >= MAX_SENDS_PER_RUN) { act({ state: 'retry-later', why: 'per-run send cap reached' }); continue }
 
+    const cc = await ccForLead(id, lead.message, to)
     if (BOT_EMAIL_MODE === 'draft') {
       // Park it for the agent (owner, 2026-10-22). The lead is theirs from now
       // on, with a task and a push; nothing reaches the customer until they
@@ -482,7 +497,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       const draft: BotDraft = {
         id: newDraftId(), step: 'first', status: 'pending', agent, from: alias.email, to,
         subject: mail.subject, text: mail.text, complete: mail.complete, missing, at,
-        chatSessionId: chat?.sessionId,
+        chatSessionId: chat?.sessionId, cc: cc || undefined,
       }
       if (!(await ledger(id, lead.site_id, { step: 'first', state: 'drafted', at, to, agent, from: alias.email, complete: mail.complete, missing }))) {
         act({ state: 'retry-later', why: 'ledger write failed' }); continue
@@ -521,7 +536,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
 
     let sent
     try {
-      sent = await sendEmail(agent, cfg, { from: alias.email, to, subject: mail.subject, body: finalText, html: finalHtml })
+      sent = await sendEmail(agent, cfg, { from: alias.email, to, cc: cc || undefined, subject: mail.subject, body: finalText, html: finalHtml })
     } catch (e) {
       const why = e instanceof GmailAuthError ? `${agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
       await ledger(id, lead.site_id, { step: 'first', state: 'failed', at: new Date().toISOString(), why, to, agent })
@@ -531,7 +546,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
 
     const at = new Date().toISOString()
     const entry: CrmEmailEntry = {
-      id: emailId, sentBy: agent, from: alias.email, to, subject: mail.subject,
+      id: emailId, sentBy: agent, from: alias.email, to, cc: cc || undefined, subject: mail.subject,
       body: finalText, html: finalHtml, snippet: makeSnippet(mail.text), at,
       gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
       direction: 'outbound', bot: true,
@@ -775,6 +790,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   const assessment = await assessQuote(lead?.message ?? '', lead?.name ?? null)
   if (!assessment) return { ok: false, state: 'failed', why: 'could not read the enquiry (model unavailable)' }
+  const cc = await ccForLead(id, lead?.message, first.to)
   const missing = (latest.missing ?? []) as Missing[]
   const fu = buildFollowUp(assessment, { n, missing, firstName: assessment.firstName, now })
 
@@ -801,7 +817,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   let sent
   try {
     sent = await sendEmail(first.agent, cfg, {
-      from: first.from, to: first.to, subject, body: finalText, html: finalHtml,
+      from: first.from, to: first.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
       threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
     })
   } catch (e) {
@@ -812,7 +828,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
 
   const at = new Date().toISOString()
   const entry: CrmEmailEntry = {
-    id: emailId, sentBy: first.agent, from: first.from, to: first.to, subject,
+    id: emailId, sentBy: first.agent, from: first.from, to: first.to, cc: cc || undefined, subject,
     body: finalText, html: finalHtml, snippet: makeSnippet(fu.text), at,
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
     direction: 'outbound', bot: true,
@@ -942,12 +958,14 @@ export async function answerReply(
   const sentRows = (logRows ?? []).filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
   const original = [...sentRows].reverse().find((e) => e.bot)
   const subject = original ? (/^re:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`) : 'Your packaging quote'
+  const cc = await ccForLead(id, lead?.message, first.to)
   if (BOT_EMAIL_MODE === 'draft') {
     // Same rule as the first email: the agent reads it and sends it.
     const at = now.toISOString()
     const draft: BotDraft = {
       id: newDraftId(), step: 'reply', status: 'pending', agent: first.agent, from: first.from, to: first.to,
       subject, text: answer.text, complete: answer.complete, missing: missingOf(assessment), inboundId: latest.gmailId, at,
+      cc: cc || undefined,
     }
     if (!(await ledger(id, siteId, { step: 'reply', state: 'drafted', at, inboundId: latest.gmailId, agent: first.agent, from: first.from, to: first.to, complete: answer.complete, missing: missingOf(assessment) }))) {
       return { state: 'failed', why: 'ledger write failed' }
@@ -977,7 +995,7 @@ export async function answerReply(
   let sent
   try {
     sent = await sendEmail(first.agent, cfg, {
-      from: first.from, to: first.to, subject, body: finalText, html: finalHtml,
+      from: first.from, to: first.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
       threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
     })
   } catch (e) {
@@ -987,7 +1005,7 @@ export async function answerReply(
   }
   const at = new Date().toISOString()
   const entry: CrmEmailEntry = {
-    id: emailId, sentBy: first.agent, from: first.from, to: first.to, subject,
+    id: emailId, sentBy: first.agent, from: first.from, to: first.to, cc: cc || undefined, subject,
     body: finalText, html: finalHtml, snippet: makeSnippet(answer.text), at,
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
     direction: 'outbound', bot: true,
@@ -1220,6 +1238,8 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   const assessment = await assessQuote(lead?.message ?? '', lead?.name ?? null)
   const fu = buildQuoteFollowUp({ n, firstName: assessment?.firstName ?? null, product: assessment?.product ?? 'packaging', now })
+  // Whoever the agent copied on the price, else everyone the customer copied.
+  const cc = lastMine.cc || await ccForLead(id, lead?.message, to)
   if (opts.dryRun) return { ok: true, state: 'not-due', n, text: fu.text, why: 'dry run: would send now' }
 
   const cfg = googleConfig(PUBLIC_BASE)
@@ -1237,7 +1257,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   let sent
   try {
     sent = await sendEmail(agent, cfg, {
-      from: lastMine.from, to, subject, body: finalText, html: finalHtml,
+      from: lastMine.from, to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
       threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
     })
   } catch (e) {
@@ -1247,7 +1267,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   }
   const at = new Date().toISOString()
   const entry: CrmEmailEntry = {
-    id: emailId, sentBy: agent, from: lastMine.from, to, subject,
+    id: emailId, sentBy: agent, from: lastMine.from, to, cc: cc || undefined, subject,
     body: finalText, html: finalHtml, snippet: makeSnippet(fu.text), at,
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
     direction: 'outbound', bot: true,

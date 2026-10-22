@@ -21,6 +21,8 @@ export interface BotDraft {
   agent: string          // whose mailbox it goes from (the lead's agent)
   from: string           // the site's send-as address
   to: string
+  /** Everyone the customer copied (lib/customercc.ts), comma-separated. */
+  cc?: string
   subject: string
   text: string           // body without the signature (added at send time)
   complete: boolean

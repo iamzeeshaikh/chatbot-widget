@@ -685,6 +685,8 @@ export interface InboundMessage {
   inReplyTo: string | null
   from: string
   to: string
+  /** The Cc header, '' when none. */
+  cc: string
   subject: string
   bodyText: string
   at: string
@@ -853,6 +855,7 @@ export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadI
       inReplyTo: headerOf(headers, 'In-Reply-To') || null,
       from: headerOf(headers, 'From'),
       to: headerOf(headers, 'To'),
+      cc: headerOf(headers, 'Cc'),
       subject: headerOf(headers, 'Subject'),
       bodyText: extractBody(m.payload),
       at: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : '',

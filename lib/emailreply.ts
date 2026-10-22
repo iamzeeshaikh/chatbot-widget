@@ -50,6 +50,8 @@ export interface CrmEmailInEntry {
   from: string
   fromName: string | null
   to: string
+  /** Who else the customer copied (raw header), when any. */
+  cc?: string
   subject: string
   /** The new content, with quoted history and signature removed. */
   body: string
@@ -99,6 +101,7 @@ export function parseCrmEmailIn(message: string | null | undefined): CrmEmailInE
       from: str(o.from),
       fromName: typeof o.fromName === 'string' && o.fromName ? o.fromName : null,
       to: str(o.to),
+      cc: typeof o.cc === 'string' && o.cc ? o.cc : undefined,
       subject: str(o.subject),
       body,
       quoted,

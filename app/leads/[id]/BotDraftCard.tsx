@@ -9,16 +9,17 @@ import { formatShortDateTime } from '@/lib/datetime'
 export default function BotDraftCard({ leadId, draft, onDone }: { leadId: string; draft: BotDraft; onDone: () => void }) {
   const [text, setText] = useState(draft.text)
   const [subject, setSubject] = useState(draft.subject)
+  const [cc, setCc] = useState(draft.cc ?? '')
   const [busy, setBusy] = useState<'send' | 'discard' | null>(null)
   const [err, setErr] = useState('')
-  useEffect(() => { setText(draft.text); setSubject(draft.subject); setErr('') }, [draft.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setText(draft.text); setSubject(draft.subject); setCc(draft.cc ?? ''); setErr('') }, [draft.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function decide(action: 'send' | 'discard') {
     if (action === 'discard' && !window.confirm('Discard the bot\'s draft? The bot will not write to this customer again; you can still email them yourself.')) return
     setBusy(action); setErr('')
     const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/bot-draft`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ draftId: draft.id, action, text, subject }),
+      body: JSON.stringify({ draftId: draft.id, action, text, subject, cc }),
     })
     const j = await res.json().catch(() => ({}))
     setBusy(null)
@@ -40,6 +41,10 @@ export default function BotDraftCard({ leadId, draft, onDone }: { leadId: string
           The bot read the enquiry and wrote this for you. Check it, change anything you like, then send — it goes from {draft.agent.split('@')[0]}&apos;s mailbox as {draft.from}, with the usual signature.
           {draft.complete ? ' The customer gave every detail; your price quote comes next.' : draft.missing.length ? ` It asks for: ${draft.missing.join(', ')}.` : ''}
         </p>
+        <label className="block text-[11px] font-semibold text-amber-900">Cc <span className="font-normal">(people the customer copied — remove anyone who should not get it)</span>
+          <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="nobody"
+            className="mt-0.5 w-full rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-[13px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400" />
+        </label>
         <label className="block text-[11px] font-semibold text-amber-900">Subject
           <input value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-0.5 w-full rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-[13px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400" />
         </label>

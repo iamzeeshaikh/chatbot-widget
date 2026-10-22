@@ -607,6 +607,7 @@ export async function runEmailSweep(
             from: from.email,
             fromName: from.name,
             to: m.to,
+            cc: m.cc || undefined,
             subject: m.subject,
             body: split.visible.slice(0, MAX_INBOUND_BODY),
             quoted: split.quoted ? split.quoted.slice(0, MAX_INBOUND_BODY) : null,
