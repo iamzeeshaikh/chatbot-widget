@@ -773,9 +773,16 @@ export default function LeadRecordPage() {
                 {/* One click for the moment that matters most: the price went
                     out. It is the same stage change as the dropdown — and it is
                     what starts the quote bot's follow-ups (lib/quotebot.ts). */}
+                {isPackagingLead && record.contact.email && record.stage !== 'won' && record.stage !== 'lost' && (
+                  <a href={`/leads/${encodeURIComponent(record.id)}/quote`}
+                    title="Fill a price table and send the quote from your own mailbox; the stage moves to Quote Sent and the bot follows it up the next day"
+                    className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-blue-300 bg-blue-600 text-white hover:bg-blue-700">
+                    $ Send price quote
+                  </a>
+                )}
                 {isPackagingLead && (record.stage === 'new' || record.stage === 'contacted' || record.stage === 'follow_up') && (
                   <button type="button" onClick={() => changeStage('quote_sent')}
-                    title="Mark the quote as sent: moves the stage to Quote Sent, and the bot follows the quote up every 3 days until the customer answers"
+                    title="Already sent the price outside ZeeOps? Mark it: the stage moves to Quote Sent (the bot can follow up only when the price email went from ZeeOps)"
                     className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
                     ✓ Price sent
                   </button>
