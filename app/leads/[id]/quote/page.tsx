@@ -5,8 +5,8 @@
 // stage Quote Sent, value recorded, bot follows up the next day.
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, Plus, Send, Trash2 } from 'lucide-react'
-import { blankQuote, cleanRows, money, quoteHtml, quoteProblems, type PriceQuote } from '@/lib/pricequote'
+import { ArrowLeft, Plus, Send, Trash2, X } from 'lucide-react'
+import { blankItem, blankQuote, dealValue, grandTotal, money, normalizeQuote, quoteHtml, quoteProblems, quoteTitle, type PriceQuote, type QuoteItem, type QuoteRow } from '@/lib/pricequote'
 
 interface Setup { name: string; siteId: string; siteName: string; toKnown: boolean; cc: string[]; aliases: { email: string; displayName: string }[]; replyTo: { title: string } | null }
 const input = 'w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -31,7 +31,7 @@ export default function QuotePage() {
       if (!r.ok) { setErr(j.error || 'Could not load this lead'); return }
       setSetup(j)
       let saved: PriceQuote | null = null
-      try { saved = JSON.parse(localStorage.getItem(key) || 'null') } catch { saved = null }
+      try { const raw = JSON.parse(localStorage.getItem(key) || 'null'); saved = raw ? normalizeQuote(raw) : null } catch { saved = null }
       setQ(saved ?? blankQuote(j.name || '', ''))
       const site = String(j.siteId || '').replace(/-/g, '')
       const pick = (j.aliases as Setup['aliases']).find((a) => a.email.split('@')[1]?.replace(/\./g, '').startsWith(site.slice(0, 8))) ?? j.aliases[0]
@@ -42,17 +42,19 @@ export default function QuotePage() {
   useEffect(() => { if (q) try { localStorage.setItem(key, JSON.stringify(q)) } catch { /* private mode */ } }, [q, key])
 
   const set = (p: Partial<PriceQuote>) => setQ((x) => (x ? { ...x, ...p } : x))
-  const setRow = (i: number, p: Partial<PriceQuote['rows'][number]>) => setQ((x) => (x ? { ...x, rows: x.rows.map((r, n) => (n === i ? { ...r, ...p } : r)) } : x))
+  const setItem = (k: number, p: Partial<QuoteItem>) => setQ((x) => (x ? { ...x, items: x.items.map((it, n) => (n === k ? { ...it, ...p } : it)) } : x))
+  const setRow = (k: number, i: number, p: Partial<QuoteRow>) => setQ((x) => (x ? { ...x, items: x.items.map((it, n) => (n === k ? { ...it, rows: it.rows.map((r, m) => (m === i ? { ...r, ...p } : r)) } : it)) } : x))
   const html = useMemo(() => (q ? quoteHtml(q) : ''), [q])
   const problems = q ? quoteProblems(q) : []
-  const rows = q ? cleanRows(q) : []
+  const value = q ? dealValue(q) : 0
+  const grand = q ? grandTotal(q) : null
 
   async function send() {
     if (!q) return
     setBusy(true); setErr('')
     const r = await fetch(`/api/leads/${encodeURIComponent(leadId)}/price-quote`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quote: q, from, cc, subject: subject || (setup?.replyTo ? '' : `Price quote — ${q.product} - ${setup?.siteName ?? ''}`) }),
+      body: JSON.stringify({ quote: q, from, cc, subject: subject || (setup?.replyTo ? '' : `Price quote — ${quoteTitle(q)} - ${setup?.siteName ?? ''}`) }),
     })
     const j = await r.json().catch(() => ({}))
     setBusy(false)
@@ -95,41 +97,51 @@ export default function QuotePage() {
               <input id="q-cc" className={input} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="nobody" /></div>
           </div>
           {!setup.replyTo && <div><label className={label} htmlFor="q-subj">Subject</label>
-            <input id="q-subj" className={input} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={`Price quote — ${q.product || 'your boxes'} - ${setup.siteName}`} /></div>}
+            <input id="q-subj" className={input} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={`Price quote — ${quoteTitle(q) || 'your boxes'} - ${setup.siteName}`} /></div>}
           <div className="grid grid-cols-3 gap-3">
             <div><label className={label} htmlFor="q-hi">Greeting name</label><input id="q-hi" className={input} value={q.greetingName} onChange={(e) => set({ greetingName: e.target.value })} /></div>
-            <div className="col-span-2"><label className={label} htmlFor="q-prod">Product</label><input id="q-prod" className={input} value={q.product} onChange={(e) => set({ product: e.target.value })} placeholder="Custom Lipstick Boxes" /></div>
+            <div className="col-span-2"><label className={label} htmlFor="q-intro">Opening line</label><input id="q-intro" className={input} value={q.intro} onChange={(e) => set({ intro: e.target.value })} /></div>
           </div>
-          <div><label className={label} htmlFor="q-intro">Opening line</label><input id="q-intro" className={input} value={q.intro} onChange={(e) => set({ intro: e.target.value })} /></div>
-          <div><label className={label} htmlFor="q-specs">Specifications (one per line)</label>
-            <textarea id="q-specs" className={input} rows={4} value={q.specs} onChange={(e) => set({ specs: e.target.value })} placeholder={'Size: 2 x 2 x 4 in\n16pt SBS, matte lamination\n4-color printing outside'} /></div>
-          <div>
-            <label className={label}>Price table</label>
-            <table className="w-full text-sm">
-              <thead><tr className="text-left text-[11px] text-gray-500"><th className="pb-1 pr-2 font-semibold">Quantity</th><th className="pb-1 pr-2 font-semibold">Unit price ($)</th><th className="pb-1 pr-2 font-semibold text-right">Total</th><th /></tr></thead>
-              <tbody>
-                {q.rows.map((r, i) => {
-                  const total = (Number(r.quantity.replace(/[^0-9.]/g, '')) || 0) * (Number(r.unitPrice.replace(/[^0-9.]/g, '')) || 0)
-                  return (
-                    <tr key={i}>
-                      <td className="py-1 pr-2"><input aria-label="Quantity" className={input} inputMode="numeric" value={r.quantity} onChange={(e) => setRow(i, { quantity: e.target.value })} placeholder="500" /></td>
-                      <td className="py-1 pr-2"><input aria-label="Unit price" className={input} inputMode="decimal" value={r.unitPrice} onChange={(e) => setRow(i, { unitPrice: e.target.value })} placeholder="0.85" /></td>
-                      <td className="py-1 pr-2 text-right tabular-nums font-semibold">{total ? money(Math.round(total * 100) / 100) : '—'}</td>
-                      <td className="py-1">{q.rows.length > 1 && <button type="button" aria-label="Remove row" onClick={() => set({ rows: q.rows.filter((_, n) => n !== i) })} className="text-gray-400 hover:text-red-700"><Trash2 size={14} aria-hidden /></button>}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-            <button type="button" onClick={() => set({ rows: [...q.rows, { quantity: '', unitPrice: '' }] })} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add quantity</button>
-          </div>
+          {q.items.map((it, k) => (
+            <div key={k} className="rounded-lg border border-gray-300 bg-gray-50 p-3 space-y-2">
+              <div className="flex items-end gap-2">
+                <div className="flex-1"><label className={label} htmlFor={`q-prod-${k}`}>Product {q.items.length > 1 ? k + 1 : ''}</label>
+                  <input id={`q-prod-${k}`} className={input} value={it.product} onChange={(e) => setItem(k, { product: e.target.value })} placeholder={k === 0 ? 'Custom Lipstick Boxes' : 'Custom Mascara Boxes'} /></div>
+                {q.items.length > 1 && <button type="button" aria-label={`Remove product ${k + 1}`} onClick={() => set({ items: q.items.filter((_, n) => n !== k) })} className="mb-1 inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-700"><X size={13} aria-hidden /> Remove</button>}
+              </div>
+              <div><label className={label} htmlFor={`q-specs-${k}`}>Specifications (one per line)</label>
+                <textarea id={`q-specs-${k}`} className={input} rows={3} value={it.specs} onChange={(e) => setItem(k, { specs: e.target.value })} placeholder={'Size: 2 x 2 x 4 in\n16pt SBS, matte lamination\n4-color printing outside'} /></div>
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-[11px] text-gray-500"><th className="pb-1 pr-2 font-semibold">Quantity</th><th className="pb-1 pr-2 font-semibold">Unit price ($)</th><th className="pb-1 pr-2 font-semibold text-right">Total</th><th /></tr></thead>
+                <tbody>
+                  {it.rows.map((r, i) => {
+                    const total = (Number(r.quantity.replace(/[^0-9.]/g, '')) || 0) * (Number(r.unitPrice.replace(/[^0-9.]/g, '')) || 0)
+                    return (
+                      <tr key={i}>
+                        <td className="py-1 pr-2"><input aria-label="Quantity" className={input} inputMode="numeric" value={r.quantity} onChange={(e) => setRow(k, i, { quantity: e.target.value })} placeholder="500" /></td>
+                        <td className="py-1 pr-2"><input aria-label="Unit price" className={input} inputMode="decimal" value={r.unitPrice} onChange={(e) => setRow(k, i, { unitPrice: e.target.value })} placeholder="0.85" /></td>
+                        <td className="py-1 pr-2 text-right tabular-nums font-semibold">{total ? money(Math.round(total * 100) / 100) : '—'}</td>
+                        <td className="py-1">{it.rows.length > 1 && <button type="button" aria-label="Remove row" onClick={() => setItem(k, { rows: it.rows.filter((_, n) => n !== i) })} className="text-gray-400 hover:text-red-700"><Trash2 size={14} aria-hidden /></button>}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <button type="button" onClick={() => setItem(k, { rows: [...it.rows, { quantity: '', unitPrice: '' }] })} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add quantity</button>
+            </div>
+          ))}
+          <button type="button" disabled={q.items.length >= 15} onClick={() => set({ items: [...q.items, blankItem()] })}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+            <Plus size={14} aria-hidden /> Add another product
+          </button>
+          {grand !== null && <p className="text-xs text-gray-600">Order total for all {q.items.length} products: <b>{money(grand)}</b> (shown in the email because each product has one quantity).</p>}
           <div><label className={label} htmlFor="q-inc">Included (one per line)</label><textarea id="q-inc" className={input} rows={3} value={q.included} onChange={(e) => set({ included: e.target.value })} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={label} htmlFor="q-turn">Turnaround</label><input id="q-turn" className={input} value={q.turnaround} onChange={(e) => set({ turnaround: e.target.value })} /></div>
             <div><label className={label} htmlFor="q-valid">Valid for</label><input id="q-valid" className={input} value={q.validity} onChange={(e) => set({ validity: e.target.value })} /></div>
           </div>
           <div><label className={label} htmlFor="q-close">Closing line</label><textarea id="q-close" className={input} rows={2} value={q.closing} onChange={(e) => set({ closing: e.target.value })} /></div>
-          <p className="text-[11px] text-gray-500">Sending moves the stage to Quote Sent, records {rows[0] ? money(rows[0].total) : 'the first total'} as the deal value, and the bot sends the first follow-up the next day if the customer does not answer. Your signature is added automatically.</p>
+          <p className="text-[11px] text-gray-500">Sending moves the stage to Quote Sent, records {value ? money(value) : 'the first total of each product'} as the deal value, and the bot sends the first follow-up the next day if the customer does not answer. Your signature is added automatically.</p>
         </section>
         <section className="rounded-xl border border-gray-200 bg-white p-5">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-3">Preview — what the customer gets{cc ? ` (cc ${cc})` : ''}</p>

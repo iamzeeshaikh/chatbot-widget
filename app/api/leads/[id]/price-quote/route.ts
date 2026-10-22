@@ -9,7 +9,7 @@ import { makeSnippet, newEmailId, type CrmEmailEntry } from '@/lib/crmemail'
 import { CRM_EMAIL_ROLE, CRM_NOTE_ROLE, CRM_VALUE_ROLE } from '@/lib/crm'
 import { applyStageChange } from '@/lib/stagechange'
 import { customerCc } from '@/lib/customercc'
-import { cleanRows, quoteHtml, quoteProblems, quoteText, money, type PriceQuote } from '@/lib/pricequote'
+import { cleanRows, dealValue, filledItems, normalizeQuote, quoteHtml, quoteProblems, quoteText, quoteTitle, money } from '@/lib/pricequote'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -43,8 +43,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await guardLeadAccess(member, id, 'email')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
   const body = await req.json().catch(() => ({}))
-  const q = body.quote as PriceQuote
-  if (!q || typeof q !== 'object') return NextResponse.json({ error: 'Nothing to send' }, { status: 400 })
+  if (!body.quote || typeof body.quote !== 'object') return NextResponse.json({ error: 'Nothing to send' }, { status: 400 })
+  const q = normalizeQuote(body.quote)
   const problems = quoteProblems(q)
   if (problems.length) return NextResponse.json({ error: `Add ${problems.join(' and ')}.` }, { status: 400 })
   const from = String(body.from ?? '').trim()
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const cfg = googleConfig(req.nextUrl.origin)
   if (!cfg) return NextResponse.json({ error: 'Google OAuth is not configured.' }, { status: 503 })
-  const subject = String(body.subject ?? '').trim().slice(0, 200) || `Price quote — ${q.product} - ${record.siteName}`
+  const subject = String(body.subject ?? '').trim().slice(0, 200) || `Price quote — ${quoteTitle(q)} - ${record.siteName}`
   // Threaded under the customer's latest email when there is one.
   const lastIn = [...record.timeline].reverse().find((e) => e.kind === 'email_in') as { id?: string } | undefined
   const gmailId = lastIn?.id?.replace(/^email-in-/, '') ?? ''
@@ -97,13 +97,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId, direction: 'outbound',
   }
   await writeControlRow({ sessionId: id, siteId: access.siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
-  const rows = cleanRows(q)
   if (record.stage !== 'quote_sent') await applyStageChange({ leadId: id, siteId: access.siteId, stage: 'quote_sent', previous: record.stage, actorEmail: access.member.email })
   await writeControlRow({ sessionId: id, siteId: access.siteId, role: CRM_VALUE_ROLE,
-    message: JSON.stringify({ estimated: Math.round(rows[0].total), won: record.value?.won ?? null, currency: q.currency || 'USD', updated_by: access.member.email, at }) })
+    message: JSON.stringify({ estimated: dealValue(q), won: record.value?.won ?? null, currency: q.currency || 'USD', updated_by: access.member.email, at }) })
   await writeControlRow({ sessionId: id, siteId: access.siteId, role: CRM_NOTE_ROLE, message: JSON.stringify({
     id: `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, author: access.member.email, at,
-    body: `Price quote sent — ${q.product}: ${rows.map((r) => `${r.qty.toLocaleString('en-US')} × ${money(r.unit, q.currency)} = ${money(r.total, q.currency)}`).join(' · ')}`,
+    body: `Price quote sent — ${filledItems(q).map((it) => `${it.product}: ${cleanRows(it).map((r) => `${r.qty.toLocaleString('en-US')} × ${money(r.unit, q.currency)} = ${money(r.total, q.currency)}`).join(' · ')}`).join(' | ')}`,
   }) })
   return NextResponse.json({ ok: true, emailId })
 }
