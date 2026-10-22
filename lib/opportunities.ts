@@ -655,17 +655,26 @@ export function readInvoiceDue(s: LeadState, sales: OppSale[], now: Date, maxDay
   if (s.stage === 'lost' || s.stage === 'not_interested' || s.stage === 'duplicate' || s.stage === 'manufacturer') return null
   if (s.restricted) return null
 
-  const codes = links.map((p) => paypalInvoiceCode(p.url)).filter((c): c is string => !!c)
-  const numbers = docs.map((d) => d.number.toUpperCase()).filter(Boolean)
+  // Only the LATEST invoice or link decides. A repeat customer's earlier
+  // order being paid says nothing about the new one (Copper Key, 2026-10-22:
+  // TWP-014 paid on the same lead hid the unpaid TWP-025 / PayPal 0013).
+  const latestLink = [...links].sort((a, b) => b.at.localeCompare(a.at))[0]
+  const latestDoc = [...docs].sort((a, b) => b.at.localeCompare(a.at))[0]
+  const anchor = [latestLink?.at, latestDoc?.at].filter((x): x is string => !!x).sort().reverse()[0]
+  // A link pasted for an invoice a day or two after it was made is the same bill.
+  const anchorDay = new Date(new Date(anchor).getTime() - 3 * DAY).toISOString().slice(0, 10)
+  const codes = links.filter((p) => p.at >= anchorDay).map((p) => paypalInvoiceCode(p.url)).filter((c): c is string => !!c)
+  const numbers = docs.filter((d) => d.at >= anchorDay).map((d) => d.number.toUpperCase()).filter(Boolean)
   const firstSent = [...links.map((l) => l.at), ...docs.map((d) => d.at)].sort()[0]
   const ids = new Set(s.ids)
   const matches = sales.filter((sale) => {
-    if (sale.leadId && ids.has(sale.leadId)) return true
     const hay = `${sale.reference} ${sale.notes}`.toUpperCase()
     if (codes.some((c) => hay.includes(c))) return true
     // An invoice number alone repeats across sites and years (SCB-021 is two
     // different customers), so it only counts with a date on the right side.
-    return numbers.some((n) => hay.includes(n)) && sale.orderDate >= firstSent.slice(0, 10)
+    if (numbers.some((n) => hay.includes(n)) && sale.orderDate >= anchorDay) return true
+    // Same lead: only a sale booked around or after the latest invoice.
+    return !!sale.leadId && ids.has(sale.leadId) && sale.orderDate >= anchorDay
   })
   // Paid, refunded or cancelled — either way nothing is owed on it any more.
   if (matches.some((m) => m.status === 'paid' || m.status === 'refunded' || m.status === 'cancelled')) return null
