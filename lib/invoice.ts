@@ -172,12 +172,12 @@ export interface SuggestOptions {
  */
 const QUOTE_MARKERS = [
   /^\s*>/m,                                               // "> quoted line"
-  /^\s*On .{0,200}?wrote:\s*$/ms,                          // Gmail / Apple Mail, English
-  /^\s*El .{0,200}?escribi[oó]:\s*$/ms,                     // Spanish
-  /^\s*Le .{0,200}?a [ée]crit\s*:\s*$/ms,                    // French
-  /^\s*Am .{0,200}?schrieb .{0,80}?:\s*$/ms,                 // German
+  /^\s*On [\s\S]{0,200}?wrote:\s*$/m,                          // Gmail / Apple Mail, English
+  /^\s*El [\s\S]{0,200}?escribi[oó]:\s*$/m,                     // Spanish
+  /^\s*Le [\s\S]{0,200}?a [ée]crit\s*:\s*$/m,                    // French
+  /^\s*Am [\s\S]{0,200}?schrieb [\s\S]{0,80}?:\s*$/m,                 // German
   /^\s*-{2,}\s*(?:Original|Forwarded) Message\s*-{2,}/mi,   // Outlook
-  /^\s*From:\s.{0,200}?\n\s*(?:Sent|Date):\s/mi,            // Outlook header block
+  /^\s*From:\s[\s\S]{0,200}?\n\s*(?:Sent|Date):\s/mi,            // Outlook header block
   /^\s*Sent from my (?:iPhone|iPad|Galaxy|Android)/mi,     // signature: nothing of ours after it, but nothing of theirs either
   /^\s*Enviado desde mi (?:iPhone|iPad)/mi,
 ]
