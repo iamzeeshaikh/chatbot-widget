@@ -156,18 +156,61 @@ function push(into: Suggestion[], value: string, from: string, at: string) {
   into.push({ value: v, from, at })
 }
 
+export interface SuggestOptions {
+  /** The site's own office address(es). Never offered as a place to ship to. */
+  ownAddresses?: string[]
+}
+
+/**
+ * The quoted part of a reply, cut off.
+ *
+ * Lilly Zelaya's iPhone replies each carried our whole previous email under
+ * "El sept 15, 2026, a la(s) 9:30 p.m., California Soccer Jerseys escribió:",
+ * signature included — so an INBOUND message offered 1247 Wilshire Blvd, our
+ * own office, as her shipping address. Everything from the first quote marker
+ * down is the other side of the conversation, not the customer speaking.
+ */
+const QUOTE_MARKERS = [
+  /^\s*>/m,                                               // "> quoted line"
+  /^\s*On .{0,200}?wrote:\s*$/ms,                          // Gmail / Apple Mail, English
+  /^\s*El .{0,200}?escribi[oó]:\s*$/ms,                     // Spanish
+  /^\s*Le .{0,200}?a [ée]crit\s*:\s*$/ms,                    // French
+  /^\s*Am .{0,200}?schrieb .{0,80}?:\s*$/ms,                 // German
+  /^\s*-{2,}\s*(?:Original|Forwarded) Message\s*-{2,}/mi,   // Outlook
+  /^\s*From:\s.{0,200}?\n\s*(?:Sent|Date):\s/mi,            // Outlook header block
+  /^\s*Sent from my (?:iPhone|iPad|Galaxy|Android)/mi,     // signature: nothing of ours after it, but nothing of theirs either
+  /^\s*Enviado desde mi (?:iPhone|iPad)/mi,
+]
+
+export function stripQuotedReply(text: string): string {
+  let cut = text.length
+  for (const re of QUOTE_MARKERS) {
+    const m = re.exec(text)
+    if (m && m.index < cut) cut = m.index
+  }
+  return text.slice(0, cut)
+}
+
+/** "1247 Wilshire Blvd, Suite 300, Los Angeles, CA 90017" → "1247wilshire": enough to recognise the same place however it is punctuated. */
+export function addressKey(a: string): string {
+  const m = /(\d{1,6})\s+([A-Za-z0-9.'-]+)/.exec(a)
+  return m ? `${m[1]}${m[2].toLowerCase().replace(/[^a-z0-9]/g, '')}` : ''
+}
+
 /**
  * Candidates from the thread, newest first — what was agreed is usually said
  * later than what was asked.
  */
-export function suggestFromTimeline(timeline: TimelineEvent[]): InvoiceSuggestions {
+export function suggestFromTimeline(timeline: TimelineEvent[], opts: SuggestOptions = {}): InvoiceSuggestions {
   const out: InvoiceSuggestions = { item: [], quantity: [], amount: [], address: [] }
+  const ours = (opts.ownAddresses ?? []).map(addressKey).filter(Boolean)
   const events = [...timeline]
     .filter((e) => CUSTOMER_KINDS.has(e.kind))
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
 
   for (const e of events) {
-    const text = [e.body, e.title, e.email?.body, e.inbound?.body].filter(Boolean).join('\n')
+    const text = [e.body, e.title, e.email?.body, e.inbound?.body].filter(Boolean)
+      .map((t) => stripQuotedReply(String(t))).join('\n')
     if (!text) continue
     const where = e.kind === 'note' ? 'note'
       : e.kind.startsWith('wa') ? 'WhatsApp'
@@ -186,7 +229,9 @@ export function suggestFromTimeline(timeline: TimelineEvent[]): InvoiceSuggestio
     if (ADDRESS_KINDS.has(e.kind)) {
       for (const m of text.matchAll(ADDRESS)) {
         const a = m[0].replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim()
-        if (a.length >= 14) push(out.address, a, where, e.at)
+        if (a.length < 14) continue
+        if (ours.includes(addressKey(a))) continue
+        push(out.address, a, where, e.at)
       }
     }
   }

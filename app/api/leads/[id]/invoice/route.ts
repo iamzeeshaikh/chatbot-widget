@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, loadLeadRecord } from '@/lib/leadrecord'
+import { loadSiteContacts } from '@/lib/signature'
 import {
   buildSheet, cleanInvoice, invoiceHints, readInvoice, sheetToText, suggestFromTimeline, writeInvoice,
 } from '@/lib/invoice'
@@ -26,13 +27,23 @@ async function context(req: NextRequest, id: string) {
   return { access, record }
 }
 
+// The site's own office address, so the worksheet never offers it as the
+// customer's shipping address (it sits in every email signature we send, and
+// in every reply that quotes one).
+async function ownAddresses(siteId: string): Promise<{ ownAddresses: string[] }> {
+  const contacts = await loadSiteContacts().catch(() => new Map())
+  const own = [...contacts.values()].map((c) => String(c.address ?? '')).filter(Boolean)
+  const mine = contacts.get(siteId)?.address
+  return { ownAddresses: mine ? [mine, ...own] : own }
+}
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const c = await context(req, id)
   if ('error' in c) return c.error
 
-  const draft = await readInvoice(id)
-  const suggestions = suggestFromTimeline(c.record.timeline ?? [])
+  const [draft, suggestOpts] = await Promise.all([readInvoice(id), ownAddresses(c.access.siteId)])
+  const suggestions = suggestFromTimeline(c.record.timeline ?? [], suggestOpts)
   const sheet = buildSheet(c.record, draft, suggestions)
   return NextResponse.json({
     ok: true,
@@ -63,6 +74,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { error } = await writeInvoice(id, c.access.siteId, draft)
   if (error) return NextResponse.json({ error: 'That did not save.' }, { status: 500 })
 
-  const sheet = buildSheet(c.record, draft, suggestFromTimeline(c.record.timeline ?? []))
+  const sheet = buildSheet(c.record, draft, suggestFromTimeline(c.record.timeline ?? [], await ownAddresses(c.access.siteId)))
   return NextResponse.json({ ok: true, sheet, text: sheetToText(sheet), draft })
 }
