@@ -37,6 +37,7 @@ import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE } from './crm'
 import { CRM_EMAIL_OPEN_ROLE, parseCrmEmailOpen } from './emailtrack'
 import { cachedLineType, whatsAppStateFrom, type WhatsAppStatus } from './whatsappstatus'
 import { parseNotALead, type NotALeadMark } from './notalead'
+import { foldDrafts, type BotDraft } from './botdraft'
 import { CRM_NOT_A_LEAD_ROLE } from './crm'
 import { phoneKey } from './identity'
 import { parseCall, callDurationLabel, type CallEntry } from './call'
@@ -113,6 +114,8 @@ export interface LeadRecord {
   /** Set when somebody has marked this "not a lead" — a supplier pitch, a
    *  duplicate, a mistake. The record still opens; it just stops counting. */
   notALead?: NotALeadMark
+  /** The quote bot's email waiting for an agent to send (lib/botdraft.ts). */
+  botDraft?: BotDraft | null
   /** Whether this number is reachable on WhatsApp, as far as anything can tell.
    *  WhatsApp offers no way to test a number without messaging it, so this is
    *  assembled from what already happened — see lib/whatsappstatus.ts. */
@@ -966,11 +969,14 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     if (m) notALead = m.spam ? m : undefined
   }
 
+  const botDraft = foldDrafts(logs).filter((d) => d.status === 'pending').pop() ?? null
+
   const record: LeadRecord = {
     recipientLocked: member.role !== 'admin',
     whatsapp,
     waAwaitingReply: lastWaInbound,
     notALead,
+    botDraft,
     id,
     siteId,
     siteName,

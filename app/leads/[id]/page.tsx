@@ -33,6 +33,7 @@ import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import WhatsAppThread from './WhatsAppThread'
 import type { CrmTaskEntry } from '@/lib/tasks'
 import Timeline from './Timeline'
+import BotDraftCard from './BotDraftCard'
 import Tasks, { type TaskDraft } from './Tasks'
 import Invoices from './Invoices'
 import Invoice, { PaymentLink } from './Invoice'
@@ -858,6 +859,9 @@ export default function LeadRecordPage() {
                     className="underline font-semibold hover:text-amber-950">Reconnect Gmail</a> to switch it on.
                 </p>
               </div>
+            )}
+            {record.botDraft && isPackagingLead && (
+              <BotDraftCard leadId={record.id} draft={record.botDraft} onDone={() => { void load() }} />
             )}
             <Timeline events={record.timeline} currency={record.value.currency} leadId={record.id}
               quoteText={isPackagingLead ? record.quoteMessage : null}

@@ -52,6 +52,7 @@ import { googleConfig, verifiedAliases, sendEmail, fetchThread, GmailAuthError, 
 import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
 import { draftCustomerEmail } from './quotebotdraft'
+import { CRM_BOT_DRAFT_ROLE, newDraftId, type BotDraft } from './botdraft'
 import { buildSendSignature } from './sendsignature'
 import { unsubscribeUrl, unsubscribedSet } from './unsubscribe'
 import { newTaskId, type CrmTaskEntry } from './tasks'
@@ -65,6 +66,15 @@ import {
 } from './quotebotcore'
 
 export const CRM_BOT_ROLE = 'crm_bot'
+
+/**
+ * Owner, 2026-10-22: the bot's customer emails are DRAFTS for a person to send
+ * (it was answering wrongly). 'draft' parks the first email and the reply to a
+ * customer's answer on the lead for the agent; 'send' is the old behaviour.
+ * Follow-ups and quote follow-ups are fixed templates and still go by
+ * themselves — but only once the agent has sent the first email.
+ */
+export const BOT_EMAIL_MODE: 'send' | 'draft' = 'draft'
 
 /** The agents the bot writes for. The owner's roster on 2026-10-13. */
 /** Team lead with dev@ access: owner of leads that reached the CRM late. */
@@ -99,7 +109,7 @@ const LEASE_MS = 4 * 60 * 1000
  */
 const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.dev').replace(/\/$/, '')
 
-export type BotState = 'claimed' | 'sent' | 'skipped' | 'failed'
+export type BotState = 'claimed' | 'sent' | 'skipped' | 'failed' | 'drafted'
 
 export interface BotLedger {
   step: 'first' | 'followup' | 'reply' | 'quote' | 'quote_fu' | 'promo'
@@ -160,7 +170,7 @@ export interface BotRunResult {
   quotes?: { leadId: string; state: string; n?: number; why?: string }[]
 }
 
-export interface ReplyResult { state: 'sent' | 'handed-over' | 'stood-down' | 'failed' | 'would-send'; why?: string; complete?: boolean; text?: string }
+export interface ReplyResult { state: 'sent' | 'drafted' | 'handed-over' | 'stood-down' | 'failed' | 'would-send'; why?: string; complete?: boolean; text?: string }
 
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; message: string | null; created_at: string }
 interface LogRow { session_id: string; role: string; message: string; created_at: string }
@@ -464,6 +474,39 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (dryRun) { act({ state: 'would-send', why: assessment.reason, ...preview }); continue }
     if (sends >= MAX_SENDS_PER_RUN) { act({ state: 'retry-later', why: 'per-run send cap reached' }); continue }
 
+    if (BOT_EMAIL_MODE === 'draft') {
+      // Park it for the agent (owner, 2026-10-22). The lead is theirs from now
+      // on, with a task and a push; nothing reaches the customer until they
+      // press Send on the record.
+      const at = now.toISOString()
+      const draft: BotDraft = {
+        id: newDraftId(), step: 'first', status: 'pending', agent, from: alias.email, to,
+        subject: mail.subject, text: mail.text, complete: mail.complete, missing, at,
+        chatSessionId: chat?.sessionId,
+      }
+      if (!(await ledger(id, lead.site_id, { step: 'first', state: 'drafted', at, to, agent, from: alias.email, complete: mail.complete, missing }))) {
+        act({ state: 'retry-later', why: 'ledger write failed' }); continue
+      }
+      await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_BOT_DRAFT_ROLE, message: JSON.stringify(draft) })
+      if (!preset) await setAssignment(id, lead.site_id, agent)
+      if (chat && !lastAssignment(chat.rows)) await setAssignment(chat.sessionId, lead.site_id, agent)
+      const who = lead.name || to
+      const task: CrmTaskEntry = {
+        id: newTaskId(),
+        title: `Review and send the first reply to ${who} — the bot drafted it on the record (${mail.complete ? 'all details given' : 'asks for ' + missing.join(', ')})`.slice(0, 200),
+        type: 'email', due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+      }
+      await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+      await sendPushToMember(agent, 'packaging', {
+        title: 'New enquiry — draft reply ready',
+        body: `${who} (${siteName.get(lead.site_id) ?? lead.site_id}). Read the bot's draft and send it.`,
+        url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-draft-${id}`,
+      }).catch(() => 0)
+      act({ state: 'drafted', why: assessment.reason, ...preview })
+      continue
+    }
+
     // ── claim, then send ────────────────────────────────────────────────────
     if (!(await ledger(id, lead.site_id, { step: 'first', state: 'claimed', at: now.toISOString(), to, agent, from: alias.email }))) {
       act({ state: 'retry-later', why: 'ledger write failed' }); continue
@@ -560,6 +603,8 @@ async function withFollowUps(result: BotRunResult, now: Date, dryRun: boolean, b
     const at = new Date(e.at).getTime()
     if (e.step === 'first' && e.state === 'sent') { cur.waiting = e.complete === false; cur.lastAt = at; cur.anchor = at }
     if (e.step === 'reply' && e.inboundId) cur.handled.add(e.inboundId)
+    // A draft waiting on the agent: no follow-up chases the customer meanwhile.
+    if (e.state === 'drafted') cur.stopped = true
     if (e.step === 'reply' && e.state === 'sent') { cur.waiting = e.complete === false; cur.lastAt = Math.max(cur.lastAt, at); cur.anchor = Math.max(cur.anchor, at) }
     if (e.step === 'reply' && e.state === 'skipped') cur.stopped = true
     // A failed send counts as an attempt: try again in three days, not in five
@@ -592,7 +637,7 @@ async function withFollowUps(result: BotRunResult, now: Date, dryRun: boolean, b
     if (!fresh.length) continue
     const r = await answerReply(id, v.siteId, all, fresh[fresh.length - 1], now, dryRun)
     result.replies.push({ leadId: id, ...r })
-    if (r.state === 'sent' || r.state === 'handed-over') used++
+    if (r.state === 'sent' || r.state === 'handed-over' || r.state === 'drafted') used++
     if (r.state !== 'failed') v.stopped = true // answered this run: no follow-up on top of it
   }
 
@@ -897,6 +942,30 @@ export async function answerReply(
   const sentRows = (logRows ?? []).filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
   const original = [...sentRows].reverse().find((e) => e.bot)
   const subject = original ? (/^re:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`) : 'Your packaging quote'
+  if (BOT_EMAIL_MODE === 'draft') {
+    // Same rule as the first email: the agent reads it and sends it.
+    const at = now.toISOString()
+    const draft: BotDraft = {
+      id: newDraftId(), step: 'reply', status: 'pending', agent: first.agent, from: first.from, to: first.to,
+      subject, text: answer.text, complete: answer.complete, missing: missingOf(assessment), inboundId: latest.gmailId, at,
+    }
+    if (!(await ledger(id, siteId, { step: 'reply', state: 'drafted', at, inboundId: latest.gmailId, agent: first.agent, from: first.from, to: first.to, complete: answer.complete, missing: missingOf(assessment) }))) {
+      return { state: 'failed', why: 'ledger write failed' }
+    }
+    await writeControlRow({ sessionId: id, siteId, role: CRM_BOT_DRAFT_ROLE, message: JSON.stringify(draft) })
+    const task: CrmTaskEntry = {
+      id: newTaskId(),
+      title: `Review and send the reply to ${who} — the bot drafted it on the record${answer.complete ? ' (all details in; price next)' : ''}`.slice(0, 200),
+      type: 'email', due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+    }
+    await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
+    await sendPushToMember(first.agent, 'packaging', {
+      title: 'Customer replied — draft answer ready', body: `${who}: read the bot's draft and send it.`,
+      url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-draft-${id}`,
+    }).catch(() => 0)
+    return { state: 'drafted', complete: answer.complete, text: answer.text }
+  }
   const thread = await threadContextFor(id, latest.gmailId)
   if (!(await ledger(id, siteId, { step: 'reply', state: 'claimed', at: now.toISOString(), inboundId: latest.gmailId, agent: first.agent }))) {
     return { state: 'failed', why: 'ledger write failed' }

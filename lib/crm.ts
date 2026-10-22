@@ -94,6 +94,8 @@ export const CRM_ROLES = [
   // because opening it shows the customer's address on PayPal's own page. On
   // the lead, and it must never reach a transcript.
   'crm_pay_link',
+  // The quote bot's emails waiting for an agent to send (lib/botdraft.ts).
+  'crm_bot_draft',
   // The intake audit (lib/intakedrop.ts, lib/intakelag.ts) — what the intake
   // endpoint accepted and did not store, and what reached us hours after the
   // customer sent it. Both live on the reserved zeeops-crm site rather than on
