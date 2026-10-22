@@ -47,6 +47,9 @@ export const PACKAGING_SITES = [
   // 2026-10-22: paper bags (US) and food packaging (UK).
   'paperbagsupply',
   'thefoodpackaginguk',
+  // 2026-10-22: cosmetic packaging (UK) and mylar bags (UK).
+  'thecosmeticpackaginguk',
+  'shopmylarbagsuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
