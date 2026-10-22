@@ -703,3 +703,18 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
 - Lead dedupe has three rules in `app/api/quote-intake`, each added after a real
   duplicate got through. The same person contacting two **different sites** is two
   leads, not a duplicate — the site is part of every dedupe key.
+
+### The UK WhatsApp line is Meta Cloud API, not Twilio (2026-10-22)
+`lib/metawa.ts` + `app/api/meta/whatsapp/route.ts`. +44 7578 382054 could not be
+registered through Twilio (Meta's 2-numbers-per-unverified-business cap on both
+WABAs Twilio can reach), so it lives on its own WABA under the "Zee Custom Boxes"
+portfolio and ZeeOps talks to Meta directly: env `META_UK_*` on Vercel. Rows are
+the SAME `CRM_WA_IN_ROLE` / `CRM_WA_OUT_ROLE` shape as Twilio's, so the timeline,
+media route and status helpers need no branch; the one new decision is
+`lineForLead()` — the newest inbound WhatsApp row's `to` decides the line, else a
+`.co.uk` site goes UK. Inbound media is downloaded at webhook time into Storage
+(Meta links expire in minutes); statuses carry no lead id, so the send row is found
+by the message id. Meta error codes (131047 = 24h window) are mapped beside Twilio's
+63xxx in `waErrorHint`. **An unpublished Meta app receives no production webhooks** —
+publishing is a dashboard click the owner makes. `scratch/metawa-sig.test.mjs` checks
+the signature verifier against the real module.
