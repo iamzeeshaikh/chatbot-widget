@@ -289,6 +289,8 @@ export interface LeadState {
   ownerEmail: string | null
   lastOurAt: string | null
   lastOurBy: string | null
+  /** First reply a PERSON made (not the quote bot): email, Gmail reply, WhatsApp, chat, call. */
+  humanAt: string | null
   customer: CustomerMsg[]
   quote: { amount: number; at: string } | null
   /** First moment a price is known to have gone out (a price, or the stage). */
@@ -328,7 +330,7 @@ export function foldLeads(leads: OppLead[], rows: OppRow[], ctx: OppContext): Le
     byId.set(l.id, {
       id: l.id, ids: [l.id], siteId: l.siteId, name: l.name, email: l.email?.trim().toLowerCase() || null,
       createdAt: created, stage: 'new', stageAt: null, owner: null, ownerEmail: null,
-      lastOurAt: null, lastOurBy: null, customer: [], quote: null, quoteSentAt: null, estimated: null,
+      lastOurAt: null, lastOurBy: null, humanAt: null, customer: [], quote: null, quoteSentAt: null, estimated: null,
       payLinks: [], invoices: [], restricted: null, leadText: l.text || '',
     })
   }
@@ -342,6 +344,7 @@ export function foldLeads(leads: OppLead[], rows: OppRow[], ctx: OppContext): Le
   const ours = (s: LeadState, at: string, by: string) => {
     if (!s.lastOurAt || at > s.lastOurAt) { s.lastOurAt = at; s.lastOurBy = by || s.lastOurBy }
   }
+  const human = (s: LeadState, at: string) => { if (!s.humanAt || at < s.humanAt) s.humanAt = at }
   const quoteFrom = (s: LeadState, text: string, at: string) => {
     const amt = extractQuoteAmount(text)
     if (amt && (!s.quote || at >= s.quote.at)) s.quote = { amount: amt, at }
@@ -361,6 +364,18 @@ export function foldLeads(leads: OppLead[], rows: OppRow[], ctx: OppContext): Le
         const body = visibleText(str(o.body))
         ours(s, at, agentKey(str(o.sentBy) || parseFromHeader(str(o.from)).email))
         quoteFrom(s, body, at)
+        // The bot's own email is not a person answering; a bot draft an agent
+        // reviewed and sent (reviewedBy) is.
+        if (o.bot !== true || str(o.reviewedBy)) human(s, at)
+        break
+      }
+      case 'admin': {
+        // A person replying in the live chat.
+        human(s, at)
+        break
+      }
+      case 'crm_call': {
+        if (o && str(o.by) && /^(completed|in-progress|answered)$/i.test(str(o.status))) human(s, at)
         break
       }
       case 'crm_email_in': {
@@ -371,6 +386,7 @@ export function foldLeads(leads: OppLead[], rows: OppRow[], ctx: OppContext): Le
           const body = visibleText(str(o.body))
           ours(s, at, agentKey(parseFromHeader(from).email))
           quoteFrom(s, body, at)
+          human(s, at)
           break
         }
         if (SYSTEM_SENDER.test(parseFromHeader(from).email) || SYSTEM_SUBJECT.test(str(o.subject).trim())) break
@@ -388,6 +404,7 @@ export function foldLeads(leads: OppLead[], rows: OppRow[], ctx: OppContext): Le
         if (!o) break
         ours(s, at, agentKey(str(o.sentBy)))
         quoteFrom(s, str(o.body), at)
+        human(s, at)
         break
       }
       case 'crm_stage': {
@@ -478,6 +495,7 @@ function mergeStates(a: LeadState, b: LeadState): LeadState {
     ownerEmail: a.ownerEmail ?? b.ownerEmail,
     lastOurAt: lastOur.lastOurAt,
     lastOurBy: lastOur.lastOurBy,
+    humanAt: minIso(a.humanAt, b.humanAt),
     customer: [...a.customer, ...b.customer].sort((x, y) => x.at.localeCompare(y.at)),
     quote: !a.quote ? b.quote : !b.quote ? a.quote : a.quote.at >= b.quote.at ? a.quote : b.quote,
     quoteSentAt: minIso(a.quoteSentAt, b.quoteSentAt),
@@ -581,6 +599,29 @@ export function readWaiting(s: LeadState, now: Date, maxDays = 14): Waiting | nu
   if (hours > maxDays * 24) return null
   if (customerSignal(last.text).kind === 'negative') return null
   return { hours: Math.max(0, Math.round(hours * 10) / 10), since: last.at, channel: last.channel, lastLine: last.text }
+}
+
+export interface NoHuman { hours: number; since: string }
+
+/** Stages a person moves a lead into; the bot only ever sets 'contacted'. */
+const UNTOUCHED_STAGES: ReadonlySet<CrmStage> = new Set<CrmStage>(['new', 'contacted'])
+export const NO_HUMAN_MAX_DAYS = 14
+
+/**
+ * A new lead nobody has answered IN PERSON. The quote bot's email (or the chat
+ * bot) makes readWaiting() think we replied — that is how Dylan's Candy Bar and
+ * Always Mettle sat for days with only the bot's words (owner, 2026-10-22).
+ * Counts from the lead's arrival; any reply by a person, or a stage a person
+ * set (quote sent, won, lost...), ends it.
+ */
+export function readNoHuman(s: LeadState, now: Date, maxDays = NO_HUMAN_MAX_DAYS): NoHuman | null {
+  if (s.humanAt) return null
+  if (!UNTOUCHED_STAGES.has(s.stage)) return null
+  if (s.restricted) return null
+  const hours = (now.getTime() - new Date(s.createdAt).getTime()) / 3_600_000
+  if (hours < 0 || hours > maxDays * 24) return null
+  if (!s.email && s.customer.length === 0 && !s.leadText.trim()) return null
+  return { hours: Math.round(hours * 10) / 10, since: s.createdAt }
 }
 
 export interface InvoiceDue {

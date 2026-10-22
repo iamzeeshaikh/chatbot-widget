@@ -135,10 +135,17 @@ export async function runOppAlerts(opts: { dry?: boolean; now?: Date } = {}): Pr
   for (const i of data.waiting) bump(i.owner, 'waiting')
   for (const i of data.hot) bump(i.owner, 'hot')
   for (const i of data.invoices) bump(i.owner, 'invoices')
+  for (const i of data.noHuman) {
+    const k = i.owner ?? ''
+    const c = counts.get(k) ?? { waiting: 0, hot: 0, invoices: 0 }
+    c.noHuman = (c.noHuman ?? 0) + 1
+    counts.set(k, c)
+  }
   const waiting: WaitingLead[] = data.waiting.map((i) => ({ id: i.id, name: i.name, owner: i.owner, hours: i.hours ?? 0, since: i.lastLineAt ?? i.createdAt }))
+  const noHuman: WaitingLead[] = data.noHuman.map((i) => ({ id: i.id, name: i.name, owner: i.owner, hours: i.hours ?? 0, since: i.createdAt }))
 
   const { plans, held } = planAlerts({
-    now, agents, counts, waiting, sent: ledger,
+    now, agents, counts, waiting, noHuman, sent: ledger,
     monthLabel: data.monthLabel,
     leaderboard: data.leaderboard.map((r) => ({ key: r.agent, name: r.name, wonCount: r.wonCount, wonUsd: r.wonUsd })),
   })

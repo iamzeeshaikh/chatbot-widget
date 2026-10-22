@@ -83,7 +83,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
     direction: 'outbound', bot: true,
   }
-  await writeControlRow({ sessionId: id, siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify(entry) })
+  // reviewedBy: a person read and sent it — Opportunities counts it as a human reply.
+  await writeControlRow({ sessionId: id, siteId, role: CRM_EMAIL_ROLE, message: JSON.stringify({ ...entry, reviewedBy: by }) })
   await revise({ status: 'sent', by, decidedAt: at, sentEmailId: emailId, text, subject })
   await ledger({ step: draft.step, state: 'sent', at, to: draft.to, agent: draft.agent, from: draft.from, complete: draft.complete, missing: draft.missing, emailId, inboundId: draft.inboundId })
 

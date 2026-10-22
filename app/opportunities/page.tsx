@@ -14,6 +14,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, RefreshCw, TriangleAlert, Lock, Clock, Receipt, Flame, History, Trophy,
   Mail, MessageCircle, Ban, CircleDollarSign, X,
+  UserX,
 } from 'lucide-react'
 import { Card, EmptyState } from '@/app/leads/[id]/ui'
 import { CRM_STAGE_LABEL, CRM_STAGE_STYLE } from '@/lib/crm'
@@ -25,9 +26,9 @@ const BTN = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs fon
 const usd = (n: number | null | undefined) =>
   n === null || n === undefined ? '—' : `$${Math.round(n).toLocaleString('en-US')}`
 
-type TabKey = 'waiting' | 'invoices' | 'hot' | 'older'
-type FocusKind = 'won' | 'pipeline' | 'hot' | 'waiting'
-const FOCUS_LABEL: Record<FocusKind, string> = { won: 'Won this month', pipeline: 'Pipeline (hot quotes + unpaid invoices)', hot: 'Can close this month', waiting: 'Customers waiting on us' }
+type TabKey = 'nohuman' | 'waiting' | 'invoices' | 'hot' | 'older'
+type FocusKind = 'won' | 'pipeline' | 'hot' | 'waiting' | 'nohuman'
+const FOCUS_LABEL: Record<FocusKind, string> = { won: 'Won this month', pipeline: 'Pipeline (hot quotes + unpaid invoices)', hot: 'Can close this month', waiting: 'Customers waiting on us', nohuman: 'New leads — no reply from a person yet' }
 
 function waitLong(hours: number): string {
   if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} min`
@@ -43,7 +44,7 @@ export default function OpportunitiesPage() {
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [showAllOlder, setShowAllOlder] = useState(false)
-  const [tab, setTab] = useState<TabKey>('waiting')
+  const [tab, setTab] = useState<TabKey>(() => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('list') === 'nohuman' ? 'nohuman' : 'waiting'))
   // Deep link from an alert: ?agent=<key>&list=waiting|hot|pipeline|won opens
   // that agent's list straight away (agent= empty means Unassigned).
   const [focus, setFocus] = useState<{ agent: string; kind: FocusKind } | null>(() => {
@@ -128,11 +129,13 @@ export default function OpportunitiesPage() {
     const mine = <T extends { owner: string | null }>(xs: T[]) => xs.filter((i) => ownerKey(i) === focus.agent)
     if (focus.kind === 'won') return { won: mine(data.won), items: [] as OppItem[] }
     if (focus.kind === 'waiting') return { won: [], items: mine(data.waiting) }
+    if (focus.kind === 'nohuman') return { won: [], items: mine(data.noHuman ?? []) }
     if (focus.kind === 'hot') return { won: [], items: mine(data.hot) }
     return { won: [], items: [...mine(data.invoices), ...mine(data.hot)] }
   })()
 
   const tabs: { key: TabKey; label: string; count: number; icon: typeof Clock; tone: string }[] = [
+    { key: 'nohuman', label: 'New lead · no reply from a person', count: (data.noHuman ?? []).length, icon: UserX, tone: 'bg-red-700' },
     { key: 'waiting', label: 'Customer waiting on us', count: data.waiting.length, icon: Clock, tone: 'bg-red-600' },
     { key: 'invoices', label: 'Invoice sent · payment due', count: data.invoices.length, icon: Receipt, tone: 'bg-amber-500' },
     { key: 'hot', label: 'Can close this month', count: data.hot.length, icon: Flame, tone: 'bg-orange-500' },
@@ -144,6 +147,12 @@ export default function OpportunitiesPage() {
       badge={<span className={`shrink-0 rounded-md px-2 py-1 text-xs font-bold tabular-nums ${(i.hours ?? 0) >= 24 ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-800 border border-amber-300'}`}
         title="How long the customer has been waiting">waiting {waitLong(i.hours ?? 0)}</span>}
       extra={<>{i.channel === 'whatsapp' ? <MessageCircle className="w-3 h-3" aria-label="WhatsApp" /> : <Mail className="w-3 h-3" aria-label="Email" />}{i.hot && <Chip tone="hot">hot</Chip>}</>} />
+  )
+  const noHumanRow = (i: OppItem) => (
+    <Row key={i.id} item={i} ownerFirst
+      badge={<span className={`shrink-0 rounded-md px-2 py-1 text-xs font-bold tabular-nums ${(i.hours ?? 0) >= 24 ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-800 border border-amber-300'}`}
+        title="Since the lead arrived; only the bot has written to them">{waitLong(i.hours ?? 0)} · bot only</span>}
+      extra={<>{i.waiting && <Chip tone="bad">customer wrote again</Chip>}</>} />
   )
   const invoiceRow = (i: OppItem) => (
     <Row key={i.id} item={i} amount={i.invoice?.amount ?? null}
@@ -192,7 +201,7 @@ export default function OpportunitiesPage() {
         <Stat label={`Booked in ${data.monthLabel.split(' ')[0]}`} value={usd(s.bookedUsd)} hint={`${s.bookedCount} sale${s.bookedCount === 1 ? '' : 's'} in the Sales ledger`} tone="good" />
         <Stat label="Invoices due" value={usd(s.invoicesDueUsd)} hint={`${s.invoicesDueCount} sent, not paid`} tone={s.invoicesDueCount ? 'warn' : 'default'} />
         <Stat label="Hot quotes" value={usd(s.hotUsd)} hint={`${s.hotCount} can close this month`} tone="good" />
-        <Stat label="Waiting on us" value={String(s.waitingCount)} hint={s.waitingOver24 ? `${s.waitingOver24} over 24 hours` : 'none over 24 hours'} tone={s.waitingOver24 ? 'bad' : 'default'} />
+        <Stat label="Waiting on us" value={String(s.waitingCount)} hint={`${s.waitingOver24 ? `${s.waitingOver24} over 24 hours` : 'none over 24 hours'} · ${s.noHumanCount ?? 0} new with no reply from a person`} tone={s.waitingOver24 || s.noHumanCount ? 'bad' : 'default'} />
       </div>
 
       {/* Leaderboard — visible to everyone, by the owner's decision. Every
@@ -208,6 +217,7 @@ export default function OpportunitiesPage() {
                 <th className="px-3 py-2 font-semibold text-right">Pipeline $</th>
                 <th className="px-3 py-2 font-semibold text-right">Hot</th>
                 <th className="px-3 py-2 font-semibold text-right">Waiting</th>
+                <th className="px-3 py-2 font-semibold text-right" title="New leads only the bot has answered">No reply yet</th>
               </tr>
             </thead>
             <tbody>
@@ -221,6 +231,7 @@ export default function OpportunitiesPage() {
                   {cell(r.agent, 'pipeline', usd(r.pipelineUsd), 'text-gray-700')}
                   {cell(r.agent, 'hot', r.hot, 'text-gray-700')}
                   {cell(r.agent, 'waiting', r.waiting, r.waiting ? 'font-semibold text-red-700' : 'text-gray-700')}
+                  {cell(r.agent, 'nohuman', r.noHuman ?? 0, r.noHuman ? 'font-semibold text-red-700' : 'text-gray-700')}
                 </tr>
               ))}
             </tbody>
@@ -248,7 +259,7 @@ export default function OpportunitiesPage() {
             )
           ) : filtered.items.length === 0 ? <EmptyState icon={CircleDollarSign} title="Nothing here" /> : (
             <ul className="divide-y divide-gray-100">
-              {filtered.items.map((i) => focus.kind === 'waiting' ? waitingRow(i) : i.invoice ? invoiceRow(i) : hotRow(i))}
+              {filtered.items.map((i) => focus.kind === 'nohuman' ? noHumanRow(i) : focus.kind === 'waiting' ? waitingRow(i) : i.invoice ? invoiceRow(i) : hotRow(i))}
             </ul>
           )}
         </Card>
@@ -256,7 +267,7 @@ export default function OpportunitiesPage() {
         <>
           {/* Tabs — big, bold, with the count; "waiting on us" first because
               it is the one that costs customers. */}
-          <div role="tablist" aria-label="Opportunity lists" className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+          <div role="tablist" aria-label="Opportunity lists" className="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
             {tabs.map((t) => {
               const on = tab === t.key
               return (
@@ -270,6 +281,11 @@ export default function OpportunitiesPage() {
             })}
           </div>
 
+          {tab === 'nohuman' && (
+            <Section hint="New leads (last 14 days) where only the bot has written — no email, WhatsApp, call or chat reply from a person yet. Oldest first. Red after 24 hours." count={(data.noHuman ?? []).length} empty="Every new lead has had a reply from a person.">
+              {(data.noHuman ?? []).map(noHumanRow)}
+            </Section>
+          )}
           {tab === 'waiting' && (
             <Section hint="The customer wrote last and nobody has answered yet — longest wait first. Red after 24 hours." count={data.waiting.length} empty="Nobody is waiting on a reply.">
               {data.waiting.map(waitingRow)}

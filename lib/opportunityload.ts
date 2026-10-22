@@ -26,7 +26,7 @@ import { storedMemberNames } from './membername'
 import { agentDisplayName } from './agentname'
 import { canSeeContacts, scrubText } from './pii'
 import {
-  foldLeads, readHot, readWaiting, readInvoiceDue, readOlder, agentKey, oneLine, ourAddress,
+  foldLeads, readHot, readWaiting, readInvoiceDue, readOlder, readNoHuman, agentKey, oneLine, ourAddress, eventAt,
   type OppLead, type OppRow, type OppSale, type OppContext, type LeadState,
 } from './opportunities'
 import type { CrmStage } from './crm'
@@ -71,6 +71,8 @@ export interface LeaderRow {
   pipelineUsd: number
   hot: number
   waiting: number
+  /** New leads no person has answered yet (bot only). */
+  noHuman: number
 }
 
 /** A sale booked this month — what the leaderboard's Won cells open. */
@@ -89,10 +91,13 @@ export interface OpportunitiesResult {
     invoicesDueUsd: number; invoicesDueCount: number
     hotUsd: number; hotCount: number
     waitingCount: number; waitingOver24: number
+    noHumanCount: number
   }
   leaderboard: LeaderRow[]
   won: WonItem[]
   waiting: OppItem[]
+  /** New leads with only the bot's reply so far (lib/opportunities.ts readNoHuman). */
+  noHuman: OppItem[]
   invoices: OppItem[]
   hot: OppItem[]
   older: OppItem[]
@@ -125,8 +130,8 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
 
   const empty: OpportunitiesResult = {
     generatedAt: now.toISOString(), month: `${year}-${String(month).padStart(2, '0')}`, monthLabel: monthName(year, month),
-    strip: { bookedUsd: 0, bookedCount: 0, invoicesDueUsd: 0, invoicesDueCount: 0, hotUsd: 0, hotCount: 0, waitingCount: 0, waitingOver24: 0 },
-    leaderboard: [], won: [], waiting: [], invoices: [], hot: [], older: [], excluded: { restricted: 0, notALead: 0, ownTests: 0 }, windowFrom, truncated: false,
+    strip: { bookedUsd: 0, bookedCount: 0, invoicesDueUsd: 0, invoicesDueCount: 0, hotUsd: 0, hotCount: 0, waitingCount: 0, waitingOver24: 0, noHumanCount: 0 },
+    leaderboard: [], won: [], waiting: [], noHuman: [], invoices: [], hot: [], older: [], excluded: { restricted: 0, notALead: 0, ownTests: 0 }, windowFrom, truncated: false,
   }
   if (sites.length === 0) return empty
 
@@ -189,6 +194,29 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
 
   const states = foldLeads(leads, rows, ctx)
 
+  // People answering in the live chat ('admin' rows) and calls are read only
+  // for the leads that still look untouched — reading every chat reply in the
+  // window would be tens of thousands of rows for a handful of answers.
+  const untouched = states.filter((s) => readNoHuman(s, now))
+  const untouchedIds = untouched.flatMap((s) => s.ids)
+  const stateOf = new Map<string, LeadState>()
+  for (const s of untouched) for (const id of s.ids) stateOf.set(id, s)
+  for (let i = 0; i < untouchedIds.length; i += 100) {
+    const { data: extra } = await supabase.from('chat_logs').select('session_id, site_id, role, message, created_at')
+      .in('role', ['admin', 'crm_call']).in('session_id', untouchedIds.slice(i, i + 100))
+    for (const r of (extra ?? []) as OppRow[]) {
+      const st = stateOf.get(r.session_id)
+      if (!st) continue
+      let o: Record<string, unknown> | null = null
+      try { o = JSON.parse(r.message) } catch { o = null }
+      const at = r.role === 'admin' ? r.created_at : eventAt(r, o)
+      if (!at) continue
+      const answered = r.role === 'admin'
+        || (!!o && typeof o.by === 'string' && !!o.by && /^(completed|in-progress|answered)$/i.test(String(o.status ?? '')))
+      if (answered && (!st.humanAt || at < st.humanAt)) st.humanAt = at
+    }
+  }
+
   // ── names ──
   const nameByKey = new Map<string, string>()
   for (const [email, n] of names) nameByKey.set(agentKey(email), n)
@@ -225,6 +253,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   }
 
   const waiting: OppItem[] = []
+  const noHuman: OppItem[] = []
   const invoices: OppItem[] = []
   const hot: OppItem[] = []
   const older: OppItem[] = []
@@ -235,6 +264,8 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
     for (const id of s.ids) ownerOfLead.set(id, s.owner)
     if (s.restricted) restricted++
     const w = readWaiting(s, now)
+    const nh = readNoHuman(s, now)
+    if (nh) noHuman.push({ ...base(s), hours: nh.hours, lastLine: line(s.customer[s.customer.length - 1]?.text || s.leadText), lastLineAt: nh.since, waiting: !!w })
     const h = readHot(s, now)
     const inv = readInvoiceDue(s, oppSales, now)
     if (w) waiting.push({ ...base(s), hours: w.hours, channel: w.channel, lastLine: line(w.lastLine), lastLineAt: w.since, hot: h.hot })
@@ -255,6 +286,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   }
 
   waiting.sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0))
+  noHuman.sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0))
   invoices.sort((a, b) => (b.invoice?.sentAt ?? '').localeCompare(a.invoice?.sentAt ?? ''))
   hot.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (b.lastLineAt ?? '').localeCompare(a.lastLineAt ?? ''))
   older.sort((a, b) => (b.quote ?? 0) - (a.quote ?? 0) || (b.lastLineAt ?? '').localeCompare(a.lastLineAt ?? ''))
@@ -281,7 +313,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   const row = (k: string | null) => {
     const agent = k ?? ''
     let r = board.get(agent)
-    if (!r) { r = { agent, name: nameOf(k), wonCount: 0, wonUsd: 0, pipelineUsd: 0, hot: 0, waiting: 0 }; board.set(agent, r) }
+    if (!r) { r = { agent, name: nameOf(k), wonCount: 0, wonUsd: 0, pipelineUsd: 0, hot: 0, waiting: 0, noHuman: 0 }; board.set(agent, r) }
     return r
   }
   // Every packaging agent appears, even with nothing on their name yet.
@@ -299,6 +331,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   for (const i of hot) { const r = row(i.owner); r.hot++; r.pipelineUsd += i.quote ?? 0 }
   for (const i of invoices) row(i.owner).pipelineUsd += i.invoice?.amount ?? 0
   for (const i of waiting) row(i.owner).waiting++
+  for (const i of noHuman) row(i.owner).noHuman++
   const leaderboard = [...board.values()]
     .map((r) => ({ ...r, wonUsd: Math.round(r.wonUsd), pipelineUsd: Math.round(r.pipelineUsd) }))
     .sort((a, b) => b.wonUsd - a.wonUsd || b.pipelineUsd - a.pipelineUsd || a.name.localeCompare(b.name))
@@ -314,10 +347,11 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
       hotCount: hot.length,
       waitingCount: waiting.length,
       waitingOver24: waiting.filter((w) => (w.hours ?? 0) >= 24).length,
+      noHumanCount: noHuman.length,
     },
     leaderboard,
     won,
-    waiting, invoices, hot,
+    waiting, noHuman, invoices, hot,
     older: older.slice(0, 150),
     excluded: { restricted, notALead, ownTests },
     truncated,

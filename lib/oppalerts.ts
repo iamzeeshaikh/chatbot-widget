@@ -42,8 +42,12 @@ export const WAIT_ESCALATE_H = 24
 export const WAIT_STALE_H = 72
 /** Nudges per recipient per run; the rest go out on the next run (5 min). */
 export const WAIT_PER_RUN = 5
+/** A new lead with only the bot's reply: the owner after 3 h, admins at 24 h
+ *  (owner, 2026-10-22: Dylan's Candy Bar sat two days with only the bot's email). */
+export const NOHUMAN_FIRST_H = 3
+export const NOHUMAN_ESCALATE_H = 24
 
-export type AlertKind = 'morning' | 'waiting' | 'waiting24' | 'monthend'
+export type AlertKind = 'morning' | 'waiting' | 'waiting24' | 'monthend' | 'nohuman' | 'nohuman24'
 
 /** 12:00–03:59 PKT is open; 04:00–11:59 is quiet. */
 export function inQuiet(now: Date): boolean {
@@ -92,7 +96,7 @@ export interface WaitingLead {
   since: string
 }
 
-export interface AgentCounts { waiting: number; hot: number; invoices: number }
+export interface AgentCounts { waiting: number; hot: number; invoices: number; noHuman?: number }
 
 export interface Plan {
   kind: AlertKind
@@ -111,6 +115,8 @@ export interface AlertInput {
   /** Per agent key ('' = unassigned). */
   counts: Map<string, AgentCounts>
   waiting: WaitingLead[]
+  /** New leads no person has answered (since = the lead's arrival). */
+  noHuman?: WaitingLead[]
   /** Month name + per-agent won figures for the month-end line. */
   monthLabel: string
   leaderboard: { key: string; name: string; wonCount: number; wonUsd: number }[]
@@ -132,6 +138,7 @@ export function morningCopy(name: string, c: AgentCounts): string | null {
   if (c.waiting) parts.push(`${plural(c.waiting, 'customer')} ${c.waiting === 1 ? 'is' : 'are'} waiting for your reply`)
   if (c.hot) parts.push(`${plural(c.hot, 'quote')} can close this month`)
   if (c.invoices) parts.push(`${plural(c.invoices, 'invoice')} ${c.invoices === 1 ? 'is' : 'are'} due`)
+  if (c.noHuman) parts.push(`${plural(c.noHuman, 'new lead')} ${c.noHuman === 1 ? 'has' : 'have'} only had the bot's reply — answer ${c.noHuman === 1 ? 'it' : 'them'} yourself`)
   if (parts.length === 0) return null
   return `Good evening ${firstName(name)}. ${parts.join(', ')}.`
 }
@@ -141,6 +148,7 @@ export function adminMorningCopy(name: string, total: AgentCounts, unassigned: n
   if (total.waiting) parts.push(`${plural(total.waiting, 'customer')} waiting for a reply${unassigned ? ` (${unassigned} unassigned)` : ''}`)
   if (total.hot) parts.push(`${plural(total.hot, 'quote')} that can close this month`)
   if (total.invoices) parts.push(`${plural(total.invoices, 'invoice')} due`)
+  if (total.noHuman) parts.push(`${plural(total.noHuman, 'new lead')} with no reply from a person yet`)
   if (parts.length === 0) return null
   const g = greet(name)
   return `Good evening${g ? ` ${g.slice(0, -2)}` : ''}. Across the team: ${parts.join(', ')}.`
@@ -158,13 +166,21 @@ export function waiting24Copy(name: string, lead: WaitingLead, ownerName: string
   return `${greet(name)}${lead.name} has had no reply for ${hoursLabel(lead.hours)}${ownerName ? ` (${ownerName}'s lead)` : ' and nobody has taken the lead'}.`
 }
 
+export function noHumanCopy(name: string, lead: WaitingLead): string {
+  return `${firstName(name)}, ${lead.name} came in ${hoursLabel(lead.hours)} ago and only the bot has replied. Please answer them yourself.`
+}
+
+export function noHuman24Copy(name: string, lead: WaitingLead, ownerName: string | null): string {
+  return `${greet(name)}${lead.name} came in ${hoursLabel(lead.hours)} ago and no person has replied yet${ownerName ? ` (${ownerName}'s lead)` : ' — nobody owns it'}.`
+}
+
 export function monthendCopy(monthLabel: string, rows: AlertInput['leaderboard']): string {
   const active = rows.filter((r) => r.wonCount > 0).sort((a, b) => b.wonUsd - a.wonUsd || b.wonCount - a.wonCount)
   if (active.length === 0) return `${monthLabel}: no sales were booked this month.`
   return `${monthLabel}: ${active.map((r) => `${firstName(r.name)} ${r.wonCount} won ($${Math.round(r.wonUsd).toLocaleString('en-US')})`).join(' · ')}`
 }
 
-export const agentUrl = (key: string, list: 'waiting' | 'hot' | 'pipeline' | 'won') => `/opportunities?agent=${encodeURIComponent(key)}&list=${list}`
+export const agentUrl = (key: string, list: 'waiting' | 'hot' | 'pipeline' | 'won' | 'nohuman') => `/opportunities?agent=${encodeURIComponent(key)}&list=${list}`
 
 // ── The decision ────────────────────────────────────────────────────────────
 
@@ -195,10 +211,10 @@ export function planAlerts(input: AlertInput): { plans: Plan[]; held: Held[] } {
       const own = morningCopy(a.name, c)
       const lines = [own, unassigned ? unassignedCopy(unassigned) : null].filter((x): x is string => !!x)
       if (lines.length === 0) continue
-      want({ kind: 'morning', key, to: a.email, title: 'Your opportunities today', body: lines.join(' '), url: own ? agentUrl(a.key, c.waiting ? 'waiting' : c.hot ? 'hot' : 'pipeline') : agentUrl('', 'waiting') })
+      want({ kind: 'morning', key, to: a.email, title: 'Your opportunities today', body: lines.join(' '), url: own ? agentUrl(a.key, c.noHuman ? 'nohuman' : c.waiting ? 'waiting' : c.hot ? 'hot' : 'pipeline') : agentUrl('', 'waiting') })
     }
-    const total: AgentCounts = { waiting: 0, hot: 0, invoices: 0 }
-    for (const c of counts.values()) { total.waiting += c.waiting; total.hot += c.hot; total.invoices += c.invoices }
+    const total: AgentCounts = { waiting: 0, hot: 0, invoices: 0, noHuman: 0 }
+    for (const c of counts.values()) { total.waiting += c.waiting; total.hot += c.hot; total.invoices += c.invoices; total.noHuman = (total.noHuman ?? 0) + (c.noHuman ?? 0) }
     for (const a of admins) {
       const key = morningKey(a.email, now)
       if (sent.has(key)) continue
@@ -233,6 +249,30 @@ export function planAlerts(input: AlertInput): { plans: Plan[]; held: Held[] } {
         if (quiet) { held.push({ kind: 'waiting24', to: a.email, why: 'quiet hours' }); continue }
         if (!room(a.email)) { held.push({ kind: 'waiting24', to: a.email, why: 'next run (per-run cap)' }); continue }
         take({ kind: 'waiting24', key, to: a.email, title: 'A customer has waited a day', body: waiting24Copy(a.name, w, ownerName), url: `/leads/${encodeURIComponent(w.id)}` })
+      }
+    }
+  }
+
+  // ── a new lead only the bot has answered ──
+  const nh = (input.noHuman ?? []).filter((w) => w.hours < WAIT_STALE_H).sort((a, b) => a.hours - b.hours)
+  for (const w of nh) {
+    if (w.hours >= NOHUMAN_FIRST_H && w.owner) {
+      const key = waitingKey(w.id, w.since, 'waiting').replace(/^waiting:/, 'nohuman:')
+      const owner = agents.find((a) => a.key === w.owner)
+      if (owner && !sent.has(key)) {
+        if (quiet) held.push({ kind: 'nohuman', to: owner.email, why: 'quiet hours' })
+        else if (room(owner.email)) take({ kind: 'nohuman', key, to: owner.email, title: 'New lead — only the bot has replied', body: noHumanCopy(owner.name, w), url: `/leads/${encodeURIComponent(w.id)}` })
+        else held.push({ kind: 'nohuman', to: owner.email, why: 'next run (per-run cap)' })
+      }
+    }
+    if (w.hours >= NOHUMAN_ESCALATE_H) {
+      const ownerName = nameOf(w.owner)
+      for (const a of admins) {
+        const key = `nohuman24:${w.id}:${w.since}:${a.email.toLowerCase()}`
+        if (sent.has(key)) continue
+        if (quiet) { held.push({ kind: 'nohuman24', to: a.email, why: 'quiet hours' }); continue }
+        if (!room(a.email)) { held.push({ kind: 'nohuman24', to: a.email, why: 'next run (per-run cap)' }); continue }
+        take({ kind: 'nohuman24', key, to: a.email, title: 'A new lead has had no reply from a person for a day', body: noHuman24Copy(a.name, w, ownerName), url: `/leads/${encodeURIComponent(w.id)}` })
       }
     }
   }

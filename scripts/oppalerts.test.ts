@@ -139,3 +139,28 @@ ok(`at most ${WAIT_PER_RUN} nudges per recipient per run, freshest first; the re
 })
 
 console.log(`\n${n} checks passed`)
+
+// ── no reply from a person (2026-10-22) ──
+{
+  const agents2 = [
+    { email: 'samir@x.com', key: 'samir', name: 'Samir Khan', role: 'standard' as const },
+    { email: 'boss@x.com', key: 'boss', name: 'Boss', role: 'admin' as const },
+  ]
+  const at = new Date('2026-10-22T15:00:00Z') // 20:00 PKT, not quiet
+  const lead = { id: 'quote-1', name: "Dylan's Candy Bar", owner: 'samir', hours: 4, since: '2026-10-22T11:00:00Z' }
+  const r1 = planAlerts({ now: at, agents: agents2, counts: new Map(), waiting: [], noHuman: [lead], monthLabel: 'October 2026', leaderboard: [], sent: new Set() })
+  const nh = r1.plans.filter((p) => p.kind === 'nohuman')
+  assert.equal(nh.length, 1, 'owner nudged after 3 h')
+  assert.equal(nh[0].to, 'samir@x.com')
+  assert.ok(nh[0].body.includes('only the bot'), 'copy says only the bot replied')
+  assert.equal(r1.plans.filter((p) => p.kind === 'nohuman24').length, 0, 'no admin escalation before 24 h')
+  const r2 = planAlerts({ now: at, agents: agents2, counts: new Map(), waiting: [], noHuman: [{ ...lead, hours: 2 }], monthLabel: 'October 2026', leaderboard: [], sent: new Set() })
+  assert.equal(r2.plans.filter((p) => p.kind === 'nohuman').length, 0, 'not before 3 h')
+  const r3 = planAlerts({ now: at, agents: agents2, counts: new Map(), waiting: [], noHuman: [{ ...lead, hours: 26 }], monthLabel: 'October 2026', leaderboard: [], sent: new Set([nh[0].key]) })
+  assert.equal(r3.plans.filter((p) => p.kind === 'nohuman').length, 0, 'owner nudge fires once')
+  assert.equal(r3.plans.filter((p) => p.kind === 'nohuman24' && p.to === 'boss@x.com').length, 1, 'admins at 24 h')
+  const quiet = new Date('2026-10-22T02:00:00Z') // 07:00 PKT
+  const r4 = planAlerts({ now: quiet, agents: agents2, counts: new Map(), waiting: [], noHuman: [lead], monthLabel: 'October 2026', leaderboard: [], sent: new Set() })
+  assert.equal(r4.plans.length, 0, 'held in quiet hours')
+  console.log('no-human alerts: 8 checks passed')
+}
