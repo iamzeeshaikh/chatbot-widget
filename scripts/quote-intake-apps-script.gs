@@ -737,7 +737,7 @@ function processQuoteLeads() {
     siteLabeled++;
 
     var messages = lookbackMessages_(thread, cutoff);
-    if (machineOnly_(messages)) { addLabel_(thread, ignoreLabel_()); continue; } // DMARC & co.: silenced, never posted
+    if (machineOnly_(messages)) continue; // DMARC & co.: never posted and NO ZeeOps label (owner, 2026-10-22: only mail that reached ZeeOps gets one)
     var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
       var msg = messages[m];
@@ -959,7 +959,7 @@ function retryUnmatched() {
     if (!code) { stillStuck++; continue; } // no site label at all — leave it alone
 
     var messages = thread.getMessages();
-    if (machineOnly_(messages)) { addLabel_(thread, ignoreLabel_()); continue; } // DMARC & co.: silenced, never posted
+    if (machineOnly_(messages)) continue; // DMARC & co.: never posted and NO ZeeOps label (owner, 2026-10-22: only mail that reached ZeeOps gets one)
     var handledAny = false;
     for (var m = 0; m < messages.length; m++) {
       var parsed = leadFromMessage_(messages[m]);
@@ -1214,7 +1214,7 @@ function sweepCheckoutLabel_(start, processedLabel, skippedLabel, max, deep) {
     // A site-code label on the thread still wins over the subject's store name.
     var code = matchSiteCode_(thread);
     var messages = lookbackMessages_(thread, cutoff);
-    if (machineOnly_(messages)) { addLabel_(thread, ignoreLabel_()); continue; } // DMARC & co.: silenced, never posted
+    if (machineOnly_(messages)) continue; // DMARC & co.: never posted and NO ZeeOps label (owner, 2026-10-22: only mail that reached ZeeOps gets one)
     var handledAny = false, considered = 0;
     for (var m = 0; m < messages.length; m++) {
       considered++;
