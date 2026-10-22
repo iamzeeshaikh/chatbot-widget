@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { guardLeadAccess, writeControlRow, leadPhone } from '@/lib/leadrecord'
 import { getMember } from '@/lib/auth'
 import { twilioConfig, twilioProblem, sendWhatsApp } from '@/lib/twilio'
+import { lineForLead, metaWaConfig, sendMetaWhatsApp } from '@/lib/metawa'
 import { CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { signedMediaUrl } from '@/lib/whatsappmedia'
 
@@ -23,9 +24,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await guardLeadAccess(member, id, 'telephony')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
-  const problem = twilioProblem(access.member.workspace)
-  const cfg = twilioConfig(access.member.workspace)
-  if (problem || !cfg) return NextResponse.json({ error: problem, needsSetup: true }, { status: 503 })
+  // Which line this customer talks on (lib/metawa.ts): the UK number goes
+  // through Meta directly, everything else through Twilio.
+  const line = await lineForLead(id, access.siteId)
+  const meta = line === 'meta' ? metaWaConfig() : null
+  const cfg = line === 'meta' ? null : twilioConfig(access.member.workspace)
+  const problem = line === 'meta'
+    ? (meta ? null : 'The UK WhatsApp line is not configured on the server (META_UK_*).')
+    : twilioProblem(access.member.workspace)
+  if (problem || (!cfg && !meta)) return NextResponse.json({ error: problem, needsSetup: true }, { status: 503 })
 
   const body = await req.json().catch(() => ({}))
   const text = String(body.body ?? '').trim()
@@ -57,13 +64,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   let sent
   try {
-    sent = await sendWhatsApp(cfg, to, text, statusUrl, mediaUrl)
+    sent = meta
+      ? await sendMetaWhatsApp(meta, to, text, mediaUrl ? { url: mediaUrl, type: mediaType, name: mediaName } : undefined)
+      : await sendWhatsApp(cfg!, to, text, statusUrl, mediaUrl)
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'WhatsApp refused the message.' }, { status: 502 })
   }
 
   const entry = {
-    sid: sent.sid, from: cfg.whatsappFrom.replace(/^whatsapp:/, ''), to,
+    sid: sent.sid, from: meta ? meta.number : cfg!.whatsappFrom.replace(/^whatsapp:/, ''), to,
     body: text, at: new Date().toISOString(),
     sentBy: access.member.email, direction: 'outbound' as const,
     // The STORAGE PATH is recorded, never the signed URL: that link expires in

@@ -25,7 +25,7 @@ const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/
 // become somebody's "phone".
 const PHONE_RE = /(?:\+?\(?\d[\d\s().-]{8,18}\d)/
 
-const OWN_NUMBERS = ['5033580443', '5034614788', '2134493746', '447458651107']
+const OWN_NUMBERS = ['5033580443', '5034614788', '2134493746', '447458651107', '447578382054']
 
 function digitsOf(v: string): string { return v.replace(/\D/g, '') }
 

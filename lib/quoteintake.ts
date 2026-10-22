@@ -320,7 +320,8 @@ const OWN_NUMBERS = [
   '5033580443',      // the old packaging line
   '5034614788',      // the current packaging line
   '2134493746',      // sports
-  '447458651107',    // the UK line
+  '447458651107',    // the UK line (conesleeves / wax papers)
+  '447578382054',    // the UK packaging line (Meta Cloud API, lib/metawa.ts)
 ]
 
 function isOwnNumber(phone: string | null | undefined): boolean {

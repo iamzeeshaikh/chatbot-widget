@@ -56,6 +56,11 @@ export function waErrorHint(code: number | undefined): string {
     case 63003: return 'That number is not reachable on WhatsApp.'
     case 63024: return 'WhatsApp refused this message. A business writing FIRST — before the customer has messaged you — needs an approved template; a free-form message is only allowed inside 24 hours of their last one.'
     case 63021: return 'WhatsApp would not take this attachment. It accepts photos (JPG/PNG), PDFs, MP4 video and audio as OGG/opus, AAC, MPEG or AMR — and nothing else.'
+    // Meta's own codes, from the UK line (lib/metawa.ts) — a different family
+    // from Twilio's 63xxx, so one switch serves both without a collision.
+    case 131047: return 'WhatsApp only allows a free-form message within 24 hours of the customer’s last message. This one was outside that window, so it was not delivered. Wait for them to message first, or use an approved template.'
+    case 131026: return 'That number is not reachable on WhatsApp.'
+    case 131053: return 'WhatsApp would not take this attachment. It accepts photos (JPG/PNG), PDFs, MP4 video and audio as OGG/opus, AAC, MPEG or AMR — and nothing else.'
     default: return ''
   }
 }

@@ -105,10 +105,11 @@ export function whatsAppStateFrom(
   // 63024 was read as "no" here and told the owner a number was not on WhatsApp
   // when it plainly was — he had the chat open. A verdict this confident has to
   // come from evidence that actually supports it.
-  if (failedCode === 63003) {
+  // 131026 is Meta's own spelling of the same verdict, from the UK line.
+  if (failedCode === 63003 || failedCode === 131026) {
     return { state: 'no', reason: 'WhatsApp reported this number as not reachable.' }
   }
-  if (failedCode === 63024 || failedCode === 63021 || failedCode === 63016) {
+  if (failedCode === 63024 || failedCode === 63021 || failedCode === 63016 || failedCode === 131047 || failedCode === 131053) {
     // A refusal proves the message was wrong, not the number — fall through to
     // the line-type evidence below rather than claiming either way.
   }
