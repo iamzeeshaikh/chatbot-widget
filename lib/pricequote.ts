@@ -105,7 +105,9 @@ export function quoteProblems(q: PriceQuote): string[] {
 const esc = (v: string) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const lines = (v: string) => String(v ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
 
-export function quoteText(q: PriceQuote): string {
+export const PDF_LINE = 'The full quotation is attached as a PDF for your records.'
+
+export function quoteText(q: PriceQuote, opts: { pdf?: boolean } = {}): string {
   const items = filledItems(q)
   const many = items.length > 1
   const out = [q.greetingName ? `Hello ${q.greetingName},` : 'Hello,', '', q.intro, '']
@@ -116,6 +118,7 @@ export function quoteText(q: PriceQuote): string {
   })
   const g = grandTotal(q)
   if (g !== null) out.push(`Order total (all ${items.length} products): ${money(g, q.currency)}`, '')
+  if (opts.pdf) out.push(PDF_LINE, '')
   const inc = lines(q.included)
   if (inc.length) out.push('Included:', ...inc.map((l) => `- ${l}`), '')
   if (q.turnaround.trim()) out.push(`Turnaround: ${q.turnaround.trim()}`)
@@ -124,7 +127,7 @@ export function quoteText(q: PriceQuote): string {
   return out.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
-export function quoteHtml(q: PriceQuote): string {
+export function quoteHtml(q: PriceQuote, opts: { pdf?: boolean } = {}): string {
   const items = filledItems(q)
   const many = items.length > 1
   const p = (t: string) => `<p style="margin:0 0 14px 0;">${esc(t)}</p>`
@@ -148,6 +151,7 @@ export function quoteHtml(q: PriceQuote): string {
     p(q.intro),
     ...items.map(block),
     g !== null ? `<p style="margin:0 0 16px 0;font-size:15px;"><b>Order total (all ${items.length} products): ${esc(money(g, q.currency))}</b></p>` : '',
+    opts.pdf ? p(PDF_LINE) : '',
     inc.length ? `<p style="margin:0 0 4px 0;"><b>Included with your order:</b></p><ul style="margin:0 0 14px 18px;padding:0;">${inc.map((l) => `<li style="margin:2px 0;">${esc(l)}</li>`).join('')}</ul>` : '',
     q.turnaround.trim() ? `<p style="margin:0 0 4px 0;"><b>Turnaround:</b> ${esc(q.turnaround.trim())}</p>` : '',
     q.validity.trim() ? `<p style="margin:0 0 14px 0;"><b>Quote valid for:</b> ${esc(q.validity.trim())}</p>` : '',

@@ -5,7 +5,7 @@
 // stage Quote Sent, value recorded, bot follows up the next day.
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, Plus, Send, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Download, Plus, Send, Trash2, X } from 'lucide-react'
 import { blankItem, blankQuote, dealValue, grandTotal, money, normalizeQuote, quoteHtml, quoteProblems, quoteTitle, type PriceQuote, type QuoteItem, type QuoteRow } from '@/lib/pricequote'
 
 interface Setup { name: string; siteId: string; siteName: string; toKnown: boolean; cc: string[]; aliases: { email: string; displayName: string }[]; replyTo: { title: string } | null }
@@ -23,6 +23,8 @@ export default function QuotePage() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [done, setDone] = useState(false)
+  const [attachPdf, setAttachPdf] = useState(true)
+  const [pdfBusy, setPdfBusy] = useState(false)
   const key = `zee-quote-${leadId}`
 
   useEffect(() => {
@@ -44,7 +46,7 @@ export default function QuotePage() {
   const set = (p: Partial<PriceQuote>) => setQ((x) => (x ? { ...x, ...p } : x))
   const setItem = (k: number, p: Partial<QuoteItem>) => setQ((x) => (x ? { ...x, items: x.items.map((it, n) => (n === k ? { ...it, ...p } : it)) } : x))
   const setRow = (k: number, i: number, p: Partial<QuoteRow>) => setQ((x) => (x ? { ...x, items: x.items.map((it, n) => (n === k ? { ...it, rows: it.rows.map((r, m) => (m === i ? { ...r, ...p } : r)) } : it)) } : x))
-  const html = useMemo(() => (q ? quoteHtml(q) : ''), [q])
+  const html = useMemo(() => (q ? quoteHtml(q, { pdf: attachPdf }) : ''), [q, attachPdf])
   const problems = q ? quoteProblems(q) : []
   const value = q ? dealValue(q) : 0
   const grand = q ? grandTotal(q) : null
@@ -54,7 +56,7 @@ export default function QuotePage() {
     setBusy(true); setErr('')
     const r = await fetch(`/api/leads/${encodeURIComponent(leadId)}/price-quote`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quote: q, from, cc, subject: subject || (setup?.replyTo ? '' : `Price quote — ${quoteTitle(q)} - ${setup?.siteName ?? ''}`) }),
+      body: JSON.stringify({ quote: q, attachPdf, from, cc, subject: subject || (setup?.replyTo ? '' : `Price quote — ${quoteTitle(q)} - ${setup?.siteName ?? ''}`) }),
     })
     const j = await r.json().catch(() => ({}))
     setBusy(false)
@@ -62,6 +64,20 @@ export default function QuotePage() {
     try { localStorage.removeItem(key) } catch { /* ignore */ }
     setDone(true)
     setTimeout(() => { window.location.href = `/leads/${encodeURIComponent(leadId)}` }, 1500)
+  }
+
+  async function downloadPdf() {
+    if (!q) return
+    setPdfBusy(true); setErr('')
+    const r = await fetch(`/api/leads/${encodeURIComponent(leadId)}/price-quote/pdf`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quote: q }),
+    })
+    setPdfBusy(false)
+    if (!r.ok) { const j = await r.json().catch(() => ({})); setErr(j.error || 'Could not make the PDF'); return }
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') ?? '')?.[1] ?? 'Price Quotation.pdf'
+    const url = URL.createObjectURL(await r.blob())
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 5000)
   }
 
   if (err && !setup) return <main className="p-8 text-sm text-red-700">{err}</main>
@@ -77,6 +93,13 @@ export default function QuotePage() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             {problems.length > 0 && <span className="text-xs text-amber-700">Add {problems.join(' and ')}</span>}
+            <label className="inline-flex items-center gap-1.5 text-xs text-gray-700 select-none">
+              <input type="checkbox" checked={attachPdf} onChange={(e) => setAttachPdf(e.target.checked)} /> Attach quotation PDF
+            </label>
+            <button type="button" disabled={pdfBusy || problems.length > 0} onClick={() => void downloadPdf()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+              <Download size={14} aria-hidden /> {pdfBusy ? 'Making PDF…' : 'Download PDF'}
+            </button>
             <button type="button" disabled={busy || done || problems.length > 0 || !from || !setup.toKnown} onClick={() => void send()}
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               <Send size={14} aria-hidden /> {done ? 'Sent ✓' : busy ? 'Sending…' : 'Send quote'}
@@ -146,7 +169,7 @@ export default function QuotePage() {
         <section className="rounded-xl border border-gray-200 bg-white p-5">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-3">Preview — what the customer gets{cc ? ` (cc ${cc})` : ''}</p>
           <div className="text-[14px] leading-relaxed text-gray-800" dangerouslySetInnerHTML={{ __html: html }} />
-          <p className="text-[12px] text-gray-400 mt-2">+ your email signature</p>
+          <p className="text-[12px] text-gray-400 mt-2">+ your email signature{attachPdf ? ' · 📎 quotation PDF attached' : ''}</p>
         </section>
       </div>
     </main>

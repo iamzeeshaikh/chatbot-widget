@@ -9,6 +9,7 @@ import { makeSnippet, newEmailId, type CrmEmailEntry } from '@/lib/crmemail'
 import { CRM_EMAIL_ROLE, CRM_NOTE_ROLE, CRM_VALUE_ROLE } from '@/lib/crm'
 import { applyStageChange } from '@/lib/stagechange'
 import { customerCc } from '@/lib/customercc'
+import { quotePdfFor } from '@/lib/quotepdfload'
 import { cleanRows, dealValue, filledItems, normalizeQuote, quoteHtml, quoteProblems, quoteText, quoteTitle, money } from '@/lib/pricequote'
 
 export const dynamic = 'force-dynamic'
@@ -69,13 +70,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const base = (process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).replace(/\/$/, '')
   const sig = await buildSendSignature({ memberEmail: access.member.email, workspace: access.member.workspace, siteId: access.siteId, from, base })
-  const text = quoteText(q)
+  // The quotation PDF (the team's own format) goes along unless unticked.
+  const attachPdf = body.attachPdf !== false
+  const pdf = attachPdf ? await quotePdfFor({
+    siteId: access.siteId, siteName: record.siteName, quote: q, customerEmail: to,
+    customerName: record.contact.name || q.greetingName,
+  }).catch(() => null) : null
+  const text = quoteText(q, { pdf: !!pdf })
   const emailId = newEmailId()
   const finalText = sig.text ? `${text}\n\n${sig.text}` : text
-  const finalHtml = `${quoteHtml(q)}${sig.html}${openPixelHtml(base, id, emailId)}`
+  const finalHtml = `${quoteHtml(q, { pdf: !!pdf })}${sig.html}${openPixelHtml(base, id, emailId)}`
   let sent
   try {
-    const msg = { from, to, cc: cc || undefined, subject, body: finalText, html: finalHtml, inReplyTo: thread?.inReplyTo, references: thread?.references }
+    const msg = { from, to, cc: cc || undefined, subject, body: finalText, html: finalHtml, inReplyTo: thread?.inReplyTo, references: thread?.references,
+      attachments: pdf ? [{ name: pdf.name, mime: 'application/pdf', bytes: pdf.bytes }] : undefined }
     try {
       sent = await sendEmail(access.member.email, cfg, { ...msg, threadId: thread?.threadId })
     } catch (e) {
@@ -102,7 +110,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     message: JSON.stringify({ estimated: dealValue(q), won: record.value?.won ?? null, currency: q.currency || 'USD', updated_by: access.member.email, at }) })
   await writeControlRow({ sessionId: id, siteId: access.siteId, role: CRM_NOTE_ROLE, message: JSON.stringify({
     id: `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, author: access.member.email, at,
-    body: `Price quote sent — ${filledItems(q).map((it) => `${it.product}: ${cleanRows(it).map((r) => `${r.qty.toLocaleString('en-US')} × ${money(r.unit, q.currency)} = ${money(r.total, q.currency)}`).join(' · ')}`).join(' | ')}`,
+    body: `Price quote sent — ${filledItems(q).map((it) => `${it.product}: ${cleanRows(it).map((r) => `${r.qty.toLocaleString('en-US')} × ${money(r.unit, q.currency)} = ${money(r.total, q.currency)}`).join(' · ')}`).join(' | ')}${pdf ? ` (PDF attached: ${pdf.name})` : ''}`,
   }) })
   return NextResponse.json({ ok: true, emailId })
 }
