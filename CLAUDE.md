@@ -584,7 +584,12 @@ On 2026-07-24 it pinned CPU at 95% because the conversations endpoint scanned th
 
 ## 7. Things that live outside this repo
 
-- **`scripts/quote-intake-apps-script.gs` must be pasted into the user's Apps Script
+- **Since 2026-10-23 the Apps Script is a LOADER** (`scripts/quote-intake-loader.gs`,
+  pasted once): every run fetches the engine from `/api/intake/script` (secret header,
+  or an admin session to inspect it) and keeps the last good copy in Script Properties.
+  So an engine change ships with a normal deploy — never ask the owner to paste again
+  (owner: "rozana update karwate ho"). Until the loader is pasted, the old rule holds:
+  `scripts/quote-intake-apps-script.gs` must be pasted into the user's Apps Script
   editor by hand** — deploying this repo does not update it. Refresh
   `~/Desktop/zeeops-quote-intake-NEW.txt` from the repo copy after any change, and
   re-run `pbcopy` rather than assuming the clipboard survived.
