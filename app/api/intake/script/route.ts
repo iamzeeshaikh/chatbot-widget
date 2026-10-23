@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { getMember } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,9 @@ export const dynamic = 'force-dynamic'
 // the script that already holds it.
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('x-quote-secret')
-  if (!secret || secret !== process.env.QUOTE_INTAKE_SECRET) return new NextResponse('Unauthorized', { status: 401 })
+  const ok = !!secret && secret === process.env.QUOTE_INTAKE_SECRET
+  // A signed-in admin may read it too, to check what the loader will run.
+  if (!ok) { const m = await getMember(req); if (m?.role !== 'admin') return new NextResponse('Unauthorized', { status: 401 }) }
   const src = readFileSync(path.join(process.cwd(), 'scripts', 'quote-intake-apps-script.gs'), 'utf8')
   return new NextResponse(src, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } })
 }
