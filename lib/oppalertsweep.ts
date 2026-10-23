@@ -141,8 +141,14 @@ export async function runOppAlerts(opts: { dry?: boolean; now?: Date } = {}): Pr
     c.noHuman = (c.noHuman ?? 0) + 1
     counts.set(k, c)
   }
+  for (const i of data.drafts ?? []) {
+    const k = i.owner ?? ''
+    const c = counts.get(k) ?? { waiting: 0, hot: 0, invoices: 0 }
+    c.drafts = (c.drafts ?? 0) + 1
+    counts.set(k, c)
+  }
   const waiting: WaitingLead[] = data.waiting.map((i) => ({ id: i.id, name: i.name, owner: i.owner, hours: i.hours ?? 0, since: i.lastLineAt ?? i.createdAt }))
-  const noHuman: WaitingLead[] = data.noHuman.map((i) => ({ id: i.id, name: i.name, owner: i.owner, hours: i.hours ?? 0, since: i.createdAt }))
+  const noHuman: WaitingLead[] = data.noHuman.map((i) => ({ id: i.id, name: i.name, owner: i.owner, hours: i.hours ?? 0, since: i.createdAt, ...(i.draftAt !== undefined ? { draft: true } : {}) }))
 
   const { plans, held } = planAlerts({
     now, agents, counts, waiting, noHuman, sent: ledger,

@@ -30,6 +30,7 @@ import {
   type OppLead, type OppRow, type OppSale, type OppContext, type LeadState,
 } from './opportunities'
 import type { CrmStage } from './crm'
+import { CRM_BOT_DRAFT_ROLE, foldDrafts } from './botdraft'
 
 const ROW_CAP = 60_000
 const LEAD_CAP = 20_000
@@ -54,6 +55,8 @@ export interface OppItem {
   lastLineAt: string | null
   // section specifics
   hours?: number
+  /** A bot draft is waiting on this lead for a person to press Send — since when. */
+  draftAt?: string
   channel?: 'email' | 'whatsapp'
   reason?: string
   score?: number
@@ -73,6 +76,8 @@ export interface LeaderRow {
   waiting: number
   /** New leads no person has answered yet (bot only). */
   noHuman: number
+  /** Bot drafts on their leads nobody has sent yet. */
+  drafts: number
 }
 
 /** A sale booked this month — what the leaderboard's Won cells open. */
@@ -92,12 +97,15 @@ export interface OpportunitiesResult {
     hotUsd: number; hotCount: number
     waitingCount: number; waitingOver24: number
     noHumanCount: number
+    draftsCount: number
   }
   leaderboard: LeaderRow[]
   won: WonItem[]
   waiting: OppItem[]
   /** New leads with only the bot's reply so far (lib/opportunities.ts readNoHuman). */
   noHuman: OppItem[]
+  /** Leads where the bot drafted the first reply and nobody has sent it (owner, 2026-10-23). */
+  drafts: OppItem[]
   invoices: OppItem[]
   hot: OppItem[]
   older: OppItem[]
@@ -130,12 +138,12 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
 
   const empty: OpportunitiesResult = {
     generatedAt: now.toISOString(), month: `${year}-${String(month).padStart(2, '0')}`, monthLabel: monthName(year, month),
-    strip: { bookedUsd: 0, bookedCount: 0, invoicesDueUsd: 0, invoicesDueCount: 0, hotUsd: 0, hotCount: 0, waitingCount: 0, waitingOver24: 0, noHumanCount: 0 },
-    leaderboard: [], won: [], waiting: [], noHuman: [], invoices: [], hot: [], older: [], excluded: { restricted: 0, notALead: 0, ownTests: 0 }, windowFrom, truncated: false,
+    strip: { bookedUsd: 0, bookedCount: 0, invoicesDueUsd: 0, invoicesDueCount: 0, hotUsd: 0, hotCount: 0, waitingCount: 0, waitingOver24: 0, noHumanCount: 0, draftsCount: 0 },
+    leaderboard: [], won: [], waiting: [], noHuman: [], drafts: [], invoices: [], hot: [], older: [], excluded: { restricted: 0, notALead: 0, ownTests: 0 }, windowFrom, truncated: false,
   }
   if (sites.length === 0) return empty
 
-  const [captureRows, leadRows, rows, siteRes, notLeads, sales, names, members] = await Promise.all([
+  const [captureRows, leadRows, rows, siteRes, notLeads, sales, names, members, draftRows] = await Promise.all([
     fetchAllPages<OppRow>(
       () => supabase.from('chat_logs').select('session_id, site_id, role, message, created_at')
         .eq('role', LEAD_CAPTURE_ROLE).in('site_id', sites).gte('created_at', windowFrom)
@@ -157,7 +165,22 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
     member.workspace === 'packaging' ? readSales('packaging') : Promise.resolve([]),
     storedMemberNames(),
     supabase.from('members').select('email, workspace'),
+    fetchAllPages<{ session_id: string; role: string; message: string; created_at: string }>(
+      () => supabase.from('chat_logs').select('session_id, role, message, created_at')
+        .eq('role', CRM_BOT_DRAFT_ROLE).in('site_id', sites).gte('created_at', windowFrom)
+        .order('created_at', { ascending: true }),
+      LEAD_CAP),
   ])
+  // Pending bot drafts per lead: the newest revision of each draft decides.
+  const pendingDraft = new Map<string, string>()
+  {
+    const bySession = new Map<string, { role: string; message: string }[]>()
+    for (const d of draftRows) { const l = bySession.get(d.session_id) ?? []; l.push(d); bySession.set(d.session_id, l) }
+    for (const [sid, list] of bySession) {
+      const pend = foldDrafts(list).filter((d) => d.status === 'pending')
+      if (pend.length) pendingDraft.set(sid, String((pend[pend.length - 1] as { at?: string }).at ?? ''))
+    }
+  }
   const truncated = warnIfCapped('opportunities rows', rows.length, ROW_CAP)
     || warnIfCapped('opportunities leads', leadRows.length, LEAD_CAP)
     || warnIfCapped('opportunities captures', captureRows.length, LEAD_CAP)
@@ -254,6 +277,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
 
   const waiting: OppItem[] = []
   const noHuman: OppItem[] = []
+  const drafts: OppItem[] = []
   const invoices: OppItem[] = []
   const hot: OppItem[] = []
   const older: OppItem[] = []
@@ -265,7 +289,12 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
     if (s.restricted) restricted++
     const w = readWaiting(s, now)
     const nh = readNoHuman(s, now)
-    if (nh) noHuman.push({ ...base(s), hours: nh.hours, lastLine: line(s.customer[s.customer.length - 1]?.text || s.leadText), lastLineAt: nh.since, waiting: !!w })
+    const draftAt = s.ids.map((id) => pendingDraft.get(id)).find((x) => x !== undefined)
+    if (nh) noHuman.push({ ...base(s), hours: nh.hours, lastLine: line(s.customer[s.customer.length - 1]?.text || s.leadText), lastLineAt: nh.since, waiting: !!w, ...(draftAt !== undefined ? { draftAt } : {}) })
+    if (draftAt !== undefined) {
+      const since = draftAt || s.createdAt
+      drafts.push({ ...base(s), hours: Math.max(0, Math.round((now.getTime() - Date.parse(since)) / 36e5 * 10) / 10), draftAt: since, lastLine: line(s.customer[s.customer.length - 1]?.text || s.leadText), lastLineAt: since, waiting: !!w })
+    }
     const h = readHot(s, now)
     const inv = readInvoiceDue(s, oppSales, now)
     if (w) waiting.push({ ...base(s), hours: w.hours, channel: w.channel, lastLine: line(w.lastLine), lastLineAt: w.since, hot: h.hot })
@@ -287,6 +316,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
 
   waiting.sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0))
   noHuman.sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0))
+  drafts.sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0))
   invoices.sort((a, b) => (b.invoice?.sentAt ?? '').localeCompare(a.invoice?.sentAt ?? ''))
   hot.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (b.lastLineAt ?? '').localeCompare(a.lastLineAt ?? ''))
   older.sort((a, b) => (b.quote ?? 0) - (a.quote ?? 0) || (b.lastLineAt ?? '').localeCompare(a.lastLineAt ?? ''))
@@ -313,7 +343,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   const row = (k: string | null) => {
     const agent = k ?? ''
     let r = board.get(agent)
-    if (!r) { r = { agent, name: nameOf(k), wonCount: 0, wonUsd: 0, pipelineUsd: 0, hot: 0, waiting: 0, noHuman: 0 }; board.set(agent, r) }
+    if (!r) { r = { agent, name: nameOf(k), wonCount: 0, wonUsd: 0, pipelineUsd: 0, hot: 0, waiting: 0, noHuman: 0, drafts: 0 }; board.set(agent, r) }
     return r
   }
   // Every packaging agent appears, even with nothing on their name yet.
@@ -332,6 +362,7 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   for (const i of invoices) row(i.owner).pipelineUsd += i.invoice?.amount ?? 0
   for (const i of waiting) row(i.owner).waiting++
   for (const i of noHuman) row(i.owner).noHuman++
+  for (const i of drafts) row(i.owner).drafts++
   const leaderboard = [...board.values()]
     .map((r) => ({ ...r, wonUsd: Math.round(r.wonUsd), pipelineUsd: Math.round(r.pipelineUsd) }))
     .sort((a, b) => b.wonUsd - a.wonUsd || b.pipelineUsd - a.pipelineUsd || a.name.localeCompare(b.name))
@@ -348,10 +379,11 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
       waitingCount: waiting.length,
       waitingOver24: waiting.filter((w) => (w.hours ?? 0) >= 24).length,
       noHumanCount: noHuman.length,
+      draftsCount: drafts.length,
     },
     leaderboard,
     won,
-    waiting, noHuman, invoices, hot,
+    waiting, noHuman, drafts, invoices, hot,
     older: older.slice(0, 150),
     excluded: { restricted, notALead, ownTests },
     truncated,

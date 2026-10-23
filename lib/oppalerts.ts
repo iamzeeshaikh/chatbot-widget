@@ -45,6 +45,8 @@ export const WAIT_PER_RUN = 5
 /** A new lead with only the bot's reply: the owner after 3 h, admins at 24 h
  *  (owner, 2026-10-22: Dylan's Candy Bar sat two days with only the bot's email). */
 export const NOHUMAN_FIRST_H = 3
+/** A parked bot draft nudges its agent sooner: the customer has heard nothing at all. */
+export const DRAFT_FIRST_H = 1
 export const NOHUMAN_ESCALATE_H = 24
 
 export type AlertKind = 'morning' | 'waiting' | 'waiting24' | 'monthend' | 'nohuman' | 'nohuman24'
@@ -94,9 +96,11 @@ export interface WaitingLead {
   hours: number
   /** The customer's message instant — the episode id. */
   since: string
+  /** The bot's draft is parked on the lead and nobody has pressed Send. */
+  draft?: boolean
 }
 
-export interface AgentCounts { waiting: number; hot: number; invoices: number; noHuman?: number }
+export interface AgentCounts { waiting: number; hot: number; invoices: number; noHuman?: number; drafts?: number }
 
 export interface Plan {
   kind: AlertKind
@@ -138,7 +142,9 @@ export function morningCopy(name: string, c: AgentCounts): string | null {
   if (c.waiting) parts.push(`${plural(c.waiting, 'customer')} ${c.waiting === 1 ? 'is' : 'are'} waiting for your reply`)
   if (c.hot) parts.push(`${plural(c.hot, 'quote')} can close this month`)
   if (c.invoices) parts.push(`${plural(c.invoices, 'invoice')} ${c.invoices === 1 ? 'is' : 'are'} due`)
-  if (c.noHuman) parts.push(`${plural(c.noHuman, 'new lead')} ${c.noHuman === 1 ? 'has' : 'have'} only had the bot's reply — answer ${c.noHuman === 1 ? 'it' : 'them'} yourself`)
+  if (c.drafts) parts.push(`${plural(c.drafts, 'bot draft')} ${c.drafts === 1 ? 'is' : 'are'} waiting for you to press Send`)
+  const bare = (c.noHuman ?? 0) - (c.drafts ?? 0)
+  if (bare > 0) parts.push(`${plural(bare, 'new lead')} ${bare === 1 ? 'has' : 'have'} only had the bot's reply — answer ${bare === 1 ? 'it' : 'them'} yourself`)
   if (parts.length === 0) return null
   return `Good evening ${firstName(name)}. ${parts.join(', ')}.`
 }
@@ -148,6 +154,7 @@ export function adminMorningCopy(name: string, total: AgentCounts, unassigned: n
   if (total.waiting) parts.push(`${plural(total.waiting, 'customer')} waiting for a reply${unassigned ? ` (${unassigned} unassigned)` : ''}`)
   if (total.hot) parts.push(`${plural(total.hot, 'quote')} that can close this month`)
   if (total.invoices) parts.push(`${plural(total.invoices, 'invoice')} due`)
+  if (total.drafts) parts.push(`${plural(total.drafts, 'bot draft')} not sent yet`)
   if (total.noHuman) parts.push(`${plural(total.noHuman, 'new lead')} with no reply from a person yet`)
   if (parts.length === 0) return null
   const g = greet(name)
@@ -167,6 +174,7 @@ export function waiting24Copy(name: string, lead: WaitingLead, ownerName: string
 }
 
 export function noHumanCopy(name: string, lead: WaitingLead): string {
+  if (lead.draft) return `${firstName(name)}, ${lead.name} came in ${hoursLabel(lead.hours)} ago. The bot has drafted the first reply on the lead — open it, check it and press Send.`
   return `${firstName(name)}, ${lead.name} came in ${hoursLabel(lead.hours)} ago and only the bot has replied. Please answer them yourself.`
 }
 
@@ -180,7 +188,7 @@ export function monthendCopy(monthLabel: string, rows: AlertInput['leaderboard']
   return `${monthLabel}: ${active.map((r) => `${firstName(r.name)} ${r.wonCount} won ($${Math.round(r.wonUsd).toLocaleString('en-US')})`).join(' · ')}`
 }
 
-export const agentUrl = (key: string, list: 'waiting' | 'hot' | 'pipeline' | 'won' | 'nohuman') => `/opportunities?agent=${encodeURIComponent(key)}&list=${list}`
+export const agentUrl = (key: string, list: 'waiting' | 'hot' | 'pipeline' | 'won' | 'nohuman' | 'drafts') => `/opportunities?agent=${encodeURIComponent(key)}&list=${list}`
 
 // ── The decision ────────────────────────────────────────────────────────────
 
@@ -211,10 +219,10 @@ export function planAlerts(input: AlertInput): { plans: Plan[]; held: Held[] } {
       const own = morningCopy(a.name, c)
       const lines = [own, unassigned ? unassignedCopy(unassigned) : null].filter((x): x is string => !!x)
       if (lines.length === 0) continue
-      want({ kind: 'morning', key, to: a.email, title: 'Your opportunities today', body: lines.join(' '), url: own ? agentUrl(a.key, c.noHuman ? 'nohuman' : c.waiting ? 'waiting' : c.hot ? 'hot' : 'pipeline') : agentUrl('', 'waiting') })
+      want({ kind: 'morning', key, to: a.email, title: 'Your opportunities today', body: lines.join(' '), url: own ? agentUrl(a.key, c.drafts ? 'drafts' : c.noHuman ? 'nohuman' : c.waiting ? 'waiting' : c.hot ? 'hot' : 'pipeline') : agentUrl('', 'waiting') })
     }
     const total: AgentCounts = { waiting: 0, hot: 0, invoices: 0, noHuman: 0 }
-    for (const c of counts.values()) { total.waiting += c.waiting; total.hot += c.hot; total.invoices += c.invoices; total.noHuman = (total.noHuman ?? 0) + (c.noHuman ?? 0) }
+    for (const c of counts.values()) { total.waiting += c.waiting; total.hot += c.hot; total.invoices += c.invoices; total.noHuman = (total.noHuman ?? 0) + (c.noHuman ?? 0); total.drafts = (total.drafts ?? 0) + (c.drafts ?? 0) }
     for (const a of admins) {
       const key = morningKey(a.email, now)
       if (sent.has(key)) continue
@@ -256,12 +264,12 @@ export function planAlerts(input: AlertInput): { plans: Plan[]; held: Held[] } {
   // ── a new lead only the bot has answered ──
   const nh = (input.noHuman ?? []).filter((w) => w.hours < WAIT_STALE_H).sort((a, b) => a.hours - b.hours)
   for (const w of nh) {
-    if (w.hours >= NOHUMAN_FIRST_H && w.owner) {
+    if (w.hours >= (w.draft ? DRAFT_FIRST_H : NOHUMAN_FIRST_H) && w.owner) {
       const key = waitingKey(w.id, w.since, 'waiting').replace(/^waiting:/, 'nohuman:')
       const owner = agents.find((a) => a.key === w.owner)
       if (owner && !sent.has(key)) {
         if (quiet) held.push({ kind: 'nohuman', to: owner.email, why: 'quiet hours' })
-        else if (room(owner.email)) take({ kind: 'nohuman', key, to: owner.email, title: 'New lead — only the bot has replied', body: noHumanCopy(owner.name, w), url: `/leads/${encodeURIComponent(w.id)}` })
+        else if (room(owner.email)) take({ kind: 'nohuman', key, to: owner.email, title: w.draft ? 'A bot draft is waiting for you to send' : 'New lead — only the bot has replied', body: noHumanCopy(owner.name, w), url: `/leads/${encodeURIComponent(w.id)}` })
         else held.push({ kind: 'nohuman', to: owner.email, why: 'next run (per-run cap)' })
       }
     }

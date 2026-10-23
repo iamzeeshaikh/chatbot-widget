@@ -164,3 +164,19 @@ console.log(`\n${n} checks passed`)
   assert.equal(r4.plans.length, 0, 'held in quiet hours')
   console.log('no-human alerts: 8 checks passed')
 }
+
+// ── a parked bot draft (2026-10-23) ──
+{
+  const agents2 = [{ email: 'samir@x.com', key: 'samir', name: 'Samir Khan', role: 'standard' as const }]
+  const at = new Date('2026-10-23T15:00:00Z') // 20:00 PKT
+  const d = { id: 'quote-2', name: 'Uni', owner: 'samir', hours: 1.5, since: '2026-10-23T13:30:00Z', draft: true }
+  const r1 = planAlerts({ now: at, agents: agents2, counts: new Map(), waiting: [], noHuman: [d], monthLabel: 'October 2026', leaderboard: [], sent: new Set() })
+  const p = r1.plans.filter((x) => x.kind === 'nohuman')
+  assert.equal(p.length, 1, 'a draft nudges after 1 h, not 3')
+  assert.ok(p[0].body.includes('press Send') && p[0].title.includes('draft'), 'draft copy tells them to press Send')
+  const r2 = planAlerts({ now: at, agents: agents2, counts: new Map(), waiting: [], noHuman: [{ ...d, hours: 0.5 }], monthLabel: 'October 2026', leaderboard: [], sent: new Set() })
+  assert.equal(r2.plans.filter((x) => x.kind === 'nohuman').length, 0, 'not before 1 h')
+  const m = morningCopy('Samir Khan', { waiting: 0, hot: 0, invoices: 0, noHuman: 3, drafts: 2 })
+  assert.ok(m && m.includes('2 bot drafts are waiting for you to press Send') && m.includes('1 new lead has only'), 'summary splits drafts from bare no-reply leads')
+  console.log('draft alerts: 4 checks passed')
+}
