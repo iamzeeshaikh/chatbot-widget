@@ -387,7 +387,6 @@ const NOT_A_CUSTOMER_RE = new RegExp([
   String.raw`targeted visitors coming to your site|we launch campaigns in less than`,
   String.raw`share your pitch deck|explore business opportunities for your company`,
   String.raw`looks after systems, feel free to pass this on|software that works for the people using it`,
-  String.raw`attempted to place an order online[\s\S]{0,200}wire transfer|payment via wire transfer during the process|\byannat management\b`,
   String.raw`meet shoppers where they.?re\s+buying|join tiktok shop|\bm\.tiktok\.shop/`,
   String.raw`site options with established audiences|relevant content placements|share the current rates and placement`,
   String.raw`reply "?unsubscribe"? if not interested|try (it )?free for \d+ days|no credit card\.? no commitment|\bfor woocommerce (retailers|merchants|stores)|amplify your product discovery|\bcatalogpilot\b`,
