@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
-import { runQuoteBot, runPromoDrip, sendFollowUp, sendQuoteFollowUp, sendPromo, quoteBotEnabled } from '@/lib/quotebot'
+import { runQuoteBot, runPromoDrip, sendFollowUp, sendQuoteFollowUp, redraftFirst, sendPromo, quoteBotEnabled } from '@/lib/quotebot'
 
 export const dynamic = 'force-dynamic'
 const PROMO_DRIP_PAUSED = false
@@ -55,6 +55,12 @@ export async function GET(req: NextRequest) {
     if (!auth.by.startsWith('admin:')) return NextResponse.json({ error: 'Follow-up test sends are for an admin' }, { status: 403 })
     if (!quoteBotEnabled()) return NextResponse.json({ error: 'The quote bot is switched off' }, { status: 409 })
     return NextResponse.json(await sendQuoteFollowUp(quoteFollowup, new Date(), { force: true }))
+  }
+  const redraft = req.nextUrl.searchParams.get('redraft')
+  if (redraft) {
+    if (!auth.by.startsWith('admin:')) return NextResponse.json({ error: 'Redraft previews are for an admin' }, { status: 403 })
+    const ids = redraft.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 12)
+    return NextResponse.json({ previews: await Promise.all(ids.map((x) => redraftFirst(x))) })
   }
   const promo = req.nextUrl.searchParams.get('promo')
   if (promo) {

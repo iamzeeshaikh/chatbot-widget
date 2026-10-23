@@ -1588,3 +1588,21 @@ export async function mirrorToChatTwins(siteId: string, email: string, createdAt
   }
   return twins
 }
+
+/**
+ * ADMIN PREVIEW: what the bot's first email to this lead would say TODAY,
+ * whatever it already sent. Writes nothing and sends nothing — used to check
+ * the bot against the agents' review of real emails (Saifullah, 2026-10-23).
+ */
+export async function redraftFirst(leadId: string): Promise<{ id: string; name?: string | null; site?: string; assessment?: QuoteAssessment | null; text?: string; drafted?: boolean; error?: string }> {
+  const id = leadId.replace(/^quote-/, '')
+  const { data: lead } = await supabase.from('leads').select('id, site_id, name, message').eq('id', id).maybeSingle()
+  if (!lead) return { id: leadId, error: 'no such lead' }
+  const message = String(lead.message ?? '')
+  const fromChat = /^\s*(\[[^\]]+\]\s*)?(user|assistant):/m.test(message)
+  const assessment = await assessQuote(message, lead.name)
+  if (!assessment) return { id: leadId, name: lead.name, site: lead.site_id, error: 'assessment failed' }
+  const mail = buildFirstEmail(assessment, { siteName: lead.site_id, fromChat })
+  const drafted = await draftCustomerEmail({ kind: 'first', fromChat, enquiry: quoteTextForAssessment(message, lead.name), assessment, siteName: lead.site_id })
+  return { id: leadId, name: lead.name, site: lead.site_id, assessment, text: drafted?.text ?? mail.text, drafted: !!drafted }
+}
