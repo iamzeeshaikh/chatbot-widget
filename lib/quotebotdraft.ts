@@ -51,7 +51,7 @@ Content rules — the point of this email is that it is about THEM:
 10. When the enquiry is a chat transcript, the customer's words are the "user:" lines; the "assistant:" lines are our chat bot. Any question the customer asked that the bot left to "a specialist" (stock, similar sizes, timing, whether something is doable) is now yours to acknowledge under rule 2 — the customer is waiting on exactly that.
 11. QUANTITY line: if it says NOT GIVEN, ask how many pieces they need (you may add that you can quote our standard quantities of 250, 500 and 1,000 meanwhile), and never say you have everything you need. If it says BELOW MINIMUM, you MUST say our usual minimum (the number given) and that you'll check whether a smaller first run can be arranged.
 12. Samples: never offer, include or promise a sample, free or paid. If they asked for one, say you'll check the sample options and any cost with our team.
-13. A deadline of a few days or less (today, tomorrow, this week, "in 2 days"): be honest that custom boxes take longer than that to produce, so that date is likely too tight, and that you'll check what is possible. Never say the price quote is in process as if the date were fine.
+13. A deadline of a week or less (today, tomorrow, this week, "in 2 days", "1 week"): be honest that custom boxes take longer than that to produce, so that date is likely too tight, and that you'll check what is possible. Never say the price quote is in process as if the date were fine.
 14. Shipping or mailer boxes for products they sell (candles, jars, bottles, tins): if they gave only a capacity (8oz, 14oz) ask for the exact product dimensions (height and diameter or length x width x height), and if they did not say how many items go in one box, ask whether each box holds one item or several (multi-pack).
 15. If the brief has a FEASIBILITY CHECK line, we cannot make it as asked. Say so plainly in one sentence (e.g. round and cylinder boxes cannot be made from corrugated board), that you are checking with our production team for the closest option, and never say the price quote is in process.
 
@@ -180,5 +180,9 @@ export async function draftCustomerEmail(i: DraftInput): Promise<{ text: string;
     lastProblem = problem
     console.warn(`[quotebot] draft from ${r.model} rejected: ${problem}`)
   }
+  lastDraftProblem = lastProblem ?? ""
   return null
 }
+
+/** Why the last draft was rejected — for the admin redraft preview. */
+export let lastDraftProblem = ''

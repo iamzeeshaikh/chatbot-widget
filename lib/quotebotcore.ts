@@ -35,6 +35,8 @@ export interface QuoteAssessment {
   /** A dimension beyond what we normally produce ("50 x 30 x 20 in"), or undefined. The
    *  bot must not promise a price for it; a person checks with production first. */
   oversize?: string
+  /** They asked for a sample or prototype — never promised, always acknowledged. */
+  asksSample?: boolean
   /** One line, for the ledger and the person reading it. */
   reason: string
 }
@@ -102,6 +104,13 @@ export function minimumFor(product: string): number {
 }
 
 export function oversizeIn(text: string): string | null {
+  // "H178.6, W91.1, D61.5cm" (Charlie, 18 Oct): sides named by letter, no x.
+  const lettered = [...String(text || '').matchAll(/(?<![A-Za-z])([LWHD])\s*[:=]?\s*(\d{1,4}(?:\.\d{1,2})?)\s*(cm|mm|in(?:ch(?:es)?)?\b|")?/gi)]
+  if (lettered.length >= 2) {
+    const u = (lettered.find((x) => x[3]) ?? [])[3] ?? ''
+    const f = /^cm/i.test(u) ? 1 / 2.54 : /^mm/i.test(u) ? 1 / 25.4 : 1
+    if (lettered.some((x) => parseFloat(x[2]) * f > OVERSIZE_IN)) return lettered.map((x) => x[0].trim()).join(' x ')
+  }
   const t = String(text || '').replace(/[×*]/g, 'x').replace(/[“”″]/g, '"')
     // "H178.6 x W91.1 x D61.5cm": a side's letter in front of its number.
     .replace(/(^|[\s(,:;])[LWHD]\s*[:=]?\s*(?=\d)/gi, '$1')
@@ -250,6 +259,7 @@ export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fro
   const product = a.product
 
   const parts: string[] = [greet, '']
+  const sampleLine = a.asksSample ? ' I\'ll also check the sample options and any cost with our team.' : ''
   if (a.feasibility) {
     parts.push(
       `${thanks} I've noted your request for ${product}. Round and cylinder boxes cannot be made from corrugated board, so I'm checking with our production team for the closest option for you, and I'll come back to you with that and the price quote.`,
@@ -270,7 +280,7 @@ export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fro
     if (!a.hasDeadline) parts.push('', 'Also, how soon do you need these?')
   } else if (complete) {
     parts.push(
-      `${thanks} I have everything I need, and the price quote for your ${product} is in process. I'll share it with you shortly.`,
+      `${thanks} I have everything I need, and the price quote for your ${product} is in process. I'll share it with you shortly.${sampleLine}`,
     )
     if (!a.hasDeadline) parts.push('', 'In the meantime, could you please let me know how soon you need these?')
   } else {

@@ -51,7 +51,7 @@ import { CRM_EMAIL_IN_ROLE, parseCrmEmailIn } from './emailreply'
 import { googleConfig, verifiedAliases, sendEmail, fetchThread, GmailAuthError, type SendAsAlias } from './gmail'
 import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
-import { draftCustomerEmail } from './quotebotdraft'
+import { lastDraftProblem, draftCustomerEmail } from './quotebotdraft'
 import { CRM_BOT_DRAFT_ROLE, newDraftId, type BotDraft } from './botdraft'
 import { customerCc } from './customercc'
 import { buildSendSignature } from './sendsignature'
@@ -309,6 +309,7 @@ export async function assessQuote(message: string, name: string | null): Promise
   // checks with production first (oversizeIn, lib/quotebotcore.ts).
   if (a) { const big = oversizeIn(message); if (big) a.oversize = big }
   if (a) { const no = feasibilityIn(message); if (no) a.feasibility = no }
+  if (a && /\b(samples?|prototypes?)\b/i.test(message)) a.asksSample = true
   return a
 }
 
@@ -1604,5 +1605,5 @@ export async function redraftFirst(leadId: string): Promise<{ id: string; name?:
   if (!assessment) return { id: leadId, name: lead.name, site: lead.site_id, error: 'assessment failed' }
   const mail = buildFirstEmail(assessment, { siteName: lead.site_id, fromChat })
   const drafted = await draftCustomerEmail({ kind: 'first', fromChat, enquiry: quoteTextForAssessment(message, lead.name), assessment, siteName: lead.site_id })
-  return { id: leadId, name: lead.name, site: lead.site_id, assessment, text: drafted?.text ?? mail.text, drafted: !!drafted }
+  return { id: leadId, name: lead.name, site: lead.site_id, assessment, text: drafted?.text ?? mail.text, drafted: !!drafted, ...(drafted ? {} : { error: `template used — draft rejected: ${lastDraftProblem}` }) }
 }
