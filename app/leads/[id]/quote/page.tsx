@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { ArrowLeft, Download, Plus, Send, Trash2, X } from 'lucide-react'
-import { blankItem, blankQuote, dealValue, grandTotal, money, normalizeQuote, quoteHtml, quoteProblems, quoteTitle, type PriceQuote, type QuoteItem, type QuoteRow } from '@/lib/pricequote'
+import { blankItem, blankQuote, dealValue, orderTotals, money, normalizeQuote, quoteHtml, quoteProblems, quoteTitle, type PriceQuote, type QuoteItem, type QuoteRow } from '@/lib/pricequote'
 
 interface Setup { name: string; siteId: string; siteName: string; toKnown: boolean; cc: string[]; aliases: { email: string; displayName: string }[]; replyTo: { title: string } | null }
 const input = 'w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -49,7 +49,7 @@ export default function QuotePage() {
   const html = useMemo(() => (q ? quoteHtml(q, { pdf: attachPdf }) : ''), [q, attachPdf])
   const problems = q ? quoteProblems(q) : []
   const value = q ? dealValue(q) : 0
-  const grand = q ? grandTotal(q) : null
+  const totals = q ? orderTotals(q) : []
 
   async function send() {
     if (!q) return
@@ -132,6 +132,8 @@ export default function QuotePage() {
                   <input id={`q-prod-${k}`} className={input} value={it.product} onChange={(e) => setItem(k, { product: e.target.value })} placeholder={k === 0 ? 'Custom Lipstick Boxes' : 'Custom Mascara Boxes'} /></div>
                 {q.items.length > 1 && <button type="button" aria-label={`Remove product ${k + 1}`} onClick={() => set({ items: q.items.filter((_, n) => n !== k) })} className="mb-1 inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-700"><X size={13} aria-hidden /> Remove</button>}
               </div>
+              <div><label className={label} htmlFor={`q-opt-${k}`}>Option (optional — e.g. a delivery time; options are never added together)</label>
+                <input id={`q-opt-${k}`} className={input} value={it.option ?? ''} onChange={(e) => setItem(k, { option: e.target.value })} placeholder="Standard delivery 18-22 business days" /></div>
               <div><label className={label} htmlFor={`q-specs-${k}`}>Specifications (one per line)</label>
                 <textarea id={`q-specs-${k}`} className={input} rows={3} value={it.specs} onChange={(e) => setItem(k, { specs: e.target.value })} placeholder={'Size: 2 x 2 x 4 in\n16pt SBS, matte lamination\n4-color printing outside'} /></div>
               <table className="w-full text-sm">
@@ -157,7 +159,13 @@ export default function QuotePage() {
             className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
             <Plus size={14} aria-hidden /> Add another product
           </button>
-          {grand !== null && <p className="text-xs text-gray-600">Order total for all {q.items.length} products: <b>{money(grand)}</b> (shown in the email because each product has one quantity).</p>}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
+            <label className="inline-flex items-center gap-1.5 select-none font-semibold text-gray-700">
+              <input type="checkbox" checked={q.showTotal !== false} onChange={(e) => set({ showTotal: e.target.checked })} /> Show order total
+            </label>
+            {totals.map((t) => <span key={t.label || 'all'}>{t.label ? `Total — ${t.label}` : `Order total (${t.count} products)`}: <b>{money(t.total)}</b></span>)}
+            {q.showTotal !== false && totals.length === 0 && q.items.length > 1 && <span>No total shown (a product has more than one quantity).</span>}
+          </div>
           <div><label className={label} htmlFor="q-inc">Included (one per line)</label><textarea id="q-inc" className={input} rows={3} value={q.included} onChange={(e) => set({ included: e.target.value })} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={label} htmlFor="q-turn">Turnaround</label><input id="q-turn" className={input} value={q.turnaround} onChange={(e) => set({ turnaround: e.target.value })} /></div>

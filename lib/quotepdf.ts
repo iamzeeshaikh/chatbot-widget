@@ -6,7 +6,7 @@
 // pdf-lib + standard Helvetica, like lib/invoicepdf.ts — the same Latin-1 rule.
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage, type RGB } from 'pdf-lib'
-import { cleanRows, filledItems, grandTotal, type PriceQuote } from './pricequote'
+import { cleanRows, filledItems, orderTotals, type PriceQuote } from './pricequote'
 import { dateLabel, sitePrefix, initials } from './invoicedoc'
 
 const INK = rgb(0.11, 0.13, 0.17)
@@ -145,7 +145,7 @@ export async function buildQuotePdf(q: PriceQuote, o: QuotePdfOptions): Promise<
   let stripe = 0
   items.forEach((it, n) => {
     const rows = cleanRows(it)
-    const name = wrap(`${n + 1}. ${it.product.trim()}`, bold, 9.5, DESC_W)
+    const name = wrap(`${n + 1}. ${it.product.trim()}${(it.option ?? '').trim() ? ` (${(it.option ?? '').trim()})` : ''}`, bold, 9.5, DESC_W)
     const specs = wrap(it.specs.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' | '), font, 8.5, DESC_W)
     const textH = name.length * 12 + specs.length * 11
     const rowsH = rows.length * 15
@@ -167,14 +167,20 @@ export async function buildQuotePdf(q: PriceQuote, o: QuotePdfOptions): Promise<
   })
 
   // ── total ────────────────────────────────────────────────────────────────
-  const g = grandTotal(q) ?? (items.length === 1 && cleanRows(items[0]).length === 1 ? cleanRows(items[0])[0].total : null)
+  let totals = orderTotals(q)
+  if (!totals.length && q.showTotal !== false && items.length === 1 && cleanRows(items[0]).length === 1) totals = [{ label: '', count: 1, total: cleanRows(items[0])[0].total }]
   if (y < 230) newPage()
   page.drawRectangle({ x: L, y: y - 2, width: R - L, height: 2, color: ACC })
-  if (g !== null) {
-    box(L, y - 32, R - L, 30, ACC_SOFT)
-    tr('TOTAL QUOTATION AMOUNT:', 445, y - 21, 10.5, bold, ACC)
-    tr(money(g, cur), R - 10, y - 21, 11, bold, ACC)
-    y -= 32
+  if (totals.length) {
+    for (const tt of totals) {
+      box(L, y - 32, R - L, 30, ACC_SOFT)
+      const lab = tt.label ? `TOTAL - ${tt.label.toUpperCase()}:` : 'TOTAL QUOTATION AMOUNT:'
+      tr(lab.length > 60 ? lab.slice(0, 57) + '...:' : lab, 445, y - 21, 10.5, bold, ACC)
+      tr(money(tt.total, cur), R - 10, y - 21, 11, bold, ACC)
+      y -= 32
+    }
+  } else if (q.showTotal === false) {
+    y -= 2
   } else {
     box(L, y - 30, R - L, 28, ACC_SOFT)
     t('Each quantity above is a separate option - choose the one that suits you best.', L + 10, y - 19, 9, font, ACC)

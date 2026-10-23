@@ -17,6 +17,10 @@ export interface QuoteItem {
   /** One detail per line: size, material, printing, finish… */
   specs: string
   rows: QuoteRow[]
+  /** Which option this product belongs to ("Standard 18-22 days", "Rush").
+   *  Products in different options are never added together (Saifullah,
+   *  2026-10-23: two lead times in one quote, one total confused the customer). */
+  option?: string
 }
 export interface PriceQuote {
   greetingName: string
@@ -28,6 +32,8 @@ export interface PriceQuote {
   validity: string
   closing: string
   currency: string
+  /** false hides every order total from the email and the PDF. */
+  showTotal?: boolean
 }
 
 export const DEFAULT_INCLUDED = ['Free shipping to your doorstep', 'Free 2D and 3D mockups before printing', 'No extra or hidden charges'].join('\n')
@@ -53,7 +59,7 @@ export function normalizeQuote(raw: unknown): PriceQuote {
   const str = (v: unknown, d: string) => (typeof v === 'string' ? v : d)
   const rowsOf = (v: unknown): QuoteRow[] => (Array.isArray(v) ? v : []).map((r) => ({ quantity: str((r as QuoteRow)?.quantity, ''), unitPrice: str((r as QuoteRow)?.unitPrice, '') }))
   let items: QuoteItem[] = Array.isArray(o.items)
-    ? (o.items as unknown[]).map((it) => { const i = (it ?? {}) as Record<string, unknown>; return { product: str(i.product, ''), specs: str(i.specs, ''), rows: rowsOf(i.rows) } })
+    ? (o.items as unknown[]).map((it) => { const i = (it ?? {}) as Record<string, unknown>; return { product: str(i.product, ''), specs: str(i.specs, ''), rows: rowsOf(i.rows), option: str(i.option, '').slice(0, 80) } })
     : [{ product: str(o.product, ''), specs: str(o.specs, ''), rows: rowsOf(o.rows) }]
   items = items.slice(0, 15).map((i) => (i.rows.length ? i : { ...i, rows: [{ quantity: '', unitPrice: '' }] }))
   if (!items.length) items = [blankItem()]
@@ -61,6 +67,7 @@ export function normalizeQuote(raw: unknown): PriceQuote {
     greetingName: str(o.greetingName, ''), intro: str(o.intro, base.intro), items,
     included: str(o.included, base.included), turnaround: str(o.turnaround, base.turnaround),
     validity: str(o.validity, base.validity), closing: str(o.closing, base.closing), currency: str(o.currency, 'USD') || 'USD',
+    showTotal: o.showTotal !== false,
   }
 }
 
@@ -83,15 +90,46 @@ export function quoteTitle(q: PriceQuote): string {
   return `${names[0]} + ${names.length - 1} more`
 }
 
-/** A grand total only means something when each product has ONE quantity. */
-export function grandTotal(q: PriceQuote): number | null {
-  const items = filledItems(q)
-  if (items.length < 2 || items.some((i) => cleanRows(i).length !== 1)) return null
-  return Math.round(items.reduce((a, i) => a + cleanRows(i)[0].total, 0) * 100) / 100
+const optionOf = (i: QuoteItem) => (i.option ?? '').trim()
+
+/** The products grouped by option, in the order the agent wrote them. */
+export function optionGroups(q: PriceQuote): { label: string; items: QuoteItem[] }[] {
+  const out: { label: string; items: QuoteItem[] }[] = []
+  for (const it of filledItems(q)) {
+    const label = optionOf(it)
+    let g = out.find((x) => x.label.toLowerCase() === label.toLowerCase())
+    if (!g) { g = { label, items: [] }; out.push(g) }
+    g.items.push(it)
+  }
+  return out
 }
 
-/** Deal value recorded on send: the first quantity of every product, summed. */
-export const dealValue = (q: PriceQuote) => Math.round(filledItems(q).reduce((a, i) => a + cleanRows(i)[0].total, 0))
+/**
+ * The totals the customer sees: none when the agent switched them off; one per
+ * option when the quote has options (never one across options); otherwise a
+ * single order total for 2+ products. A total only means something when every
+ * product in it has ONE quantity.
+ */
+export function orderTotals(q: PriceQuote): { label: string; count: number; total: number }[] {
+  if (q.showTotal === false) return []
+  const groups = optionGroups(q)
+  const many = groups.length > 1
+  return groups
+    .filter((g) => (many || g.items.length >= 2) && g.items.every((i) => cleanRows(i).length === 1))
+    .map((g) => ({ label: many ? g.label : '', count: g.items.length, total: Math.round(g.items.reduce((a, i) => a + cleanRows(i)[0].total, 0) * 100) / 100 }))
+}
+
+/** Back-compat: the single order total, when there is exactly one. */
+export function grandTotal(q: PriceQuote): number | null {
+  const t = orderTotals(q)
+  return t.length === 1 && !t[0].label ? t[0].total : null
+}
+
+/** Deal value recorded on send: the first quantity of every product in the
+ *  FIRST option (options are alternatives, not additions). */
+export const dealValue = (q: PriceQuote) => Math.round((optionGroups(q)[0]?.items ?? []).reduce((a, i) => a + cleanRows(i)[0].total, 0))
+
+const totalLine = (t: { label: string; count: number }) => t.label ? `Total — ${t.label} (${t.count} product${t.count === 1 ? '' : 's'})` : `Order total (all ${t.count} products)`
 
 export function quoteProblems(q: PriceQuote): string[] {
   const out: string[] = []
@@ -112,12 +150,13 @@ export function quoteText(q: PriceQuote, opts: { pdf?: boolean } = {}): string {
   const many = items.length > 1
   const out = [q.greetingName ? `Hello ${q.greetingName},` : 'Hello,', '', q.intro, '']
   items.forEach((it, n) => {
-    out.push(many ? `${n + 1}. ${it.product}` : it.product, ...lines(it.specs).map((l) => `- ${l}`), '',
+    const opt = optionOf(it) ? ` — ${optionOf(it)}` : ''
+    out.push(many ? `${n + 1}. ${it.product}${opt}` : `${it.product}${opt}`, ...lines(it.specs).map((l) => `- ${l}`), '',
       'Quantity | Unit price | Total',
       ...cleanRows(it).map((r) => `${r.qty.toLocaleString('en-US')} | ${unit(r.unit, q.currency)} | ${money(r.total, q.currency)}`), '')
   })
-  const g = grandTotal(q)
-  if (g !== null) out.push(`Order total (all ${items.length} products): ${money(g, q.currency)}`, '')
+  for (const t of orderTotals(q)) out.push(`${totalLine(t)}: ${money(t.total, q.currency)}`)
+  if (orderTotals(q).length) out.push('')
   if (opts.pdf) out.push(PDF_LINE, '')
   const inc = lines(q.included)
   if (inc.length) out.push('Included:', ...inc.map((l) => `- ${l}`), '')
@@ -134,11 +173,11 @@ export function quoteHtml(q: PriceQuote, opts: { pdf?: boolean } = {}): string {
   const th = 'padding:9px 14px;border:1px solid #d1d5db;background:#111827;color:#ffffff;font-weight:600;text-align:'
   const td = 'padding:9px 14px;border:1px solid #d1d5db;text-align:'
   const inc = lines(q.included)
-  const g = grandTotal(q)
+  const totals = orderTotals(q)
   const block = (it: QuoteItem, n: number) => {
     const specs = lines(it.specs)
     return [
-      `<p style="margin:0 0 6px 0;"><b>${many ? `${n + 1}. ` : ''}${esc(it.product)}</b></p>`,
+      `<p style="margin:0 0 6px 0;"><b>${many ? `${n + 1}. ` : ''}${esc(it.product)}</b>${optionOf(it) ? ` <span style="color:#6b7280;">— ${esc(optionOf(it))}</span>` : ''}</p>`,
       specs.length ? `<ul style="margin:0 0 10px 18px;padding:0;color:#374151;">${specs.map((l) => `<li style="margin:2px 0;">${esc(l)}</li>`).join('')}</ul>` : '',
       `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 ${many ? 20 : 16}px 0;font-size:14px;">`,
       `<tr><th style="${th}left;">Quantity</th><th style="${th}right;">Unit price</th><th style="${th}right;">Total</th></tr>`,
@@ -150,7 +189,7 @@ export function quoteHtml(q: PriceQuote, opts: { pdf?: boolean } = {}): string {
     p(q.greetingName ? `Hello ${q.greetingName},` : 'Hello,'),
     p(q.intro),
     ...items.map(block),
-    g !== null ? `<p style="margin:0 0 16px 0;font-size:15px;"><b>Order total (all ${items.length} products): ${esc(money(g, q.currency))}</b></p>` : '',
+    ...totals.map((t, i) => `<p style="margin:0 0 ${i === totals.length - 1 ? 16 : 4}px 0;font-size:15px;"><b>${esc(totalLine(t))}: ${esc(money(t.total, q.currency))}</b></p>`),
     opts.pdf ? p(PDF_LINE) : '',
     inc.length ? `<p style="margin:0 0 4px 0;"><b>Included with your order:</b></p><ul style="margin:0 0 14px 18px;padding:0;">${inc.map((l) => `<li style="margin:2px 0;">${esc(l)}</li>`).join('')}</ul>` : '',
     q.turnaround.trim() ? `<p style="margin:0 0 4px 0;"><b>Turnaround:</b> ${esc(q.turnaround.trim())}</p>` : '',
