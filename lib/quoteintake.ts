@@ -514,6 +514,8 @@ export function nameFromForwardHeader(body: string): string | null {
 export function isTestSubmission(name: string | null | undefined, email: string | null | undefined, phone: string | null | undefined, body: string): string | null {
   const n = (name ?? '').trim(), e = (email ?? '').trim().toLowerCase()
   if (/\[security test\]|security hardening probe|\bescape probe\b|\brelay probe\b|\bautoreply probe\b/i.test(body)) return 'security test probe'
+  // Our own tests (owner, 2026-10-23: "claude test etc wali remove karo").
+  if (/\bclaude[- ]?test\b|\bTEST LEAD\b|\bsmoke test\b|\bmigration test\b|\bfinal live test\b|please ignore \(|\(mail config check\)|\(redesign check\)/i.test(`${n}\n${body}`)) return 'our own test'
   if (/<\/?[a-z][^>]*>/i.test(n)) return 'HTML tag in the name'
   if (/@example\.(com|net|org)$|@[a-z0-9.-]*\.(local|test|invalid|example)$|@localhost$/i.test(e) || /^[a-z]@[a-z]\.(com|net|org)$/i.test(e)) return `test address ${e}`
   const digits = (phone ?? '').replace(/\D/g, '')
@@ -524,6 +526,10 @@ export function isTestSubmission(name: string | null | undefined, email: string 
 export function isMachineMail(email: string, body: string): string | null {
   if (/dmarc|mailer-daemon|postmaster@/i.test(email) || /DMARC (aggregate )?report|aggregate DMARC report|This domain has a DMARC record|^\s*Report[- ]Domain\s*:[^\n]*Submitter\s*:/im.test(body.slice(0, 1500))) return 'DMARC report'
   if (/##-\s*Please type your reply above this line\s*-##/i.test(body)) return 'ticket-system auto-reply'
+  // OUR order confirmation to a customer ("Hi X, Thank you for your order
+  // TPC-261023-CKYN … What happens next"), copied into the intake mailbox. The
+  // order itself reaches ZeeOps through the checkout notification.
+  if (/Thank you for your order [A-Z]{2,6}-\d{6}-[A-Z0-9]{3,6}\b/.test(body) && /What happens next/i.test(body)) return 'our own order confirmation'
   return null
 }
 
