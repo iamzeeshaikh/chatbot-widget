@@ -574,7 +574,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
         id: newTaskId(),
         title: (assessment.oversize
           ? `Check with production first — ${who} wants ${assessment.product} at ${assessment.oversize}; the bot said we are confirming the size, then send the price quote or an alternative`
-          : `Send the price quote — ${who} gave size, style and quantity (bot replied)`).slice(0, 200),
+          : `Send the price quote — ${who} gave size and style${assessment.hasQuantity ? ' and quantity' : '; NO quantity yet, so quote 250 / 500 / 1,000 as the bot told them'} (bot replied)`).slice(0, 200),
         type: 'email',
         due_at: new Date(Date.now() + 3 * 3600 * 1000).toISOString(),
         assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
@@ -1024,7 +1024,7 @@ export async function answerReply(
   if (answer.complete) {
     const task: CrmTaskEntry = {
       id: newTaskId(),
-      title: `Send the price quote — ${who} has now given size, style and quantity (bot replied)`.slice(0, 200),
+      title: `Send the price quote — ${who} has now given the missing details (bot replied)`.slice(0, 200),
       type: 'email', due_at: new Date(Date.now() + 3 * 3600 * 1000).toISOString(),
       assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }

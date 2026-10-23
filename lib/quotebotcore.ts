@@ -123,7 +123,7 @@ Rules:
   * Standard sizes count: A4, A5, letter, legal, business-card size, a vial or bottle capacity ("2ml vial", "750ml bottle").
   * Cups: TRUE when a capacity is given or picked (8 oz, 12 oz, 16 oz, 250 ml). Cup sleeves: TRUE when the cup size they fit is given. Papers, liners, stickers, labels, bags: TRUE when a width x length (or a picked size option) is given. Otherwise FALSE — our agents asked for it.
 - has_style — TRUE when the product type is clear from what they wrote, the product they picked, or the page they came from (shipping box, mailer box, candle box, tuck end, rigid box, pillow box, burger box, coffee cups, wax paper, sleeves, inserts, dividers…): our agents choose the usual construction for it and quote. Also TRUE with a reference image. FALSE only when all we have is generic "custom boxes", "packaging" or "a box" with no product, page or picture to go on.
-- has_quantity: true when a number of pieces or a range is given.
+- has_quantity: true when a number of pieces or a range is given. Dimensions are NEVER a quantity: in "6 x 5 x 3 white" there is no quantity.
 - has_deadline: true when they said when they need it (a date, "in 3 weeks", "ASAP", an event date).
 - reason: one short English sentence saying what is there and what is missing.
 Judge only from what the customer wrote or chose. Never assume a value they did not give.`
@@ -206,6 +206,15 @@ export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fro
       `${thanks} I've noted the size you gave (${a.oversize}). That is larger than what we usually produce, so I'm checking with our production team whether your ${product} can be made at this size, and I'll come back to you with the answer and the price quote.`,
     )
     if (!a.hasDeadline) parts.push('', 'In the meantime, could you please let me know how soon you need these?')
+  } else if (complete && !a.hasQuantity) {
+    // Size and style but no quantity (Saifullah, 2026-10-23: the customer
+    // never said how many and the bot still wrote "your price quote is in
+    // process"). Ask for it, and say what we will quote meanwhile — the
+    // agents price standard tiers, so the quote is not held up.
+    parts.push(
+      `${thanks} I've noted your ${product}. Could you please let me know the quantity you need? In the meantime, I'll prepare the price quote for our standard quantities (250, 500 and 1,000 pieces) so you can compare.`,
+    )
+    if (!a.hasDeadline) parts.push('', 'Also, how soon do you need these?')
   } else if (complete) {
     parts.push(
       `${thanks} I have everything I need, and the price quote for your ${product} is in process. I'll share it with you shortly.`,
