@@ -58,6 +58,24 @@ export const OVERSIZE_IN = 30
  * Quantities, prices, zip codes and phone numbers never carry a unit or an
  * "x", so they do not match.
  */
+/**
+ * Does the customer's text carry an actual measurement? "Standard", "medium"
+ * or "regular" picked from a form is not a size our agents can price from
+ * (Saifullah, 2026-10-21: Curtis chose Size "Standard" and the bot said the
+ * price quote was in process). Dimensions (6 x 5 x 3, 12x12, 4" x 6"), a
+ * value with a unit (4 inch, 10 cm, 12 oz, 2 ml) or a paper size count.
+ */
+export function hasMeasurement(text: string): boolean {
+  const t = String(text || '')
+  if (/\d+(\.\d+)?\s*("|”|''|in\b|inch|cm\b|mm\b)?\s*(x|×|by|\*)\s*\d/i.test(t)) return true
+  if (/\d+(\.\d+)?\s*(-|\s)?(inch(es)?|in\.|"|”|cm|mm|oz|ozs|ounces?|ml|cl|liters?|litres?|lbs?|gsm|pt)\b/i.test(t)) return true
+  if (/\d+(\.\d+)?\s*("|”)/.test(t)) return true
+  if (/\b(l|length|w|width|h|height|d|depth|dia|diameter)\s*[:=-]?\s*\d+(\.\d+)?\b[\s\S]{0,30}\b(w|width|h|height|d|depth)\s*[:=-]?\s*\d/i.test(t)) return true
+  if (/\b(length|width|height|depth|diameter)\s*[:=-]?\s*\d/i.test(t)) return true
+  if (/\b(A[3-6]|letter[- ]size|business[- ]card[- ]size)\b/i.test(t)) return true
+  return false
+}
+
 export function oversizeIn(text: string): string | null {
   const t = String(text || '').replace(/[×*]/g, 'x').replace(/[“”″]/g, '"')
   // No metres: nobody orders a box in them, and "30M" in a marketing pitch is
