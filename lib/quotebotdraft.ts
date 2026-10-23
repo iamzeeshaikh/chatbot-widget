@@ -16,7 +16,7 @@
 // a dull email beats a wrong one.
 
 import { llmComplete, CLAUDE_WORK_MODEL, CLAUDE_CHAT_MODEL } from './llm'
-import { missingOf, type QuoteAssessment, type Missing } from './quotebotcore'
+import { missingOf, minimumFor, type QuoteAssessment, type Missing } from './quotebotcore'
 
 export interface DraftInput {
   kind: 'first' | 'reply'
@@ -49,6 +49,11 @@ Content rules — the point of this email is that it is about THEM:
 8. Keep it under 120 words. Short beats complete.
 9. If the brief has a SIZE CHECK line, the size they gave is beyond what we normally produce. Then NEVER say the price quote is in process or that you have everything you need. Say you have noted their size (quote the whole size exactly as they gave it — never single out one dimension as the problem), that it is larger than what we usually make, and that you are checking with our production team whether it can be made at this size before coming back with the price quote. Do not suggest a different size or say it is impossible.
 10. When the enquiry is a chat transcript, the customer's words are the "user:" lines; the "assistant:" lines are our chat bot. Any question the customer asked that the bot left to "a specialist" (stock, similar sizes, timing, whether something is doable) is now yours to acknowledge under rule 2 — the customer is waiting on exactly that.
+11. QUANTITY line: if it says NOT GIVEN, ask how many pieces they need (you may add that you can quote our standard quantities of 250, 500 and 1,000 meanwhile), and never say you have everything you need. If it says BELOW MINIMUM, you MUST say our usual minimum (the number given) and that you'll check whether a smaller first run can be arranged.
+12. Samples: never offer, include or promise a sample, free or paid. If they asked for one, say you'll check the sample options and any cost with our team.
+13. A deadline of a few days or less (today, tomorrow, this week, "in 2 days"): be honest that custom boxes take longer than that to produce, so that date is likely too tight, and that you'll check what is possible. Never say the price quote is in process as if the date were fine.
+14. Shipping or mailer boxes for products they sell (candles, jars, bottles, tins): if they gave only a capacity (8oz, 14oz) ask for the exact product dimensions (height and diameter or length x width x height), and if they did not say how many items go in one box, ask whether each box holds one item or several (multi-pack).
+15. If the brief has a FEASIBILITY CHECK line, we cannot make it as asked. Say so plainly in one sentence (e.g. round and cylinder boxes cannot be made from corrugated board), that you are checking with our production team for the closest option, and never say the price quote is in process.
 
 Examples of our agents' real emails (match the tone, not the facts):
 
@@ -82,6 +87,8 @@ function brief(i: DraftInput): string {
     `PRODUCT (as we would name it): ${a.product}`,
     `MISSING: ${missing.length ? missing.map((m) => (m === 'size' ? `size — ask for the ${a.sizeLabel}` : `style — ask for the ${a.styleLabel} (a reference image works)`)).join('; ') : 'nothing'}`,
     `DEADLINE GIVEN: ${a.hasDeadline ? 'yes — do not ask' : 'no'}`,
+    `QUANTITY: ${!a.hasQuantity ? 'NOT GIVEN — ask how many pieces they need' : a.quantity && a.quantity < minimumFor(a.product) ? `${a.quantity} — BELOW MINIMUM of ${minimumFor(a.product)}: say so and offer to check a smaller first run` : `${a.quantity ?? 'given'}`}`,
+    ...(a.feasibility ? [`FEASIBILITY CHECK: ${a.feasibility} — say so, offer the closest option via production, no price promise`] : []),
     ...(a.oversize ? [`SIZE CHECK: ${a.oversize} is beyond what we normally produce — no price promise; say we are confirming with production whether it can be made`] : []),
     '',
     'THE CUSTOMER WROTE:',
@@ -128,6 +135,15 @@ export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[
   if ((t.match(/!/g) ?? []).length > 1) return 'too many exclamation marks'
   if (missing.includes('size') && !/\bsize|dimension|measure/i.test(t)) return 'did not ask for the size'
   if (missing.includes('style') && !/\bstyle|type|shape|reference/i.test(t)) return 'did not ask for the style'
+  if (!a.hasQuantity && !/quantit|how many/i.test(t)) return 'did not ask for the quantity'
+  if (!a.hasQuantity && /everything I need/i.test(t)) return 'claims everything is in hand without a quantity'
+  if (a.hasQuantity && a.quantity && a.quantity < minimumFor(a.product) && !/minimum/i.test(t)) return 'quantity below our minimum not mentioned'
+  if (/\b(I'll|I will|we'll|we will|can)\s+(include|send|provide|ship|offer|arrange)\b[^.]{0,40}\bsamples?\b/i.test(t)) return 'promised a sample'
+  if (a.feasibility) {
+    if (/in process|everything I need|is being prepared/i.test(t)) return 'promised a price quote for something we cannot make'
+    if (!/production|closest|alternative|option/i.test(t)) return 'cannot-make request but no alternative mentioned'
+    return null
+  }
   if (a.oversize) {
     if (/in process|everything I need|is being prepared|working on (the|your) price/i.test(t)) return 'promised a price quote for an oversized request'
     if (!/production team|can be made|possible at|feasib|able to make|whether we can/i.test(t)) return 'oversized request but no production check mentioned'

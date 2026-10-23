@@ -27,6 +27,11 @@ export interface QuoteAssessment {
   hasSize: boolean
   hasStyle: boolean
   hasQuantity: boolean
+  /** The smallest number of pieces they asked for, when they gave one. */
+  quantity?: number | null
+  /** Something we cannot make as asked (a round box in corrugated), or undefined.
+   *  Like oversize: no price promise, a person suggests the closest option. */
+  feasibility?: string
   /** A dimension beyond what we normally produce ("50 x 30 x 20 in"), or undefined. The
    *  bot must not promise a price for it; a person checks with production first. */
   oversize?: string
@@ -68,7 +73,12 @@ export const OVERSIZE_IN = 30
 export function hasMeasurement(text: string): boolean {
   const t = String(text || '')
   if (/\d+(\.\d+)?\s*("|”|''|in\b|inch|cm\b|mm\b)?\s*(x|×|by|\*)\s*\d/i.test(t)) return true
-  if (/\d+(\.\d+)?\s*(-|\s)?(inch(es)?|in\.|"|”|cm|mm|oz|ozs|ounces?|ml|cl|liters?|litres?|lbs?|gsm|pt)\b/i.test(t)) return true
+  if (/\d+(\.\d+)?\s*(-|\s)?(inch(es)?|in\.|"|”|cm|mm)\b/i.test(t)) return true
+  // A capacity is a size for cups, sleeves, vials and bottles — not for a box
+  // around a candle jar or tin, where the agents need its real dimensions.
+  if (/\d+(\.\d+)?\s*(oz|ozs|ounces?|ml|cl|liters?|litres?)\b/i.test(t) && /\b(cups?|sleeves?|vials?|bottles?|tumblers?|lids?)\b/i.test(t) && !/\b(candles?|jars?|tins?)\b/i.test(t)) return true
+  // Shoe and clothing sizes the box has to fit ("men's sizes 8-12", "size 10 shoes").
+  if (/\b(shoes?|sneakers?|boots?)\b/i.test(t) && /\bsizes?\s*\d{1,2}(\.5)?\b/i.test(t)) return true
   if (/\d+(\.\d+)?\s*("|”)/.test(t)) return true
   if (/\b(l|length|w|width|h|height|d|depth|dia|diameter)\s*[:=-]?\s*\d+(\.\d+)?\b[\s\S]{0,30}\b(w|width|h|height|d|depth)\s*[:=-]?\s*\d/i.test(t)) return true
   if (/\b(length|width|height|depth|diameter)\s*[:=-]?\s*\d/i.test(t)) return true
@@ -76,8 +86,25 @@ export function hasMeasurement(text: string): boolean {
   return false
 }
 
+/** A request we cannot make as asked, in words for the agent and the email. */
+export function feasibilityIn(text: string): string | null {
+  const t = String(text || '')
+  if (/\b(round|cylind\w*|tubes?|circular)\b/i.test(t) && /\b(corrugat\w*|\d+\s*ECT|flute[ds]?|single[- ]wall|double[- ]wall)\b/i.test(t)) return 'a round or cylinder box in corrugated board, which we cannot make'
+  return null
+}
+
+/** Our usual minimum for this product, as the agents quote it. */
+export function minimumFor(product: string): number {
+  const p = product.toLowerCase()
+  if (/cups?|sleeves?/.test(p)) return 1000
+  if (/mailers?|bags?|pouch/.test(p) && !/box/.test(p)) return 500
+  return 250
+}
+
 export function oversizeIn(text: string): string | null {
   const t = String(text || '').replace(/[×*]/g, 'x').replace(/[“”″]/g, '"')
+    // "H178.6 x W91.1 x D61.5cm": a side's letter in front of its number.
+    .replace(/(^|[\s(,:;])[LWHD]\s*[:=]?\s*(?=\d)/gi, '$1')
   // No metres: nobody orders a box in them, and "30M" in a marketing pitch is
   // thirty million.
   const unitIn = (u: string) => /^(cm|centimet)/i.test(u) ? 1 / 2.54 : /^(mm|millimet)/i.test(u) ? 1 / 25.4 : /^(ft|feet|foot)/i.test(u) ? 12 : 1
@@ -127,7 +154,7 @@ export function missingOf(a: QuoteAssessment): Missing[] {
 export const ASSESS_SYSTEM = `You read one enquiry that reached a custom packaging company (boxes, cups, sleeves, wax paper, stickers, mailers, trays, inserts, presentation and tax-return folders and similar) and report, as JSON only, what the customer has told us. We run many websites, one per product line (thecustomfolders.com, thewaxpapers.co, shopcardboardboxes.com, …): the site named in a form, in a "Site:" line or in "New quote request from <site>" is OUR OWN site that the customer used, never another company.
 
 Return exactly this object and nothing else:
-{"is_quote": boolean, "language": "en", "first_name": string|null, "product": string, "style_label": string, "size_label": string, "has_size": boolean, "has_style": boolean, "has_quantity": boolean, "has_deadline": boolean, "reason": string}
+{"is_quote": boolean, "language": "en", "first_name": string|null, "product": string, "style_label": string, "size_label": string, "has_size": boolean, "has_style": boolean, "has_quantity": boolean, "quantity": number|null, "has_deadline": boolean, "reason": string}
 
 Rules:
 - is_quote: true when a real person shows interest in packaging we make, even with no details at all: a quote form with an empty message, a product page enquiry, "what sizes do you have?", or a chat where they only answered "yes" to the product question. Those are exactly the people we must ask for details. False ONLY for spam, SEO/marketing/data pitches, suppliers or factories selling to us, job seekers, test submissions with random characters, a placeholder with no person behind it ("Site not identified", "I need more info about Thank You"), or a chat where the visitor never said anything.
@@ -138,10 +165,13 @@ Rules:
 - size_label: how to ask THIS product's size, at most 45 characters, lower case: "box size (length x width x height)" for boxes and inserts, "cup size (8 oz, 12 oz, 16 oz...)" for cups, "sleeve size or the cup size it fits" for cup sleeves, "sheet size (width x length)" for papers, "sticker size (width x height)" for stickers, "mailer size (width x length)" for mailers and bags.
 - has_size — decide the way our sales agents did on ~360 real quotes:
   * Boxes, sleeves, inserts, trays, tubes, displays, mailer/shipping boxes: TRUE when the customer gave the box dimensions (three, or two plus height for a round box), OR the size of the product that goes inside (e.g. "10 oz tumbler 3.5 in high", "2ml vial", "fits a 750ml bottle", "8x8x6"), OR picked a size OPTION from a field on our form ("Size: Slider", "Size: Large"). FALSE for vague words in their own message ("medium size", "small to large", "standard size"), a single number for a box ("12-15 inch round box" with no height), or no size at all.
-  * Standard sizes count: A4, A5, letter, legal, business-card size, a vial or bottle capacity ("2ml vial", "750ml bottle").
+  * Standard sizes count: A4, A5, letter, legal, business-card size, a vial or bottle capacity ("2ml vial", "750ml bottle"), and shoe or clothing sizes the box must fit ("men's shoe sizes 8-12").
+  * A candle, jar or tin CAPACITY ("8oz tin", "14oz glass candle") is NOT a size for a box: our agents ask for the exact product dimensions (height and diameter). Saifullah, 2026-10-23.
+  * A size word picked or typed with no measurement ("Size: Standard", "medium") is FALSE.
   * Cups: TRUE when a capacity is given or picked (8 oz, 12 oz, 16 oz, 250 ml). Cup sleeves: TRUE when the cup size they fit is given. Papers, liners, stickers, labels, bags: TRUE when a width x length (or a picked size option) is given. Otherwise FALSE — our agents asked for it.
 - has_style — TRUE when the product type is clear from what they wrote, the product they picked, or the page they came from (shipping box, mailer box, candle box, tuck end, rigid box, pillow box, burger box, coffee cups, wax paper, sleeves, inserts, dividers…): our agents choose the usual construction for it and quote. Also TRUE with a reference image. FALSE only when all we have is generic "custom boxes", "packaging" or "a box" with no product, page or picture to go on.
 - has_quantity: true when a number of pieces or a range is given. Dimensions are NEVER a quantity: in "6 x 5 x 3 white" there is no quantity.
+- quantity: the SMALLEST number of pieces they asked for, as a plain number ("qty 15" → 15, "100, 500 and 2,000" → 100, "50 of each size" → 50); null when none.
 - has_deadline: true when they said when they need it (a date, "in 3 weeks", "ASAP", an event date).
 - reason: one short English sentence saying what is there and what is missing.
 Judge only from what the customer wrote or chose. Never assume a value they did not give.`
@@ -170,6 +200,7 @@ export function parseAssessment(text: string): QuoteAssessment | null {
     // then gets asked which style they want for the style they already named.
     hasStyle: bool(o.has_style) || namesAStyle(product),
     hasQuantity: bool(o.has_quantity),
+    quantity: typeof o.quantity === 'number' && o.quantity > 0 ? Math.round(o.quantity) : null,
     reason: typeof o.reason === 'string' ? o.reason.trim().slice(0, 300) : '',
   }
 }
@@ -219,7 +250,11 @@ export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fro
   const product = a.product
 
   const parts: string[] = [greet, '']
-  if (complete && a.oversize) {
+  if (a.feasibility) {
+    parts.push(
+      `${thanks} I've noted your request for ${product}. Round and cylinder boxes cannot be made from corrugated board, so I'm checking with our production team for the closest option for you, and I'll come back to you with that and the price quote.`,
+    )
+  } else if (complete && a.oversize) {
     parts.push(
       `${thanks} I've noted the size you gave (${a.oversize}). That is larger than what we usually produce, so I'm checking with our production team whether your ${product} can be made at this size, and I'll come back to you with the answer and the price quote.`,
     )

@@ -63,7 +63,7 @@ import {
   ASSESS_SYSTEM, BOT_ACTOR, parseAssessment, buildFirstEmail, missingOf, buildFollowUp,
   FOLLOW_UP_GAP_DAYS, CALL_TASK_EVERY, REPLY_SYSTEM, parseReplyDecision, buildReplyAnswer,
   buildQuoteFollowUp, currentOrNextCampaign, buildPromoEmail, promoFooterHtml, type Missing,
-  quoteTextForAssessment, emailHtml, type QuoteAssessment, oversizeIn, hasMeasurement,
+  quoteTextForAssessment, emailHtml, type QuoteAssessment, oversizeIn, hasMeasurement, feasibilityIn,
 } from './quotebotcore'
 
 export const CRM_BOT_ROLE = 'crm_bot'
@@ -300,7 +300,7 @@ export async function assessQuote(message: string, name: string | null): Promise
   const a = parseAssessment(r.text)
   // A container's capacity is a size: "2ml vial", "10 oz tumbler", "750ml
   // bottle" — the box is built around it, and our agents priced from it.
-  if (a && !a.hasSize && /\b\d+(\.\d+)?\s?(ml|oz|cl|l)\b/i.test(message) && /vial|bottle|jar|tumbler|candle|cup|tin|can\b/i.test(message)) a.hasSize = true
+  if (a && !a.hasSize && /\b\d+(\.\d+)?\s?(ml|oz|cl|l)\b/i.test(message) && /vial|bottle|tumbler|cup/i.test(message) && !/candle|jar|\btins?\b/i.test(message)) a.hasSize = true
   if (a && !a.hasSize && /\b(A[3-6]|letter[- ]size|business[- ]card[- ]size)\b/i.test(message)) a.hasSize = true
   // A size word with no measurement anywhere ("Standard", "Medium") is not a
   // size: ask for it rather than promise a quote (hasMeasurement).
@@ -308,6 +308,7 @@ export async function assessQuote(message: string, name: string | null): Promise
   // A size we may not be able to make at all: no price promise, a person
   // checks with production first (oversizeIn, lib/quotebotcore.ts).
   if (a) { const big = oversizeIn(message); if (big) a.oversize = big }
+  if (a) { const no = feasibilityIn(message); if (no) a.feasibility = no }
   return a
 }
 
