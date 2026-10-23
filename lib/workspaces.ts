@@ -52,6 +52,8 @@ export const PACKAGING_SITES = [
   'shopmylarbagsuk',
   // 2026-10-23: rigid boxes (UK).
   'shoprigidboxesuk',
+  // 2026-10-23: tuck boxes (UK).
+  'tuckboxesuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.

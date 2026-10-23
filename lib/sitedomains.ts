@@ -56,6 +56,7 @@ export const SITE_DOMAINS: Record<string, string> = {
   thecosmeticpackaginguk: 'thecosmeticpackaging.co.uk',
   shopmylarbagsuk: 'shopmylarbags.co.uk',
   shoprigidboxesuk: 'shoprigidboxes.co.uk',
+  tuckboxesuk: 'tuckboxes.co.uk',
   // Sports workspace
   texasfootball: 'texasfootballuniforms.com',
   volleyballuniforms: 'thevolleyballuniforms.com',
