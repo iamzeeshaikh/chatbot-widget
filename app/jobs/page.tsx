@@ -16,7 +16,7 @@ import PushButton from './PushButton'
 import { timeAgo } from '@/lib/datetime'
 import {
   JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, JOB_DESIGNERS,
-  JOB_TRACKS, JOB_TRACK_LABEL, statusesOf, type JobTrack,
+  JOB_TRACKS, JOB_TRACK_LABEL, statusesOf, trackForType, type JobTrack,
   type Job, type JobType,
 } from '@/lib/jobs'
 
@@ -52,7 +52,7 @@ function JobsPage() {
 
   const nameOf = useCallback((email: string) => members.find((m) => m.email === email)?.name ?? (email ? email.split('@')[0] : 'Unassigned'), [members])
   // Two boards — design work and production work move through different steps.
-  const [track, setTrack] = useState<JobTrack>(search.get('track') === 'production' ? 'production' : 'design')
+  const [track, setTrack] = useState<JobTrack>(((JOB_TRACKS as readonly string[]).includes(search.get('track') ?? '') ? search.get('track') : 'design') as JobTrack)
   const shown = useMemo(() => (jobs ?? []).filter((j) => j.track === track && (!mine || j.assignee === me || j.createdBy === me)), [jobs, mine, me, track])
   const countOf = (t: JobTrack) => (jobs ?? []).filter((j) => j.track === t && j.status !== 'shipped' && j.status !== 'approved').length
   const columns = statusesOf(track)
@@ -147,7 +147,7 @@ function NewJob({ members, track, leadId, onClose, onCreated }: { members: Membe
   const [title, setTitle] = useState('')
   // A production order goes straight onto the Production board (a reorder of
   // an approved design); everything else starts as design work.
-  const [type, setType] = useState<JobType>(track === 'production' ? 'production' : 'estimate')
+  const [type, setType] = useState<JobType>(track === 'production' ? 'production' : track === 'estimate' ? 'estimate' : 'design_2d3d')
   // The designer/estimator by default — that is who almost every job is for.
   const designers = Object.values(JOB_DESIGNERS).flat()
   const [assignee, setAssignee] = useState(() => members.find((m) => designers.includes(m.email))?.email ?? '')
@@ -160,7 +160,7 @@ function NewJob({ members, track, leadId, onClose, onCreated }: { members: Membe
     e.preventDefault()
     setBusy(true); setErr('')
     const r = await fetch('/api/jobs', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title, type, track: type === 'production' ? 'production' : 'design', assignee, dueAt, requirements, leadId }) })
+      body: JSON.stringify({ title, type, track: trackForType(type), assignee, dueAt, requirements, leadId }) })
     const j = await r.json().catch(() => ({}))
     setBusy(false)
     if (!r.ok) { setErr(j.error ?? 'Could not create the job.'); return }

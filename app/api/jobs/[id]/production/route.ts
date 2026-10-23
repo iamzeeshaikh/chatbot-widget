@@ -17,7 +17,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const all = await listJobs(m.workspace)
   const design = all.find((j) => j.id === id)
   if (!design || (design.siteId && !canAccessSite(m, design.siteId))) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (design.track !== 'design') return NextResponse.json({ error: 'Only a design job can be sent to production.' }, { status: 400 })
+  if (design.track === 'production') return NextResponse.json({ error: 'Only a design job can be sent to production.' }, { status: 400 })
   if (design.productionJobId && all.some((j) => j.id === design.productionJobId)) {
     return NextResponse.json({ error: 'This job is already in production.', job: all.find((j) => j.id === design.productionJobId) }, { status: 409 })
   }

@@ -55,9 +55,16 @@ export const JOB_TYPE_STYLE: Record<JobType, string> = {
 // two boards: Design & Estimates (the designer/estimator, checked by the CSR)
 // and Production (stock to shipped). An approved design job can open its own
 // production job with one button. Stages can grow later — add them here.
-export const JOB_TRACKS = ['design', 'production'] as const
+// Three boards since 2026-10-23 (owner: "design, estimation aur production alag
+// alag kar dein"): Estimation holds `estimate` jobs, Design every other design job.
+export const JOB_TRACKS = ['design', 'estimate', 'production'] as const
 export type JobTrack = (typeof JOB_TRACKS)[number]
-export const JOB_TRACK_LABEL: Record<JobTrack, string> = { design: 'Design & Estimates', production: 'Production' }
+export const JOB_TRACK_LABEL: Record<JobTrack, string> = { design: 'Design', estimate: 'Estimation', production: 'Production' }
+
+/** Which board a new job of this type belongs on. */
+export function trackForType(type: string | undefined): JobTrack {
+  return type === 'production' ? 'production' : type === 'estimate' ? 'estimate' : 'design'
+}
 
 export const DESIGN_STATUSES = ['pending', 'in_process', 'verification', 'approved'] as const
 export const PRODUCTION_STATUSES = ['stock', 'printing', 'lamination', 'die_cutting', 'packing', 'shipped'] as const
@@ -215,6 +222,8 @@ export function parseJob(message: string | null | undefined): Job | null {
     if (!(JOB_TRACKS as readonly string[]).includes(j.track)) {
       j.track = (PRODUCTION_STATUSES as readonly string[]).includes(j.status) || j.type === 'production' ? 'production' : 'design'
     }
+    // Estimate jobs saved on the old shared design board move to Estimation.
+    if (j.track === 'design' && j.type === 'estimate') j.track = 'estimate'
     if (!statusesOf(j.track).includes(j.status)) j.status = statusesOf(j.track)[0]
     return j
   } catch { return null }

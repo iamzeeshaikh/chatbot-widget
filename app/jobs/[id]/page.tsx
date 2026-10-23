@@ -115,7 +115,7 @@ export default function JobPage() {
   const steps = statusesOf(job.track)
   const idx = steps.indexOf(job.status)
   const next = NEXT_ACTION[job.status]
-  const canSendToProduction = job.track === 'design' && job.status === 'approved' && !job.productionJobId
+  const canSendToProduction = job.track !== 'production' && job.status === 'approved' && !job.productionJobId
 
   return (
     <main className="min-h-screen bg-gray-50">

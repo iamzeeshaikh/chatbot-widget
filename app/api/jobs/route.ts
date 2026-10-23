@@ -4,7 +4,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { isJobsOnly } from '@/lib/jobsonly'
 import { resolveLeadSite } from '@/lib/leadrecord'
 import { listJobs, jobCount, writeJob, workspaceMembers, notifyJob } from '@/lib/jobstore'
-import { cleanJobInput, newJobId, statusesOf, JOB_TYPE_LABEL, type Job } from '@/lib/jobs'
+import { cleanJobInput, newJobId, statusesOf, trackForType, JOB_TYPE_LABEL, type Job } from '@/lib/jobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,9 +46,9 @@ export async function POST(req: NextRequest) {
     id: newJobId(),
     number: `J-${String((await jobCount(c.m.workspace)) + 1).padStart(4, '0')}`,
     title: input.title,
-    track: input.track ?? (input.type === 'production' ? 'production' : 'design'),
+    track: input.track ?? trackForType(input.type),
     type: input.type ?? (input.track === 'production' ? 'production' : 'other'),
-    status: statusesOf(input.track ?? (input.type === 'production' ? 'production' : 'design'))[0],
+    status: statusesOf(input.track ?? trackForType(input.type))[0],
     requirements: input.requirements ?? '', assignee: input.assignee ?? '',
     leadId: input.leadId ?? '', leadName, siteId, dueAt: input.dueAt ?? '',
     estimate: input.estimate ?? null,
