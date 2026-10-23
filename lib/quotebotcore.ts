@@ -37,6 +37,8 @@ export interface QuoteAssessment {
   oversize?: string
   /** They asked for a sample or prototype — never promised, always acknowledged. */
   asksSample?: boolean
+  /** Shipping boxes for candles/jars with no word on how many go in one box. */
+  askPackCount?: boolean
   /** One line, for the ledger and the person reading it. */
   reason: string
 }
@@ -278,6 +280,11 @@ export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fro
       `${thanks} I've noted your ${product}. Could you please let me know the quantity you need? In the meantime, I'll prepare the price quote for our standard quantities (250, 500 and 1,000 pieces) so you can compare.`,
     )
     if (!a.hasDeadline) parts.push('', 'Also, how soon do you need these?')
+  } else if (complete && a.quantity && a.quantity < minimumFor(product)) {
+    parts.push(
+      `${thanks} Our usual minimum is ${minimumFor(product)} per size or design, but I'll check with our team whether a smaller first run of ${a.quantity} can be arranged, and I'll share the price quote with you shortly.${sampleLine}`,
+    )
+    if (!a.hasDeadline) parts.push('', 'In the meantime, could you please let me know how soon you need these?')
   } else if (complete) {
     parts.push(
       `${thanks} I have everything I need, and the price quote for your ${product} is in process. I'll share it with you shortly.${sampleLine}`,

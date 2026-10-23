@@ -310,6 +310,7 @@ export async function assessQuote(message: string, name: string | null): Promise
   if (a) { const big = oversizeIn(message); if (big) a.oversize = big }
   if (a) { const no = feasibilityIn(message); if (no) a.feasibility = no }
   if (a && /\b(samples?|prototypes?)\b/i.test(message)) a.asksSample = true
+  if (a && /shipping|mailer|corrugat/i.test(`${a.product} ${message}`) && /\b(candles?|jars?|tins?|bottles?)\b/i.test(message) && !/(per|each|one) box|multi[- ]?pack|\bsingle\b|\d+\s*(candles|jars|tins|bottles)\s*(per|in each|in one)/i.test(message)) a.askPackCount = true
   return a
 }
 

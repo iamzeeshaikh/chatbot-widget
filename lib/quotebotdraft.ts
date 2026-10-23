@@ -88,6 +88,8 @@ function brief(i: DraftInput): string {
     `MISSING: ${missing.length ? missing.map((m) => (m === 'size' ? `size — ask for the ${a.sizeLabel}` : `style — ask for the ${a.styleLabel} (a reference image works)`)).join('; ') : 'nothing'}`,
     `DEADLINE GIVEN: ${a.hasDeadline ? 'yes — do not ask' : 'no'}`,
     `QUANTITY: ${!a.hasQuantity ? 'NOT GIVEN — ask how many pieces they need' : a.quantity && a.quantity < minimumFor(a.product) ? `${a.quantity} — BELOW MINIMUM of ${minimumFor(a.product)}: say so and offer to check a smaller first run` : `${a.quantity ?? 'given'}`}`,
+    ...(a.askPackCount ? ['PACK COUNT: not given — ask whether each shipping box holds one item or several (multi-pack), and the exact product dimensions'] : []),
+    ...(a.asksSample ? ['SAMPLE: they asked for a sample — rule 12'] : []),
     ...(a.feasibility ? [`FEASIBILITY CHECK: ${a.feasibility} — say so, offer the closest option via production, no price promise`] : []),
     ...(a.oversize ? [`SIZE CHECK: ${a.oversize} is beyond what we normally produce — no price promise; say we are confirming with production whether it can be made`] : []),
     '',
@@ -149,8 +151,11 @@ export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[
     if (!/production team|can be made|possible at|feasib|able to make|whether we can/i.test(t)) return 'oversized request but no production check mentioned'
     return null
   }
-  if (!missing.length && !/price quote/i.test(t)) return 'complete brief but no mention of the price quote'
-  if (!missing.length && !/process|shortly|work|get back|put .{0,12}together|prepar|ready|send|share|calculat|numbers/i.test(t)) return 'complete brief but no "quote in process"'
+  if (a.askPackCount && !/each box|per box|multi[- ]?pack|single|one (item|candle|jar)|how many (candles|jars|items|tins|bottles)/i.test(t)) return 'did not ask how many items go in one box'
+  // An honest "that date is too tight" (rule 13) stands in for "in process".
+  const tight = /too tight|tight|longer than that|longer to produce|what is possible|what's possible/i.test(t)
+  if (!missing.length && !tight && !/\bquote\b/i.test(t)) return 'complete brief but no mention of the price quote'
+  if (!missing.length && !tight && !/process|shortly|work|get back|put .{0,12}together|prepar|ready|send|share|calculat|numbers|confirm|check/i.test(t)) return 'complete brief but no "quote in process"'
   if (missing.length && /everything I need/i.test(t)) return 'claims everything is in hand'
   return null
 }
