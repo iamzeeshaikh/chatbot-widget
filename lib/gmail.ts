@@ -762,9 +762,15 @@ export async function fetchAttachment(
   return new Uint8Array(Buffer.from(j.data, 'base64url'))
 }
 
-function htmlToText(html: string): string {
+export function htmlToText(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, '')
+    // Source line breaks and indentation mean nothing in HTML (a browser
+    // collapses them). Left in, "<td>Name</td>\n  <td>Cassie Dye</td>" came
+    // out as "Name" and "Cassie Dye" on separate lines, so HTML-only form
+    // mails (The Wax Papers, Lip Boxes, Pillow Boxes) never read as forms
+    // to the server pull and waited on the Gmail script (2026-10-23).
+    .replace(/>\s+</g, '> <')
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n')
