@@ -112,7 +112,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = '2026-10-03';
+var SCRIPT_VERSION = '2026-10-23';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -702,6 +702,27 @@ function processQuoteLeads() {
             String(thread.getFirstMessageSubject() || '').slice(0, 70));
         }
       }
+      // A customer who writes to info@<our site> BY HAND (not through a form)
+      // has no "Email:" line for the parser and the thread has no site label,
+      // so it used to be skipped — two real RFQs on 22-23 Oct 2026 (a 2-vial
+      // peptide kit, 1,000 scrunchie gift boxes) never reached ZeeOps (owner:
+      // "ye dono zeeops men kiun nahi gae"). Addressed to one of OUR site
+      // addresses + written by a person = a lead; the sender's address comes
+      // from From/Reply-To. Pitches are still dropped by the server's filter.
+      if (!fbAny) {
+        for (var dm = 0; dm < umsgs.length; dm++) {
+          var dmsg = umsgs[dm];
+          var dcode = codeFromOwnRecipient_(recipientsOf_(dmsg));
+          if (!dcode || !isPersonalMail_(dmsg)) continue;
+          var dparsed = leadFromMessage_(dmsg);
+          if (!dparsed || dparsed.unreadable) continue;
+          if (postLead_(dcode, dparsed, dmsg.getDate(), dmsg)) {
+            sent++; noLabel++; fbAny = true;
+            noLabelHits.push(dcode + '  direct mail  ' + Utilities.formatDate(dmsg.getDate(), 'UTC', 'yyyy-MM-dd') + '  ' +
+              String(thread.getFirstMessageSubject() || '').slice(0, 70));
+          }
+        }
+      }
       if (fbAny) { addLabel_(thread, processedLabel); continue; }
 
       // A checkout thread whose store name isn't in STORE_NAME_CODES would
@@ -1151,6 +1172,27 @@ function isMachineMessage_(msg) {
   var head = String(msg.getPlainBody() || '').slice(0, 800);
   return /DMARC (aggregate )?report|aggregate DMARC report|This domain has a DMARC record/i.test(head);
 }
+// Written by a person, to us — not a newsletter, notification, receipt or
+// our own mail. Used only for hand-written mail to one of our site addresses.
+function isPersonalMail_(msg) {
+  if (isMachineMessage_(msg)) return false;
+  var from = String(msg.getFrom() || '').toLowerCase();
+  var addr = (from.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/) || [''])[0];
+  if (!addr || isOwnAddress_(addr)) return false;
+  var me = '';
+  try { me = String(Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) {}
+  if (me && addr === me) return false;
+  if (/^(no-?reply|do-?not-?reply|notifications?|notify|alerts?|mailer|bounces?|news(letter)?|marketing|billing|invoices?|receipts?|support|hello@(mail|e|em)\.|info@(mail|e|em)\.)/.test(addr)) return false;
+  if (/@(.*\.)?(google|googlemail|youtube|vercel|github|namecheap|cloudflare|paypal|stripe|wise|facebookmail|linkedin|shopify|wordpress|godaddy|hostinger|siteground|mailchimp|hubspot|zoom|slack|apple|microsoft|amazon(ses)?|meta|twilio|calendly)\.com$/.test(addr)) return false;
+  try {
+    if (msg.getHeader('List-Unsubscribe') || msg.getHeader('List-Id')) return false;
+    if (/bulk|list|junk/i.test(String(msg.getHeader('Precedence') || ''))) return false;
+    var auto = String(msg.getHeader('Auto-Submitted') || '');
+    if (auto && !/^no$/i.test(auto)) return false;
+  } catch (e) {}
+  return true;
+}
+
 function machineOnly_(messages) {
   if (!messages.length) return false;
   for (var i = 0; i < messages.length; i++) if (!isMachineMessage_(messages[i])) return false;
