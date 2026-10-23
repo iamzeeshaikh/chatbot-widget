@@ -386,6 +386,9 @@ const NOT_A_CUSTOMER_RE = new RegExp([
   String.raw`visual case[- ]study series|can i show you a few ideas in`,
   String.raw`targeted visitors coming to your site|we launch campaigns in less than`,
   String.raw`share your pitch deck|explore business opportunities for your company`,
+  String.raw`trucking capacity|\bFTL,? LTL\b|any shipments coming up|shipments that need (transportation|truck coverage)`,
+  String.raw`editorially reviewed articles|articles include links back to your site|free visibility check`,
+  String.raw`\(OEM/ODM\)|\bOEM/ODM\b`,
   String.raw`looks after systems, feel free to pass this on|software that works for the people using it`,
   String.raw`meet shoppers where they.?re\s+buying|join tiktok shop|\bm\.tiktok\.shop/`,
   String.raw`site options with established audiences|relevant content placements|share the current rates and placement`,
@@ -519,7 +522,11 @@ export function isTestSubmission(name: string | null | undefined, email: string 
   if (/<\/?[a-z][^>]*>/i.test(n)) return 'HTML tag in the name'
   if (/@example\.(com|net|org)$|@[a-z0-9.-]*\.(local|test|invalid|example)$|@localhost$/i.test(e) || /^[a-z]@[a-z]\.(com|net|org)$/i.test(e)) return `test address ${e}`
   const digits = (phone ?? '').replace(/\D/g, '')
-  if (digits.length >= 7 && /^(\d)\1+$/.test(digits)) return `test phone ${phone}`
+  // A filler phone (0000000, 1111111111) on its own is not a test: real
+  // customers skip the field that way (Tucker's paper tubes, Zaccary's ice-cube
+  // grid, a nonprofit's shoeboxes — all real, 2026-10-23 audit). Only with no
+  // usable email as well is it a test.
+  if (digits.length >= 7 && /^(\d)\1+$/.test(digits) && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(e)) return `test phone ${phone}`
   return null
 }
 
