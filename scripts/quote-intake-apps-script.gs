@@ -609,6 +609,12 @@ function processQuoteLeads() {
   // the first one was handled. The message-date watermark below is what stops
   // the same message being sent twice.
   var cutoff = readWatermark_();
+  // Never chase a backlog older than MAX_BACKLOG_MS on an ordinary run (owner,
+  // 2026-10-23: a 7-day rewind stopped on its time budget every run, so the
+  // watermark never moved and every 30 minutes re-read the same ~1,000
+  // threads until Gmail's daily allowance ran out and intake stopped for the
+  // day). The daily catch-up and a rewind are the only runs allowed further.
+  if (!FORCE_DEEP_SCAN && !REWIND_RUN) cutoff = Math.max(cutoff, Date.now() - MAX_BACKLOG_MS);
   // Scope the search to the watermark, not to a fixed RECENT_DAYS window — on a
   // 30-minute trigger that is a handful of threads instead of a week's worth,
   // which both slashes the Gmail quota AND keeps the run clear of
@@ -823,7 +829,7 @@ function processQuoteLeads() {
 // see, so without this they stay invisible forever. Costs no Gmail quota at
 // all (it only writes a property); everything already ingested comes straight
 // back as `deduped` from the server.
-var REWIND_DAYS = 7;
+var REWIND_DAYS = 2;
 
 // ── Daily catch-up (label-it-later insurance) ────────────────────────────────
 // The watermark asks "is this MESSAGE newer than the last run?". That is the
@@ -845,6 +851,9 @@ var REWIND_DAYS = 7;
 // timer, e.g. 2am–3am. KEEP the 30-minute processQuoteLeads trigger as well —
 // this is a safety net under it, not a replacement.
 var CATCHUP_DAYS = 2;
+// How far back an ordinary 30-minute run may look, whatever the watermark says.
+var MAX_BACKLOG_MS = 30 * 60 * 60 * 1000;
+var REWIND_RUN = false;
 
 function dailyCatchUp() {
   var target = Date.now() - CATCHUP_DAYS * 24 * 60 * 60 * 1000;
@@ -880,7 +889,8 @@ function rewindWatermark() {
   saveWatermark_(target + WATERMARK_OVERLAP_MS); // readWatermark_ subtracts the overlap again
   Logger.log('Watermark rewound to ' + new Date(target) +
     ' — re-reading everything since then now.');
-  processQuoteLeads();
+  REWIND_RUN = true;
+  try { processQuoteLeads(); } finally { REWIND_RUN = false; }
 }
 
 // Why did THIS email never become a lead? Put anything that identifies it in
@@ -1184,12 +1194,10 @@ function isPersonalMail_(msg) {
   if (me && addr === me) return false;
   if (/^(no-?reply|do-?not-?reply|notifications?|notify|alerts?|mailer|bounces?|news(letter)?|marketing|billing|invoices?|receipts?|support|hello@(mail|e|em)\.|info@(mail|e|em)\.)/.test(addr)) return false;
   if (/@(.*\.)?(google|googlemail|youtube|vercel|github|namecheap|cloudflare|paypal|stripe|wise|facebookmail|linkedin|shopify|wordpress|godaddy|hostinger|siteground|mailchimp|hubspot|zoom|slack|apple|microsoft|amazon(ses)?|meta|twilio|calendly)\.com$/.test(addr)) return false;
-  try {
-    if (msg.getHeader('List-Unsubscribe') || msg.getHeader('List-Id')) return false;
-    if (/bulk|list|junk/i.test(String(msg.getHeader('Precedence') || ''))) return false;
-    var auto = String(msg.getHeader('Auto-Submitted') || '');
-    if (auto && !/^no$/i.test(auto)) return false;
-  } catch (e) {}
+  // Bulk mail is told apart by its body, NOT by getHeader(): every getHeader
+  // call is a Gmail call, and four of them per message helped exhaust the
+  // daily allowance on 23 Oct 2026.
+  if (/\bunsubscribe\b|manage (your )?(email )?preferences|view (this email )?in (your )?browser/i.test(String(msg.getPlainBody() || '').slice(-3000))) return false;
   return true;
 }
 
