@@ -16,6 +16,7 @@
 // a dull email beats a wrong one.
 
 import { llmComplete, CLAUDE_WORK_MODEL, CLAUDE_CHAT_MODEL } from './llm'
+import { lessonsBlock } from './botlearn'
 import { missingOf, minimumFor, type QuoteAssessment, type Missing } from './quotebotcore'
 
 export interface DraftInput {
@@ -167,6 +168,8 @@ export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[
 export async function draftCustomerEmail(i: DraftInput): Promise<{ text: string; model: string } | null> {
   const missing = missingOf(i.assessment)
   const user = brief(i)
+  // What the team has taught it (lib/botlearn.ts), after the hard rules.
+  const system = SYSTEM + (await lessonsBlock())
   // Two tries on the work model (the second told what was wrong with the
   // first), then one on the chat model. Temperature is left to the vendor
   // default: Claude 5 refuses the parameter.
@@ -175,7 +178,7 @@ export async function draftCustomerEmail(i: DraftInput): Promise<{ text: string;
   for (const a of attempts) {
     const content = lastProblem ? `${user}\n\nYOUR PREVIOUS DRAFT WAS REJECTED: ${lastProblem}. Rewrite it following every rule.` : user
     const r = await llmComplete({
-      system: SYSTEM, messages: [{ role: 'user', content }],
+      system, messages: [{ role: 'user', content }],
       maxTokens: 500, anthropicMaxTokens: 450, model: a.model, timeoutMs: 30000,
     })
     if (r.error || !r.text.trim()) continue
