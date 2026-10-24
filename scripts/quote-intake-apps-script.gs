@@ -1402,7 +1402,10 @@ function codeFromOwnRecipient_(toHeader) {
   var found = null;
   for (var code in SITE_DOMAINS) {
     if (isIgnoredLeaf_(code)) continue;
-    if (text.indexOf('@' + SITE_DOMAINS[code].toLowerCase()) === -1) continue;
+    // The WHOLE domain: "@thewaxpapers.co" must not match info@thewaxpapers.co.uk
+    // (a UK site that is not in ZeeOps — Abigail Murrell, 24 Oct 2026).
+    var dom = SITE_DOMAINS[code].toLowerCase().replace(/[.]/g, '\\.');
+    if (!new RegExp('@' + dom + '(?![a-z0-9.-])').test(text)) continue;
     if (found && found !== code) return null;
     found = code;
   }
@@ -1970,7 +1973,10 @@ function attachmentPlan_(msg) {
 function leadFromMessage_(msg) {
   var plain = msg.getPlainBody();
   var parsed = parseLeadBody_(plain);
-  if (parsed.email || parsed.phone) return parsed;
+  if (parsed.email) return parsed;
+  // A phone in a hand-written email's signature is not the whole contact: the
+  // sender's address still has to come from Reply-To/From below, or the lead
+  // has no email and cannot be deduped or answered (Westend RFQ, 24 Oct 2026).
   var emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   var subject = String(msg.getSubject() || '');
   var from = String(msg.getFrom() || '');
@@ -1984,13 +1990,17 @@ function leadFromMessage_(msg) {
     var hit = heads[i].match(emailRe);
     if (hit && !isOwnAddress_(hit[0])) {
       parsed.email = hit[0];
-      if (!parsed.name) {
+      parsed.unreadable = false;
+      // A hand-written email has no "Name:" field, so whatever the parser
+      // guessed from the body is a sentence, not a name — use the sender's.
+      if (!parsed.name || !looksLikeFormSubmission_(plain)) {
         var nm = heads[i].replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
         if (nm && nm.indexOf('@') === -1) parsed.name = nm;
       }
       return parsed;
     }
   }
+  if (parsed.phone) return parsed;   // no usable address, but a number to call
   parsed.unreadable = true;
   parsed.message = 'Needs a look: ZeeOps could not find an email or phone in this enquiry. Open it in Gmail.\n' +
     'Subject: ' + subject + '\n\n' + String(parsed.message || plain || '').slice(0, 1800);
