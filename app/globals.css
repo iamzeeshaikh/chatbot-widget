@@ -309,3 +309,16 @@ html.dark[data-ws="sports"] .to-blue-50 { --tw-gradient-to: rgba(34, 197, 94, 0.
 .mail-thread .text-\[11px\] { font-size: 0.875rem; line-height: 1.5; }
 .mail-thread .text-\[10px\] { font-size: 0.8125rem; line-height: 1.4; }
 .mail-thread .leading-snug { line-height: 1.55; }
+
+/* Sales ledger in dark mode (owner, 2026-10-24: the filter bar turned light
+   grey and hid its labels; the "Via" chips were dark text on dark). */
+html.dark .bg-gray-50\/60 { background-color: rgba(30, 41, 59, 0.6) !important; }
+html.dark .text-sky-800 { color: #7dd3fc !important; }
+html.dark .bg-fuchsia-50 { background-color: rgba(217, 70, 239, 0.14) !important; }
+html.dark .text-fuchsia-800 { color: #f0abfc !important; }
+html.dark .border-fuchsia-200 { border-color: rgba(217, 70, 239, 0.4) !important; }
+html.dark .text-indigo-800 { color: #a5b4fc !important; }
+html.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.14) !important; }
+html.dark .text-emerald-800 { color: #6ee7b7 !important; }
+html.dark .border-emerald-200 { border-color: rgba(16, 185, 129, 0.4) !important; }
+html.dark .text-amber-800 { color: #fcd34d !important; }
