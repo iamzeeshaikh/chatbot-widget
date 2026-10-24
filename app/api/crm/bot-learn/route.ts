@@ -4,7 +4,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { learnFromTeam, readLessons, writeLessons, type BotLesson } from '@/lib/botlearn'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+export const maxDuration = 300
 
 // The quote bot's daily lesson from the team (lib/botlearn.ts).
 //   GET            cron (Bearer CRON_SECRET) or an admin: learn from the last day

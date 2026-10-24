@@ -173,11 +173,12 @@ export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number } =
     `EMAILS AGENTS WROTE THEMSELVES (${counts.human}):`,
     ...sig.human.slice(0, 25).map((e, i) => `#${i + 1}\nCUSTOMER WROTE:\n${e.customer || '(new enquiry)'}\nAGENT REPLIED:\n${e.agent}`),
   ].join('\n').slice(0, 60000)
-  const r = await llmComplete({ system: LEARN_SYSTEM, messages: [{ role: 'user', content: user }], maxTokens: 3000, anthropicMaxTokens: 3000, model: CLAUDE_WORK_MODEL, timeoutMs: 90000 })
-  if (r.error) return { ok: false, why: 'the model did not answer', signals: counts, before: current.lessons.length }
+  const r = await llmComplete({ system: LEARN_SYSTEM, messages: [{ role: 'user', content: user }], maxTokens: 8000, anthropicMaxTokens: 8000, model: CLAUDE_WORK_MODEL, timeoutMs: 110000 })
+  if (r.error || !r.text.trim()) return { ok: false, why: 'the model did not answer', signals: counts, before: current.lessons.length }
   const m = r.text.match(/\{[\s\S]*\}/)
   let parsed: { lessons?: { text?: string; from?: string; evidence?: string }[] } = {}
   try { parsed = m ? JSON.parse(m[0]) : {} } catch { parsed = {} }
+  if (!Array.isArray(parsed.lessons)) return { ok: false, why: `could not read the model's answer (stop: ${r.stopReason || '?'}): ${r.text.slice(0, 300)}`, signals: counts, before: current.lessons.length }
   const now = new Date().toISOString()
   const owner = current.lessons.filter((l) => l.from === 'owner')
   const learned: BotLesson[] = (parsed.lessons ?? [])
