@@ -215,6 +215,9 @@ var LABEL_ALIASES = {
   // Note this is NOT "candle": that name belongs to The Candle Packaging (TCP),
   // a different site, so the alias has to carry the word "sleeves".
   'candle sleeves': 'TCSL',
+  // "Extra Outsource Projects/tds" is The Die Cut Stickers (owner confirmed
+  // 2026-10-24); its code is TDCS, so the short leaf matched nothing.
+  'tds': 'TDCS',
 };
 
 // The one place a label leaf becomes a site code. Returns the code, or null.
