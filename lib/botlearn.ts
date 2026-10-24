@@ -80,8 +80,11 @@ export async function gatherSignals(hours = 26): Promise<LearnSignals> {
     supabase.from('chat_logs').select('session_id, message, created_at').eq('role', CRM_BOT_DRAFT_ROLE).in('site_id', sites)
       .gte('created_at', draftSince).order('created_at', { ascending: true }).limit(3000),
     supabase.from('chat_logs').select('session_id, message, created_at').in('role', [CRM_EMAIL_ROLE, 'crm_email_in']).in('site_id', sites)
-      .gte('created_at', new Date(Date.now() - (hours + 240) * 3600_000).toISOString()).order('created_at', { ascending: true }).limit(8000),
+      // NEWEST first, then reversed: with a cap and oldest-first, the cap
+      // eats exactly the recent emails this pass is for (CLAUDE.md §6).
+      .gte('created_at', new Date(Date.now() - (hours + 72) * 3600_000).toISOString()).order('created_at', { ascending: false }).limit(8000),
   ])
+  emails?.reverse()
   // Each draft id: its first (bot) revision and its decided revision.
   const byId = new Map<string, { session: string; first: BotDraft; last: BotDraft; lastAt: string }>()
   for (const r of drafts ?? []) {
@@ -150,6 +153,8 @@ Rules for lessons:
 - General, never about one customer: no names, emails, phone numbers, company names, prices, order numbers or dates.
 - Only what the agents' behaviour clearly shows. Skip typos, signatures and small rewording.
 - Never a lesson that writes a price, a discount, a turnaround promise or a free sample — those stay with the agent.
+- Never a lesson that sends the customer to another supplier, turns a customer away, or tells the bot to state a fact it cannot know (an exact maximum size, stock, a capability, a lead time). The bot only knows what the customer wrote plus these facts: we make to the customer's own size and design; free 2D/3D mockups and design support; free shipping; no hidden charges; minimum usually 250 per size or design (1,000 cups and sleeves, 500 mailers and bags), and a smaller first run can be checked.
+- The bot's fixed rules already cover: asking for missing size/style/quantity, stating the minimum when the quantity is below it, never promising samples, being honest about tight deadlines, oversized sizes and round corrugated boxes going to production. Do not restate those; learn what goes BEYOND them (wording, what to ask for which product, what to leave out).
 - Merge with the EXISTING lessons: keep the ones still right (unchanged text, same "from"), improve or merge near-duplicates, drop ones the new evidence contradicts. Keep every lesson whose "from" is "owner" unchanged.
 - At most ${MAX_LESSONS} lessons in total, most useful first.`
 
@@ -177,7 +182,7 @@ export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number } =
   const owner = current.lessons.filter((l) => l.from === 'owner')
   const learned: BotLesson[] = (parsed.lessons ?? [])
     .filter((l) => typeof l.text === 'string' && l.text.trim().length > 10)
-    .filter((l) => !/[$€£]\s?\d|\bfree sample/i.test(String(l.text)))
+    .filter((l) => !/[$€£]\s?\d|\bfree sample|alternat\w* (source|supplier|vendor)|another (supplier|vendor|company)|elsewhere/i.test(String(l.text)))
     .map((l, i) => {
       const text = clip(String(l.text), 260)
       const prev = current.lessons.find((x) => x.text === text)
