@@ -852,7 +852,7 @@ var REWIND_DAYS = 2;
 // this is a safety net under it, not a replacement.
 var CATCHUP_DAYS = 2;
 // How far back an ordinary 30-minute run may look, whatever the watermark says.
-var MAX_BACKLOG_MS = 30 * 60 * 60 * 1000;
+var MAX_BACKLOG_MS = 6 * 60 * 60 * 1000;
 var REWIND_RUN = false;
 
 function dailyCatchUp() {
