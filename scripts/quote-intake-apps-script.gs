@@ -566,7 +566,32 @@ function processQuoteLeadsBackfill() {
     (stoppedEarly ? ' — stopped early (time budget); run again to continue.' : ' — done, nothing left to process.'));
 }
 
+// ── Self-scheduling daily catch-up (owner, 2026-10-24) ──────────────────────
+// The 30-minute run only looks back MAX_BACKLOG_MS, and the separate
+// dailyCatchUp trigger turned out not to exist in the project — so mail from
+// the 23 Oct outage never got its ZeeOps label or reached ZeeOps, and the owner
+// had to notice. Now the ordinary trigger does the catch-up itself: the first
+// run after CATCHUP_EVERY_MS since the last one re-covers CATCHUP_DAYS, deep.
+// The time is saved BEFORE the pass, so a pass cut short by the time budget is
+// not retried every 30 minutes (that is what exhausted Gmail on 23 Oct).
+var CATCHUP_KEY = 'ZEEOPS_LAST_CATCHUP_MS';
+var CATCHUP_EVERY_MS = 20 * 60 * 60 * 1000;
+
 function processQuoteLeads() {
+  if (!FORCE_DEEP_SCAN && !REWIND_RUN) {
+    var props = PropertiesService.getScriptProperties();
+    var last = parseInt(props.getProperty(CATCHUP_KEY), 10) || 0;
+    if (Date.now() - last > CATCHUP_EVERY_MS) {
+      props.setProperty(CATCHUP_KEY, String(Date.now()));
+      Logger.log('Daily catch-up: re-covering the last ' + CATCHUP_DAYS + ' days (deep).');
+      dailyCatchUp();
+      return;
+    }
+  }
+  processQuoteLeadsCore_();
+}
+
+function processQuoteLeadsCore_() {
   var start = Date.now();
   // Cheap routine run, or the periodic deep one that re-reads the last
   // DEEP_LOOKBACK_MS regardless of the watermark? See "Gmail call budget".
@@ -863,6 +888,7 @@ function dailyCatchUp() {
   // The whole point of this run is to re-read mail whose own date is old —
   // exactly what the routine date gate drops — so it always runs deep.
   FORCE_DEEP_SCAN = true;
+  try { PropertiesService.getScriptProperties().setProperty(CATCHUP_KEY, String(Date.now())); } catch (e) {}
   saveWatermark_(target + WATERMARK_OVERLAP_MS); // readWatermark_ subtracts the overlap again
   Logger.log('dailyCatchUp: watermark pulled back to ' + new Date(target) +
     ' — re-covering ' + CATCHUP_DAYS + ' day(s), then running the normal pass.');
