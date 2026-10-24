@@ -10,6 +10,22 @@
  * daily) and the ZEEOPS_WEBHOOK_SECRET script property — nothing else changes.
  */
 var ENGINE_URL = 'https://chat.zeeops.dev/api/intake/script';
+
+// NEVER CALLED. Apps Script decides which permissions to ask for by reading
+// THIS file's code, and the engine's Gmail calls live on the server — without
+// these lines saving the loader silently dropped the Gmail permission and every
+// run failed with "Specified permissions are not sufficient" (24 Oct 2026).
+// Keep one call for every Google service the engine uses.
+function permissionsTheEngineNeeds_() {
+  GmailApp.search('in:inbox', 0, 1);
+  GmailApp.getMessagesForThreads(GmailApp.getInboxThreads(0, 1));
+  GmailApp.getUserLabels();
+  GmailApp.getUserLabelByName('ZeeOps/Processed');
+  GmailApp.createLabel('ZeeOps/Processed').addToThread(GmailApp.getInboxThreads(0, 1)[0]);
+  UrlFetchApp.fetch(ENGINE_URL);
+  Session.getActiveUser().getEmail();
+  Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy');
+}
 var ENGINE_CHUNK = 8000;
 
 function engineFetch_() {
