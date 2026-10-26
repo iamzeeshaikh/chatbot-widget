@@ -556,7 +556,11 @@ export function isMachineMail(email: string, body: string): string | null {
   // order itself reaches ZeeOps through the checkout notification.
   // OUR acknowledgement to a customer ("Hi X, thanks for writing to us. A real
   // person reads every request…") copied into the intake mailbox.
-  if (/\bA (real )?person (on our team )?reads every (request|message|enquiry)/i.test(body)) return 'our own auto-reply'
+  // Only the customer's own lines count: a REPLY quotes our acknowledgement
+  // underneath, and that must not make the reply look like ours (Lone
+  // Sorensen, 2026-10-26: "only 4 boxes, can that be done?" was dropped).
+  const own = body.split(/\n\s*On .{4,160}wrote:\s*\n|\n-{2,}\s*Original Message/i)[0].split('\n').filter((l) => !/^\s*>/.test(l)).join('\n')
+  if (/\bA (real )?person (on our team )?reads every (request|message|enquiry)/i.test(own)) return 'our own auto-reply'
   if (/Thank you for your order [A-Z]{2,6}-\d{6}-[A-Z0-9]{3,6}\b/.test(body) && /What happens next/i.test(body)) return 'our own order confirmation'
   return null
 }
