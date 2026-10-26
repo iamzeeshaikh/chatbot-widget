@@ -77,6 +77,8 @@ export const CRM_ROLES = [
   CRM_NOT_A_LEAD_ROLE,
   // What the quote bot learned from the team (lib/botlearn.ts) — reserved site.
   'crm_bot_lessons',
+  // PayPal payments synced into the packaging ledger (lib/paypalsync.ts).
+  'crm_paypal_sync',
   // Payouts (lib/payouts.ts) — on the reserved site too; see below.
   'crm_payout', 'crm_expense',
   // Both live on the reserved zeeops-crm site, not on a lead — but registered

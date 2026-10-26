@@ -200,7 +200,7 @@ export async function leadRefs(): Promise<LeadRef[]> {
   return out
 }
 
-async function currentStage(leadId: string): Promise<string | null> {
+export async function currentStage(leadId: string): Promise<string | null> {
   const { data } = await supabase.from('chat_logs').select('message').eq('session_id', leadId).eq('role', CRM_STAGE_ROLE)
     .order('created_at', { ascending: false }).limit(1)
   return parseCrmStage(data?.[0]?.message)?.stage ?? null
