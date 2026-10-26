@@ -7,6 +7,7 @@ import { sendPushToWorkspace } from '@/lib/push'
 import { recordIntakeDrop } from '@/lib/intakedrop'
 import { recordIntakeLag } from '@/lib/intakelag'
 import { phoneFromText } from '@/lib/identity'
+import { CRM_EMAIL_IN_ROLE, splitQuoted } from '@/lib/emailreply'
 
 export const dynamic = 'force-dynamic'
 
@@ -268,6 +269,43 @@ export async function POST(req: NextRequest) {
   // the artwork attached, so a longer follow-up replaces the stored text
   // rather than being thrown away. The lead keeps its id, status and original
   // timestamp.
+  // A customer REPLYING to us (owner, 2026-10-26: Lone Sorensen answered the
+  // site's acknowledgement with "only 4 boxes, can that be done?" and it never
+  // reached ZeeOps — it was folded away as a same-day duplicate). Hand-written
+  // text, no form fields, from someone who already has a lead on this site in
+  // the last 30 days: it goes on THAT lead's timeline as an inbound email and
+  // the team is told. Not a new lead, not dropped.
+  if (cleanEmail && tag === QUOTE_TAG) {
+    let visible = bodyText
+    try { visible = splitQuoted(bodyText).visible || bodyText } catch { /* keep */ }
+    const formLines = visible.split('\n').filter((l) => /^\s*(full name|name|e-?mail|email address|phone|product|quantity|size|length|width|height|unit|material|print(ing)?|company|message|wall|finish)\s*:/i.test(l)).length
+    if (formLines < 2 && visible.trim().length > 0) {
+      const since = new Date(Date.now() - 30 * 864e5).toISOString()
+      const { data: prior } = await supabase.from('leads').select('id').eq('site_id', siteId).ilike('email', cleanEmail)
+        .gte('created_at', since).order('created_at', { ascending: false }).limit(1)
+      const lead = prior?.[0]
+      if (lead) {
+        const sessionId = `quote-${lead.id}`
+        const key = `intake-reply-${createdAt}-${visible.replace(/\s+/g, ' ').trim().slice(0, 60)}`
+        const { data: seen } = await supabase.from('chat_logs').select('id').eq('session_id', sessionId).eq('role', CRM_EMAIL_IN_ROLE)
+          .like('message', `%${key.replace(/[%_]/g, '')}%`).limit(1)
+        if (!seen?.length) {
+          const subj = typeof body.subject === 'string' ? body.subject.slice(0, 200) : 'Reply'
+          await supabase.from('chat_logs').insert({ session_id: sessionId, site_id: siteId, role: CRM_EMAIL_IN_ROLE, message: JSON.stringify({
+            gmailId: key.replace(/[%_]/g, ''), threadId: '', messageId: '', inReplyTo: null, from: cleanEmail, fromName: leadName || null,
+            to: '', subject: subj, body: visible.trim().slice(0, 8000), quoted: null, snippet: visible.replace(/\s+/g, ' ').trim().slice(0, 140),
+            at: createdAt, direction: 'inbound',
+          }) })
+          await sendPushToWorkspace(siteWorkspace(siteId) || 'packaging', {
+            title: `Customer replied — ${leadName || cleanEmail}`, body: visible.replace(/\s+/g, ' ').trim().slice(0, 140),
+            url: `/leads/${encodeURIComponent(sessionId)}`, tag: `reply-${lead.id}`,
+          })
+        }
+        return NextResponse.json({ success: true, deduped: true, reply: true })
+      }
+    }
+  }
+
   if (cleanEmail && tag === QUOTE_TAG) {
     const dayStart = `${createdAt.slice(0, 10)}T00:00:00Z`
     const dayEnd = new Date(new Date(dayStart).getTime() + 86400000).toISOString()
