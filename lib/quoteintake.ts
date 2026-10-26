@@ -532,6 +532,10 @@ export function isTestSubmission(name: string | null | undefined, email: string 
   const n = (name ?? '').trim(), e = (email ?? '').trim().toLowerCase()
   if (/\[security test\]|security hardening probe|\bescape probe\b|\brelay probe\b|\bautoreply probe\b/i.test(body)) return 'security test probe'
   // Our own tests (owner, 2026-10-23: "claude test etc wali remove karo").
+  // Launch/QA forms on new sites (2026-10-26 backfill: "TEST ux", "TEST smtp",
+  // "QA Test", "Audit Test", "Live Test (Claude)", SMTP test sends).
+  if (/^\s*(test|qa)\b/i.test(n) || /\b(audit|live|qa|smtp|launch) test\b/i.test(n)) return 'our own test'
+  if (/\bSMTP test\b|\bTest send from info@|\bTEST (ux|smtp|launch|audit|short|build|rail|diff|concept)/.test(body)) return 'our own test'
   if (/\bclaude[- ]?test\b|\bTEST LEAD\b|\bsmoke test\b|\bmigration test\b|\bfinal live test\b|please ignore \(|\(mail config check\)|\(redesign check\)/i.test(`${n}\n${body}`)) return 'our own test'
   if (/<\/?[a-z][^>]*>/i.test(n)) return 'HTML tag in the name'
   if (/@example\.(com|net|org)$|@[a-z0-9.-]*\.(local|test|invalid|example)$|@localhost$/i.test(e) || /^[a-z]@[a-z]\.(com|net|org)$/i.test(e)) return `test address ${e}`
@@ -550,6 +554,9 @@ export function isMachineMail(email: string, body: string): string | null {
   // OUR order confirmation to a customer ("Hi X, Thank you for your order
   // TPC-261023-CKYN … What happens next"), copied into the intake mailbox. The
   // order itself reaches ZeeOps through the checkout notification.
+  // OUR acknowledgement to a customer ("Hi X, thanks for writing to us. A real
+  // person reads every request…") copied into the intake mailbox.
+  if (/\bA (real )?person (on our team )?reads every (request|message|enquiry)/i.test(body)) return 'our own auto-reply'
   if (/Thank you for your order [A-Z]{2,6}-\d{6}-[A-Z0-9]{3,6}\b/.test(body) && /What happens next/i.test(body)) return 'our own order confirmation'
   return null
 }
