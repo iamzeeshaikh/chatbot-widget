@@ -337,12 +337,16 @@ export function NetProfitCard({ month, t, avgMargin, awaitingRevenuePkr, version
   const expenses = Math.round(shown.reduce((a, e) => a + e.pkr.value, 0))
   const expEstimated = shown.some((e) => e.pkr.estimated || e.pkr.missing)
   const net = t.profitPkr - expenses
+  // SEO is a "Marketing" expense paid to "SEO" (owner adds it per month). When
+  // it is in, the card is after SEO; until then it says so plainly.
+  const seoIn = shown.some((e) => e.category === 'marketing' && /\bseo\b/i.test(e.payee))
+  const seoLabel = seoIn ? 'after SEO cost' : 'without SEO cost'
   const estExtra = avgMargin !== null && t.awaitingCosting > 0 ? Math.round(awaitingRevenuePkr * avgMargin) : null
   const period = month ? monthLabel(month) : 'All months'
   const tone = (n: number) => (n >= 0 ? 'text-green-700' : 'text-red-700')
 
   return (
-    <Card title={`Net profit (without SEO cost) — Model Town Direct · ${period}`} icon={Wallet} className="mb-4">
+    <Card title={`Net profit (${seoLabel}) — Model Town Direct · ${period}`} icon={Wallet} className="mb-4">
       {rows === null ? <p className="px-3 py-4 text-xs text-gray-500">Loading…</p> : (
         <div className="px-3 py-3 grid grid-cols-1 md:grid-cols-[repeat(3,auto)_1fr] gap-x-6 gap-y-2 items-baseline text-sm">
           <div>
@@ -358,7 +362,7 @@ export function NetProfitCard({ month, t, avgMargin, awaitingRevenuePkr, version
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">= Net profit</p>
             <p className={`tabular-nums text-xl font-bold ${tone(net)}`}>{money(net, 'PKR')}</p>
-            <p className="text-[10px] text-gray-500">without SEO cost</p>
+            <p className="text-[10px] text-gray-500">{seoLabel}</p>
           </div>
           <div className="text-xs text-gray-600 md:text-right">
             {t.awaitingCosting > 0 ? (
