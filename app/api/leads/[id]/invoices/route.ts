@@ -5,6 +5,8 @@ import { buildSheet, readInvoice, suggestFromTimeline } from '@/lib/invoice'
 import { listInvoices, saveInvoice } from '@/lib/invoicestore'
 import { loadAgentSignatures } from '@/lib/signature'
 import { pktDayKey } from '@/lib/datetime'
+import { siteWorkspace } from '@/lib/workspaces'
+import { paypalConfigured } from '@/lib/paypalapi'
 import {
   blankInvoice, cleanInvoiceDoc, newInvoiceId, poNumber, sitePrefix, type InvoiceDoc,
 } from '@/lib/invoicedoc'
@@ -67,6 +69,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     ok: true, invoices, prefill,
     lead: { id, name: record.contact.name, email: record.contact.email, siteId: record.siteId, siteName: record.siteName },
     prefix, logoUrl: `/api/logo/${encodeURIComponent(record.siteId)}`,
+    paypal: paypalConfigured() && siteWorkspace(record.siteId) === 'packaging',
   })
 }
 

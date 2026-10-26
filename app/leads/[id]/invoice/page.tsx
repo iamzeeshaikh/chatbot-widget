@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
-import { ArrowLeft, Download, Plus, Save, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, Plus, Save, Send, Trash2 } from 'lucide-react'
 import { CopyButton } from '../ui'
 import {
   blankInvoice, dateLabel, lineCents, money, poNumber, prefixOf, rateLabel, shipParty, totals,
@@ -23,6 +23,8 @@ interface Loaded {
   lead: { id: string; name: string; email: string; siteId: string; siteName: string }
   prefix: string
   logoUrl: string
+  /** The lead is packaging and PayPal is connected. */
+  paypal?: boolean
 }
 
 const input = 'w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
@@ -88,6 +90,21 @@ export default function InvoicePage() {
     if (saved) window.location.href = `${api}/${encodeURIComponent(saved.id)}/pdf`
   }
 
+  async function sendPaypal() {
+    const saved = dirty || !doc.id ? await save() : doc
+    if (!saved) return
+    const total = totals(saved).total
+    const dep = window.prompt(`Send invoice #${saved.number} (${money(total, saved.currency)}) to ${data?.lead.email || 'the customer'} through PayPal?\n\nPayPal will email it to the customer now.\nFor a deposit, type the minimum they may pay first (e.g. ${Math.round(total / 2)}). Leave empty for full payment.`, '')
+    if (dep === null) return
+    setBusy(true); setMsg(null)
+    try {
+      const r = await fetch(`${api}/${encodeURIComponent(saved.id)}/paypal`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ deposit: Number(dep.replace(/[^0-9.]/g, '')) || 0 }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { setMsg({ ok: false, text: j.error ?? 'PayPal did not take the invoice.' }); return }
+      setMsg({ ok: true, text: `Sent through PayPal as invoice ${j.paypalNumber}. The payer link is saved on the lead; payment will be recorded by itself.` })
+    } catch { setMsg({ ok: false, text: 'PayPal did not take the invoice.' }) } finally { setBusy(false) }
+  }
+
   async function remove() {
     if (!doc.id || !window.confirm(`Remove invoice #${doc.number}?`)) return
     const r = await fetch(`${api}?inv=${encodeURIComponent(doc.id)}`, { method: 'DELETE' })
@@ -143,6 +160,12 @@ export default function InvoicePage() {
               className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50">
               <Save size={14} aria-hidden /> {dirty || !doc.id ? 'Save' : 'Saved'}
             </button>
+            {data.paypal && (
+              <button type="button" onClick={() => void sendPaypal()} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#003087] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+                <Send size={14} aria-hidden /> Send via PayPal
+              </button>
+            )}
             <button type="button" onClick={download} disabled={busy}
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               <Download size={14} aria-hidden /> Download PDF

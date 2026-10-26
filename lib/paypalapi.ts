@@ -23,6 +23,18 @@ async function token(): Promise<string> {
   return tok.value
 }
 
+async function call<T>(method: 'POST' | 'DELETE', path: string, body?: unknown): Promise<{ status: number; json: T | null; location: string | null }> {
+  const r = await fetch(`${API}${path}`, {
+    method, headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  const text = await r.text()
+  if (!r.ok) throw new Error(`PayPal ${method} ${path.split('?')[0]} ${r.status}: ${text.slice(0, 300)}`)
+  let json: T | null = null
+  try { json = text ? JSON.parse(text) as T : null } catch { json = null }
+  return { status: r.status, json, location: r.headers.get('location') }
+}
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${await token()}` } })
   if (!r.ok) throw new Error(`PayPal ${path.split('?')[0]} ${r.status}: ${(await r.text()).slice(0, 160)}`)
@@ -129,4 +141,77 @@ export async function gbpPkrOn(day: string): Promise<number | null> {
     } catch { /* next */ }
   }
   return null
+}
+
+export interface NewPpInvoice {
+  number?: string
+  currency: string
+  date: string            // YYYY-MM-DD
+  dueDate?: string
+  recipient: { email: string; name: string; company: string; address: string; phone: string }
+  shipTo?: { name: string; company: string; address: string } | null
+  items: { name: string; description: string; quantity: number; unitPrice: number }[]
+  taxPercent: number
+  note: string
+  terms: string
+  reference: string
+  /** Allow part payment with this minimum (a deposit), or null for full only. */
+  minimumDue: number | null
+}
+
+/** PayPal's next number in the account's own sequence ("0017"). */
+export async function nextInvoiceNumber(): Promise<string> {
+  const r = await call<{ invoice_number?: string }>('POST', '/v2/invoicing/generate-next-invoice-number')
+  return String(r.json?.invoice_number ?? '')
+}
+
+/** Create a DRAFT invoice on the packaging PayPal account. Returns its id. */
+export async function createDraft(i: NewPpInvoice): Promise<{ id: string; number: string }> {
+  const [given, ...rest] = i.recipient.name.trim().split(/\s+/)
+  const lines = (a: string) => a.split(/\n+/).map((x) => x.trim()).filter(Boolean)
+  const addr = lines(i.recipient.address)
+  const body = {
+    detail: {
+      invoice_number: i.number || undefined,
+      reference: i.reference.slice(0, 120) || undefined,
+      invoice_date: i.date, currency_code: i.currency,
+      note: i.note.slice(0, 4000) || undefined, term: i.terms.slice(0, 4000) || undefined,
+      payment_term: i.dueDate && i.dueDate !== i.date ? { due_date: i.dueDate } : { term_type: 'DUE_ON_RECEIPT' },
+    },
+    primary_recipients: [{
+      billing_info: {
+        name: { given_name: given || i.recipient.name, surname: rest.join(' ') || undefined },
+        business_name: i.recipient.company || undefined,
+        email_address: i.recipient.email,
+        additional_info: addr.length ? addr.join(', ').slice(0, 400) : undefined,
+      },
+      ...(i.shipTo ? { shipping_info: { name: { given_name: i.shipTo.name || given }, business_name: i.shipTo.company || undefined } } : {}),
+    }],
+    items: i.items.map((it) => ({
+      name: it.name.slice(0, 200), description: it.description.slice(0, 1000) || undefined,
+      quantity: String(it.quantity), unit_amount: { currency_code: i.currency, value: it.unitPrice.toFixed(it.unitPrice < 1 ? 4 : 2) },
+      ...(i.taxPercent > 0 ? { tax: { name: 'Tax', percent: String(i.taxPercent) } } : {}),
+      unit_of_measure: 'QUANTITY',
+    })),
+    configuration: {
+      allow_tip: false, tax_inclusive: false,
+      ...(i.minimumDue && i.minimumDue > 0 ? { partial_payment: { allow_partial_payment: true, minimum_amount_due: { currency_code: i.currency, value: i.minimumDue.toFixed(2) } } } : {}),
+    },
+  }
+  const r = await call<{ id?: string; href?: string; detail?: { invoice_number?: string } }>('POST', '/v2/invoicing/invoices', body)
+  const id = r.json?.id ?? String(r.json?.href ?? r.location ?? '').split('/').pop() ?? ''
+  if (!id) throw new Error('PayPal did not return an invoice id')
+  return { id, number: r.json?.detail?.invoice_number ?? i.number ?? '' }
+}
+
+/** Send a draft: PayPal emails the customer. Returns the payer link. */
+export async function sendInvoice(id: string): Promise<string> {
+  await call('POST', `/v2/invoicing/invoices/${encodeURIComponent(id)}/send`, { send_to_invoicer: true, send_to_recipient: true })
+  const d = await get<{ detail?: { metadata?: { recipient_view_url?: string } } }>(`/v2/invoicing/invoices/${encodeURIComponent(id)}`)
+  return d.detail?.metadata?.recipient_view_url ?? `https://www.paypal.com/invoice/p/#${shortCode(id)}`
+}
+
+/** Delete a DRAFT (tests, or an agent changing their mind before sending). */
+export async function deleteDraft(id: string): Promise<void> {
+  await call('DELETE', `/v2/invoicing/invoices/${encodeURIComponent(id)}`)
 }
