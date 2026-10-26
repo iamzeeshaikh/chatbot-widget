@@ -93,7 +93,12 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
       const payments = inv.payments.length ? inv.payments : await invoiceDetail(inv.id)
       for (const p of payments) {
         if (!p.paymentId || done.has(p.paymentId)) continue
-        if (sale && sale.payments.some((x) => x.id === `pay_pp_${p.paymentId}` || (x.note ?? '').includes(p.paymentId))) {
+        // Already there: by our id, by the transaction id in a note, or a
+        // payment typed by hand for the same amount within a week (every
+        // October payment was entered by hand before this sync existed).
+        const near = (d: string) => Math.abs(Date.parse(d) - Date.parse(p.date || d)) <= 7 * 864e5
+        if (sale && sale.payments.some((x) => x.id === `pay_pp_${p.paymentId}` || (x.note ?? '').includes(p.paymentId)
+          || (Math.abs(x.amount - p.amount) < 0.01 && near(x.date)))) {
           if (!dryRun) await remember({ paymentId: p.paymentId, invoice: inv.number, saleId: sale.id, how: 'already in ledger' })
           continue
         }
