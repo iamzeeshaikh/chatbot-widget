@@ -76,9 +76,12 @@ async function processedIds(retryNotAForm = false, days = 4): Promise<Set<string
   const out = new Set<string>()
   // Newest result per message wins: a retried not-a-form that became a lead
   // is "done", and with retryNotAForm a still-not-a-form one is tried again.
-  const last = new Map<string, string>()
-  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.gmailId) last.set(o.gmailId, String(o.result ?? '')) } catch { /* skip */ } }
-  for (const [id, result] of last) if (!(retryNotAForm && result === 'not-a-form')) out.add(id)
+  const last = new Map<string, { result: string; at: string }>()
+  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.gmailId) last.set(o.gmailId, { result: String(o.result ?? ''), at: String(o.at ?? '') }) } catch { /* skip */ } }
+  // A not-a-form re-read in the last 6 hours stays done, or a backfill would
+  // re-open the same newest 40 on every call and never get further back.
+  const fresh = new Date(Date.now() - 6 * 3600_000).toISOString()
+  for (const [id, v] of last) if (!(retryNotAForm && v.result === 'not-a-form' && v.at < fresh)) out.add(id)
   return out
 }
 
