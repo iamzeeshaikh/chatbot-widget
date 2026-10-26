@@ -385,7 +385,7 @@
 #zee-chat-file { display: none; }\
 #zee-lead-form { display: none; }\
 #zee-chat-avatar { color: ' + primaryColor + '; }\
-@media (max-width: 767px) { #zee-chat-widget { bottom: 0; right: 0; width: 100%; height: 100%; border-radius: 0; } #zee-chat-widget-btn { bottom: 16px; right: 16px; } }';
+@media (max-width: 767px) { #zee-chat-widget { bottom: 0; right: 0; width: 100%; height: 100%; border-radius: 0; } #zee-chat-widget-btn { bottom: 16px; right: 16px; } body:has(#zee-chat-widget.open) #zee-chat-widget-btn { display: none !important; } }';
 
     // ── Optional "large" presentation ────────────────────────────────────────
     // Appended last so it wins, and the PANEL half is wrapped in a min-width
