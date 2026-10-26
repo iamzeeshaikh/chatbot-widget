@@ -159,10 +159,24 @@ export interface NewPpInvoice {
   minimumDue: number | null
 }
 
-/** PayPal's next number in the account's own sequence ("0017"). */
+/**
+ * The next number in the account's OWN series ("0017"): the highest all-digit
+ * invoice number + 1, same width. Not PayPal's generate-next-invoice-number —
+ * that follows the LAST number used, and one test draft named "TEST-…" made it
+ * hand out "TEST-mvp0bf90" (2026-10-26).
+ */
 export async function nextInvoiceNumber(): Promise<string> {
-  const r = await call<{ invoice_number?: string }>('POST', '/v2/invoicing/generate-next-invoice-number')
-  return String(r.json?.invoice_number ?? '')
+  const all = await listInvoices(500)
+  const nums = all.map((i) => i.number).filter((n) => /^\d{1,8}$/.test(n))
+  if (!nums.length) return '0001'
+  const max = Math.max(...nums.map(Number))
+  const width = Math.max(4, ...nums.map((n) => n.length))
+  return String(max + 1).padStart(width, '0')
+}
+
+/** Cancel a SENT invoice (PayPal tells the customer it is cancelled). */
+export async function cancelInvoice(id: string, note = 'Cancelled'): Promise<void> {
+  await call('POST', `/v2/invoicing/invoices/${encodeURIComponent(id)}/cancel`, { subject: 'Invoice cancelled', note, send_to_invoicer: false, send_to_recipient: true })
 }
 
 /** Create a DRAFT invoice on the packaging PayPal account. Returns its id. */

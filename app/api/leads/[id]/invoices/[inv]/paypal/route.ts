@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   let draftId = ''
   try {
-    const number = await nextInvoiceNumber().catch(() => '')
+    const number = await nextInvoiceNumber()
     const draft = await createDraft({
       number, currency: doc.currency || 'USD', date: doc.date, dueDate: doc.dueDate,
       recipient: { email: to, name: doc.billTo.name || record.contact.name, company: doc.billTo.company, address: doc.billTo.address, phone: doc.billTo.phone },
