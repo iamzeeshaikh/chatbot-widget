@@ -399,6 +399,17 @@ export function holidaysOf(year: number): Holiday[] {
   ]
 }
 
+/**
+ * What a holiday offer hangs on. The holidays are American; a UK customer was
+ * told about Thanksgiving (26 Oct 2026), so on a UK site the offer names no
+ * holiday and simply runs for two weeks.
+ */
+export function offerOccasion(now: Date, uk?: boolean): { lead: string; date: Date } {
+  if (uk) return { lead: 'As a thank-you for considering us', date: new Date(now.getTime() + 14 * 864e5) }
+  const h = nextHoliday(now)
+  return { lead: `With ${h.name} coming up`, date: h.date }
+}
+
 /** The next holiday at least a week away — an offer needs time to be used. */
 export function nextHoliday(now: Date): Holiday {
   const soon = now.getTime() + 7 * 864e5
@@ -430,6 +441,8 @@ export interface FollowUpContext {
   missing: Missing[]
   firstName: string | null
   now: Date
+  /** A UK site: no US holiday is named, the offer simply has a date. */
+  uk?: boolean
 }
 
 /**
@@ -445,7 +458,7 @@ export function buildFollowUp(a: QuoteAssessment, c: FollowUpContext): { text: s
   const asking = c.missing.length > 0
   const cycle = Math.floor((c.n - 1) / 5)
   const step = (c.n - 1) % 5
-  const holiday = nextHoliday(c.now)
+  const holiday = offerOccasion(c.now, c.uk)
   const offer = cycle === 0 ? 10 : 15
   const bySize = c.missing.includes('size')
 
@@ -469,7 +482,7 @@ export function buildFollowUp(a: QuoteAssessment, c: FollowUpContext): { text: s
       break
     case 3:
       usedOffer = offer
-      body = [`With ${holiday.name} coming up, I can offer ${offer}% off your order of ${a.product} if you're able to move forward before ${dayLabel(holiday.date)}.${asking ? ` Once I have the ${what}, I'll include it in your price quote.` : ''}`]
+      body = [`${holiday.lead}, I can offer ${offer}% off your order of ${a.product} if you're able to move forward before ${dayLabel(holiday.date)}.${asking ? ` Once I have the ${what}, I'll include it in your price quote.` : ''}`]
       break
     default:
       body = [`I wanted to check in one more time: are you still interested in moving forward with your ${a.product}?`, `If the timing isn't right now, I totally understand. Just let me know and I'll follow up later instead.`]
@@ -533,11 +546,11 @@ export function looksLikeQuote(body: string): boolean {
   return /\$\s?\d/.test(own)
 }
 
-export function buildQuoteFollowUp(c: { n: number; firstName: string | null; product: string; now: Date }): { text: string; offer: number | null } {
+export function buildQuoteFollowUp(c: { n: number; firstName: string | null; product: string; now: Date; uk?: boolean }): { text: string; offer: number | null } {
   const greet = c.firstName ? `Hello ${c.firstName},` : 'Hello,'
   const cycle = Math.floor((c.n - 1) / 5)
   const step = (c.n - 1) % 5
-  const holiday = nextHoliday(c.now)
+  const holiday = offerOccasion(c.now, c.uk)
   const offer = cycle === 0 ? 10 : 15
   const product = c.product || 'packaging'
   let body: string[]
@@ -556,7 +569,7 @@ export function buildQuoteFollowUp(c: { n: number; firstName: string | null; pro
       break
     case 3:
       used = offer
-      body = [`With ${holiday.name} coming up, I can offer ${offer}% off the quoted pricing if you're able to move forward before ${MONTHS[holiday.date.getUTCMonth()]} ${holiday.date.getUTCDate()}.`, `Please let me know if you have any questions or would like to make any changes. I'd be happy to help!`]
+      body = [`${holiday.lead}, I can offer ${offer}% off the quoted pricing if you're able to move forward before ${MONTHS[holiday.date.getUTCMonth()]} ${holiday.date.getUTCDate()}.`, `Please let me know if you have any questions or would like to make any changes. I'd be happy to help!`]
       break
     default:
       body = [`I wanted to check in one more time: are you still interested in moving forward with your ${product}?`, `If the timing isn't right now, I totally understand. Just let me know and I'll follow up later instead.`]

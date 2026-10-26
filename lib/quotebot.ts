@@ -32,6 +32,7 @@
 // always has an answer.
 
 import { supabase, fetchAllPages, warnIfCapped } from './supabase'
+import { isUkSite } from './metawa'
 import { recentIntakeLags } from './intakelag'
 import { workspaceSites, hasFeature } from './workspaces'
 import { quoteSessionId, leadSource, isMerchantTestOrder } from './quoteintake'
@@ -824,7 +825,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   if (!assessment) return { ok: false, state: 'failed', why: 'could not read the enquiry (model unavailable)' }
   const cc = await ccForLead(id, lead?.message, first.to)
   const missing = (latest.missing ?? []) as Missing[]
-  const fu = buildFollowUp(assessment, { n, missing, firstName: assessment.firstName, now })
+  const fu = buildFollowUp(assessment, { n, missing, firstName: assessment.firstName, now, uk: isUkSite(siteId) })
 
   // Threaded under the first email, in the customer's mail client and ours.
   const sentRows = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
@@ -1273,7 +1274,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
 
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   const assessment = await assessQuote(lead?.message ?? '', lead?.name ?? null)
-  const fu = buildQuoteFollowUp({ n, firstName: assessment?.firstName ?? null, product: assessment?.product ?? 'packaging', now })
+  const fu = buildQuoteFollowUp({ n, firstName: assessment?.firstName ?? null, product: assessment?.product ?? 'packaging', now, uk: isUkSite(siteId) })
   // Whoever the agent copied on the price, else everyone the customer copied.
   const cc = lastMine.cc || await ccForLead(id, lead?.message, to)
   if (opts.dryRun) return { ok: true, state: 'not-due', n, text: fu.text, why: 'dry run: would send now' }
@@ -1521,6 +1522,9 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
     const id = quoteSessionId(l.id)
     if (!isAddress(to) || seenAddr.has(to)) continue
     seenAddr.add(to)  // newest lead per address only: one customer, one email
+    // The campaigns are American holidays (Thanksgiving, July 4th…): a UK
+    // site's customer is never sent one (three were, 23-26 Oct 2026).
+    if (isUkSite(l.site_id)) continue
     // Never a new lead. The newest enquiry from this address is still being
     // worked (or should be): the promo is for customers who went quiet, and
     // 39 of the first 85 went to leads under three weeks old — some the same

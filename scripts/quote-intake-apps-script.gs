@@ -330,6 +330,7 @@ var SITE_DOMAINS = {
   SMB: 'shopmylarbags.co.uk',
   SRB: 'shoprigidboxes.co.uk',
   TBX: 'tuckboxes.co.uk',
+  TKB: 'thekraftboxes.co.uk',
 };
 
 /**
