@@ -346,16 +346,20 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
   if (!leads.length) return withFollowUps(result, now, dryRun, opts.leadIds?.length ? 0 : MAX_SENDS_PER_RUN)
 
   const sessions = leads.map((l) => quoteSessionId(l.id))
-  const [{ data: logRows }, excluded, siteRes] = await Promise.all([
-    supabase.from('chat_logs').select('session_id, role, message, created_at')
+  // Paged: a plain select stops at 1,000 rows. Past that the newest leads'
+  // ledger rows were cut off, the bot read them as never handled, and drafted
+  // them again every five minutes — 150+ drafts and tasks a lead, each run
+  // adding rows that pushed more leads past the cut (25-26 Oct 2026).
+  const [logRows, excluded, siteRes] = await Promise.all([
+    fetchAllPages<LogRow & { session_id: string }>(() => supabase.from('chat_logs').select('session_id, role, message, created_at')
       .in('session_id', sessions)
       .in('role', [CRM_BOT_ROLE, CRM_STAGE_ROLE, LEAD_STATUS_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, ASSIGNMENT_ROLE])
-      .order('created_at', { ascending: true }),
+      .order('created_at', { ascending: true }), 100_000),
     notALeadSessions(sites),
     supabase.from('sites').select('site_id, name'),
   ])
   const bySession = new Map<string, LogRow[]>()
-  for (const r of (logRows ?? []) as LogRow[]) {
+  for (const r of logRows as LogRow[]) {
     const list = bySession.get(r.session_id) ?? []
     list.push(r)
     bySession.set(r.session_id, list)
@@ -381,6 +385,12 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
 
     // ── stand down quietly: these were never the bot's ──────────────────────
     if (rows.some((r) => r.role === CRM_BOT_ROLE)) continue // already handled, once
+    // Second line of defence, asked of the database for this one lead: a page
+    // that failed above must never turn into a second draft.
+    if (!dryRun) {
+      const { data: done, error: doneErr } = await supabase.from('chat_logs').select('id').eq('session_id', id).eq('role', CRM_BOT_ROLE).limit(1)
+      if (doneErr || done?.length) continue
+    }
     const kind = leadSource(lead.message)
     if (kind !== 'quote' && kind !== 'chat') continue // calls, WhatsApp, checkout
     if (excluded.has(id)) continue
