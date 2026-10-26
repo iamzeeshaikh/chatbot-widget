@@ -89,3 +89,44 @@ export async function feeFor(paymentId: string, day: string): Promise<number | n
   const v = t?.transaction_info.fee_amount?.value
   return v === undefined ? null : Math.abs(Number(v))
 }
+
+export interface PpTxn { id: string; code: string; date: string; amount: number; currency: string; fee: number; ref: string }
+
+/** Transactions between two days (the API allows 31 days per call). */
+export async function listTransactions(fromDay: string, toDay: string): Promise<PpTxn[]> {
+  const out: PpTxn[] = []
+  let start = new Date(`${fromDay}T00:00:00Z`)
+  const end = new Date(Math.min(Date.now(), +new Date(`${toDay}T23:59:59Z`)))
+  while (start < end) {
+    const stop = new Date(Math.min(+end, +start + 30 * 864e5))
+    const f = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, '-0000')
+    for (let page = 1; page <= 20; page++) {
+      const j = await get<{ transaction_details?: { transaction_info: Record<string, unknown> }[]; total_pages?: number }>(
+        `/v1/reporting/transactions?start_date=${f(start)}&end_date=${f(stop)}&fields=transaction_info&page_size=500&page=${page}`)
+      for (const x of j.transaction_details ?? []) {
+        const t = x.transaction_info
+        const a = (t.transaction_amount ?? {}) as { value?: string; currency_code?: string }
+        out.push({ id: String(t.transaction_id ?? ''), code: String(t.transaction_event_code ?? ''), date: String(t.transaction_initiation_date ?? '').slice(0, 10),
+          amount: Number(a.value ?? 0), currency: String(a.currency_code ?? ''), fee: Math.abs(Number(((t.fee_amount ?? {}) as { value?: string }).value ?? 0)), ref: String(t.paypal_reference_id ?? '') })
+      }
+      if (!j.total_pages || page >= j.total_pages) break
+    }
+    start = stop
+  }
+  return out
+}
+
+/** Mid-market GBP→PKR for a day (free daily rates, cached per process). */
+const gbpPkrCache = new Map<string, number>()
+export async function gbpPkrOn(day: string): Promise<number | null> {
+  if (gbpPkrCache.has(day)) return gbpPkrCache.get(day)!
+  for (const url of [`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${day}/v1/currencies/gbp.json`, `https://${day}.currency-api.pages.dev/v1/currencies/gbp.json`]) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(10000) })
+      if (!r.ok) continue
+      const v = Number(((await r.json()) as { gbp?: { pkr?: number } }).gbp?.pkr)
+      if (v > 0) { gbpPkrCache.set(day, v); return v }
+    } catch { /* next */ }
+  }
+  return null
+}

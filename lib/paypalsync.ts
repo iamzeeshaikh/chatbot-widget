@@ -23,7 +23,7 @@ import { writeControlRow } from './leadrecord'
 import { CRM_NOTE_ROLE, type CrmNoteEntry, type CrmStage } from './crm'
 import { sendPushToWorkspace } from './push'
 import { currentStage } from './paypalpaid'
-import { listInvoices, invoiceDetail, feeFor, shortCode, paypalConfigured, type PpInvoice } from './paypalapi'
+import { listInvoices, invoiceDetail, feeFor, shortCode, paypalConfigured, listTransactions, gbpPkrOn, type PpInvoice } from './paypalapi'
 
 export const CRM_PAYPAL_SYNC_ROLE = 'crm_paypal_sync'
 const SESSION = 'zeeops-paypal-sync'
@@ -40,6 +40,8 @@ export interface PaypalSyncResult {
   applied: { invoice: string; customer: string; amount: number; fee: number | null; saleId: string; leadId: string | null }[]
   unmatchedPaid: { invoice: string; customer: string; amount: number }[]
   unpaidNotInLedger: { invoice: string; customer: string; amount: number; status: string }[]
+  /** Rates locked from PayPal's own USD→GBP conversion (see lockRates). */
+  ratesLocked: { customer: string; date: string; usdNet: number; gbp: number; rate: number }[]
   errors: string[]
 }
 
@@ -79,7 +81,7 @@ function findSale(inv: PpInvoice, sales: Sale[], links: Map<string, { leadId: st
 
 export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<PaypalSyncResult> {
   const dryRun = !!opts.dryRun
-  const res: PaypalSyncResult = { ok: true, dryRun, invoices: 0, applied: [], unmatchedPaid: [], unpaidNotInLedger: [], errors: [] }
+  const res: PaypalSyncResult = { ok: true, dryRun, invoices: 0, applied: [], unmatchedPaid: [], unpaidNotInLedger: [], ratesLocked: [], errors: [] }
   if (!paypalConfigured()) { res.ok = false; res.errors.push('PAYPAL_PACKAGING_CLIENT_ID / SECRET are not set'); return res }
   const [invoices, sales, links, done] = await Promise.all([listInvoices(), readSales('packaging'), linkIndex(), doneIds()])
   res.invoices = invoices.length
@@ -146,5 +148,57 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
       res.errors.push(`${inv.number}: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
+  try { await lockRates(dryRun, res) } catch (e) { res.errors.push(`rates: ${e instanceof Error ? e.message : String(e)}`) }
   return res
+}
+
+/** What a PayPal → Wise → bank PKR transfer keeps on the Wise leg (GBP→PKR). */
+export const WISE_GBP_PKR_CUT = 0.006
+
+/**
+ * The real rate on PayPal payments (owner, 2026-10-26). PayPal converts every
+ * USD sale to GBP at once (a T0200 pair whose paypal_reference_id is the sale)
+ * — that leg, where PayPal's ~3.5% margin sits, is now EXACT from PayPal's own
+ * record. The GBP then goes to Wise and on to PKR; that leg is the day's
+ * mid-market GBP→PKR less Wise's ~0.6% until Wise itself is connected. The
+ * result is locked onto the payment as PKR per USD of its NET amount, which is
+ * what the ledger multiplies (lib/salescore.ts), so profit stops being an
+ * estimate at a flat 4% haircut. Only payments with no rate yet are touched.
+ */
+async function lockRates(dryRun: boolean, res: PaypalSyncResult): Promise<void> {
+  const sales = (await readSales('packaging')).filter((s) => s.stream === 'pk_direct' && !s.deleted && s.currency === 'USD')
+  const open = sales.flatMap((s) => s.payments.filter((p) => p.method === 'paypal' && !p.rate).map((p) => ({ s, p })))
+  if (!open.length) return
+  const first = open.map((x) => x.p.date).sort()[0]
+  const from = new Date(Math.max(+new Date(`${first}T00:00:00Z`) - 3 * 864e5, Date.now() - 360 * 864e5)).toISOString().slice(0, 10)
+  const txns = await listTransactions(from, new Date().toISOString().slice(0, 10))
+  const sales0006 = txns.filter((t) => (t.code === 'T0006' || t.code === 'T0007' || t.code === 'T0011') && t.currency === 'USD' && t.amount > 0)
+  const touched = new Set<Sale>()
+  for (const { s, p } of open) {
+    const txId = (p.note ?? '').match(/transaction ([A-Z0-9]{17})/)?.[1]
+      ?? p.id.replace(/^pay_pp_/, '')
+    let sale = sales0006.find((t) => t.id === txId)
+    if (!sale) {
+      const near = sales0006.filter((t) => Math.abs(t.amount - p.amount) < 0.01 && Math.abs(Date.parse(t.date) - Date.parse(p.date)) <= 3 * 864e5)
+      if (near.length === 1) sale = near[0]
+    }
+    if (!sale) continue
+    const gbp = txns.find((t) => t.code === 'T0200' && t.currency === 'GBP' && t.amount > 0 && t.ref === sale!.id)
+    if (!gbp) continue
+    const gbpPkr = await gbpPkrOn(gbp.date)
+    if (!gbpPkr) continue
+    const usdNet = p.amount - p.fee
+    if (usdNet <= 0) continue
+    const rate = Math.round((gbp.amount * gbpPkr * (1 - WISE_GBP_PKR_CUT) / usdNet) * 100) / 100
+    res.ratesLocked.push({ customer: s.customer, date: p.date, usdNet, gbp: gbp.amount, rate })
+    if (dryRun) continue
+    p.rate = rate
+    p.note = `${p.note ? `${p.note} · ` : ''}rate ${rate} PKR/USD: PayPal turned $${usdNet.toFixed(2)} into £${gbp.amount.toFixed(2)} (txn ${sale.id}); £→PKR at mid-market ${gbpPkr.toFixed(2)} on ${gbp.date} less Wise ~0.6%`
+    touched.add(s)
+  }
+  for (const s of touched) {
+    s.updatedAt = new Date().toISOString(); s.updatedBy = ACTOR
+    const failed = await writeSale(s)
+    if (failed) res.errors.push(`rates: could not save ${s.customer}`)
+  }
 }
