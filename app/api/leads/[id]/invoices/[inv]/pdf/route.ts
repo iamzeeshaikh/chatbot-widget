@@ -4,6 +4,8 @@ import { guardLeadAccess } from '@/lib/leadrecord'
 import { listInvoices } from '@/lib/invoicestore'
 import { buildInvoicePdf } from '@/lib/invoicepdf'
 import { loadSiteContacts } from '@/lib/signature'
+import { bankDetails, isBankTransfer } from '@/lib/bankdetails'
+import { siteWorkspace } from '@/lib/workspaces'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -32,7 +34,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
       if (r.ok) logo = new Uint8Array(await r.arrayBuffer())
     } catch { logo = null }
   }
-  const bytes = await buildInvoicePdf(doc, { logo, siteName: String(site.data?.name ?? access.siteId) })
+  const bank = isBankTransfer(doc.paymentTerms) ? bankDetails(siteWorkspace(access.siteId) ?? '') : ''
+  const bytes = await buildInvoicePdf(doc, { logo, siteName: String(site.data?.name ?? access.siteId), bank })
   const name = `Invoice ${doc.number}`.replace(/[^\w .-]/g, '') || 'Invoice'
   return new NextResponse(Buffer.from(bytes), {
     headers: {

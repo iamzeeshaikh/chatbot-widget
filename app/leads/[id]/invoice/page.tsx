@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Download, Plus, Save, Send, Trash2 } from 'lucide-react'
+import { isBankTransfer } from '@/lib/bankdetails'
 import { CopyButton } from '../ui'
 import {
   blankInvoice, dateLabel, lineCents, money, poNumber, prefixOf, rateLabel, shipParty, totals,
@@ -25,6 +26,8 @@ interface Loaded {
   logoUrl: string
   /** The lead is packaging and PayPal is connected. */
   paypal?: boolean
+  /** Bank details printed when the payment terms say wire / bank transfer. */
+  bank?: string
 }
 
 const input = 'w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
@@ -199,7 +202,8 @@ export default function InvoicePage() {
               </div>
               <div>
                 <label className={label} htmlFor="inv-terms">Payment terms</label>
-                <input id="inv-terms" className={input} value={doc.paymentTerms} onChange={(e) => update({ paymentTerms: e.target.value })} />
+                <input id="inv-terms" list="inv-terms-list" className={input} value={doc.paymentTerms} onChange={(e) => update({ paymentTerms: e.target.value })} />
+                <datalist id="inv-terms-list"><option value="Credit Card" /><option value="PayPal" /><option value="Bank Transfer" /></datalist>
               </div>
               <div>
                 <label className={label} htmlFor="inv-po">PO number</label>
@@ -339,6 +343,7 @@ export default function InvoicePage() {
                 ))}
               </div>
               {doc.notes && <div className="mt-8"><p className="text-gray-500">Notes:</p><p className="whitespace-pre-line">{doc.notes}</p></div>}
+              {data.bank && isBankTransfer(doc.paymentTerms) && <div className="mt-4"><p className="text-gray-500">Pay by bank transfer:</p><p className="whitespace-pre-line">{data.bank}</p></div>}
               {doc.terms && <div className="mt-4"><p className="text-gray-500">Terms:</p><p className="whitespace-pre-line">{doc.terms}</p></div>}
             </div>
           </article>

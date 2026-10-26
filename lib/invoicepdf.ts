@@ -33,7 +33,7 @@ function wrap(s: string, font: PDFFont, size: number, width: number): string[] {
   return out
 }
 
-export async function buildInvoicePdf(doc: InvoiceDoc, opts: { logo?: Uint8Array | null; siteName: string }): Promise<Uint8Array> {
+export async function buildInvoicePdf(doc: InvoiceDoc, opts: { logo?: Uint8Array | null; siteName: string; bank?: string }): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   pdf.setTitle(`Invoice ${doc.number}`)
   const font = await pdf.embedFont(StandardFonts.Helvetica)
@@ -136,6 +136,7 @@ export async function buildInvoicePdf(doc: InvoiceDoc, opts: { logo?: Uint8Array
     for (const ln of lines) { t(ln, L + 6, y, 10.5); y -= 14.5 }
     y -= 14
   }
+  if (opts.bank) block('Pay by bank transfer:', opts.bank)
   block('Notes:', doc.notes)
   block('Terms:', doc.terms)
 

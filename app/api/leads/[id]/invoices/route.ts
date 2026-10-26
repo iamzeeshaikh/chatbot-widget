@@ -7,6 +7,7 @@ import { loadAgentSignatures } from '@/lib/signature'
 import { pktDayKey } from '@/lib/datetime'
 import { siteWorkspace } from '@/lib/workspaces'
 import { paypalConfigured } from '@/lib/paypalapi'
+import { bankDetails } from '@/lib/bankdetails'
 import {
   blankInvoice, cleanInvoiceDoc, newInvoiceId, poNumber, sitePrefix, type InvoiceDoc,
 } from '@/lib/invoicedoc'
@@ -70,6 +71,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     lead: { id, name: record.contact.name, email: record.contact.email, siteId: record.siteId, siteName: record.siteName },
     prefix, logoUrl: `/api/logo/${encodeURIComponent(record.siteId)}`,
     paypal: paypalConfigured() && siteWorkspace(record.siteId) === 'packaging',
+    bank: bankDetails(siteWorkspace(record.siteId) ?? ''),
   })
 }
 
