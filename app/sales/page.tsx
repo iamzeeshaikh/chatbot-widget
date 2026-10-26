@@ -350,7 +350,10 @@ export default function SalesPage() {
         </div>
       )}
 
-      <TotalsGrid t={t} />
+      <TotalsGrid t={t} picked={filters.status} pick={(status) => {
+        setFilters({ ...filters, status })
+        setTimeout(() => document.getElementById('sales-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+      }} />
 
       {tab === 'master' && <MasterBreakdown data={data} onPick={pickTab} />}
 
@@ -382,6 +385,7 @@ export default function SalesPage() {
       })()}
       <ExpensesCard month={filters.month} monthProfitPkr={filters.month ? t.profitPkr : null} onChanged={() => setExpVersion((n) => n + 1)} />
 
+      <div id="sales-table" />
       <Card title={tab === 'master' ? 'All sales' : `${STREAMS[tab].short} — sales`} icon={Receipt}
         action={
           <label className="relative block">
@@ -459,14 +463,16 @@ function LoadingState() {
 
 // ── Totals ───────────────────────────────────────────────────────────────────
 
-function Stat({ label, value, hint, tone = 'default' }: { label: string; value: string; hint?: React.ReactNode; tone?: 'default' | 'good' | 'warn' | 'bad' }) {
+function Stat({ label, value, hint, tone = 'default', onClick, active }: { label: string; value: string; hint?: React.ReactNode; tone?: 'default' | 'good' | 'warn' | 'bad'; onClick?: () => void; active?: boolean }) {
   const color = tone === 'good' ? 'text-green-700' : tone === 'warn' ? 'text-amber-700' : tone === 'bad' ? 'text-red-700' : 'text-gray-900'
+  const Tag = onClick ? 'button' : 'div'
   return (
-    <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 min-w-0">
+    <Tag {...(onClick ? { type: 'button' as const, onClick, title: `Show these sales in the table` } : {})}
+      className={`text-left bg-white border rounded-xl px-3 py-2.5 min-w-0 ${active ? 'border-blue-600 ring-2 ring-blue-500' : 'border-gray-200'} ${onClick ? 'cursor-pointer hover:border-gray-400' : ''}`}>
       <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">{label}</p>
       <p className={`mt-0.5 text-lg font-bold tabular-nums truncate ${color}`}>{value}</p>
       {hint && <p className="text-[10px] text-gray-500 truncate">{hint}</p>}
-    </div>
+    </Tag>
   )
 }
 
@@ -511,17 +517,18 @@ function profitHint(t: StreamTotals): string {
   return [pending, t.profitEstimated ? 'estimated' : 'at locked rates'].filter(Boolean).join(' · ')
 }
 
-function TotalsGrid({ t }: { t: StreamTotals }) {
+function TotalsGrid({ t, pick, picked }: { t: StreamTotals; pick?: (status: string) => void; picked?: string }) {
   const est = t.estimated || t.incomplete
+  const on = (k: string) => (pick ? { onClick: () => pick(picked === k ? '' : k), active: picked === k } : {})
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-4">
-      <Stat label="Orders" value={String(t.open)} hint={t.closed ? `+${t.closed} refunded / cancelled` : 'open orders'} />
+      <Stat label="Orders" value={String(t.open)} hint={t.closed ? `+${t.closed} refunded / cancelled` : 'open orders'} {...(pick ? { onClick: () => pick(''), active: false } : {})} />
       <Stat label="Order value" value={money(t.orderValueUsd, 'USD')} hint="open orders, USD" />
-      <Stat label="Received" value={money(t.receivedUsd, 'USD')} hint={`fees ${money(t.feesUsd, 'USD')}`} />
-      <Stat label="Net received" value={money(t.netUsd, 'USD')} hint="after merchant fees" tone="good" />
+      <Stat label="Received" value={money(t.receivedUsd, 'USD')} hint={`fees ${money(t.feesUsd, 'USD')}`} {...on('@received')} />
+      <Stat label="Net received" value={money(t.netUsd, 'USD')} hint="after merchant fees" tone="good" {...on('@received')} />
       <Stat label="Outstanding" value={money(t.outstandingUsd, 'USD')}
         hint={t.awaitingPayment ? `${t.awaitingPayment} awaiting payment` : 'nothing owed'}
-        tone={t.outstandingUsd > 0 ? 'warn' : 'default'} />
+        tone={t.outstandingUsd > 0 ? 'warn' : 'default'} {...on('@owed')} />
       <Stat label="Merchant fees" value={t.feesUsd > 0 ? `−${money(t.feesUsd, 'USD')}` : money(0, 'USD')} hint="PayPal · Wise · Payoneer cuts" tone={t.feesUsd > 0 ? 'bad' : 'default'} />
       <Stat label="Revenue (PKR)" value={money(t.revenuePkr, 'PKR')} hint={est ? 'includes estimates' : 'at locked rates'} />
       <Stat label="Cost (PKR)" value={money(t.costPkr, 'PKR')} hint="production + other" />
@@ -645,7 +652,10 @@ function matchesFilters(v: SaleView, f: SaleFilters): boolean {
   if (f.site && (s.siteId ?? '') !== f.site) return false
   if (f.via && (s.leadKind ?? '') !== f.via) return false
   if (f.agent && s.salesPerson.trim().toLowerCase() !== f.agent) return false
-  if (f.status && v.fig.status !== f.status) return false
+  // '@owed' / '@received' come from clicking the Outstanding / Received cards.
+  if (f.status === '@owed') { if (v.fig.closed || !(v.fig.outstanding > 0)) return false }
+  else if (f.status === '@received') { if (!(v.fig.received > 0)) return false }
+  else if (f.status && v.fig.status !== f.status) return false
   if (f.month && monthKey(s.orderDate) !== f.month) return false
   return true
 }
@@ -677,7 +687,12 @@ function filterOptionsFor(rows: SaleView[]): FilterOptions {
       .sort((a, b) => SALE_LEAD_KIND_ORDER.indexOf(a.value as SaleLeadKind) - SALE_LEAD_KIND_ORDER.indexOf(b.value as SaleLeadKind)),
     agents: [...agents].map(([value, n]) => ({ value, label: agentLabel(value), n }))
       .sort((a, b) => a.label.localeCompare(b.label)),
-    statuses: [...statuses].map(([value, n]) => ({ value, label: PAYMENT_STATUS_LABEL[value as keyof typeof PAYMENT_STATUS_LABEL] ?? value, n }))
+    statuses: [
+      ...[...statuses].map(([value, n]) => ({ value, label: PAYMENT_STATUS_LABEL[value as keyof typeof PAYMENT_STATUS_LABEL] ?? value, n })),
+      // The two the totals cards pick (Outstanding / Received).
+      { value: '@owed', label: 'Outstanding (money owed)', n: rows.filter((v) => !v.fig.closed && v.fig.outstanding > 0).length },
+      { value: '@received', label: 'Money received', n: rows.filter((v) => v.fig.received > 0).length },
+    ]
       .sort((a, b) => STATUS_ORDER.indexOf(a.value) - STATUS_ORDER.indexOf(b.value)),
     // Newest month first — that is the one being asked about.
     months: [...months].map(([value, n]) => ({ value, label: monthLabel(value), n }))
