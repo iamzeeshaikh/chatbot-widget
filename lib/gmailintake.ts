@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { NextRequest } from 'next/server'
-import { supabase } from './supabase'
+import { supabase, fetchAllPages } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import { siteIdFromQuoteCode, isMachineMessage } from './quoteintake'
 import { siteWorkspace } from './workspaces'
@@ -71,8 +71,10 @@ export interface PullResult {
 
 async function processedIds(retryNotAForm = false, days = 4): Promise<Set<string>> {
   const since = new Date(Date.now() - Math.max(4, days + 1) * 864e5).toISOString()
-  const { data } = await supabase.from('chat_logs').select('message')
-    .eq('session_id', SESSION).eq('role', CRM_INTAKE_PULL_ROLE).gte('created_at', since).limit(5000)
+  // Paged: 732 rows in five days already, and a plain select stops at 1,000 —
+  // past that the oldest-first page would hide the newest pulls and re-import them.
+  const data = await fetchAllPages<{ message: string }>(() => supabase.from('chat_logs').select('message')
+    .eq('session_id', SESSION).eq('role', CRM_INTAKE_PULL_ROLE).gte('created_at', since).order('created_at', { ascending: true }), 50000)
   const out = new Set<string>()
   // Newest result per message wins: a retried not-a-form that became a lead
   // is "done", and with retryNotAForm a still-not-a-form one is tried again.
