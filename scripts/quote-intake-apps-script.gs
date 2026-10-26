@@ -167,7 +167,7 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // SBM and TRP joined on 2026-09-19, the day their labels were created: both
 // sites' form mail names the site nowhere a pattern can read it, so the label
 // is what places it.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP', 'TPB', 'TCST'];
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP', 'TPB', 'TCST', 'SMB']; // SMB = Shop Mylar Bags (owner's Gmail label "smb", 2026-10-26)
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -318,6 +318,18 @@ var SITE_DOMAINS = {
   // added here, so its first two quote forms (Monica Baalmann, Christine
   // Azarmanesh, 15 Oct) resolved to no site and were skipped as not-a-form.
   TCF: 'thecustomfolders.com',
+  // 2026-10-26: the eleven sites launched 19-22 Oct (see QUOTE_SITE_CODES).
+  THT: 'thehangtags.com',
+  TCB: 'thecookiebags.com',
+  SMBX: 'shopmailerboxes.com',
+  OCB: 'ordercardboardboxes.co.uk',
+  TPCU: 'thepapercups.co.uk',
+  PBS: 'paperbagsupply.com',
+  TFPU: 'thefoodpackaging.co.uk',
+  TCPU: 'thecosmeticpackaging.co.uk',
+  SMB: 'shopmylarbags.co.uk',
+  SRB: 'shoprigidboxes.co.uk',
+  TBX: 'tuckboxes.co.uk',
 };
 
 /**

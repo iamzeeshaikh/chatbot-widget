@@ -69,12 +69,16 @@ export interface PullResult {
   errors: string[]
 }
 
-async function processedIds(): Promise<Set<string>> {
-  const since = new Date(Date.now() - 4 * 864e5).toISOString()
+async function processedIds(retryNotAForm = false, days = 4): Promise<Set<string>> {
+  const since = new Date(Date.now() - Math.max(4, days + 1) * 864e5).toISOString()
   const { data } = await supabase.from('chat_logs').select('message')
     .eq('session_id', SESSION).eq('role', CRM_INTAKE_PULL_ROLE).gte('created_at', since).limit(5000)
   const out = new Set<string>()
-  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.gmailId) out.add(o.gmailId) } catch { /* skip */ } }
+  // Newest result per message wins: a retried not-a-form that became a lead
+  // is "done", and with retryNotAForm a still-not-a-form one is tried again.
+  const last = new Map<string, string>()
+  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.gmailId) last.set(o.gmailId, String(o.result ?? '')) } catch { /* skip */ } }
+  for (const [id, result] of last) if (!(retryNotAForm && result === 'not-a-form')) out.add(id)
   return out
 }
 
@@ -85,7 +89,12 @@ async function remember(gmailId: string, result: string, extra: Record<string, u
   })
 }
 
-export async function runIntakePull(origin: string, opts: { dryRun?: boolean } = {}): Promise<PullResult> {
+/**
+ * opts.days widens the search (admin backfill, max 30); opts.retryNotAForm
+ * re-reads messages earlier skipped as not-a-form — for when a site was
+ * missing from the intake maps and has just been added (2026-10-26).
+ */
+export async function runIntakePull(origin: string, opts: { dryRun?: boolean; days?: number; retryNotAForm?: boolean } = {}): Promise<PullResult> {
   const dryRun = !!opts.dryRun
   const out: PullResult = { ranAt: new Date().toISOString(), dryRun, found: 0, opened: 0, posted: [], skipped: 0, errors: [] }
   const cfg = googleConfig(origin)
@@ -93,9 +102,10 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean } =
   const secret = process.env.QUOTE_INTAKE_SECRET
   if (!secret) { out.errors.push('QUOTE_INTAKE_SECRET is not set'); return out }
 
-  const ids = await searchIntakeMessageIds(INTAKE_MAILBOX, cfg, `${WINDOW} -in:sent -in:chats`, 300)
+  const days = Math.min(30, Math.max(0, Math.round(opts.days ?? 0)))
+  const ids = await searchIntakeMessageIds(INTAKE_MAILBOX, cfg, `${days ? `newer_than:${days}d` : WINDOW} -in:sent -in:chats`, days ? 500 : 300)
   out.found = ids.length
-  const done = await processedIds()
+  const done = await processedIds(!!opts.retryNotAForm, days || 4)
   const todo = ids.filter((m) => !done.has(m.id)).slice(0, PER_RUN)
   const threads = new Map<string, InboundMessage[]>()
   const g = script()

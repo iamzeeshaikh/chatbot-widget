@@ -169,6 +169,20 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   // 2026-10-15: thecustomfolders.com (widget since 12 Oct) was in no intake
   // map; its first two forms were skipped as not-a-form.
   TCF: 'thecustomfolders',
+  // 2026-10-26: eleven sites launched 19-22 Oct were in no intake map, so
+  // their form mail was skipped as not-a-form (owner: Shop Mylar Bags lead
+  // never counted). SMB matches the owner's Gmail label "smb".
+  THT: 'thehangtags',
+  TCB: 'thecookiebags',
+  SMBX: 'shopmailerboxes',
+  OCB: 'ordercardboardboxes',
+  TPCU: 'thepapercupsuk',
+  PBS: 'paperbagsupply',
+  TFPU: 'thefoodpackaginguk',
+  TCPU: 'thecosmeticpackaginguk',
+  SMB: 'shopmylarbagsuk',
+  SRB: 'shoprigidboxesuk',
+  TBX: 'tuckboxesuk',
 
   // 2026-08-29: the SPORTS workspace joins the quote intake. Nothing about the
   // routing changes — a lead's dashboard is decided by its site_id

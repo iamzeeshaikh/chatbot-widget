@@ -18,7 +18,13 @@ export async function GET(req: NextRequest) {
     }
   }
   try {
-    const result = await runIntakePull(req.nextUrl.origin, { dryRun: req.nextUrl.searchParams.get('dryRun') === '1' })
+    const q = req.nextUrl.searchParams
+    // Backfill knobs are for an admin by hand; the cron always runs the plain pass.
+    const result = await runIntakePull(req.nextUrl.origin, {
+      dryRun: q.get('dryRun') === '1',
+      days: cron ? undefined : Number(q.get('days')) || undefined,
+      retryNotAForm: !cron && q.get('retry') === '1',
+    })
     if (result.errors.length) console.error('[intake-pull]', result.errors.slice(0, 5))
     return NextResponse.json(result)
   } catch (e) {
