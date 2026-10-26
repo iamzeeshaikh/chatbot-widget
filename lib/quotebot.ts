@@ -226,16 +226,23 @@ async function addressAlreadyContacted(address: string, now: Date, notLeads: Set
   // the address is used as it is. Stripping it once made john_doe@ unfindable.
   const needle = `%${address.trim().replace(/%/g, '')}%`
   const [mail, bot] = await Promise.all([
-    supabase.from('chat_logs').select('session_id').eq('role', CRM_EMAIL_ROLE)
+    supabase.from('chat_logs').select('session_id, message').eq('role', CRM_EMAIL_ROLE)
       .gte('created_at', since).ilike('message', needle).limit(200),
     supabase.from('chat_logs').select('session_id, message').eq('role', CRM_BOT_ROLE)
       .gte('created_at', since).ilike('message', needle).limit(200),
   ])
-  if ((mail.data ?? []).some((r) => !notLeads.has(r.session_id))) return true
+  // A holiday promo is not a reply. Counting it once let a promo that reached
+  // a brand-new lead block that lead's first answer (Grace, 26 Oct 2026).
+  const promoMail = new Set<string>()
+  for (const r of bot.data ?? []) {
+    const e = parseBotLedger(r.message)
+    if (e?.step === 'promo' && e.emailId) promoMail.add(e.emailId)
+  }
+  if ((mail.data ?? []).some((r) => !notLeads.has(r.session_id) && !promoMail.has(parseCrmEmail(r.message)?.id ?? ''))) return true
   return (bot.data ?? []).some((r) => {
     if (notLeads.has(r.session_id)) return false
     const e = parseBotLedger(r.message)
-    return e?.state === 'sent' || e?.state === 'claimed'
+    return e?.step !== 'promo' && (e?.state === 'sent' || e?.state === 'claimed')
   })
 }
 
@@ -1498,6 +1505,11 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
     const id = quoteSessionId(l.id)
     if (!isAddress(to) || seenAddr.has(to)) continue
     seenAddr.add(to)  // newest lead per address only: one customer, one email
+    // Never a new lead. The newest enquiry from this address is still being
+    // worked (or should be): the promo is for customers who went quiet, and
+    // 39 of the first 85 went to leads under three weeks old — some the same
+    // hour they wrote in (Grace and Shaun, 26 Oct 2026).
+    if (now.getTime() - new Date(l.created_at).getTime() < PROMO_QUIET_DAYS * 864e5) continue
     if (doneSessions.has(id) || recentAddrs.has(to) || unsub.has(to) || notALead.has(id) || active.has(id)) continue
     if (isNoiseSender(to) || isMerchantTestOrder(to)) continue
     const local = to.split('@')[0]
