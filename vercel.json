@@ -33,6 +33,10 @@
       "schedule": "0 21 * * *"
     },
     {
+      "path": "/api/costing/sweep",
+      "schedule": "0 5 * * *"
+    },
+    {
       "path": "/api/crm/paypal-sync",
       "schedule": "*/30 * * * *"
     }

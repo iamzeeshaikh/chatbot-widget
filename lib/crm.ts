@@ -81,6 +81,8 @@ export const CRM_ROLES = [
   'crm_paypal_sync',
   // Payouts (lib/payouts.ts) — on the reserved site too; see below.
   'crm_payout', 'crm_expense',
+  // Which costing task belongs to which sale (lib/costingsweep.ts) — reserved site.
+  'crm_costing',
   // Both live on the reserved zeeops-crm site, not on a lead — but registered
   // here anyway, as the second line of defence the reserved site is the first.
   CRM_SIGNATURE_ROLE, CRM_SITE_CONTACT_ROLE, CRM_TEAM_LEAD_ROLE,

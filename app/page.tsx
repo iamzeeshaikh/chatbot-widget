@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
+import { canUseCosting } from '@/lib/costing'
 import { isBotOffBySchedule, isBotOffByScheduleForWorkspace } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
 import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadstatus'
@@ -2408,6 +2409,8 @@ export default function Dashboard() {
   // API refuses everyone else regardless.
   const canSales = hasFeature(workspace, 'sales') && userRole === 'admin'
   const canJobs = hasFeature(workspace, 'jobs')
+  // Costing (lib/costing.ts): packaging admins and the costing person.
+  const canCosting = canUseCosting({ role: userRole, workspace, email: userEmail })
   const canOpportunities = hasFeature(workspace, 'opportunities')
   const showFirstResponse = hasFeature(workspace, 'quotebot')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
@@ -2704,6 +2707,11 @@ export default function Dashboard() {
             // eslint-disable-next-line @next/next/no-html-link-for-pages
             <a href="/jobs" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/jobs') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Estimates, designs and production">Jobs</a>
+          )}
+          {canCosting && (
+            // eslint-disable-next-line @next/next/no-html-link-for-pages
+            <a href="/costing" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/costing') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Production cost of each order">Costing</a>
           )}
           {canSales && (
             <a href="/sales" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/sales') } }}
