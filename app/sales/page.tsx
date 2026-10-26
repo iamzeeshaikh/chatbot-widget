@@ -334,6 +334,22 @@ export default function SalesPage() {
 
       {tab !== 'master' && <p className="-mt-2 mb-3 text-xs text-gray-500">{STREAMS[tab].blurb}</p>}
 
+      {/* Month at a glance (owner, 2026-10-26: "sirf Oct ki sale dekh sakon").
+          The same Month filter the table has, lifted to where the totals are. */}
+      {filterOptions.months.length > 0 && (
+        <div role="group" aria-label="Show totals for a month" className="mb-3 flex flex-wrap items-center gap-1.5">
+          {[{ value: '', label: 'All time', n: tabRows.length }, ...filterOptions.months].map((m) => {
+            const on = filters.month === m.value
+            return (
+              <button key={m.value || 'all'} type="button" onClick={() => setFilters({ ...filters, month: m.value })}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold ${on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
+                {m.label} <span className={on ? 'text-white/80' : 'text-gray-500'}>({m.n})</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       <TotalsGrid t={t} />
 
       {tab === 'master' && <MasterBreakdown data={data} onPick={pickTab} />}
