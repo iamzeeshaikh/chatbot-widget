@@ -635,10 +635,13 @@ async function withFollowUps(result: BotRunResult, now: Date, dryRun: boolean, b
   // timeline every five minutes would be hundreds of thousands of queries a
   // day against a database that has fallen over once already (CLAUDE.md §6).
   const since = new Date(now.getTime() - FOLLOW_UP_WINDOW_DAYS * 864e5).toISOString()
-  const { data } = await supabase.from('chat_logs').select('session_id, site_id, message')
+  // Paged (fetchAllPages): a plain select stops at 1,000 rows whatever .limit()
+  // says, and this ledger is past 10,000 — the newest leads were never seen
+  // here, so they got no follow-up and no answer to their replies.
+  const data = await fetchAllPages<{ session_id: string; site_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, site_id, message')
     .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
-    .order('created_at', { ascending: true }).limit(20000)
-  if ((data ?? []).length >= 20000) console.warn('[quotebot] follow-up ledger query hit its cap')
+    .order('created_at', { ascending: true }), 60000)
+  warnIfCapped('follow-up ledger', data.length, 60000)
   const state = new Map<string, { siteId: string; waiting: boolean; stopped: boolean; lastAt: number; anchor: number; handled: Set<string> }>()
   for (const r of data ?? []) {
     const e = parseBotLedger(r.message)
@@ -1098,9 +1101,12 @@ async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budg
   result.quotes = []
   const sites = workspaceSites('packaging')
   const since = new Date(Math.max(new Date(BOT_START).getTime(), now.getTime() - FOLLOW_UP_WINDOW_DAYS * 864e5)).toISOString()
-  const { data: ledgerRows } = await supabase.from('chat_logs').select('session_id, site_id, message')
+  // Paged for the same reason as withFollowUps: past 1,000 rows the newest
+  // quotes were invisible and their skips were written again every run.
+  const ledgerRows = await fetchAllPages<{ session_id: string; site_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, site_id, message')
     .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
-    .order('created_at', { ascending: true }).limit(20000)
+    .order('created_at', { ascending: true }), 60000)
+  warnIfCapped('quote follow-up ledger', ledgerRows.length, 60000)
   interface Q { siteId: string; awaitingPrice: number | null; quotedAt: number | null; lastAt: number; stopped: boolean; ups?: number }
   const st = new Map<string, Q>()
   for (const r of ledgerRows ?? []) {
@@ -1119,9 +1125,9 @@ async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budg
   // The agent who sent the price moves the stage (the owner's rule, 2026-10-13:
   // "stage Steve change karni chahie kiunke quote usne bheji hai") — by the
   // dropdown or the Price sent button. The bot never moves it on their behalf.
-  const { data: stageRows } = await supabase.from('chat_logs').select('session_id, site_id, message, created_at')
+  const stageRows = await fetchAllPages<{ session_id: string; site_id: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, site_id, message, created_at')
     .eq('role', CRM_STAGE_ROLE).in('site_id', sites).gte('created_at', new Date(BOT_START).toISOString())
-    .ilike('message', '%"stage":"quote_sent"%').order('created_at', { ascending: true }).limit(2000)
+    .ilike('message', '%"stage":"quote_sent"%').order('created_at', { ascending: true }), 20000)
   for (const r of stageRows ?? []) {
     const s = parseCrmStage(r.message)
     if (!s || s.changed_by === BOT_ACTOR) continue
