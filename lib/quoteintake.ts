@@ -409,6 +409,14 @@ const NOT_A_CUSTOMER_RE = new RegExp([
   String.raw`looks after systems, feel free to pass this on|software that works for the people using it`,
   String.raw`meet shoppers where they.?re\s+buying|join tiktok shop|\bm\.tiktok\.shop/`,
   String.raw`site options with established audiences|relevant content placements|share the current rates and placement`,
+  // Owner, 2026-10-27: China factories / sourcing pitches and review-removal
+  // offers are deleted, never leads (weikeqi, Winstar, Estelle Liu, Sterling).
+  // Each pattern needs the factory to be OURS-to-be ("we are … factory in
+  // China", "your sourcing dept") so a customer who mentions their own
+  // supplier still gets through.
+  String.raw`\bwe(?:'re| are) (?:a |an |the )?(?:leading |professional |direct |reliable |experienced )?[a-z &/,-]{0,60}(?:factory|manufacturer|supplier)\b[a-z0-9 &/,-]{0,60}\bin china\b|\bdirect factory in china\b|\bfactory in china\b[^.\n]{0,80}\b(?:sourcing|supplier|catalog(?:ue)?|samples?)\b`,
+  String.raw`\byour sourcing (?:dept|department|team)\b|right person for supplier partnerships|supplier partnership|paid member (?:in|of|on) alibaba|\.en\.alibaba\.com\b`,
+  String.raw`negative reviews? (?:removed|removal)|(?:remove|removing|delete|deleting|get rid of) (?:your |the |those |all )?(?:negative|bad|1[- ]star|one[- ]star) reviews|reviews? removed from your (?:trustpilot|google|yelp)`,
   String.raw`reply "?unsubscribe"? if not interested|try (it )?free for \d+ days|no credit card\.? no commitment|\bfor woocommerce (retailers|merchants|stores)|amplify your product discovery|\bcatalogpilot\b`,
 ].join('|'), 'im')
 
