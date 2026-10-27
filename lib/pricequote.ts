@@ -66,14 +66,19 @@ export function normalizeQuote(raw: unknown): PriceQuote {
   return {
     greetingName: str(o.greetingName, ''), intro: str(o.intro, base.intro), items,
     included: str(o.included, base.included), turnaround: str(o.turnaround, base.turnaround),
-    validity: str(o.validity, base.validity), closing: str(o.closing, base.closing), currency: str(o.currency, 'USD') || 'USD',
+    validity: str(o.validity, base.validity), closing: str(o.closing, base.closing), currency: (QUOTE_CURRENCIES as readonly string[]).includes(str(o.currency, '')) ? str(o.currency, '') : 'USD',
     showTotal: o.showTotal !== false,
   }
 }
 
 export const num = (v: string): number => { const n = Number(String(v ?? '').replace(/[^0-9.]/g, '')); return Number.isFinite(n) ? n : 0 }
-export const money = (v: number, cur = 'USD') => (cur === 'USD' ? '$' : `${cur} `) + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const unit = (v: number, cur: string) => (cur === 'USD' ? '$' : `${cur} `) + (v < 1 ? v.toFixed(3).replace(/0$/, '') : v.toFixed(2))
+// The currencies an agent can quote in (Saifullah, 2026-10-27: a UK customer
+// needs the quote in pounds). USD stays the default; a UK site opens on GBP.
+export const QUOTE_CURRENCIES = ['USD', 'GBP', 'EUR', 'CAD', 'AUD'] as const
+export const CURRENCY_SYMBOL: Record<string, string> = { USD: '$', GBP: '£', EUR: '€', CAD: 'CA$', AUD: 'A$' }
+export const currencySymbol = (cur: string) => CURRENCY_SYMBOL[cur] ?? `${cur} `
+export const money = (v: number, cur = 'USD') => currencySymbol(cur) + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const unit = (v: number, cur: string) => currencySymbol(cur) + (v < 1 ? v.toFixed(3).replace(/0$/, '') : v.toFixed(2))
 
 export function cleanRows(item: QuoteItem): { qty: number; unit: number; total: number }[] {
   return item.rows.map((r) => ({ qty: num(r.quantity), unit: num(r.unitPrice) })).filter((r) => r.qty > 0 && r.unit > 0)

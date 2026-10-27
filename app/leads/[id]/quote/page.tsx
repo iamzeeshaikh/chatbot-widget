@@ -5,8 +5,9 @@
 // stage Quote Sent, value recorded, bot follows up the next day.
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { SITE_DOMAINS } from '@/lib/sitedomains'
 import { ArrowLeft, Download, Plus, Send, Trash2, X } from 'lucide-react'
-import { blankItem, blankQuote, dealValue, orderTotals, money, normalizeQuote, quoteHtml, quoteProblems, quoteTitle, type PriceQuote, type QuoteItem, type QuoteRow } from '@/lib/pricequote'
+import { blankItem, blankQuote, currencySymbol, dealValue, orderTotals, money, normalizeQuote, QUOTE_CURRENCIES, quoteHtml, quoteProblems, quoteTitle, type PriceQuote, type QuoteItem, type QuoteRow } from '@/lib/pricequote'
 
 interface Setup { name: string; siteId: string; siteName: string; toKnown: boolean; cc: string[]; aliases: { email: string; displayName: string }[]; replyTo: { title: string } | null }
 const input = 'w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -34,7 +35,9 @@ export default function QuotePage() {
       setSetup(j)
       let saved: PriceQuote | null = null
       try { const raw = JSON.parse(localStorage.getItem(key) || 'null'); saved = raw ? normalizeQuote(raw) : null } catch { saved = null }
-      setQ(saved ?? blankQuote(j.name || '', ''))
+      // A UK site quotes in pounds unless the agent picks otherwise.
+      const uk = /\.co\.uk$/i.test(SITE_DOMAINS[String(j.siteId || '')] ?? '')
+      setQ(saved ?? { ...blankQuote(j.name || '', ''), currency: uk ? 'GBP' : 'USD' })
       const site = String(j.siteId || '').replace(/-/g, '')
       const pick = (j.aliases as Setup['aliases']).find((a) => a.email.split('@')[1]?.replace(/\./g, '').startsWith(site.slice(0, 8))) ?? j.aliases[0]
       setFrom(pick?.email ?? '')
@@ -121,8 +124,12 @@ export default function QuotePage() {
           </div>
           {!setup.replyTo && <div><label className={label} htmlFor="q-subj">Subject</label>
             <input id="q-subj" className={input} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={`Price quote — ${quoteTitle(q) || 'your boxes'} - ${setup.siteName}`} /></div>}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             <div><label className={label} htmlFor="q-hi">Greeting name</label><input id="q-hi" className={input} value={q.greetingName} onChange={(e) => set({ greetingName: e.target.value })} /></div>
+            <div><label className={label} htmlFor="q-cur">Currency</label>
+              <select id="q-cur" className={input} value={q.currency} onChange={(e) => set({ currency: e.target.value })}>
+                {QUOTE_CURRENCIES.map((c) => <option key={c} value={c}>{c} ({currencySymbol(c).trim()})</option>)}
+              </select></div>
             <div className="col-span-2"><label className={label} htmlFor="q-intro">Opening line</label><input id="q-intro" className={input} value={q.intro} onChange={(e) => set({ intro: e.target.value })} /></div>
           </div>
           {q.items.map((it, k) => (
@@ -137,7 +144,7 @@ export default function QuotePage() {
               <div><label className={label} htmlFor={`q-specs-${k}`}>Specifications (one per line)</label>
                 <textarea id={`q-specs-${k}`} className={input} rows={3} value={it.specs} onChange={(e) => setItem(k, { specs: e.target.value })} placeholder={'Size: 2 x 2 x 4 in\n16pt SBS, matte lamination\n4-color printing outside'} /></div>
               <table className="w-full text-sm">
-                <thead><tr className="text-left text-[11px] text-gray-500"><th className="pb-1 pr-2 font-semibold">Quantity</th><th className="pb-1 pr-2 font-semibold">Unit price ($)</th><th className="pb-1 pr-2 font-semibold text-right">Total</th><th /></tr></thead>
+                <thead><tr className="text-left text-[11px] text-gray-500"><th className="pb-1 pr-2 font-semibold">Quantity</th><th className="pb-1 pr-2 font-semibold">Unit price ({currencySymbol(q.currency).trim()})</th><th className="pb-1 pr-2 font-semibold text-right">Total</th><th /></tr></thead>
                 <tbody>
                   {it.rows.map((r, i) => {
                     const total = (Number(r.quantity.replace(/[^0-9.]/g, '')) || 0) * (Number(r.unitPrice.replace(/[^0-9.]/g, '')) || 0)
@@ -145,7 +152,7 @@ export default function QuotePage() {
                       <tr key={i}>
                         <td className="py-1 pr-2"><input aria-label="Quantity" className={input} inputMode="numeric" value={r.quantity} onChange={(e) => setRow(k, i, { quantity: e.target.value })} placeholder="500" /></td>
                         <td className="py-1 pr-2"><input aria-label="Unit price" className={input} inputMode="decimal" value={r.unitPrice} onChange={(e) => setRow(k, i, { unitPrice: e.target.value })} placeholder="0.85" /></td>
-                        <td className="py-1 pr-2 text-right tabular-nums font-semibold">{total ? money(Math.round(total * 100) / 100) : '—'}</td>
+                        <td className="py-1 pr-2 text-right tabular-nums font-semibold">{total ? money(Math.round(total * 100) / 100, q.currency) : '—'}</td>
                         <td className="py-1">{it.rows.length > 1 && <button type="button" aria-label="Remove row" onClick={() => setItem(k, { rows: it.rows.filter((_, n) => n !== i) })} className="text-gray-400 hover:text-red-700"><Trash2 size={14} aria-hidden /></button>}</td>
                       </tr>
                     )
@@ -163,7 +170,7 @@ export default function QuotePage() {
             <label className="inline-flex items-center gap-1.5 select-none font-semibold text-gray-700">
               <input type="checkbox" checked={q.showTotal !== false} onChange={(e) => set({ showTotal: e.target.checked })} /> Show order total
             </label>
-            {totals.map((t) => <span key={t.label || 'all'}>{t.label ? `Total — ${t.label}` : `Order total (${t.count} products)`}: <b>{money(t.total)}</b></span>)}
+            {totals.map((t) => <span key={t.label || 'all'}>{t.label ? `Total — ${t.label}` : `Order total (${t.count} products)`}: <b>{money(t.total, q.currency)}</b></span>)}
             {q.showTotal !== false && totals.length === 0 && q.items.length > 1 && <span>No total shown (a product has more than one quantity).</span>}
           </div>
           <div><label className={label} htmlFor="q-inc">Included (one per line)</label><textarea id="q-inc" className={input} rows={3} value={q.included} onChange={(e) => set({ included: e.target.value })} /></div>
@@ -172,7 +179,7 @@ export default function QuotePage() {
             <div><label className={label} htmlFor="q-valid">Valid for</label><input id="q-valid" className={input} value={q.validity} onChange={(e) => set({ validity: e.target.value })} /></div>
           </div>
           <div><label className={label} htmlFor="q-close">Closing line</label><textarea id="q-close" className={input} rows={2} value={q.closing} onChange={(e) => set({ closing: e.target.value })} /></div>
-          <p className="text-[11px] text-gray-500">Sending moves the stage to Quote Sent, records {value ? money(value) : 'the first total of each product'} as the deal value, and the bot sends the first follow-up the next day if the customer does not answer. Your signature is added automatically.</p>
+          <p className="text-[11px] text-gray-500">Sending moves the stage to Quote Sent, records {value ? money(value, q.currency) : 'the first total of each product'} as the deal value, and the bot sends the first follow-up the next day if the customer does not answer. Your signature is added automatically.</p>
         </section>
         <section className="rounded-xl border border-gray-200 bg-white p-5">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-3">Preview — what the customer gets{cc ? ` (cc ${cc})` : ''}</p>

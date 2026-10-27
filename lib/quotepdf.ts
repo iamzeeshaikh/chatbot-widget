@@ -20,6 +20,8 @@ function safe(s: string): string {
   return String(s ?? '')
     .replace(/[‘’]/g, "'").replace(/[“”″]/g, '"').replace(/[–—]/g, '-')
     .replace(/•/g, '-').replace(/×/g, 'x').replace(/…/g, '...').replace(/✓/g, '')
+    // € is outside the range kept below and would vanish from a EUR quote.
+    .replace(/€/g, 'EUR ')
     .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '')
 }
 
