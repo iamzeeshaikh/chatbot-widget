@@ -1788,6 +1788,11 @@ function looksLikeName_(line) {
 }
 
 function parseLeadBody_(body) {
+  // Inline images in a hand-written email leave "[cid:image001.png@01DD65B5.BCF2D620]"
+  // in the plain text, which looks like an address: two leads (Olivia/Veritiv,
+  // Cory/Sazerac, Oct 2026) got "image001.png@01DD…" as their email and could
+  // never be answered. Strip content-ids before anything reads the body.
+  body = String(body || '').replace(/\[?cid:[^\]\s>]+\]?/gi, '');
   var lines = body.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
   var emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   var phoneRe = /^[+()\-.\s\d]{7,20}$/;
