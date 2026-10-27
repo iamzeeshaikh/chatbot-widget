@@ -123,8 +123,16 @@ function JobsPage() {
                     </div>
                     <p className="mt-1 text-sm font-semibold text-gray-900 line-clamp-2">{j.title}</p>
                     {j.leadName && <p className="mt-0.5 truncate text-[11px] text-gray-500">{j.leadName}</p>}
+                    {/* Whose job it is: the designer works from files on the
+                        server and could not tell Samir's mockup from Steve's
+                        (owner's video, 27 Oct 2026). */}
+                    {j.createdBy && j.createdBy !== j.assignee && (
+                      <p className="mt-1 inline-flex max-w-full items-center rounded-full border border-blue-300 bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                        <span className="truncate">From {nameOf(j.createdBy)}</span>
+                      </p>
+                    )}
                     <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-500">
-                      <span className="truncate">{nameOf(j.assignee)}</span>
+                      <span className="truncate" title="Assigned to">→ {nameOf(j.assignee)}</span>
                       <span className="ml-auto shrink-0">{timeAgo(j.statusAt || j.updatedAt)}</span>
                     </div>
                   </a>
