@@ -795,9 +795,9 @@ export class GmailScopeError extends Error {
  * Script intake stopped overnight and leads sat in Gmail for six hours; the
  * thread-only rule in CLAUDE.md still holds for every agent mailbox.
  */
-export async function searchIntakeMessageIds(agentEmail: string, cfg: GoogleConfig, q: string, max = 100): Promise<{ id: string; threadId: string }[]> {
+export async function searchIntakeMessageIds(agentEmail: string, cfg: GoogleConfig, q: string, max = 100, includeSpam = false): Promise<{ id: string; threadId: string }[]> {
   const token = await accessTokenFor(agentEmail, cfg)
-  const { res, json: j } = await gapi(`${API}/messages?maxResults=${Math.min(max, 500)}&q=${encodeURIComponent(q)}`, {
+  const { res, json: j } = await gapi(`${API}/messages?maxResults=${Math.min(max, 500)}&q=${encodeURIComponent(q)}${includeSpam ? '&includeSpamTrash=true' : ''}`, {
     headers: { Authorization: `Bearer ${token}` },
   }, 'the intake mailbox could not be searched')
   if (res.status === 401) { forgetAccessToken(agentEmail); throw new GmailAuthError('Gmail refused the request. Reconnect Gmail.') }
@@ -812,7 +812,10 @@ export async function searchIntakeMessageIds(agentEmail: string, cfg: GoogleConf
  * it sees those payment notices and nothing else.
  */
 export async function searchPaypalPaidMail(mailbox: string, cfg: GoogleConfig): Promise<{ id: string; threadId: string }[]> {
-  return searchIntakeMessageIds(mailbox, cfg, 'subject:("paid for your invoice") newer_than:30d', 100)
+  // Spam too: Gmail filed the forwarded PayPal notices there (Lilly Zelaya,
+  // invoice 0499, 23 Oct 2026), and a plain search never sees spam, so not one
+  // sports payment was ever picked up. The query stays this narrow.
+  return searchIntakeMessageIds(mailbox, cfg, 'subject:("paid for your invoice") newer_than:30d -in:trash', 100, true)
 }
 
 /**
