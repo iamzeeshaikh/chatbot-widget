@@ -156,7 +156,14 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
         getFrom: () => m.from, getReplyTo: () => '',
       })
       if (!parsed) { if (!dryRun) await remember(ref.id, 'own-reply'); out.skipped++; continue }
-      if (fwdEmail && (!parsed.email || isOurAddress(String(parsed.email)))) { parsed.email = fwdEmail; parsed.unreadable = false }
+      if (fwdEmail) {
+        if (!parsed.email || isOurAddress(String(parsed.email))) { parsed.email = fwdEmail; parsed.unreadable = false }
+        // A hand-written email has no "Name:" field: take the forwarded From
+        // line's display name ("'Gemma Aylott' via Info All Brands" → Gemma Aylott).
+        const fromLine = m.bodyText.match(/^From:\s*(.+)$/im)?.[1] ?? ''
+        const nm = fromLine.replace(/<[^>]*>/, '').replace(/\s+via\s+.*$/i, '').replace(/["']/g, '').trim()
+        if (nm && !nm.includes('@')) parsed.name = nm
+      }
 
       // Files: posted straight into the handler, so Vercel's 4.5MB request cap
       // does not apply here; the store's own per-file limit still does.
