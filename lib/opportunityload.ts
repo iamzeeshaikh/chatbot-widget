@@ -289,7 +289,8 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
     if (s.restricted) restricted++
     const w = readWaiting(s, now)
     const nh = readNoHuman(s, now)
-    const draftAt = s.ids.map((id) => pendingDraft.get(id)).find((x) => x !== undefined)
+    // A person already reached the customer: the draft is stale, not a job (Laurie Chassé, 28 Oct 2026).
+    const draftAt = s.humanAt ? undefined : s.ids.map((id) => pendingDraft.get(id)).find((x) => x !== undefined)
     if (nh) noHuman.push({ ...base(s), hours: nh.hours, lastLine: line(s.customer[s.customer.length - 1]?.text || s.leadText), lastLineAt: nh.since, waiting: !!w, ...(draftAt !== undefined ? { draftAt } : {}) })
     if (draftAt !== undefined) {
       const since = draftAt || s.createdAt

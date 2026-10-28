@@ -17,6 +17,7 @@ import {
 } from '@/lib/crmemail'
 import { sanitizeHtml, htmlToPlain, plainToHtml } from '@/lib/richtext'
 import { buildSendSignature } from '@/lib/sendsignature'
+import { retireFirstDrafts } from '@/lib/draftretire'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -234,6 +235,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // used to take a separate click on the message itself, which meant a lead you
   // had already replied to kept asking for attention.
   await markThreadRepliesRead(id, access.siteId, sent.threadId ?? thread?.threadId, access.member.email)
+  // The customer has now heard from a person: the bot's unsent first reply is stale.
+  await retireFirstDrafts(id, access.siteId, access.member.email).catch((e) => console.error('[email] draft retire failed:', e))
 
   // The row we STORE keeps the real recipient — that is the record of what was
   // sent, and an admin must be able to read it. What goes back to the browser
