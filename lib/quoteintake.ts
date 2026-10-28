@@ -417,6 +417,15 @@ const NOT_A_CUSTOMER_RE = new RegExp([
   String.raw`\bwe(?:'re| are) (?:a |an |the )?(?:leading |professional |direct |reliable |experienced )?[a-z &/,-]{0,60}(?:factory|manufacturer|supplier)\b[a-z0-9 &/,-]{0,60}\bin china\b|\bdirect factory in china\b|\bfactory in china\b[^.\n]{0,80}\b(?:sourcing|supplier|catalog(?:ue)?|samples?)\b`,
   String.raw`\byour sourcing (?:dept|department|team)\b|right person for supplier partnerships|supplier partnership|paid member (?:in|of|on) alibaba|\.en\.alibaba\.com\b`,
   String.raw`negative reviews? (?:removed|removal)|(?:remove|removing|delete|deleting|get rid of) (?:your |the |those |all )?(?:negative|bad|1[- ]star|one[- ]star) reviews|reviews? removed from your (?:trustpilot|google|yelp)`,
+  // Owner, 2026-10-28 (audit of October's billable leads): SEO ranking offers,
+  // paid link insertions, freelance writers, casino link spam, TikTok Shop
+  // codes and supplier "who handles purchasing" pitches.
+  String.raw`competitors outrank you|outrank (?:your )?competitors|competitors' google ranking|let.?s outrank`,
+  String.raw`\blink insertions?\b|contextual link added to an existing article|i pay the publisher`,
+  String.raw`any use for a freelance writer|i'?m a freelance (?:writer|content writer)`,
+  String.raw`\b(?:kazino|casino|betting|totalizators?)\b[^\n]{0,40}https?://`,
+  String.raw`enter this code in tiktok shop|to verify your account, enter this code`,
+  String.raw`right person for new product sourcing|share the purchasing contact`,
   String.raw`reply "?unsubscribe"? if not interested|try (it )?free for \d+ days|no credit card\.? no commitment|\bfor woocommerce (retailers|merchants|stores)|amplify your product discovery|\bcatalogpilot\b`,
 ].join('|'), 'im')
 

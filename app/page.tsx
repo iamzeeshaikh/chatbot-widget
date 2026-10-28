@@ -24,6 +24,7 @@ import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadsta
 import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 import { isQuoteLeadMessage, stripQuoteTag, cleanQuoteSubject, leadSource, type LeadSource } from '@/lib/quoteintake'
+import { billableKey } from '@/lib/billablekey'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -4562,7 +4563,7 @@ export default function Dashboard() {
                   <p className="text-[2.5rem] leading-none font-extrabold text-emerald-900 tabular-nums">{billing?.billable ?? 0}</p>
                   <p className="text-[11px] text-emerald-800 mt-1">
                     {billing && (billing.billableBase ?? billing.total) > billing.billable
-                      ? `${(billing.billableBase ?? billing.total) - billing.billable} overlap${(billing.billableBase ?? billing.total) - billing.billable === 1 ? '' : 's'} removed — same customer, both channels`
+                      ? `${(billing.billableBase ?? billing.total) - billing.billable} overlap${(billing.billableBase ?? billing.total) - billing.billable === 1 ? '' : 's'} removed — same customer or same company`
                       : 'No overlap this period'}
                   </p>
                   <p className="text-[11px] text-emerald-700 mt-2">
@@ -4670,13 +4671,13 @@ export default function Dashboard() {
                   )
                 }
                 if (billingBillableView) {
-                  // Same rule as the server's billable count (leads-billing): one
-                  // customer per site + email; a lead with no email counts alone.
+                  // Same rule as the server's billable count (lib/billablekey.ts):
+                  // one customer per site + email, or per site + company domain.
                   const m: Record<string, { name: string; keys: Set<string>; chat: number; quote: number }> = {}
                   for (const l of allLeads) {
                     if (l.source === 'checkout') continue
                     const r = (m[l.site_id] ??= { name: l.site_name, keys: new Set(), chat: 0, quote: 0 })
-                    r.keys.add(l.email ? l.email.toLowerCase() : `manual::${l.session_id}`)
+                    r.keys.add(billableKey(l.site_id, l.email, l.session_id))
                     if (l.source === 'chat') r.chat++; else r.quote++
                   }
                   const rows = Object.entries(m).map(([id, r]) => ({ id, name: r.name, billable: r.keys.size, chat: r.chat, quote: r.quote }))
@@ -4707,7 +4708,7 @@ export default function Dashboard() {
                                   </span>
                                   <span className="text-lg font-extrabold tabular-nums flex-shrink-0 text-gray-900">{r.billable}</span>
                                 </div>
-                                <p className="text-[11px] text-gray-500 tabular-nums mb-1.5">{r.chat} chat + {r.quote} quote{overlap > 0 ? ` − ${overlap} same customer` : ''}</p>
+                                <p className="text-[11px] text-gray-500 tabular-nums mb-1.5">{r.chat} chat + {r.quote} quote{overlap > 0 ? ` − ${overlap} same customer or company` : ''}</p>
                                 <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
                                   <div className="h-full rounded-full" style={{ width: `${Math.max(8, Math.round((r.billable / max) * 100))}%`, backgroundColor: accent, opacity: 0.55 }} />
                                 </div>

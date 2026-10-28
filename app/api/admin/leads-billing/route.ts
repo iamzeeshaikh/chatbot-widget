@@ -8,6 +8,7 @@ import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from '@/lib/replyauthor'
 import { unpackVisitor } from '@/lib/visitor'
 import { notALeadSessions } from '@/lib/notalead'
 import { QUOTE_TAG, CHECKOUT_TAG, stripQuoteTag, quoteSessionId } from '@/lib/quoteintake'
+import { billableKey } from '@/lib/billablekey'
 
 export const dynamic = 'force-dynamic'
 
@@ -232,7 +233,7 @@ export async function GET(req: NextRequest) {
   // charged for. `billableBase` is the population billable is deduped FROM, so
   // the UI can report the overlap removed without checkout skewing it.
   const billableSource = leads.filter((l) => l.source !== 'checkout')
-  const billableKeys = new Set(billableSource.map((l) => l.email ? `${l.site_id}::${l.email.toLowerCase()}` : `manual::${l.session_id}`))
+  const billableKeys = new Set(billableSource.map((l) => billableKey(l.site_id, l.email, l.session_id)))
   const billable = billableKeys.size
   const billableBase = billableSource.length
 
