@@ -569,7 +569,7 @@ export function isTestSubmission(name: string | null | undefined, email: string 
 }
 
 export function isMachineMail(email: string, body: string): string | null {
-  if (/dmarc|mailer-daemon|postmaster@/i.test(email) || /DMARC (aggregate )?report|aggregate DMARC report|This domain has a DMARC record|^\s*Report[- ]Domain\s*:[^\n]*Submitter\s*:/im.test(body.slice(0, 1500))) return 'DMARC report'
+  if (/^(?:[^@]*[._+-])?dmarc(?:[._+-][^@]*)?@|@(?:[^@]*\.)?dmarc|mailer-daemon|postmaster@/i.test(email) || /DMARC (aggregate )?report|aggregate DMARC report|This domain has a DMARC record|^\s*Report[- ]Domain\s*:[^\n]*Submitter\s*:/im.test(body.slice(0, 1500))) return 'DMARC report'
   if (/##-\s*Please type your reply above this line\s*-##/i.test(body)) return 'ticket-system auto-reply'
   // OUR order confirmation to a customer ("Hi X, Thank you for your order
   // TPC-261023-CKYN … What happens next"), copied into the intake mailbox. The
@@ -589,7 +589,7 @@ export function isMachineMail(email: string, body: string): string | null {
  *  posted: a DMARC report is not a lead whichever site's domain it names. */
 export function isMachineMessage(from: string, subject: string, body: string): string | null {
   const addr = String(from || '').toLowerCase()
-  if (/dmarc|mailer-daemon|postmaster@/.test(addr)) return 'DMARC report'
+  if (/^(?:[^@]*[._+-])?dmarc(?:[._+-][^@]*)?@|@(?:[^@]*\.)?dmarc|mailer-daemon|postmaster@/.test(addr)) return 'DMARC report'
   if (/report[- ]domain\s*:[^\n]*submitter\s*:|\bDMARC\b/i.test(String(subject || ''))) return 'DMARC report'
   return isMachineMail('', String(body || ''))
 }
