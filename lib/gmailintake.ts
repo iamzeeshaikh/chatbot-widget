@@ -28,6 +28,11 @@ import { siteWorkspace } from './workspaces'
 import { googleConfig, searchIntakeMessageIds, fetchThread, fetchAttachment, type InboundMessage } from './gmail'
 import { POST as intakePost } from '@/app/api/quote-intake/route'
 import { isOurAddress } from './customercc'
+import { SITE_DOMAINS } from './sitedomains'
+import { QUOTE_SITE_CODES } from './quoteintake'
+
+// The owners' own Gmail inboxes, which forward customer mail to the intake box.
+const OWNER_INBOXES = /^(?:.*<)?(?:shanimazhar82|zeeshanmzhr3|shanzeeshan571|uzairzia19)@gmail\.com>?$/i
 
 export const INTAKE_MAILBOX = 'dev@zeecustomboxes.com'
 export const CRM_INTAKE_PULL_ROLE = 'crm_intake_pull'
@@ -125,7 +130,20 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
       // they are nobody's enquiry. Dropped here, before a parse or a post.
       const machine = isMachineMessage(m.from, m.subject, m.bodyText)
       if (machine) { if (!dryRun) await remember(ref.id, 'machine', { detail: machine }); out.skipped++; continue }
-      const code = g.codeFromMessageText_(m.bodyText, m.from, m.to)
+      let code = g.codeFromMessageText_(m.bodyText, m.from, m.to)
+      // A customer's own email to info@<site>, forwarded here by one of us
+      // (the owner's Gmail gets the original through the info-all group). The
+      // forward's "To:" line names the site; the customer is the first address
+      // in the body that is not ours. Gemma Aylott, 29 Oct 2026, was skipped.
+      let fwdEmail: string | null = null
+      const ours = (a: string) => isOurAddress(a) || OWNER_INBOXES.test(a)
+      if (!code && ours(m.from) && /^-+\s*Forwarded message/im.test(m.bodyText)) {
+        const toLine = (m.bodyText.match(/^To:\s*(.+)$/im)?.[1] ?? '').toLowerCase()
+        const hit = Object.entries(SITE_DOMAINS).find(([, d]) => toLine.includes(`@${d.toLowerCase()}`))
+        const c = hit ? Object.entries(QUOTE_SITE_CODES).find(([, sid]) => sid === hit[0] || sid === SITE_DOMAINS[hit[0]])?.[0] : undefined
+        const addr = (m.bodyText.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []).find((a) => !ours(a))
+        if (c && addr) { code = c; fwdEmail = addr }
+      }
       const siteId = code ? siteIdFromQuoteCode(code) : null
       if (!code || !siteId || siteWorkspace(siteId) !== 'packaging') {
         if (!dryRun) await remember(ref.id, 'not-a-form')
@@ -138,6 +156,7 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
         getFrom: () => m.from, getReplyTo: () => '',
       })
       if (!parsed) { if (!dryRun) await remember(ref.id, 'own-reply'); out.skipped++; continue }
+      if (fwdEmail && (!parsed.email || isOurAddress(String(parsed.email)))) { parsed.email = fwdEmail; parsed.unreadable = false }
 
       // Files: posted straight into the handler, so Vercel's 4.5MB request cap
       // does not apply here; the store's own per-file limit still does.
