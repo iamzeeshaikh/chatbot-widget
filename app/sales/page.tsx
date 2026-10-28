@@ -767,6 +767,8 @@ function LeadKindChip({ kind }: { kind: SaleLeadKind }) {
 function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }: {
   rows: SaleView[]; showStream: boolean; detailed?: boolean; onOpen: (v: SaleView) => void; ownWorkspace: Workspace
 }) {
+  // Header row stays on screen while the ledger scrolls (owner, 2026-10-28).
+  // The table scrolls inside its own box, so 'top-0' pins to that box.
   const TH = 'px-3 py-2 font-semibold whitespace-nowrap'
   const TD = 'px-3 py-2 whitespace-nowrap text-gray-700'
   // The first two columns (date / order no, then customer) stay put while the
@@ -775,12 +777,12 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
   // column has a fixed width so the customer column knows where to pin.
   const COL1 = 'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem]'
   const FROZEN = 'sticky z-[1] bg-white group-hover:bg-gray-50'
-  const FROZEN_HEAD = 'sticky z-[2] bg-white'
+  const FROZEN_HEAD = 'sticky z-[3] bg-white'
   const PANE_EDGE = 'shadow-[inset_-1px_0_0_#e5e7eb]'
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-auto max-h-[calc(100vh-7rem)]">
       <table className="w-full text-xs">
-        <thead>
+        <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_#e5e7eb]">
           <tr className="text-left text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
             {detailed ? <>
               <th className={`${TH} ${FROZEN_HEAD} left-0 ${COL1}`}>Order No</th>

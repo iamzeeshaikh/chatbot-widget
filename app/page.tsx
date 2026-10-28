@@ -1223,6 +1223,9 @@ export default function Dashboard() {
   // different "what does this mean" — that mixing them in one table read as
   // confusing. Split into two switchable views on the same page.
   const [billingLeadType, setBillingLeadType] = useState<'chat' | 'quote' | 'checkout'>('chat')
+  // Billable card clicked: show the per-site unique-customer breakdown (chat +
+  // quote, the same customer once) instead of the Chat / Quote pair (owner, 2026-10-28).
+  const [billingBillableView, setBillingBillableView] = useState(false)
   // Click a site in the "By site" breakdown to filter the table below to
   // just that site — null means "all sites" (the default).
   const [billingSiteFilter, setBillingSiteFilter] = useState<string | null>(null)
@@ -4551,7 +4554,8 @@ export default function Dashboard() {
                     that's one customer and gets charged once. The Chat/Quote
                     tiles below stay as raw per-channel totals on purpose;
                     this is the only place the overlap is collapsed. */}
-                <div className="bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-2xl p-5 border border-emerald-200">
+                <button type="button" onClick={() => { setBillingBillableView((v) => !v); setBillingSiteFilter(null) }} aria-pressed={billingBillableView}
+                  className={`text-left bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-2xl p-5 border transition-all ${billingBillableView ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-emerald-200 hover:border-emerald-300'}`}>
                   <p className="text-emerald-800 text-[11px] font-semibold uppercase tracking-wide mb-2 inline-flex items-center gap-1.5"><CreditCard size={11} strokeWidth={2} aria-hidden /> Billable Leads</p>
                   {/* Fixed light-green card — use emerald text (NOT gray, which the
                       dark theme remaps to near-white and would vanish here). */}
@@ -4565,7 +4569,8 @@ export default function Dashboard() {
                     Unique customers — this is what to charge per lead for.
                     {checkoutLeads.length > 0 ? ` Checkout orders (${checkoutLeads.length}) are counted in the total but never billed.` : ''}
                   </p>
-                </div>
+                  <p className="text-[11px] font-semibold text-emerald-800 mt-2">{billingBillableView ? 'Showing billable by site — click to go back' : 'Click to see billable by site'}</p>
+                </button>
 
                 {/* Chat / Quote tabs — click either to switch the table below */}
                 <button onClick={() => { setBillingLeadType('chat'); setBillingSiteFilter(null) }}
@@ -4657,6 +4662,56 @@ export default function Dashboard() {
                                   <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent, opacity: selected ? 1 : 0.55 }} />
                                 </div>
                               </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+                if (billingBillableView) {
+                  // Same rule as the server's billable count (leads-billing): one
+                  // customer per site + email; a lead with no email counts alone.
+                  const m: Record<string, { name: string; keys: Set<string>; chat: number; quote: number }> = {}
+                  for (const l of allLeads) {
+                    if (l.source === 'checkout') continue
+                    const r = (m[l.site_id] ??= { name: l.site_name, keys: new Set(), chat: 0, quote: 0 })
+                    r.keys.add(l.email ? l.email.toLowerCase() : `manual::${l.session_id}`)
+                    if (l.source === 'chat') r.chat++; else r.quote++
+                  }
+                  const rows = Object.entries(m).map(([id, r]) => ({ id, name: r.name, billable: r.keys.size, chat: r.chat, quote: r.quote }))
+                    .sort((a, b) => b.billable - a.billable)
+                  const max = rows.length ? Math.max(...rows.map((r) => r.billable)) : 0
+                  const sum = rows.reduce((a, r) => a + r.billable, 0)
+                  return (
+                    <div className="bg-gray-100 rounded-2xl p-5 border border-emerald-300 ring-1 ring-emerald-200 mb-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">
+                          By site — <span className="inline-flex items-center gap-1 align-middle"><CreditCard size={11} strokeWidth={2} aria-hidden /> Billable</span>
+                          <span className="ml-1.5 tabular-nums normal-case text-gray-400">{sum}</span>
+                        </p>
+                        <button onClick={() => setBillingBillableView(false)}
+                          className="text-[11px] font-medium text-indigo-700 hover:text-indigo-800 hover:underline"><span className="inline-flex items-center gap-1">Back to chat / quote <X size={11} strokeWidth={2} aria-hidden /></span></button>
+                      </div>
+                      {rows.length === 0 ? <p className="text-xs text-gray-500">No billable leads in this period.</p> : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                          {rows.map((r) => {
+                            const accent = SITE_ACCENT[r.id] ?? '#6366f1'
+                            const overlap = r.chat + r.quote - r.billable
+                            return (
+                              <div key={r.id} className="rounded-xl px-3.5 py-3 border bg-white border-gray-200">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <span className="flex items-center gap-2 min-w-0">
+                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: accent }} />
+                                    <span className="text-sm truncate text-gray-800">{r.name}</span>
+                                  </span>
+                                  <span className="text-lg font-extrabold tabular-nums flex-shrink-0 text-gray-900">{r.billable}</span>
+                                </div>
+                                <p className="text-[11px] text-gray-500 tabular-nums mb-1.5">{r.chat} chat + {r.quote} quote{overlap > 0 ? ` − ${overlap} same customer` : ''}</p>
+                                <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${Math.max(8, Math.round((r.billable / max) * 100))}%`, backgroundColor: accent, opacity: 0.55 }} />
+                                </div>
+                              </div>
                             )
                           })}
                         </div>
