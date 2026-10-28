@@ -420,6 +420,10 @@ const NOT_A_CUSTOMER_RE = new RegExp([
   // Owner, 2026-10-28 (audit of October's billable leads): SEO ranking offers,
   // paid link insertions, freelance writers, casino link spam, TikTok Shop
   // codes and supplier "who handles purchasing" pitches.
+  // The form's own honeypot fired ("Spam check: hidden field filled") — no
+  // person fills a field they cannot see — plus blog-comment spam (owner, 2026-10-29).
+  String.raw`^\s*(?:\[[^\]]*\]\s*)?spam check:[^\n]*hidden field filled`,
+  String.raw`enjoying the (?:template|theme)|perfect balance.{0,40}user friendliness|exceptional blog|\bthe blog loads\b|\bporno\b`,
   String.raw`competitors outrank you|outrank (?:your )?competitors|competitors' google ranking|let.?s outrank`,
   String.raw`\blink insertions?\b|contextual link added to an existing article|i pay the publisher`,
   String.raw`any use for a freelance writer|i'?m a freelance (?:writer|content writer)`,
