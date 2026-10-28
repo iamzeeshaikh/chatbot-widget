@@ -22,6 +22,7 @@ import { CRM_STAGE_LABEL, CRM_STAGE_STYLE } from '@/lib/crm'
 import { timeAgo, formatDateTime } from '@/lib/datetime'
 import type { OpportunitiesResult, OppItem } from '@/lib/opportunityload'
 import type { FollowUpStats, ReplyMood } from '@/lib/followupstats'
+import { memberPhotoUrl } from '@/lib/memberphoto'
 
 const BTN = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-40'
 
@@ -235,7 +236,11 @@ export default function OpportunitiesPage() {
               {data.leaderboard.map((r, i) => (
                 <tr key={r.agent || '__none'} className="border-b border-gray-100">
                   <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap">
-                    <span className="inline-block w-5 text-gray-400 tabular-nums">{i + 1}</span>{r.name}
+                    <span className="inline-block w-5 text-gray-400 tabular-nums">{i + 1}</span>
+                    {memberPhotoUrl(r.agent?.includes('@') ? r.agent : '') && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={memberPhotoUrl(r.agent)!} alt="" className="inline-block w-6 h-6 rounded-full object-cover mr-2 align-middle" onError={(e) => e.currentTarget.remove()} />
+                    )}{r.name}
                   </td>
                   {cell(r.agent, 'won', r.wonCount, 'text-gray-700')}
                   {cell(r.agent, 'won', usd(r.wonUsd), 'font-semibold text-green-700')}

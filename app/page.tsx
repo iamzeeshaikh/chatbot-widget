@@ -25,6 +25,7 @@ import { LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 import { isQuoteLeadMessage, stripQuoteTag, cleanQuoteSubject, leadSource, type LeadSource } from '@/lib/quoteintake'
 import { billableKey } from '@/lib/billablekey'
+import { memberPhotoUrl } from '@/lib/memberphoto'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -2841,7 +2842,13 @@ export default function Dashboard() {
               title={`${userEmail} — account`} aria-label="Account menu"
               className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full text-white text-[11px] font-bold uppercase hover:opacity-90 transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-gray-500 focus-visible:ring-offset-2"
               style={{ backgroundColor: accentColor }}>
-              {(userEmail || '?').slice(0, 2)}
+              <span className="relative w-full h-full flex items-center justify-center overflow-hidden rounded-full">
+                {(userEmail || '?').slice(0, 2)}
+                {memberPhotoUrl(userEmail) && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={memberPhotoUrl(userEmail)!} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => e.currentTarget.remove()} />
+                )}
+              </span>
             </button>
             {showAccount && (
               <>
