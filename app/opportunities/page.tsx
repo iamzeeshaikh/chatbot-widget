@@ -252,8 +252,6 @@ export default function OpportunitiesPage() {
         <p className="px-3 py-2 text-[10px] text-gray-500">Click any number to see those leads. Won = sales booked this month in the Sales ledger. Pipeline = hot quotes plus unpaid invoices on that agent&apos;s leads.</p>
       </Card>
 
-      <FollowUpResults agentName={agentName} />
-
       {filtered && focus ? (
         <Card title={`${agentName(focus.agent)} · ${FOCUS_LABEL[focus.kind]} · ${focus.kind === 'won' ? filtered.won.length : filtered.items.length}`} icon={Trophy} tone="primary" className="mb-4"
           action={<button type="button" onClick={() => setFocus(null)} className={`${BTN} border border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}><X className="w-3.5 h-3.5" aria-hidden />Back to all</button>}>
@@ -341,6 +339,9 @@ export default function OpportunitiesPage() {
         {data.excluded.ownTests ? ` · ${data.excluded.ownTests} test lead${data.excluded.ownTests === 1 ? '' : 's'} from our own addresses` : ''}.
         Covers leads since {formatDateTime(data.windowFrom).split(',')[0]}.
       </p>
+
+      {/* Below the lists: the work comes first, the results after (owner, 2026-10-28). */}
+      <div className="mt-4"><FollowUpResults agentName={agentName} /></div>
     </Shell>
   )
 }
