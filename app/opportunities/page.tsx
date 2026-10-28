@@ -237,9 +237,10 @@ export default function OpportunitiesPage() {
                 <tr key={r.agent || '__none'} className="border-b border-gray-100">
                   <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap">
                     <span className="inline-block w-5 text-gray-400 tabular-nums">{i + 1}</span>
-                    {memberPhotoUrl(r.agent?.includes('@') ? r.agent : '') && (
+                    {/* The leaderboard keys agents by mailbox name; every agent mailbox is @shopcardboardboxes.com. */}
+                    {r.agent && memberPhotoUrl(r.agent.includes('@') ? r.agent : `${r.agent}@shopcardboardboxes.com`) && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={memberPhotoUrl(r.agent)!} alt="" className="inline-block w-6 h-6 rounded-full object-cover mr-2 align-middle" onError={(e) => e.currentTarget.remove()} />
+                      <img src={memberPhotoUrl(r.agent.includes('@') ? r.agent : `${r.agent}@shopcardboardboxes.com`)!} alt="" className="inline-block w-6 h-6 rounded-full object-cover mr-2 align-middle" onError={(e) => e.currentTarget.remove()} />
                     )}{r.name}
                   </td>
                   {cell(r.agent, 'won', r.wonCount, 'text-gray-700')}
