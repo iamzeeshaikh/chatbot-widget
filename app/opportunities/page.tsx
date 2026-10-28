@@ -438,6 +438,12 @@ function FollowUpResults({ agentName }: { agentName: (k: string) => string }) {
     return () => { alive = false }
   }, [])
   if (!f) return null
+  // The ledger keeps the agent's address; the leaderboard may key them by name.
+  const who = (e: string) => {
+    for (const k of [e, e.split('@')[0]]) { const n = agentName(k); if (n !== 'Unassigned') return n }
+    const local = e.split('@')[0].replace(/(khan|hayes|taylor|wright|diaz|joshi)$/i, ' $1')
+    return local.replace(/\b\w/g, (c) => c.toUpperCase())
+  }
   const rate = f.leads ? Math.round((f.replied / f.leads) * 100) : 0
   const shown = mood === 'all' ? f.replies : f.replies.filter((r) => r.mood === mood)
   const pill = (k: ReplyMood | 'all', label: string, n: number) => (
@@ -468,7 +474,7 @@ function FollowUpResults({ agentName }: { agentName: (k: string) => string }) {
             <tbody>
               {f.byAgent.map((a) => (
                 <tr key={a.agent} className="border-b border-gray-100">
-                  <td className="px-2 py-1.5 font-semibold text-gray-900">{agentName(a.agent) === 'Unassigned' ? a.agent.split('@')[0] : agentName(a.agent)}</td>
+                  <td className="px-2 py-1.5 font-semibold text-gray-900">{who(a.agent)}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{a.sent}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{a.leads}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-green-700">{a.replied}</td>
@@ -491,7 +497,7 @@ function FollowUpResults({ agentName }: { agentName: (k: string) => string }) {
                   <Chip tone={MOOD[r.mood].tone}>{MOOD[r.mood].label}</Chip>
                   <span className="font-semibold text-sm text-gray-900">{r.name}</span>
                   <span className="text-[11px] text-gray-500">{r.siteName}</span>
-                  <span className="ml-auto text-[11px] text-gray-500">{agentName(r.agent) === 'Unassigned' ? r.agent.split('@')[0] : agentName(r.agent)} · replied {timeAgo(r.repliedAt)} after {r.followUps} follow-up{r.followUps === 1 ? '' : 's'}</span>
+                  <span className="ml-auto text-[11px] text-gray-500">{who(r.agent)} · replied {timeAgo(r.repliedAt)} after {r.followUps} follow-up{r.followUps === 1 ? '' : 's'}</span>
                 </div>
                 <p className="mt-1 text-xs text-gray-700 line-clamp-2">“{r.said}”</p>
               </a>
