@@ -15,12 +15,13 @@ import {
   ArrowLeft, RefreshCw, TriangleAlert, Lock, Clock, Receipt, Flame, History, Trophy,
   Mail, MessageCircle, Ban, CircleDollarSign, X,
   UserX,
-  Send,
+  Send, MailCheck,
 } from 'lucide-react'
 import { Card, EmptyState } from '@/app/leads/[id]/ui'
 import { CRM_STAGE_LABEL, CRM_STAGE_STYLE } from '@/lib/crm'
 import { timeAgo, formatDateTime } from '@/lib/datetime'
 import type { OpportunitiesResult, OppItem } from '@/lib/opportunityload'
+import type { FollowUpStats, ReplyMood } from '@/lib/followupstats'
 
 const BTN = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-40'
 
@@ -251,6 +252,8 @@ export default function OpportunitiesPage() {
         <p className="px-3 py-2 text-[10px] text-gray-500">Click any number to see those leads. Won = sales booked this month in the Sales ledger. Pipeline = hot quotes plus unpaid invoices on that agent&apos;s leads.</p>
       </Card>
 
+      <FollowUpResults agentName={agentName} />
+
       {filtered && focus ? (
         <Card title={`${agentName(focus.agent)} · ${FOCUS_LABEL[focus.kind]} · ${focus.kind === 'won' ? filtered.won.length : filtered.items.length}`} icon={Trophy} tone="primary" className="mb-4"
           action={<button type="button" onClick={() => setFocus(null)} className={`${BTN} border border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}><X className="w-3.5 h-3.5" aria-hidden />Back to all</button>}>
@@ -418,5 +421,85 @@ function Row({ item: i, amount, badge, extra, ownerFirst = false }: { item: OppI
         )}
       </a>
     </li>
+  )
+}
+
+// Follow-up results (owner, 2026-10-28): what the follow-ups achieved, so the
+// team can see the replies they earned. lib/followupstats.ts does the counting.
+const MOOD: Record<ReplyMood, { label: string; tone: 'good' | 'warn' | 'bad' }> = {
+  interested: { label: 'Interested', tone: 'good' }, later: { label: 'Will get back', tone: 'warn' }, no: { label: 'Said no', tone: 'bad' },
+}
+function FollowUpResults({ agentName }: { agentName: (k: string) => string }) {
+  const [f, setF] = useState<FollowUpStats | null>(null)
+  const [mood, setMood] = useState<ReplyMood | 'all'>('all')
+  useEffect(() => {
+    let alive = true
+    void fetch('/api/opportunities/followups').then((r) => (r.ok ? r.json() : null)).then((j) => { if (alive && j) setF(j) })
+    return () => { alive = false }
+  }, [])
+  if (!f) return null
+  const rate = f.leads ? Math.round((f.replied / f.leads) * 100) : 0
+  const shown = mood === 'all' ? f.replies : f.replies.filter((r) => r.mood === mood)
+  const pill = (k: ReplyMood | 'all', label: string, n: number) => (
+    <button key={k} type="button" onClick={() => setMood(k)}
+      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${mood === k ? 'border-blue-400 bg-blue-100 text-blue-800' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}>{label} <span className="tabular-nums">{n}</span></button>
+  )
+  return (
+    <Card title={`Follow-up results — last ${f.days} days`} icon={MailCheck} className="mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 px-3 pt-3">
+        <Stat label="Follow-ups sent" value={String(f.sent)} hint={`to ${f.leads} customers`} />
+        <Stat label="Customers replied" value={String(f.replied)} hint={`${rate}% of those followed up`} tone="good" />
+        <Stat label="Interested" value={String(f.interested)} hint="asked, sent details or said yes" tone="good" />
+        <Stat label="Will get back" value={String(f.later)} hint="busy now, coming back" tone="warn" />
+        <Stat label="Said no" value={String(f.no)} hint="price, MOQ or bought elsewhere" tone="bad" />
+      </div>
+      {f.byAgent.length > 0 && (
+        <div className="overflow-x-auto px-3 pt-3">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-200 text-left text-[10px] uppercase tracking-wider text-gray-500">
+                <th className="px-2 py-1.5 font-semibold">Agent</th>
+                <th className="px-2 py-1.5 font-semibold text-right">Follow-ups</th>
+                <th className="px-2 py-1.5 font-semibold text-right">Customers</th>
+                <th className="px-2 py-1.5 font-semibold text-right">Replied</th>
+                <th className="px-2 py-1.5 font-semibold text-right">Still in play</th>
+              </tr>
+            </thead>
+            <tbody>
+              {f.byAgent.map((a) => (
+                <tr key={a.agent} className="border-b border-gray-100">
+                  <td className="px-2 py-1.5 font-semibold text-gray-900">{agentName(a.agent) === 'Unassigned' ? a.agent.split('@')[0] : agentName(a.agent)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{a.sent}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{a.leads}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-green-700">{a.replied}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{a.interested}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+        {pill('all', 'All replies', f.replied)}{pill('interested', 'Interested', f.interested)}{pill('later', 'Will get back', f.later)}{pill('no', 'Said no', f.no)}
+      </div>
+      {shown.length === 0 ? <EmptyState icon={MailCheck} title="No replies here yet" /> : (
+        <ul className="divide-y divide-gray-100 mt-2">
+          {shown.map((r) => (
+            <li key={r.leadId}>
+              <a href={`/leads/${encodeURIComponent(r.leadId)}`} className="block px-3 py-2.5 hover:bg-gray-50">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <Chip tone={MOOD[r.mood].tone}>{MOOD[r.mood].label}</Chip>
+                  <span className="font-semibold text-sm text-gray-900">{r.name}</span>
+                  <span className="text-[11px] text-gray-500">{r.siteName}</span>
+                  <span className="ml-auto text-[11px] text-gray-500">{agentName(r.agent) === 'Unassigned' ? r.agent.split('@')[0] : agentName(r.agent)} · replied {timeAgo(r.repliedAt)} after {r.followUps} follow-up{r.followUps === 1 ? '' : 's'}</span>
+                </div>
+                <p className="mt-1 text-xs text-gray-700 line-clamp-2">“{r.said}”</p>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="px-3 py-2 text-[10px] text-gray-500">A reply is the customer&apos;s first email after the first follow-up. Interested / Will get back / Said no is read from their words — open the lead for the full thread.</p>
+    </Card>
   )
 }
