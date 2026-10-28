@@ -10,6 +10,7 @@ export const maxDuration = 300
 //   GET            cron (Bearer CRON_SECRET) or an admin: learn from the last day
 //   GET ?dry=1     what it would learn, nothing stored
 //   GET ?list=1    the lessons as they stand
+//   GET ?hours=168&end=<iso>   learn from one past week (history replay)
 //   POST {action:'remove', id} | {action:'add', text}   admin edits
 async function who(req: NextRequest): Promise<{ ok: boolean; by: string; admin: boolean }> {
   const secret = process.env.CRON_SECRET
@@ -25,7 +26,10 @@ export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get('list') === '1') return NextResponse.json(await readLessons())
   const dry = req.nextUrl.searchParams.get('dry') === '1'
   const hours = Math.min(24 * 30, Math.max(1, Number(req.nextUrl.searchParams.get('hours')) || 26))
-  return NextResponse.json(await learnFromTeam({ dryRun: dry, hours }))
+  // ?end=<iso>: learn from a past window (history replay, admins only).
+  const endRaw = req.nextUrl.searchParams.get('end')
+  const endMs = endRaw && w.admin ? Date.parse(endRaw) : NaN
+  return NextResponse.json(await learnFromTeam({ dryRun: dry, hours, ...(Number.isFinite(endMs) ? { endMs } : {}) }))
 }
 
 export async function POST(req: NextRequest) {

@@ -14,7 +14,7 @@
 // zeeops-crm site and appended to the draft writer's instructions — the hard
 // rules there still win. The owner sees and removes them at /bot-lessons.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPages } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import { llmComplete, CLAUDE_WORK_MODEL } from './llm'
 import { CRM_BOT_DRAFT_ROLE, parseBotDraft, type BotDraft } from './botdraft'
@@ -24,7 +24,7 @@ import { splitQuoted } from './emailreply'
 
 export const CRM_BOT_LESSONS_ROLE = 'crm_bot_lessons'
 export const BOT_LESSONS_SESSION = 'zeeops-bot-lessons'
-export const MAX_LESSONS = 30
+export const MAX_LESSONS = 40
 
 export interface BotLesson { id: string; text: string; from: 'edited' | 'discarded' | 'human' | 'owner'; at: string; evidence?: string }
 export interface BotLessons { lessons: BotLesson[]; at: string; by: string; learnedFrom?: { edited: number; discarded: number; human: number } }
@@ -71,20 +71,20 @@ export interface LearnSignals {
   human: { customer: string; agent: string }[]
 }
 
-/** Gather the last `hours` of signals across the packaging sites. */
-export async function gatherSignals(hours = 26): Promise<LearnSignals> {
-  const since = new Date(Date.now() - hours * 3600_000).toISOString()
-  const draftSince = new Date(Date.now() - (hours + 72) * 3600_000).toISOString()
+/** Gather `hours` of signals across the packaging sites, ending at `endMs`
+ *  (now by default — the nightly pass). A history replay walks it back week by week. */
+export async function gatherSignals(hours = 26, endMs = Date.now()): Promise<LearnSignals> {
+  const since = new Date(endMs - hours * 3600_000).toISOString()
+  const until = new Date(endMs).toISOString()
+  const draftSince = new Date(endMs - (hours + 72) * 3600_000).toISOString()
   const sites = [...PACKAGING_SITES]
-  const [{ data: drafts }, { data: emails }] = await Promise.all([
-    supabase.from('chat_logs').select('session_id, message, created_at').eq('role', CRM_BOT_DRAFT_ROLE).in('site_id', sites)
-      .gte('created_at', draftSince).order('created_at', { ascending: true }).limit(3000),
-    supabase.from('chat_logs').select('session_id, message, created_at').in('role', [CRM_EMAIL_ROLE, 'crm_email_in']).in('site_id', sites)
-      // NEWEST first, then reversed: with a cap and oldest-first, the cap
-      // eats exactly the recent emails this pass is for (CLAUDE.md §6).
-      .gte('created_at', new Date(Date.now() - (hours + 72) * 3600_000).toISOString()).order('created_at', { ascending: false }).limit(8000),
+  // Paged: a plain select stops at 1,000 rows whatever .limit() asks for.
+  const [drafts, emails] = await Promise.all([
+    fetchAllPages<{ session_id: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, message, created_at').eq('role', CRM_BOT_DRAFT_ROLE).in('site_id', sites)
+      .gte('created_at', draftSince).lte('created_at', until).order('created_at', { ascending: true }), 20000),
+    fetchAllPages<{ session_id: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, message, created_at').in('role', [CRM_EMAIL_ROLE, 'crm_email_in']).in('site_id', sites)
+      .gte('created_at', draftSince).lte('created_at', until).order('created_at', { ascending: true }), 40000),
   ])
-  emails?.reverse()
   // Each draft id: its first (bot) revision and its decided revision.
   const byId = new Map<string, { session: string; first: BotDraft; last: BotDraft; lastAt: string }>()
   for (const r of drafts ?? []) {
@@ -159,8 +159,8 @@ Rules for lessons:
 - At most ${MAX_LESSONS} lessons in total, most useful first.`
 
 /** One learning pass: gather, ask the model, merge, store. */
-export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number } = {}): Promise<{ ok: boolean; why?: string; signals: { edited: number; discarded: number; human: number }; before: number; after?: BotLessons }> {
-  const sig = await gatherSignals(opts.hours ?? 26)
+export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number; endMs?: number } = {}): Promise<{ ok: boolean; why?: string; signals: { edited: number; discarded: number; human: number }; before: number; after?: BotLessons }> {
+  const sig = await gatherSignals(opts.hours ?? 26, opts.endMs ?? Date.now())
   const counts = { edited: sig.edited.length, discarded: sig.discarded.length, human: sig.human.length }
   const current = await readLessons()
   if (!counts.edited && !counts.discarded && !counts.human) return { ok: true, why: 'nothing new to learn from', signals: counts, before: current.lessons.length }
@@ -171,7 +171,7 @@ export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number } =
     `DRAFTS THE AGENTS DISCARDED (${counts.discarded}):`,
     ...sig.discarded.slice(0, 15).map((e, i) => `#${i + 1}${e.why ? ` (reason given: ${e.why})` : ''}\nBOT WROTE:\n${e.bot}\nAGENT SENT INSTEAD:\n${e.agent}`), '',
     `EMAILS AGENTS WROTE THEMSELVES (${counts.human}):`,
-    ...sig.human.slice(0, 25).map((e, i) => `#${i + 1}\nCUSTOMER WROTE:\n${e.customer || '(new enquiry)'}\nAGENT REPLIED:\n${e.agent}`),
+    ...sig.human.slice(0, 40).map((e, i) => `#${i + 1}\nCUSTOMER WROTE:\n${e.customer || '(new enquiry)'}\nAGENT REPLIED:\n${e.agent}`),
   ].join('\n').slice(0, 60000)
   const r = await llmComplete({ system: LEARN_SYSTEM, messages: [{ role: 'user', content: user }], maxTokens: 8000, anthropicMaxTokens: 8000, model: CLAUDE_WORK_MODEL, timeoutMs: 110000 })
   if (r.error || !r.text.trim()) return { ok: false, why: 'the model did not answer', signals: counts, before: current.lessons.length }
