@@ -1227,6 +1227,7 @@ export default function Dashboard() {
   // Billable card clicked: show the per-site unique-customer breakdown (chat +
   // quote, the same customer once) instead of the Chat / Quote pair (owner, 2026-10-28).
   const [billingBillableView, setBillingBillableView] = useState(false)
+  const [billingBillableSite, setBillingBillableSite] = useState<string | null>(null)
   // Click a site in the "By site" breakdown to filter the table below to
   // just that site — null means "all sites" (the default).
   const [billingSiteFilter, setBillingSiteFilter] = useState<string | null>(null)
@@ -4700,7 +4701,9 @@ export default function Dashboard() {
                             const accent = SITE_ACCENT[r.id] ?? '#6366f1'
                             const overlap = r.chat + r.quote - r.billable
                             return (
-                              <div key={r.id} className="rounded-xl px-3.5 py-3 border bg-white border-gray-200">
+                              <button type="button" key={r.id} onClick={() => setBillingBillableSite(billingBillableSite === r.id ? null : r.id)}
+                                style={billingBillableSite === r.id ? { backgroundColor: `${accent}14`, borderColor: accent, boxShadow: `0 0 0 1px ${accent}` } : undefined}
+                                className={`text-left rounded-xl px-3.5 py-3 border transition-all ${billingBillableSite === r.id ? '' : 'bg-white border-gray-200 hover:border-gray-300 hover:-translate-y-0.5 hover:shadow-sm'}`}>
                                 <div className="flex items-center justify-between gap-2 mb-1">
                                   <span className="flex items-center gap-2 min-w-0">
                                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: accent }} />
@@ -4712,11 +4715,50 @@ export default function Dashboard() {
                                 <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
                                   <div className="h-full rounded-full" style={{ width: `${Math.max(8, Math.round((r.billable / max) * 100))}%`, backgroundColor: accent, opacity: 0.55 }} />
                                 </div>
-                              </div>
+                              </button>
                             )
                           })}
                         </div>
                       )}
+                      {/* The customers behind the clicked site's number: one row per
+                          billable customer, both channels folded together. */}
+                      {billingBillableSite && (() => {
+                        const groups = new Map<string, typeof allLeads>()
+                        for (const l of allLeads) {
+                          if (l.source === 'checkout' || l.site_id !== billingBillableSite) continue
+                          const k = billableKey(l.site_id, l.email, l.session_id)
+                          groups.set(k, [...(groups.get(k) ?? []), l])
+                        }
+                        const list = [...groups.values()].map((g) => g.sort((a, b) => a.captured_at.localeCompare(b.captured_at)))
+                          .sort((a, b) => b[0].captured_at.localeCompare(a[0].captured_at))
+                        return (
+                          <div className="mt-4 rounded-xl border border-gray-200 bg-white overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
+                              <p className="text-xs font-semibold text-gray-800">{list[0]?.[0]?.site_name ?? billingBillableSite} — {list.length} billable customer{list.length === 1 ? '' : 's'}</p>
+                              <button onClick={() => setBillingBillableSite(null)} className="text-[11px] font-medium text-indigo-700 hover:underline inline-flex items-center gap-1">Close <X size={11} aria-hidden /></button>
+                            </div>
+                            <ul className="divide-y divide-gray-100">
+                              {list.map((g) => (
+                                <li key={g[0].session_id} className="px-3 py-2">
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    <span className="text-sm font-semibold text-gray-900">{g[0].name || g[0].email || 'Visitor'}</span>
+                                    {g[0].email && <span className="text-[11px] text-gray-500">{g[0].email}</span>}
+                                    <span className="ml-auto text-[11px] text-gray-500">{formatDateTime(g[0].captured_at)}</span>
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap gap-1.5">
+                                    {g.map((l) => (
+                                      <a key={l.session_id} href={`/leads/${encodeURIComponent(l.session_id)}`}
+                                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${l.source === 'chat' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-amber-100 text-amber-700 border-amber-300'}`}>
+                                        {l.source === 'chat' ? 'Chat' : 'Quote'}{g.length > 1 && l.email && g[0].email && l.email.toLowerCase() !== g[0].email.toLowerCase() ? ` · ${l.email}` : ''} ↗
+                                      </a>
+                                    ))}
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )
+                      })()}
                     </div>
                   )
                 }
