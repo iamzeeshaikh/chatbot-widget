@@ -186,6 +186,8 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   // 2026-10-26: thekraftboxes.co.uk was registered without an intake code
   // (the regression test caught it before its first form).
   TKB: 'thekraftboxesuk',
+  // 2026-10-29: packmio.com, Gmail label PM.
+  PM: 'packmio',
 
   // 2026-08-29: the SPORTS workspace joins the quote intake. Nothing about the
   // routing changes — a lead's dashboard is decided by its site_id

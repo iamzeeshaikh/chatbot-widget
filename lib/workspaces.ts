@@ -56,6 +56,8 @@ export const PACKAGING_SITES = [
   'tuckboxesuk',
   // 2026-10-26: kraft boxes (UK).
   'thekraftboxesuk',
+  // 2026-10-29: packmio.com (owner: Gmail label PM).
+  'packmio',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
