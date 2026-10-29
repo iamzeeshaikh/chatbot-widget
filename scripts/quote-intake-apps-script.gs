@@ -1992,7 +1992,18 @@ function attachmentPlan_(msg) {
 function leadFromMessage_(msg) {
   var plain = msg.getPlainBody();
   var parsed = parseLeadBody_(plain);
-  if (parsed.email) return parsed;
+  if (parsed.email) {
+    // A hand-written email (no form fields): the body has no "Name:" line, so
+    // whatever the parser guessed is a sentence fragment ("like a close
+    // match." — Armando Yanes Jr, 29 Oct 2026). The sender's display name is right.
+    if (!looksLikeFormSubmission_(plain)) {
+      var fromHdr = String(msg.getFrom() || '');
+      var fromAddr0 = (fromHdr.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [''])[0].toLowerCase();
+      var nm0 = fromHdr.replace(/<[^>]*>/, '').replace(/\s+via\s+.*$/i, '').replace(/["']/g, '').trim();
+      if (fromAddr0 && fromAddr0 === String(parsed.email).toLowerCase() && nm0 && nm0.indexOf('@') === -1) parsed.name = nm0;
+    }
+    return parsed;
+  }
   // A phone in a hand-written email's signature is not the whole contact: the
   // sender's address still has to come from Reply-To/From below, or the lead
   // has no email and cannot be deduped or answered (Westend RFQ, 24 Oct 2026).
