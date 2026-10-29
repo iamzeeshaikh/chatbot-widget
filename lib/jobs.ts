@@ -135,6 +135,43 @@ export const blankEstimate = (): Estimate => ({
   finishing: '', addOns: '', tiers: [{ quantity: '', unitCost: '', unitPrice: '' }], shipping: '', turnaround: '', vendor: '',
 })
 
+// ── the production form ─────────────────────────────────────────────────────
+// The sheet the production side works from (Taylor_IH-029.xlsx, 2026-10-29:
+// "production form is trha setup krein, ye sari information chahye"): invoice
+// and job numbers, CSR, rush or standard, the printer's deadline and delivery
+// date, a product table, designer detail, the client and where to ship, and
+// the shipping record. lib/productionform.ts fills a new one from the lead's
+// invoice; the job page prints it like the spreadsheet.
+export interface ProductionItem { product: string; stock: string; size: string; lamination: string; printing: string; quantity: string }
+export interface ProductionForm {
+  invoiceNo: string
+  jobNo: string
+  orderDate: string        // YYYY-MM-DD, like every date on the form
+  csr: string
+  orderType: string        // 'Standard' | 'Rush'
+  printerDeadline: string
+  deliveryDate: string
+  items: ProductionItem[]
+  addOn: string
+  handoverToDesigner: string
+  sentToProduction: string
+  designer: { die: string; color: string; quantity: string; stock: string; addOn: string }
+  client: { name: string; phone: string; company: string; address: string }
+  folderPath: string
+  shipping: { via: string; date: string; weight: string; cartons: string; quantity: string; tracking: string }
+  shipperReview: string
+}
+
+export const ORDER_TYPES = ['Standard', 'Rush'] as const
+export const blankProductionItem = (): ProductionItem => ({ product: '', stock: '', size: '', lamination: '', printing: '', quantity: '' })
+export const blankProductionForm = (): ProductionForm => ({
+  invoiceNo: '', jobNo: '', orderDate: '', csr: '', orderType: 'Standard', printerDeadline: '', deliveryDate: '',
+  items: [blankProductionItem()], addOn: '', handoverToDesigner: '', sentToProduction: '',
+  designer: { die: '', color: '', quantity: '', stock: '', addOn: '' },
+  client: { name: '', phone: '', company: '', address: '' }, folderPath: '',
+  shipping: { via: '', date: '', weight: '', cartons: '', quantity: '', tracking: '' }, shipperReview: '',
+})
+
 export interface Job {
   id: string
   /** Short and human: J-0042. Assigned on creation, never reused. */
@@ -154,6 +191,8 @@ export interface Job {
   siteId: string
   dueAt: string
   estimate: Estimate | null
+  /** Production jobs: the production form, once someone saves it. */
+  production?: ProductionForm | null
   createdBy: string
   createdAt: string
   updatedBy: string
@@ -196,6 +235,31 @@ export function cleanEstimate(raw: unknown): Estimate | null {
   }
 }
 
+const day = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : '')
+
+export function cleanProductionForm(raw: unknown): ProductionForm | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const sub = (k: string) => ((o[k] && typeof o[k] === 'object' ? o[k] : {}) as Record<string, unknown>)
+  const items = (Array.isArray(o.items) ? o.items : []).slice(0, 20).map((x) => {
+    const t = (x ?? {}) as Record<string, unknown>
+    return { product: s(t.product, 160), stock: s(t.stock, 200), size: s(t.size, 80), lamination: s(t.lamination, 80), printing: s(t.printing, 120), quantity: s(t.quantity, 20) }
+  })
+  const d = sub('designer'), c = sub('client'), sh = sub('shipping')
+  return {
+    invoiceNo: s(o.invoiceNo, 40), jobNo: s(o.jobNo, 60), orderDate: day(o.orderDate), csr: s(o.csr, 80),
+    orderType: o.orderType === 'Rush' ? 'Rush' : 'Standard',
+    printerDeadline: day(o.printerDeadline), deliveryDate: day(o.deliveryDate),
+    items: items.length ? items : [blankProductionItem()], addOn: s(o.addOn, 400),
+    handoverToDesigner: day(o.handoverToDesigner), sentToProduction: day(o.sentToProduction),
+    designer: { die: s(d.die, 200), color: s(d.color, 80), quantity: s(d.quantity, 20), stock: s(d.stock, 120), addOn: s(d.addOn, 200) },
+    client: { name: s(c.name, 120), phone: s(c.phone, 40), company: s(c.company, 120), address: s(c.address, 400) },
+    folderPath: s(o.folderPath, 200),
+    shipping: { via: s(sh.via, 80), date: day(sh.date), weight: s(sh.weight, 40), cartons: s(sh.cartons, 20), quantity: s(sh.quantity, 20), tracking: s(sh.tracking, 300) },
+    shipperReview: s(o.shipperReview, 600),
+  }
+}
+
 /** What the browser may set on a job. Ids, numbers and audit fields are the server's. */
 export function cleanJobInput(raw: unknown): Partial<Job> {
   const o = (raw ?? {}) as Record<string, unknown>
@@ -209,6 +273,7 @@ export function cleanJobInput(raw: unknown): Partial<Job> {
   if ('leadId' in o) out.leadId = s(o.leadId, 120).trim()
   if ('dueAt' in o) out.dueAt = /^\d{4}-\d{2}-\d{2}$/.test(String(o.dueAt)) ? String(o.dueAt) : ''
   if ('estimate' in o) out.estimate = cleanEstimate(o.estimate)
+  if ('production' in o) out.production = cleanProductionForm(o.production)
   return out
 }
 

@@ -13,11 +13,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { ArrowLeft, Plus, Save, Send, Trash2 } from 'lucide-react'
+import { ProductionFormEditor, ProductionSheet } from './ProductionForm'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
 import {
   JOB_STATUS_LABEL, JOB_STATUS_DOT, JOB_TYPES, JOB_TYPE_LABEL, JOB_TYPE_STYLE, NEXT_ACTION, JOB_DESIGNERS,
   JOB_TRACK_LABEL, statusesOf,
-  blankEstimate, tierMath, type Estimate, type Job, type JobMessage, type JobStatus, type JobType,
+  blankEstimate, tierMath, type Estimate, type ProductionForm, type Job, type JobMessage, type JobStatus, type JobType,
 } from '@/lib/jobs'
 
 type Member = { email: string; name: string }
@@ -35,6 +36,7 @@ export default function JobPage() {
   const [me, setMe] = useState('')
   const [jobsOnly, setJobsOnly] = useState(false)
   const [brief, setBrief] = useState<{ site: string; text: string; customerSaid: string[]; files: { url: string; name: string; mime: string; size: number; at: string; from: string }[] } | null>(null)
+  const [productionDraft, setProductionDraft] = useState<ProductionForm | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
@@ -53,7 +55,7 @@ export default function JobPage() {
       const j = await r.json().catch(() => ({}))
       if (!alive) return
       if (!r.ok) { setError(j.error ?? 'Could not load this job.'); return }
-      setMessages(j.messages); setMembers(j.members); setMe(j.me); setJob(j.job); setDraft(j.job); setJobsOnly(!!j.jobsOnly); setBrief(j.brief ?? null)
+      setMessages(j.messages); setMembers(j.members); setMe(j.me); setJob(j.job); setDraft(j.job); setJobsOnly(!!j.jobsOnly); setBrief(j.brief ?? null); setProductionDraft(j.productionDraft ?? null)
     }).catch(() => { if (alive) setError('Could not load this job.') })
     return () => { alive = false }
   }, [jobId])
@@ -65,7 +67,7 @@ export default function JobPage() {
   useEffect(() => { const box = bottom.current?.parentElement; if (box) box.scrollTop = box.scrollHeight }, [messages.length])
 
   const nameOf = useCallback((email: string) => members.find((m) => m.email === email)?.name ?? (email ? email.split('@')[0] : 'Unassigned'), [members])
-  const dirty = useMemo(() => JSON.stringify(job) !== JSON.stringify(draft), [job, draft])
+  const dirty = useMemo(() => JSON.stringify(job) !== JSON.stringify(draft) || (job?.track === 'production' && !job.production && !!productionDraft), [job, draft, productionDraft])
 
   async function patch(body: Partial<Job>) {
     setBusy(true); setError('')
@@ -79,7 +81,9 @@ export default function JobPage() {
   async function saveEdits() {
     if (!draft) return
     const { title, type, requirements, assignee, dueAt, estimate } = draft
-    await patch({ title, type, requirements, assignee, dueAt, estimate })
+    // An unsaved form filled from the invoice is saved with the first Save.
+    const production = draft.production ?? (job?.track === 'production' ? productionDraft : null)
+    await patch({ title, type, requirements, assignee, dueAt, estimate, ...(production ? { production } : {}) })
   }
 
   async function send(e: React.FormEvent) {
@@ -115,11 +119,13 @@ export default function JobPage() {
   const steps = statusesOf(job.track)
   const idx = steps.indexOf(job.status)
   const next = NEXT_ACTION[job.status]
+  const form = draft.production ?? (job.track === 'production' ? productionDraft : null)
   const canSendToProduction = job.track !== 'production' && job.status === 'approved' && !job.productionJobId
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
+    <main className="min-h-screen bg-gray-50 print:bg-white">
+      {form && <div className="hidden print:block"><ProductionSheet form={form} siteId={job.siteId} siteName={brief?.site || job.siteId} /></div>}
+      <header className="print:hidden sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200">
         <div className="max-w-[1300px] mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-3 flex-wrap">
           <Link href={`/jobs?track=${job.track}`} aria-label="Back to jobs" className="shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100"><ArrowLeft size={16} aria-hidden /></Link>
           <span className="text-sm font-bold tabular-nums text-gray-500">{job.number}</span>
@@ -136,7 +142,7 @@ export default function JobPage() {
         </div>
       </header>
 
-      <div className="max-w-[1300px] mx-auto px-3 sm:px-5 py-4 space-y-4">
+      <div className="print:hidden max-w-[1300px] mx-auto px-3 sm:px-5 py-4 space-y-4">
         {/* ── where it stands ─────────────────────────────────────────── */}
         <section className="rounded-xl border border-gray-200 bg-white p-4">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{JOB_TRACK_LABEL[job.track]}</p>
@@ -185,6 +191,12 @@ export default function JobPage() {
 
         <div className="grid gap-4 lg:grid-cols-[1fr_400px]">
           <div className="space-y-4 min-w-0">
+            {/* ── the production form (production jobs) ─────────────── */}
+            {form && (
+              <ProductionFormEditor form={form} fromDraft={!job.production} contactsHidden={jobsOnly}
+                onChange={(f) => set({ production: f })} onPrint={() => window.print()} />
+            )}
+
             {/* ── what it needs ─────────────────────────────────────── */}
             <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
               <div>
