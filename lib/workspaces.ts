@@ -59,7 +59,7 @@ export const PACKAGING_SITES = [
   // 2026-10-29: packmio.com (owner: Gmail label PM).
   'packmio',
   // 2026-10-29: deli paper + greaseproof paper (US).
-  'delipapers', 'theparchmentpaper',
+  'delipapers', 'theparchmentpaper', 'shopbutcherpaper',
   'thegreaseproofpaper', 'thegreaseproofpaperuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one

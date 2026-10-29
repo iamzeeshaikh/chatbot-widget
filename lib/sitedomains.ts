@@ -61,6 +61,7 @@ export const SITE_DOMAINS: Record<string, string> = {
   packmio: 'packmio.com',
   delipapers: 'delipapers.com',
   theparchmentpaper: 'theparchmentpaper.com',
+  shopbutcherpaper: 'shopbutcherpaper.com',
   thegreaseproofpaper: 'thegreaseproofpaper.com',
   thegreaseproofpaperuk: 'thegreaseproofpaper.co.uk',
   // Sports workspace
