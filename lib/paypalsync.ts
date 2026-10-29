@@ -17,7 +17,7 @@ import { supabase } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import { PACKAGING_SITES } from './workspaces'
 import { readSales, writeSale } from './sales'
-import type { Sale } from './salescore'
+import { cleanSale, type Sale } from './salescore'
 import { applyStageChange } from './stagechange'
 import { writeControlRow } from './leadrecord'
 import { CRM_NOTE_ROLE, type CrmNoteEntry, type CrmStage } from './crm'
@@ -45,10 +45,15 @@ export interface PaypalSyncResult {
   errors: string[]
 }
 
-async function doneIds(): Promise<Set<string>> {
-  const { data } = await supabase.from('chat_logs').select('message').eq('session_id', SESSION).eq('role', CRM_PAYPAL_SYNC_ROLE).limit(5000)
-  const out = new Set<string>()
-  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.paymentId) out.add(o.paymentId) } catch { /* skip */ } }
+/** Payments already handled, and those recorded as "no sale found" (which are
+ *  retried once a sale exists, without a second push). */
+async function doneIds(): Promise<Set<string> & { unmatched?: Set<string> }> {
+  const { data } = await supabase.from('chat_logs').select('message').eq('session_id', SESSION).eq('role', CRM_PAYPAL_SYNC_ROLE)
+    .order('created_at', { ascending: true }).range(0, 9999)
+  const last = new Map<string, boolean>()
+  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.paymentId) last.set(o.paymentId, o.matched === null) } catch { /* skip */ } }
+  const out: Set<string> & { unmatched?: Set<string> } = new Set([...last].filter(([, u]) => !u).map(([k]) => k))
+  out.unmatched = new Set([...last].filter(([, u]) => u).map(([k]) => k))
   return out
 }
 async function remember(o: Record<string, unknown>) {
@@ -87,7 +92,25 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
   res.invoices = invoices.length
   for (const inv of invoices) {
     try {
-      const sale = findSale(inv, sales, links)
+      let sale = findSale(inv, sales, links)
+      // Paid, no sale yet, but the invoice was sent from a lead in ZeeOps (its
+      // link sits on that lead): open the sale from the invoice instead of only
+      // pushing "add it in Sales" (Taylor Buser, IH-029, 28 Oct 2026).
+      const linked = links.get(shortCode(inv.id))
+      if (!sale && PAID.has(inv.status) && linked && !dryRun) {
+        const made = cleanSale({
+          stream: 'pk_direct', customer: inv.name || inv.business || 'PayPal customer', company: inv.business || '', email: inv.email || '',
+          orderDate: inv.date || new Date().toISOString().slice(0, 10), currency: inv.currency, orderAmount: inv.amount,
+          reference: `PayPal ${inv.number} (${inv.id})`, leadId: linked.leadId,
+          source: 'PayPal invoice sent from ZeeOps (sale opened automatically when it was paid)',
+          notes: 'Opened automatically from the paid PayPal invoice. Add the production cost when known.',
+          payments: [],
+        }, null, ACTOR, 'packaging')
+        if (!('error' in made)) {
+          const err = await writeSale(made.sale)
+          if (!err) { sale = made.sale; sales.push(made.sale) } else res.errors.push(`${inv.number}: could not open the sale (${err})`)
+        }
+      }
       if (!PAID.has(inv.status)) {
         if (!sale && ['SENT', 'UNPAID', 'SCHEDULED'].includes(inv.status)) res.unpaidNotInLedger.push({ invoice: inv.number, customer: inv.name || inv.business, amount: inv.amount, status: inv.status })
         continue
@@ -95,6 +118,8 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
       const payments = inv.payments.length ? inv.payments : await invoiceDetail(inv.id)
       for (const p of payments) {
         if (!p.paymentId || done.has(p.paymentId)) continue
+        // Reported before as "not in Sales": only worth another pass once a sale exists.
+        if (!sale && done.unmatched?.has(p.paymentId)) continue
         // Already there: by our id, by the transaction id in a note, or a
         // payment typed by hand for the same amount within a week (every
         // October payment was entered by hand before this sync existed).
