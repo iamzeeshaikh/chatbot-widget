@@ -563,6 +563,9 @@ export function isTestSubmission(name: string | null | undefined, email: string 
   if (/^\s*(test|qa)\b/i.test(n) || /\b(audit|live|qa|smtp|launch) test\b/i.test(n)) return 'our own test'
   if (/\bSMTP test\b|\bTest send from info@|\bTEST (ux|smtp|launch|audit|short|build|rail|diff|concept)/.test(body)) return 'our own test'
   if (/\bclaude[- ]?test\b|\bTEST LEAD\b|\bsmoke test\b|\bmigration test\b|\bfinal live test\b|please ignore \(|\(mail config check\)|\(redesign check\)/i.test(`${n}\n${body}`)) return 'our own test'
+  // The daily form monitor's Mon/Thu real submits (name "Form Monitor") test the
+  // site's mail, not ZeeOps (owner, 2026-10-29: "form monitor bh hata").
+  if (/^form monitor$/i.test(n) || /\bForm Monitor\b/.test(body)) return 'our own test'
   if (/<\/?[a-z][^>]*>/i.test(n)) return 'HTML tag in the name'
   if (/@example\.(com|net|org)$|@[a-z0-9.-]*\.(local|test|invalid|example)$|@localhost$/i.test(e) || /^[a-z]@[a-z]\.(com|net|org)$/i.test(e)) return `test address ${e}`
   const digits = (phone ?? '').replace(/\D/g, '')
