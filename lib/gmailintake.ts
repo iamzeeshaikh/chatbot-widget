@@ -23,7 +23,7 @@ import vm from 'node:vm'
 import { NextRequest } from 'next/server'
 import { supabase, fetchAllPages } from './supabase'
 import { REMINDER_SITE } from './reminders'
-import { siteIdFromQuoteCode, isMachineMessage } from './quoteintake'
+import { siteIdFromQuoteCode, isMachineMessage, customerNameFromBody } from './quoteintake'
 import { siteWorkspace } from './workspaces'
 import { googleConfig, searchIntakeMessageIds, fetchThread, fetchAttachment, type InboundMessage } from './gmail'
 import { POST as intakePost } from '@/app/api/quote-intake/route'
@@ -32,6 +32,16 @@ import { SITE_DOMAINS } from './sitedomains'
 import { QUOTE_SITE_CODES } from './quoteintake'
 
 // The owners' own Gmail inboxes, which forward customer mail to the intake box.
+// No person reads or writes from these: noreply.activation@trustpilot.com,
+// do-not-reply@, notifications@. Our own domains are left alone, since a site's
+// form can send its notice from its own no-reply address.
+const AUTOMATED_LOCAL = /^(?:[^@]*[._+-])?(?:no-?reply|do-?not-?reply|donotreply|notifications?|mailer|bounces?)(?:[._+-][^@]*)?@/i
+function automatedSender(from: string): string | null {
+  const addr = (String(from || '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0] ?? '').toLowerCase()
+  if (!addr || isOurAddress(addr) || !AUTOMATED_LOCAL.test(addr)) return null
+  return `automated sender ${addr}`
+}
+
 const OWNER_INBOXES = /^(?:.*<)?(?:shanimazhar82|zeeshanmzhr3|shanzeeshan571|uzairzia19)@gmail\.com>?$/i
 
 export const INTAKE_MAILBOX = 'dev@zeecustomboxes.com'
@@ -156,6 +166,12 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
         getFrom: () => m.from, getReplyTo: () => '',
       })
       if (!parsed) { if (!dryRun) await remember(ref.id, 'own-reply'); out.skipped++; continue }
+      // Sign-up and account mail from outside services (Trustpilot's
+      // noreply.activation@ to four sites' info@, 29 Oct 2026) is nobody's
+      // enquiry. A form notice with a "Name:" field is kept even when its
+      // sender is a no-reply address (Rebecca Knorr, 25 Sep 2026).
+      const robotLead = customerNameFromBody(m.bodyText) ? null : automatedSender(String(parsed.email ?? ''))
+      if (robotLead) { if (!dryRun) await remember(ref.id, 'machine', { detail: robotLead }); out.skipped++; continue }
       if (fwdEmail) {
         if (!parsed.email || isOurAddress(String(parsed.email))) { parsed.email = fwdEmail; parsed.unreadable = false }
         // A hand-written email has no "Name:" field: take the forwarded From
