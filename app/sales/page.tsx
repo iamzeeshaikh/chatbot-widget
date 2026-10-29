@@ -383,7 +383,11 @@ export default function SalesPage() {
             awaitingRevenuePkr={awaitingRevenue} />
         )
       })()}
-      <ExpensesCard month={filters.month} monthProfitPkr={filters.month ? t.profitPkr : null} onChanged={() => setExpVersion((n) => n + 1)} />
+      {/* The office's expenses are not the partner's business (owner, 2026-10-29:
+          "hamdan men ye show na karwao"). */}
+      {tab !== 'pk_partner' && (
+        <ExpensesCard month={filters.month} monthProfitPkr={filters.month ? t.profitPkr : null} onChanged={() => setExpVersion((n) => n + 1)} />
+      )}
 
       <div id="sales-table" />
       <Card title={tab === 'master' ? 'All sales' : `${STREAMS[tab].short} — sales`} icon={Receipt}
