@@ -278,6 +278,15 @@ export async function POST(req: NextRequest) {
   if (cleanEmail && tag === QUOTE_TAG) {
     let visible = bodyText
     try { visible = splitQuoted(bodyText).visible || bodyText } catch { /* keep */ }
+    // A plain-text reply quotes our acknowledgement WITHOUT ">" markers, so
+    // splitQuoted keeps it whole and its form lines read as a new submission
+    // (Shereen, 29 Oct 2026: her bottle and jar sizes were dropped as a
+    // same-day duplicate). Our own acknowledgement under an "On … wrote:" line
+    // is a sure boundary.
+    const ack = bodyText.match(/(?:^|\n)[^\S\n]*(?:"?>\s*)?On\b[^\n]{4,200}?(?:\n[^\n]{0,160}?)?\bwrote:\s*\n/i)
+    if (ack && ack.index! > 0 && /A (real )?person (on our team )?reads every|What you sent us:/i.test(bodyText.slice(ack.index!))) {
+      visible = bodyText.slice(0, ack.index!).trim() || visible
+    }
     const formLines = visible.split('\n').filter((l) => /^\s*(full name|name|e-?mail|email address|phone|product|quantity|size|length|width|height|unit|material|print(ing)?|company|message|wall|finish)\s*:/i.test(l)).length
     if (formLines < 2 && visible.trim().length > 0) {
       const since = new Date(Date.now() - 30 * 864e5).toISOString()
