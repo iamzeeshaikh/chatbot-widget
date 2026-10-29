@@ -98,10 +98,21 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
       // pushing "add it in Sales" (Taylor Buser, IH-029, 28 Oct 2026).
       const linked = links.get(shortCode(inv.id))
       if (!sale && PAID.has(inv.status) && linked && !dryRun) {
+        // What was sold: the newest ZeeOps invoice on that lead.
+        const { data: docRows } = await supabase.from('chat_logs').select('message').eq('session_id', linked.leadId)
+          .eq('role', 'crm_invoice_doc').order('created_at', { ascending: false }).limit(1)
+        let doc: { number?: string; agentName?: string; items?: { name?: string; details?: string; quantity?: string }[] } = {}
+        try { doc = JSON.parse(String(docRows?.[0]?.message ?? '{}')) } catch { doc = {} }
+        const items = (doc.items ?? []).filter((i) => i?.name)
+        const first = items[0]
+        const lines = String(first?.details ?? '').split('\n').map((x) => x.trim()).filter(Boolean)
         const made = cleanSale({
+          product: items.map((i) => i.name).join(' + ').slice(0, 200), quantity: items.length === 1 ? String(first?.quantity ?? '') : items.map((i) => `${i.quantity} ${i.name}`).join(', ').slice(0, 120),
+          size: lines[0] ?? '', material: lines.filter((l) => /pt|gsm|board|kraft|paper|corrugat|sbs/i.test(l)).join(', ').slice(0, 120),
+          printing: lines.filter((l) => /print|colou?r|lamin|foil|matte|gloss/i.test(l)).join(', ').slice(0, 120),
           stream: 'pk_direct', customer: inv.name || inv.business || 'PayPal customer', company: inv.business || '', email: inv.email || '',
           orderDate: inv.date || new Date().toISOString().slice(0, 10), currency: inv.currency, orderAmount: inv.amount,
-          reference: `PayPal ${inv.number} (${inv.id})`, leadId: linked.leadId,
+          reference: `${doc.number ? `${doc.number} · ` : ''}PayPal ${inv.number} (${inv.id})`, leadId: linked.leadId,
           source: 'PayPal invoice sent from ZeeOps (sale opened automatically when it was paid)',
           notes: 'Opened automatically from the paid PayPal invoice. Add the production cost when known.',
           payments: [],

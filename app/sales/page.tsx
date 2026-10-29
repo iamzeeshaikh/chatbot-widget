@@ -782,7 +782,7 @@ function SalesTable({ rows, showStream, detailed = false, onOpen, ownWorkspace }
   return (
     <div className="overflow-auto max-h-[calc(100vh-7rem)]">
       <table className="w-full text-xs">
-        <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_#e5e7eb]">
+        <thead className="sales-sticky-head">
           <tr className="text-left text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
             {detailed ? <>
               <th className={`${TH} ${FROZEN_HEAD} left-0 ${COL1}`}>Order No</th>

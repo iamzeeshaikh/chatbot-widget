@@ -322,3 +322,9 @@ html.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.14) !important
 html.dark .text-emerald-800 { color: #6ee7b7 !important; }
 html.dark .border-emerald-200 { border-color: rgba(16, 185, 129, 0.4) !important; }
 html.dark .text-amber-800 { color: #fcd34d !important; }
+
+/* Sales ledger: the header row stays on screen while the table scrolls
+   (owner, 2026-10-28). Plain CSS so the dark theme can recolour it. */
+.sales-sticky-head th { position: sticky; top: 0; z-index: 2; background-color: #ffffff; box-shadow: inset 0 -1px 0 #e5e7eb; }
+.sales-sticky-head th.sticky { z-index: 3; }
+html.dark .sales-sticky-head th { background-color: #1e293b; box-shadow: inset 0 -1px 0 #334155; }
