@@ -398,7 +398,7 @@ export default function Softphone() {
     <div
       role="region"
       aria-label="Phone"
-      className="fixed bottom-4 right-4 z-50 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
+      className="print:hidden fixed bottom-4 right-4 z-50 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
     >
       {/* An error is worth the top of the panel only when there is no call to
           look at. During a call the state that matters is the timer and the

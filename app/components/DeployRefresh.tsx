@@ -92,7 +92,7 @@ export default function DeployRefresh() {
     <button
       onClick={() => window.location.reload()}
       title="A new version of the dashboard was deployed. This tab is running old code — reload to get current."
-      className="fixed bottom-4 left-4 z-[60] flex items-center gap-1.5 rounded-full bg-white border border-gray-300 shadow-lg px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+      className="print:hidden fixed bottom-4 left-4 z-[60] flex items-center gap-1.5 rounded-full bg-white border border-gray-300 shadow-lg px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors"
     >
       <RefreshCw size={12} strokeWidth={2} aria-hidden className="text-blue-600" />
       New version — reload

@@ -66,7 +66,7 @@ export default function DialPad() {
         <button
           type="button" onClick={() => { setOpen(true); setError('') }}
           aria-label="Dial a number"
-          className="fixed bottom-4 right-20 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 shadow-lg hover:bg-gray-100"
+          className="print:hidden fixed bottom-4 right-20 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 shadow-lg hover:bg-gray-100"
         >
           <Phone className="h-4 w-4" aria-hidden />
         </button>
@@ -74,7 +74,7 @@ export default function DialPad() {
 
       {open && (
         <div role="dialog" aria-label="Dial a number"
-          className="fixed bottom-4 right-20 z-40 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+          className="print:hidden fixed bottom-4 right-20 z-40 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
           <div className="flex items-center gap-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Dial a number</p>
             <button type="button" onClick={() => setOpen(false)} aria-label="Close"
@@ -107,7 +107,7 @@ export default function DialPad() {
 
       {/* Said AFTER the call has started, not instead of starting it. */}
       {made && (
-        <div className="fixed bottom-20 right-4 z-40 w-72 rounded-xl border border-gray-200 bg-white p-2.5 shadow-lg">
+        <div className="print:hidden fixed bottom-20 right-4 z-40 w-72 rounded-xl border border-gray-200 bg-white p-2.5 shadow-lg">
           <p className="text-[11px] text-gray-600">
             A new record was created for this number.{' '}
             <a href={`/leads/${encodeURIComponent(made.leadId)}`} className="font-semibold text-blue-700 hover:underline">

@@ -4,6 +4,7 @@
 // draft and it is stored only when someone saves the job.
 import 'server-only'
 import { supabase } from './supabase'
+import { pktDayKey } from './datetime'
 import { CRM_INVOICE_DOC_ROLE, parseInvoiceDoc, shipParty, poNumber, prefixOf, type InvoiceDoc } from './invoicedoc'
 import { blankProductionForm, type Job, type ProductionForm, type ProductionItem } from './jobs'
 
@@ -34,8 +35,7 @@ export function formFromInvoice(doc: InvoiceDoc | null, job: Job, csrFallback: s
   const f = blankProductionForm()
   f.folderPath = job.title
   f.csr = csrFallback
-  f.sentToProduction = job.track === 'production' ? job.createdAt.slice(0, 10) : ''
-  if (job.dueAt) f.deliveryDate = job.dueAt
+  f.sentToProduction = job.track === 'production' ? pktDayKey(job.createdAt) : ''
   if (!doc) return f
   f.invoiceNo = doc.number
   f.orderDate = doc.date
