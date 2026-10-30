@@ -273,18 +273,25 @@ async function weeklyLoad(now: Date): Promise<Map<string, { day: number; week: n
   // PostgREST hands back at most 1000 rows, and with the lease rows in, the
   // week's real first emails fell off the end within a few days.
   const data = await fetchAllPages(
-    () => supabase.from('chat_logs').select('message,created_at')
+    () => supabase.from('chat_logs').select('session_id,message,created_at')
       .eq('role', CRM_BOT_ROLE).neq('session_id', LEASE_SESSION).gte('created_at', since)
       .order('created_at', { ascending: true }).order('id', { ascending: true }),
     50000,
   )
   const load = new Map<string, { day: number; week: number }>(BOT_AGENTS.map((a) => [a, { day: 0, week: 0 }]))
+  const counted = new Set<string>()
   for (const r of data) {
     const e = parseBotLedger(r.message)
     // New leads only. Counting follow-ups and replies too made one long
     // conversation (a test lead with a dozen follow-ups) push every new lead
     // to the other agent for a week.
-    if (e?.step !== 'first' || e.state !== 'sent' || !e.agent || !load.has(e.agent)) continue
+    // A DRAFT hands the lead out just as a send does. Counting sends only, a
+    // day of drafts all went to whoever had sent less that week: 32 to Samir
+    // and 3 to Steve on 29 Oct, then 26 to Steve on the 30th (Samir, 2026-10-30:
+    // "roz aadhi aadhi"). One count per lead, so a draft later sent is not two.
+    if (e?.step !== 'first' || (e.state !== 'sent' && e.state !== 'drafted') || !e.agent || !load.has(e.agent)) continue
+    if (counted.has(r.session_id)) continue
+    counted.add(r.session_id)
     const l = load.get(e.agent)!
     l.week++
     if (agentDay(new Date(e.at ?? r.created_at)) === today) l.day++
