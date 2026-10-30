@@ -126,13 +126,16 @@ export interface Estimate {
   addOns: string
   tiers: EstimateTier[]
   shipping: string
+  /** The estimator's figures (2026-10-30): carton weight and what it costs us to make. */
+  shippingWeight: string
+  productionCost: string
   turnaround: string
   vendor: string
 }
 
 export const blankEstimate = (): Estimate => ({
   style: '', length: '', width: '', height: '', unit: 'in', material: '', thickness: '', printing: '', sides: '',
-  finishing: '', addOns: '', tiers: [{ quantity: '', unitCost: '', unitPrice: '' }], shipping: '', turnaround: '', vendor: '',
+  finishing: '', addOns: '', tiers: [{ quantity: '', unitCost: '', unitPrice: '' }], shipping: '', shippingWeight: '', productionCost: '', turnaround: '', vendor: '',
 })
 
 // ── the production form ─────────────────────────────────────────────────────
@@ -231,7 +234,7 @@ export function cleanEstimate(raw: unknown): Estimate | null {
     unit: o.unit === 'mm' || o.unit === 'cm' ? String(o.unit) : 'in',
     material: s(o.material, 120), thickness: s(o.thickness, 40), printing: s(o.printing, 120), sides: s(o.sides, 40),
     finishing: s(o.finishing, 200), addOns: s(o.addOns, 200), tiers: tiers.length ? tiers : blankEstimate().tiers,
-    shipping: s(o.shipping, 120), turnaround: s(o.turnaround, 80), vendor: s(o.vendor, 120),
+    shipping: s(o.shipping, 120), shippingWeight: s(o.shippingWeight, 60), productionCost: s(o.productionCost, 60), turnaround: s(o.turnaround, 80), vendor: s(o.vendor, 120),
   }
 }
 

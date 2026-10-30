@@ -36,6 +36,7 @@ export default function JobPage() {
   const [me, setMe] = useState('')
   const [jobsOnly, setJobsOnly] = useState(false)
   const [brief, setBrief] = useState<{ site: string; text: string; customerSaid: string[]; files: { url: string; name: string; mime: string; size: number; at: string; from: string }[] } | null>(null)
+  const [sheetTab, setSheetTab] = useState<'estimate' | 'requirements'>('estimate')
   const [productionDraft, setProductionDraft] = useState<ProductionForm | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -197,8 +198,20 @@ export default function JobPage() {
                 onChange={(f) => set({ production: f })} onPrint={() => window.print()} />
             )}
 
-            {/* ── what it needs ─────────────────────────────────────── */}
+            {/* ── the estimate sheet, first; the requirements are its second tab
+                (estimator's video, 2026-10-30) ───────────────────────── */}
             <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+              <div className="flex items-center gap-1 border-b border-gray-100 -mx-4 px-4 pb-2" role="tablist">
+                {(['estimate', 'requirements'] as const).map((k) => (
+                  <button key={k} type="button" role="tab" aria-selected={sheetTab === k} onClick={() => setSheetTab(k)}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-bold ${sheetTab === k ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                    {k === 'estimate' ? 'Estimate' : 'Requirements'}
+                  </button>
+                ))}
+                {sheetTab === 'estimate' && !est && <button type="button" onClick={() => set({ estimate: blankEstimate() })} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add estimate</button>}
+              </div>
+              {sheetTab === 'requirements' ? (
+                <div className="space-y-3">
               <div>
                 <label className={label} htmlFor="j-title">Title</label>
                 <input id="j-title" className={input} value={draft.title} onChange={(e) => set({ title: e.target.value })} />
@@ -232,8 +245,64 @@ export default function JobPage() {
                 <label className={label} htmlFor="j-req">Requirements</label>
                 <textarea id="j-req" className={input} rows={7} value={draft.requirements} onChange={(e) => set({ requirements: e.target.value })} />
               </div>
+                </div>
+              ) : !est ? (
+                <p className="text-xs text-gray-500">No estimate on this job yet.</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="col-span-2"><label className={label}>Box style</label><input className={input} value={est.style} placeholder="Tuck end auto bottom" onChange={(e) => setEst({ style: e.target.value })} /></div>
+                    <div className="col-span-2">
+                      <label className={label}>Size (L × W × H)</label>
+                      <div className="flex gap-1.5">
+                        {(['length', 'width', 'height'] as const).map((k) => <input key={k} aria-label={k} className={input} value={est[k]} placeholder={k[0].toUpperCase()} onChange={(e) => setEst({ [k]: e.target.value })} />)}
+                        <select aria-label="Unit" className="rounded-lg border border-gray-300 bg-white px-1.5 text-sm" value={est.unit} onChange={(e) => setEst({ unit: e.target.value })}>
+                          {['in', 'cm', 'mm'].map((u) => <option key={u}>{u}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="col-span-2"><label className={label}>Material / board</label><input className={input} value={est.material} placeholder="SBS, Kraft, corrugated E-flute, rigid" onChange={(e) => setEst({ material: e.target.value })} /></div>
+                    <div><label className={label}>Thickness</label><input className={input} value={est.thickness} placeholder="18pt" onChange={(e) => setEst({ thickness: e.target.value })} /></div>
+                    <div><label className={label}>Sides printed</label><input className={input} value={est.sides} placeholder="Outside only" onChange={(e) => setEst({ sides: e.target.value })} /></div>
+                    <div className="col-span-2"><label className={label}>Printing</label><input className={input} value={est.printing} placeholder="CMYK / 2 PMS colors" onChange={(e) => setEst({ printing: e.target.value })} /></div>
+                    <div className="col-span-2"><label className={label}>Finishing</label><input className={input} value={est.finishing} placeholder="Matte lamination, spot UV, foil" onChange={(e) => setEst({ finishing: e.target.value })} /></div>
+                    <div className="col-span-2"><label className={label}>Add-ons</label><input className={input} value={est.addOns} placeholder="Window, insert, handle" onChange={(e) => setEst({ addOns: e.target.value })} /></div>
+                    <div><label className={label}>Shipping cost</label><input className={input} value={est.shipping} placeholder="Included / $" onChange={(e) => setEst({ shipping: e.target.value })} /></div>
+                    <div><label className={label}>Shipping weight</label><input className={input} value={est.shippingWeight ?? ''} placeholder="kg / lb" onChange={(e) => setEst({ shippingWeight: e.target.value })} /></div>
+                    <div><label className={label}>Turnaround</label><input className={input} value={est.turnaround} placeholder="12-15 days" onChange={(e) => setEst({ turnaround: e.target.value })} /></div>
+                    <div className="col-span-2"><label className={label}>Vendor</label><input className={input} value={est.vendor} onChange={(e) => setEst({ vendor: e.target.value })} /></div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[560px] text-sm">
+                      <thead><tr className="text-left text-[11px] uppercase tracking-wide text-gray-500">
+                        <th className="py-1.5 pr-2 font-semibold">Quantity</th><th className="py-1.5 pr-2 font-semibold">Unit cost</th><th className="py-1.5 pr-2 font-semibold">Unit price</th>
+                        <th className="py-1.5 pr-2 text-right font-semibold">Total cost</th><th className="py-1.5 pr-2 text-right font-semibold">Total price</th><th className="py-1.5 text-right font-semibold">Margin</th><th />
+                      </tr></thead>
+                      <tbody>
+                        {est.tiers.map((t, i) => {
+                          const m = tierMath(t)
+                          const setT = (p: Partial<typeof t>) => setEst({ tiers: est.tiers.map((x, n) => (n === i ? { ...x, ...p } : x)) })
+                          return (
+                            <tr key={i} className="border-t border-gray-100">
+                              <td className="py-1.5 pr-2"><input aria-label="Quantity" className={input} value={t.quantity} placeholder="500" onChange={(e) => setT({ quantity: e.target.value })} /></td>
+                              <td className="py-1.5 pr-2"><input aria-label="Unit cost" className={input} value={t.unitCost} placeholder="0.60" onChange={(e) => setT({ unitCost: e.target.value })} /></td>
+                              <td className="py-1.5 pr-2"><input aria-label="Unit price" className={input} value={t.unitPrice} placeholder="0.92" onChange={(e) => setT({ unitPrice: e.target.value })} /></td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums text-gray-700">{usd(m.cost)}</td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums font-semibold text-gray-800">{usd(m.price)}</td>
+                              <td className={`py-1.5 text-right tabular-nums font-semibold ${m.margin === null ? 'text-gray-400' : m.margin < 20 ? 'text-red-700' : 'text-emerald-700'}`}>{m.margin === null ? '—' : `${m.margin}%`}</td>
+                              <td className="py-1.5 pl-1">{est.tiers.length > 1 && <button type="button" aria-label="Remove tier" onClick={() => setEst({ tiers: est.tiers.filter((_, n) => n !== i) })} className="text-gray-400 hover:text-red-700"><Trash2 size={13} aria-hidden /></button>}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <button type="button" onClick={() => setEst({ tiers: [...est.tiers, { quantity: '', unitCost: '', unitPrice: '' }] })}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add quantity</button>
+                  <div className="max-w-xs"><label className={label} htmlFor="j-pcost">Production cost</label><input id="j-pcost" className={input} value={est.productionCost ?? ''} placeholder="$" onChange={(e) => setEst({ productionCost: e.target.value })} /></div>
+                </>
+              )}
             </section>
-
             {/* ── what the customer asked for (lib/jobbrief.ts) ─────── */}
             {brief && (brief.text || brief.customerSaid.length > 0 || brief.files.length > 0) && (
               <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 space-y-3">
@@ -268,67 +337,6 @@ export default function JobPage() {
               </section>
             )}
 
-            {/* ── the estimate sheet ────────────────────────────────── */}
-            <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-              <div className="flex items-center">
-                <h2 className="text-sm font-bold text-gray-800">Estimate</h2>
-                {!est && <button type="button" onClick={() => set({ estimate: blankEstimate() })} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add estimate</button>}
-              </div>
-              {!est ? (
-                <p className="text-xs text-gray-500">No estimate on this job yet.</p>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="col-span-2"><label className={label}>Box style</label><input className={input} value={est.style} placeholder="Tuck end auto bottom" onChange={(e) => setEst({ style: e.target.value })} /></div>
-                    <div className="col-span-2">
-                      <label className={label}>Size (L × W × H)</label>
-                      <div className="flex gap-1.5">
-                        {(['length', 'width', 'height'] as const).map((k) => <input key={k} aria-label={k} className={input} value={est[k]} placeholder={k[0].toUpperCase()} onChange={(e) => setEst({ [k]: e.target.value })} />)}
-                        <select aria-label="Unit" className="rounded-lg border border-gray-300 bg-white px-1.5 text-sm" value={est.unit} onChange={(e) => setEst({ unit: e.target.value })}>
-                          {['in', 'cm', 'mm'].map((u) => <option key={u}>{u}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    <div className="col-span-2"><label className={label}>Material / board</label><input className={input} value={est.material} placeholder="SBS, Kraft, corrugated E-flute, rigid" onChange={(e) => setEst({ material: e.target.value })} /></div>
-                    <div><label className={label}>Thickness</label><input className={input} value={est.thickness} placeholder="18pt" onChange={(e) => setEst({ thickness: e.target.value })} /></div>
-                    <div><label className={label}>Sides printed</label><input className={input} value={est.sides} placeholder="Outside only" onChange={(e) => setEst({ sides: e.target.value })} /></div>
-                    <div className="col-span-2"><label className={label}>Printing</label><input className={input} value={est.printing} placeholder="CMYK / 2 PMS colors" onChange={(e) => setEst({ printing: e.target.value })} /></div>
-                    <div className="col-span-2"><label className={label}>Finishing</label><input className={input} value={est.finishing} placeholder="Matte lamination, spot UV, foil" onChange={(e) => setEst({ finishing: e.target.value })} /></div>
-                    <div className="col-span-2"><label className={label}>Add-ons</label><input className={input} value={est.addOns} placeholder="Window, insert, handle" onChange={(e) => setEst({ addOns: e.target.value })} /></div>
-                    <div><label className={label}>Shipping</label><input className={input} value={est.shipping} placeholder="Included / $" onChange={(e) => setEst({ shipping: e.target.value })} /></div>
-                    <div><label className={label}>Turnaround</label><input className={input} value={est.turnaround} placeholder="12-15 days" onChange={(e) => setEst({ turnaround: e.target.value })} /></div>
-                    <div className="col-span-2"><label className={label}>Vendor</label><input className={input} value={est.vendor} onChange={(e) => setEst({ vendor: e.target.value })} /></div>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[560px] text-sm">
-                      <thead><tr className="text-left text-[11px] uppercase tracking-wide text-gray-500">
-                        <th className="py-1.5 pr-2 font-semibold">Quantity</th><th className="py-1.5 pr-2 font-semibold">Unit cost</th><th className="py-1.5 pr-2 font-semibold">Unit price</th>
-                        <th className="py-1.5 pr-2 text-right font-semibold">Total cost</th><th className="py-1.5 pr-2 text-right font-semibold">Total price</th><th className="py-1.5 text-right font-semibold">Margin</th><th />
-                      </tr></thead>
-                      <tbody>
-                        {est.tiers.map((t, i) => {
-                          const m = tierMath(t)
-                          const setT = (p: Partial<typeof t>) => setEst({ tiers: est.tiers.map((x, n) => (n === i ? { ...x, ...p } : x)) })
-                          return (
-                            <tr key={i} className="border-t border-gray-100">
-                              <td className="py-1.5 pr-2"><input aria-label="Quantity" className={input} value={t.quantity} placeholder="500" onChange={(e) => setT({ quantity: e.target.value })} /></td>
-                              <td className="py-1.5 pr-2"><input aria-label="Unit cost" className={input} value={t.unitCost} placeholder="0.60" onChange={(e) => setT({ unitCost: e.target.value })} /></td>
-                              <td className="py-1.5 pr-2"><input aria-label="Unit price" className={input} value={t.unitPrice} placeholder="0.92" onChange={(e) => setT({ unitPrice: e.target.value })} /></td>
-                              <td className="py-1.5 pr-2 text-right tabular-nums text-gray-700">{usd(m.cost)}</td>
-                              <td className="py-1.5 pr-2 text-right tabular-nums font-semibold text-gray-800">{usd(m.price)}</td>
-                              <td className={`py-1.5 text-right tabular-nums font-semibold ${m.margin === null ? 'text-gray-400' : m.margin < 20 ? 'text-red-700' : 'text-emerald-700'}`}>{m.margin === null ? '—' : `${m.margin}%`}</td>
-                              <td className="py-1.5 pl-1">{est.tiers.length > 1 && <button type="button" aria-label="Remove tier" onClick={() => setEst({ tiers: est.tiers.filter((_, n) => n !== i) })} className="text-gray-400 hover:text-red-700"><Trash2 size={13} aria-hidden /></button>}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <button type="button" onClick={() => setEst({ tiers: [...est.tiers, { quantity: '', unitCost: '', unitPrice: '' }] })}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add quantity</button>
-                </>
-              )}
-            </section>
           </div>
 
           {/* ── the conversation ──────────────────────────────────── */}
