@@ -201,12 +201,23 @@ export async function createDraft(i: NewPpInvoice): Promise<{ id: string; number
       },
       ...(i.shipTo ? { shipping_info: { name: { given_name: i.shipTo.name || given }, business_name: i.shipTo.company || undefined } } : {}),
     }],
-    items: i.items.map((it) => ({
-      name: it.name.slice(0, 200), description: it.description.slice(0, 1000) || undefined,
-      quantity: String(it.quantity), unit_amount: { currency_code: i.currency, value: it.unitPrice.toFixed(it.unitPrice < 1 ? 4 : 2) },
-      ...(i.taxPercent > 0 ? { tax: { name: 'Tax', percent: String(i.taxPercent) } } : {}),
-      unit_of_measure: 'QUANTITY',
-    })),
+    items: i.items.map((it) => {
+      // PayPal keeps 2 decimals on a unit price and CUTS the rest: 7,000 at
+      // $0.248 became $0.24, and Amouage's $3,581 invoice came out $3,480
+      // (TPC-030, 2026-10-30). Such a line goes as ONE unit of its exact
+      // total, with the real quantity and rate written in the description.
+      const exact = Math.abs(Math.round(it.unitPrice * 100) - it.unitPrice * 100) < 1e-6
+      const total = Math.round(it.quantity * it.unitPrice * 100) / 100
+      const rate = `${it.quantity.toLocaleString('en-US')} × $${it.unitPrice}`
+      return {
+        name: it.name.slice(0, 200),
+        description: (exact ? it.description : [rate, it.description].filter(Boolean).join('\n')).slice(0, 1000) || undefined,
+        quantity: exact ? String(it.quantity) : '1',
+        unit_amount: { currency_code: i.currency, value: (exact ? it.unitPrice : total).toFixed(2) },
+        ...(i.taxPercent > 0 ? { tax: { name: 'Tax', percent: String(i.taxPercent) } } : {}),
+        unit_of_measure: exact ? 'QUANTITY' : 'AMOUNT',
+      }
+    }),
     configuration: {
       allow_tip: false, tax_inclusive: false,
       ...(i.minimumDue && i.minimumDue > 0 ? { partial_payment: { allow_partial_payment: true, minimum_amount_due: { currency_code: i.currency, value: i.minimumDue.toFixed(2) } } } : {}),
