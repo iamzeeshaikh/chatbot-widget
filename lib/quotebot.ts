@@ -297,6 +297,14 @@ function agentDay(d: Date): string {
   return new Date(d.getTime() + 5 * 3600e3).toISOString().slice(0, 10)
 }
 
+/** The assessment's reason says the sender is selling to us. Tight on purpose:
+ *  backtested on every skip since 2026-10-13 (23 pitches matched, none of the
+ *  real enquiries — resellers, Veritiv for a client, fulfilment asks, an
+ *  existing customer's sign-off — did). */
+export function isVendorPitch(reason: string): boolean {
+  return /\b(selling|sell|pitch(?:ing)?|soliciting|offering)\b[^.;]{0,70}\bto us\b|\b(supplier|factory|vendor|seo|marketing|trustpilot|logistics|freight|trucking)\b[^.;]{0,30}\b(pitch|pitching|selling|soliciting)\b|\b(sales|marketing|seo|business|supplier) pitch\b|\bsoliciting\b|\bpitching (a |their |its )?(service|services)\b/i.test(reason)
+}
+
 export async function assessQuote(message: string, name: string | null): Promise<QuoteAssessment | null> {
   const r = await llmComplete({
     system: ASSESS_SYSTEM,
@@ -460,7 +468,20 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     // The model being down is not a decision about the lead: no ledger row, so
     // the next run tries again (until the lead ages out of the window).
     if (!assessment) { act({ state: 'retry-later', why: 'could not read the enquiry (model unavailable)' }); continue }
-    if (!assessment.isQuote) { await skip(`not a packaging quote: ${assessment.reason}`); continue }
+    if (!assessment.isQuote) {
+      await skip(`not a packaging quote: ${assessment.reason}`)
+      // Somebody selling TO us — a factory, a supplier, SEO or logistics — is
+      // not a lead and must not sit in the counts (owner, 2026-10-30: "factory
+      // wali count kiun kar rahe"). Marked, not deleted: the same reversible
+      // "not a lead" row the owner sets by hand (lib/notalead.ts).
+      if (!dryRun && isVendorPitch(assessment.reason)) {
+        const mark = JSON.stringify({ spam: true, by: BOT_ACTOR, at: now.toISOString(), reason: `selling to us: ${assessment.reason}`.slice(0, 200) })
+        for (const sid of new Set([id, chat?.sessionId].filter(Boolean) as string[])) {
+          await writeControlRow({ sessionId: sid, siteId: lead.site_id, role: CRM_NOT_A_LEAD_ROLE, message: mark })
+        }
+      }
+      continue
+    }
     if (!assessment.language.startsWith('en')) { await skip(`customer wrote in "${assessment.language}" — left for a person`); continue }
 
     // ── whose lead, and which address ───────────────────────────────────────
