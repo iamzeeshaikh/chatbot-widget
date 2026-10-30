@@ -65,6 +65,7 @@ export const SITE_DOMAINS: Record<string, string> = {
   thegreaseproofpaper: 'thegreaseproofpaper.com',
   thegreaseproofpaperuk: 'thegreaseproofpaper.co.uk',
   themailerboxesuk: 'themailerboxes.co.uk',
+  thegiftboxesuk: 'thegiftboxes.co.uk',
   // Sports workspace
   texasfootball: 'texasfootballuniforms.com',
   volleyballuniforms: 'thevolleyballuniforms.com',

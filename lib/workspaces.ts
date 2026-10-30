@@ -60,7 +60,7 @@ export const PACKAGING_SITES = [
   'packmio',
   // 2026-10-29: deli paper + greaseproof paper (US).
   'delipapers', 'theparchmentpaper', 'shopbutcherpaper',
-  'thegreaseproofpaper', 'thegreaseproofpaperuk', 'themailerboxesuk',
+  'thegreaseproofpaper', 'thegreaseproofpaperuk', 'themailerboxesuk', 'thegiftboxesuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
