@@ -36,7 +36,6 @@ export default function JobPage() {
   const [me, setMe] = useState('')
   const [jobsOnly, setJobsOnly] = useState(false)
   const [brief, setBrief] = useState<{ site: string; text: string; customerSaid: string[]; files: { url: string; name: string; mime: string; size: number; at: string; from: string }[] } | null>(null)
-  const [sheetTab, setSheetTab] = useState<'estimate' | 'requirements'>('estimate')
   const [productionDraft, setProductionDraft] = useState<ProductionForm | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -198,19 +197,11 @@ export default function JobPage() {
                 onChange={(f) => set({ production: f })} onPrint={() => window.print()} />
             )}
 
-            {/* ── the estimate sheet, first; the requirements are its second tab
-                (estimator's video, 2026-10-30) ───────────────────────── */}
+            {/* ── requirements, then the estimate under them on one page: the
+                estimator reads one while filling the other (2026-10-31: tabs
+                meant switching back and forth) ─────────────────────────── */}
             <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-              <div className="flex items-center gap-1 border-b border-gray-100 -mx-4 px-4 pb-2" role="tablist">
-                {(['estimate', 'requirements'] as const).map((k) => (
-                  <button key={k} type="button" role="tab" aria-selected={sheetTab === k} onClick={() => setSheetTab(k)}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-bold ${sheetTab === k ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-                    {k === 'estimate' ? 'Estimate' : 'Requirements'}
-                  </button>
-                ))}
-                {sheetTab === 'estimate' && !est && <button type="button" onClick={() => set({ estimate: blankEstimate() })} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add estimate</button>}
-              </div>
-              {sheetTab === 'requirements' ? (
+              <h2 className="text-sm font-bold text-gray-800">Requirements</h2>
                 <div className="space-y-3">
               <div>
                 <label className={label} htmlFor="j-title">Title</label>
@@ -246,7 +237,11 @@ export default function JobPage() {
                 <textarea id="j-req" className={input} rows={7} value={draft.requirements} onChange={(e) => set({ requirements: e.target.value })} />
               </div>
                 </div>
-              ) : !est ? (
+              <div className="flex items-center border-t border-gray-100 -mx-4 px-4 pt-3">
+                <h2 className="text-sm font-bold text-gray-800">Estimate</h2>
+                {!est && <button type="button" onClick={() => set({ estimate: blankEstimate() })} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"><Plus size={12} aria-hidden /> Add estimate</button>}
+              </div>
+              {!est ? (
                 <p className="text-xs text-gray-500">No estimate on this job yet.</p>
               ) : (
                 <>
