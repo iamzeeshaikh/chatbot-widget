@@ -59,3 +59,30 @@ export async function unsubscribedSet(): Promise<Set<string>> {
   }
   return out
 }
+
+// Addresses kept out of promotions without unsubscribing them — customers in
+// the middle of a deal (the pipeline list Shazzy sends before a campaign).
+// Same control-row pattern; {email, excluded:false} lets one back in.
+export const CRM_PROMO_EXCLUDE_ROLE = 'crm_promo_exclude'
+const EXCLUDE_SESSION = 'zeeops-promo-exclude'
+
+export async function recordPromoExclude(email: string, by: string, excluded = true): Promise<void> {
+  await supabase.from('chat_logs').insert({
+    site_id: SITE, session_id: EXCLUDE_SESSION, role: CRM_PROMO_EXCLUDE_ROLE,
+    message: JSON.stringify({ email: email.trim().toLowerCase(), excluded, by, at: new Date().toISOString() }),
+  })
+}
+
+export async function promoExcludedSet(): Promise<Set<string>> {
+  const { data } = await supabase.from('chat_logs').select('message')
+    .eq('role', CRM_PROMO_EXCLUDE_ROLE).eq('session_id', EXCLUDE_SESSION).order('created_at', { ascending: true }).limit(20000)
+  const out = new Set<string>()
+  for (const r of data ?? []) {
+    try {
+      const o = JSON.parse(r.message)
+      if (typeof o.email !== 'string') continue
+      if (o.excluded) out.add(o.email); else out.delete(o.email)
+    } catch { /* skip */ }
+  }
+  return out
+}

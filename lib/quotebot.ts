@@ -56,7 +56,7 @@ import { lastDraftProblem, draftCustomerEmail } from './quotebotdraft'
 import { CRM_BOT_DRAFT_ROLE, newDraftId, type BotDraft } from './botdraft'
 import { customerCc } from './customercc'
 import { buildSendSignature } from './sendsignature'
-import { unsubscribeUrl, unsubscribedSet } from './unsubscribe'
+import { unsubscribeUrl, unsubscribedSet, promoExcludedSet } from './unsubscribe'
 import { newTaskId, type CrmTaskEntry } from './tasks'
 import { sendPushToMember } from './push'
 import { llmComplete, CLAUDE_CHAT_MODEL } from './llm'
@@ -1369,6 +1369,7 @@ export async function sendPromo(leadId: string, now = new Date()): Promise<{ ok:
   const to = await leadRecipient(id)
   if (!to || !isAddress(to)) return { ok: false, why: 'no valid email address' }
   if ((await unsubscribedSet()).has(to.toLowerCase())) return { ok: false, why: `${to} unsubscribed from offers` }
+  if ((await promoExcludedSet()).has(to.toLowerCase())) return { ok: false, why: `${to} is on the promo exclude list` }
 
   const { data } = await supabase.from('chat_logs').select('role, message, created_at')
     .eq('session_id', id).in('role', [CRM_EMAIL_ROLE, ASSIGNMENT_ROLE]).order('created_at', { ascending: true })
@@ -1534,7 +1535,7 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
       .in('site_id', sites).gte('created_at', since).order('created_at', { ascending: true }), 20000)
   warnIfCapped('promo recent mail', recent.length, 20000)
   const active = new Set(recent.map((r) => r.session_id))
-  const [unsub, notALead] = await Promise.all([unsubscribedSet(), notALeadSessions(sites)])
+  const [unsub, excluded, notALead] = await Promise.all([unsubscribedSet(), promoExcludedSet(), notALeadSessions(sites)])
 
   const leads = await fetchAllPages<{ id: string; site_id: string; email: string | null; created_at: string }>(
     () => supabase.from('leads').select('id, site_id, email, created_at').in('site_id', sites).not('email', 'is', null)
@@ -1558,7 +1559,7 @@ export async function runPromoDrip(now = new Date(), opts: { dryRun?: boolean } 
     // 39 of the first 85 went to leads under three weeks old — some the same
     // hour they wrote in (Grace and Shaun, 26 Oct 2026).
     if (now.getTime() - new Date(l.created_at).getTime() < PROMO_QUIET_DAYS * 864e5) continue
-    if (doneSessions.has(id) || recentAddrs.has(to) || unsub.has(to) || notALead.has(id) || active.has(id)) continue
+    if (doneSessions.has(id) || recentAddrs.has(to) || unsub.has(to) || excluded.has(to) || notALead.has(id) || active.has(id)) continue
     if (isNoiseSender(to) || isMerchantTestOrder(to)) continue
     const local = to.split('@')[0]
     if (/^(dmarc|no-?reply|donotreply|do-not-reply|postmaster|mailer-?daemon|bounce)/.test(local) || /^(notifications?|reports?|abuse)$/.test(local)) continue

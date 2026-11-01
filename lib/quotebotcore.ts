@@ -589,9 +589,9 @@ export function buildQuoteFollowUp(c: { n: number; firstName: string | null; pro
 export interface Campaign { key: string; holiday: string; date: Date; start: Date; discount: number }
 
 export function campaignsOf(year: number): Campaign[] {
-  const mk = (key: string, holiday: string, date: Date, discount: number): Campaign => ({
+  const mk = (key: string, holiday: string, date: Date, discount: number, start?: Date): Campaign => ({
     key: `${key}-${year}`, holiday, date, discount,
-    start: new Date(Date.UTC(date.getUTCMonth() === 0 ? year - 1 : year, (date.getUTCMonth() + 11) % 12, 20)),
+    start: start ?? new Date(Date.UTC(date.getUTCMonth() === 0 ? year - 1 : year, (date.getUTCMonth() + 11) % 12, 20)),
   })
   const tg = nthWeekday(year, 10, 4, 4)
   return [
@@ -600,6 +600,10 @@ export function campaignsOf(year: number): Campaign[] {
     mk('memorial-day', 'Memorial Day', lastWeekday(year, 4, 1), 10),
     mk('july-4', 'the 4th of July', new Date(Date.UTC(year, 6, 4)), 10),
     mk('labor-day', 'Labor Day', nthWeekday(year, 8, 1, 1), 10),
+    // Veterans Day (Shazzy, 29 Oct 2026): 10% flat, Nov 1-11 only. Listed
+    // before Black Friday so it takes the drip while both are open; Black
+    // Friday resumes on the 12th.
+    mk('veterans-day', 'Veterans Day', new Date(Date.UTC(year, 10, 11)), 10, new Date(Date.UTC(year, 10, 1))),
     mk('black-friday', 'Thanksgiving and Black Friday', new Date(tg.getTime() + 864e5), 20),
     mk('christmas', 'Christmas', new Date(Date.UTC(year, 11, 25)), 15),
   ]
