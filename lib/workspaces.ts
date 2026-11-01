@@ -65,6 +65,8 @@ export const PACKAGING_SITES = [
   'thechocolateboxesuk',
   // 2026-11-01: custom labels and stickers (UK).
   'thecustomlabelsuk',
+  // 2026-11-02: ordercardboardboxes.com, the US twin of ordercardboardboxes.co.uk.
+  'ordercardboardboxesus',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
