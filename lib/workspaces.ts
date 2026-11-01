@@ -63,6 +63,8 @@ export const PACKAGING_SITES = [
   'thegreaseproofpaper', 'thegreaseproofpaperuk', 'themailerboxesuk', 'thegiftboxesuk',
   // 2026-11-01: chocolate boxes (UK).
   'thechocolateboxesuk',
+  // 2026-11-01: custom labels and stickers (UK).
+  'thecustomlabelsuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
