@@ -173,7 +173,7 @@ export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number; en
     `EMAILS AGENTS WROTE THEMSELVES (${counts.human}):`,
     ...sig.human.slice(0, 40).map((e, i) => `#${i + 1}\nCUSTOMER WROTE:\n${e.customer || '(new enquiry)'}\nAGENT REPLIED:\n${e.agent}`),
   ].join('\n').slice(0, 60000)
-  const r = await llmComplete({ system: LEARN_SYSTEM, messages: [{ role: 'user', content: user }], maxTokens: 8000, anthropicMaxTokens: 8000, model: CLAUDE_WORK_MODEL, timeoutMs: 110000 })
+  const r = await llmComplete({ system: LEARN_SYSTEM, messages: [{ role: 'user', content: user }], maxTokens: 16000, anthropicMaxTokens: 16000, model: CLAUDE_WORK_MODEL, timeoutMs: 240000 })
   if (r.error || !r.text.trim()) return { ok: false, why: 'the model did not answer', signals: counts, before: current.lessons.length }
   const m = r.text.match(/\{[\s\S]*\}/)
   let parsed: { lessons?: { text?: string; from?: string; evidence?: string }[] } = {}
