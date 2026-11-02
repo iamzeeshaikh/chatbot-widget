@@ -73,6 +73,8 @@ export const PACKAGING_SITES = [
   'buycardboardboxesuk',
   // 2026-11-02: counter display boxes, shelf ready packaging and display units (UK).
   'thedisplayboxesuk',
+  // 2026-11-02: custom printed boxes catalogue (UK).
+  'shopcustomboxesuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.
