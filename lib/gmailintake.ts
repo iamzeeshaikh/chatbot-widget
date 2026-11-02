@@ -163,7 +163,7 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
       // The same shim the Apps Script hands leadFromMessage_: a Gmail message.
       const parsed = g.leadFromMessage_({
         getPlainBody: () => m.bodyText, getSubject: () => m.subject,
-        getFrom: () => m.from, getReplyTo: () => '',
+        getFrom: () => m.from, getReplyTo: () => m.replyTo ?? '',
       })
       if (!parsed) { if (!dryRun) await remember(ref.id, 'own-reply'); out.skipped++; continue }
       // Sign-up and account mail from outside services (Trustpilot's

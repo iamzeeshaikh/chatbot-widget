@@ -687,6 +687,9 @@ export interface InboundMessage {
   to: string
   /** The Cc header, '' when none. */
   cc: string
+  /** The Reply-To header, '' when none. Google Group mail ("X via Info All
+   *  Brands") has the group in From and the customer only here. */
+  replyTo: string
   subject: string
   bodyText: string
   at: string
@@ -865,6 +868,7 @@ export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadI
       from: headerOf(headers, 'From'),
       to: headerOf(headers, 'To'),
       cc: headerOf(headers, 'Cc'),
+      replyTo: headerOf(headers, 'Reply-To'),
       subject: headerOf(headers, 'Subject'),
       bodyText: extractBody(m.payload),
       at: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : '',
