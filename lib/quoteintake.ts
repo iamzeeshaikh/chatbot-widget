@@ -560,7 +560,8 @@ export function isTestSubmission(name: string | null | undefined, email: string 
   // Our own tests (owner, 2026-10-23: "claude test etc wali remove karo").
   // Launch/QA forms on new sites (2026-10-26 backfill: "TEST ux", "TEST smtp",
   // "QA Test", "Audit Test", "Live Test (Claude)", SMTP test sends).
-  if (/^\s*(test|qa)\b/i.test(n) || /\b(audit|live|qa|smtp|launch) test\b/i.test(n)) return 'our own test'
+  // "[TEST] November audit" (another session's form audit, 2 Nov 2026).
+  if (/^\s*\[?\s*(test|qa)\b/i.test(n) || /\b(audit|live|qa|smtp|launch) test\b/i.test(n)) return 'our own test'
   if (/\bSMTP test\b|\bTest send from info@|\bTEST (ux|smtp|launch|audit|short|build|rail|diff|concept)/.test(body)) return 'our own test'
   if (/\bclaude[- ]?test\b|\bTEST LEAD\b|\bsmoke test\b|\bmigration test\b|\bfinal live test\b|please ignore \(|\(mail config check\)|\(redesign check\)/i.test(`${n}\n${body}`)) return 'our own test'
   // The daily form monitor's Mon/Thu real submits (name "Form Monitor") test the
