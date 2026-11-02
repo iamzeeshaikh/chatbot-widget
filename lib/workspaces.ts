@@ -69,6 +69,8 @@ export const PACKAGING_SITES = [
   'ordercardboardboxesus',
   // 2026-11-02: soap boxes, sleeves and wraps (UK).
   'thesoapboxesuk',
+  // 2026-11-02: plain and printed cardboard boxes (UK).
+  'buycardboardboxesuk',
 ]
 // zeesportswear (2026-09-08) is the parent brand rather than a sixth sport: one
 // site for ZEE Sports Wear itself, linking down to the five specialist sites.

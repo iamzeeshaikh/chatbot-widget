@@ -70,6 +70,7 @@ export const SITE_DOMAINS: Record<string, string> = {
   thecustomlabelsuk: 'thecustomlabels.co.uk',
   ordercardboardboxesus: 'ordercardboardboxes.com',
   thesoapboxesuk: 'thesoapboxes.co.uk',
+  buycardboardboxesuk: 'buycardboardboxes.co.uk',
   // Sports workspace
   texasfootball: 'texasfootballuniforms.com',
   volleyballuniforms: 'thevolleyballuniforms.com',
