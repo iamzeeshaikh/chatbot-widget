@@ -1,5 +1,6 @@
 'use client'
 
+import { siteDomain } from '@/lib/sitedomains'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { CRM_STAGE_LABEL, CRM_STAGE_STYLE, stagesForWorkspace, type CrmStage } from '@/lib/crm'
 import { useRouter } from 'next/navigation'
@@ -62,11 +63,19 @@ const SITE_URLS: Record<string, string> = {
   peptidesboxes: 'peptidesboxes.com',
 }
 
-// Each site's favicon via Google's favicon service (falls back to a coloured
-// letter tile in <SiteIcon> when the domain is unknown or the icon fails).
-function siteFaviconUrl(siteId: string): string {
-  const d = SITE_URLS[siteId]
-  return d ? `https://www.google.com/s2/favicons?domain=${d}&sz=64` : ''
+// A site's domain: the list above, else lib/sitedomains.ts — which every new
+// site is registered in, so a new site no longer shows a letter tile (owner,
+// 2 Nov 2026: "sab k icons lazmi show hone chahie").
+function siteUrl(siteId: string): string | undefined {
+  return SITE_URLS[siteId] ?? siteDomain(siteId) ?? undefined
+}
+
+// Each site's favicon: the site's own /favicon.ico first (every site ships
+// one, and Google's service shows a blank globe for a new domain it has not
+// crawled), then Google's favicon service, then a coloured letter tile.
+function siteFaviconUrls(siteId: string): string[] {
+  const d = siteUrl(siteId)
+  return d ? [`https://${d}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${d}&sz=64`] : []
 }
 
 const SITE_ACCENT: Record<string, string> = {
@@ -330,11 +339,11 @@ function agentShort(email: string | null | undefined): string {
 // A site's favicon, falling back to a coloured letter tile (its accent colour +
 // first letter) when the domain is unknown or the icon fails to load.
 function SiteIcon({ siteId, name, size = 32, accent }: { siteId: string; name: string; size?: number; accent: string }) {
-  const [failed, setFailed] = useState(false)
-  const url = siteFaviconUrl(siteId)
-  if (url && !failed) {
+  const [failed, setFailed] = useState(0)
+  const url = siteFaviconUrls(siteId)[failed]
+  if (url) {
     return (
-      <img src={url} alt="" width={size} height={size} onError={() => setFailed(true)}
+      <img key={url} src={url} alt="" width={size} height={size} onError={() => setFailed((n) => n + 1)}
         className="rounded-lg object-contain bg-white border border-gray-200 shrink-0" style={{ width: size, height: size, padding: Math.max(2, size * 0.12) }} />
     )
   }
@@ -3105,7 +3114,7 @@ export default function Dashboard() {
                 <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
                   {roleSites.map((site) => {
                     const accent = SITE_ACCENT[site.site_id] ?? site.primary_color
-                    const url = SITE_URLS[site.site_id]
+                    const url = siteUrl(site.site_id)
                     // Counted off the same rows the table shows, so the number
                     // on the card is exactly what clicking it produces.
                     const count = countedLeads.filter((l) => l.site_id === site.site_id).length
