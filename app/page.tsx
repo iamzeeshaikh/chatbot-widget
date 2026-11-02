@@ -70,12 +70,12 @@ function siteUrl(siteId: string): string | undefined {
   return SITE_URLS[siteId] ?? siteDomain(siteId) ?? undefined
 }
 
-// Each site's favicon: the site's own /favicon.ico first (every site ships
-// one, and Google's service shows a blank globe for a new domain it has not
-// crawled), then Google's favicon service, then a coloured letter tile.
+// Each site's favicon: the icon the site's own pages declare, found by
+// /api/site-icon (not /favicon.ico — some sites still serve Vercel's default
+// there), then Google's favicon service, then a coloured letter tile.
 function siteFaviconUrls(siteId: string): string[] {
   const d = siteUrl(siteId)
-  return d ? [`https://${d}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${d}&sz=64`] : []
+  return d ? [`/api/site-icon/${encodeURIComponent(siteId)}`, `https://www.google.com/s2/favicons?domain=${d}&sz=64`] : []
 }
 
 const SITE_ACCENT: Record<string, string> = {
