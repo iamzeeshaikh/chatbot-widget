@@ -146,10 +146,11 @@ export default function CostingPage() {
     for (const it of items ?? []) { c[it.bucket]++; if (it.production !== 'delivered') c.ship++ }
     return c
   }, [items])
-  // Shipping: every order not delivered yet, whatever its costing state —
-  // newest first, the ones already marked shipped (waiting on delivery) last.
+  // Shipping: every order not delivered yet, whatever its costing state,
+  // newest first. The order is by date only, so a card stays where it is when
+  // its status is saved — it leaves the list on Delivered and not before.
   const shown = tab === 'ship'
-    ? (items ?? []).filter((it) => it.production !== 'delivered').sort((a, b) => Number(a.production === 'shipped') - Number(b.production === 'shipped') || b.orderDate.localeCompare(a.orderDate))
+    ? (items ?? []).filter((it) => it.production !== 'delivered').sort((a, b) => b.orderDate.localeCompare(a.orderDate))
     : (items ?? []).filter((it) => it.bucket === tab)
 
   function onSaved(next: CostingItem | null, id: string) {
