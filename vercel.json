@@ -39,6 +39,10 @@
     {
       "path": "/api/crm/paypal-sync",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/crm/sales-sheet",
+      "schedule": "15 * * * *"
     }
   ]
 }
