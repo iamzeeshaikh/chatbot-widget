@@ -141,7 +141,10 @@ export async function syncSalesSheet(now = new Date(), opts: { dryRun?: boolean 
   if (!sheetId) return { ...base, why: 'SALES_SHEET_ID is not set' }
   const { rows, tabs } = await fetchSheetRows(sheetId, now)
   if (!tabs.length) return { ...base, why: 'the sheet could not be read (is it still link-shared?)' }
-  const sales = (await readSales('packaging')).filter((s) => s.stream === 'pk_direct' || s.stream === 'pk_partner')
+  // Model Town direct only: the sheet is Shazzy's own production list, and its
+  // invoice numbers collide with the partner stream's (its "SCB-021" is Carly
+  // Blake; ZeeOps's SCB-021 is Connie Raney, a Hamdan order).
+  const sales = (await readSales('packaging')).filter((s) => s.stream === 'pk_direct')
   const out: SheetSyncResult = { ...base, ok: true, tabs, rows: rows.length }
   const day = now.toISOString().slice(0, 10)
   for (const row of rows) {
