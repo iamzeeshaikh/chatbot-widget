@@ -17,12 +17,13 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, ExternalLink, FileText, Image as ImageIcon, Inbox as InboxIcon, Mail, Paperclip, PenLine, RefreshCw, Reply, Search, Send, X, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileText, Image as ImageIcon, Inbox as InboxIcon, Mail, MessageCircle, Paperclip, PenLine, RefreshCw, Reply, Search, Send, X, type LucideIcon } from 'lucide-react'
 import { formatDateTime, formatShortDate, formatTime, pktDayKey } from '@/lib/datetime'
 import GlobalSearch from '@/app/components/GlobalSearch'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import { EmailEntry, InboundEntry, Files, type ReplyContext } from '@/app/leads/[id]/Timeline'
 import EmailComposer from '@/app/leads/[id]/EmailComposer'
+import WhatsAppThread from '@/app/leads/[id]/WhatsAppThread'
 
 interface Thread {
   leadId: string; siteId: string; siteName: string
@@ -32,10 +33,23 @@ interface Thread {
   participants: string[]; files: { name: string; mime: string }[]; lastOutAt: string | null; lastOutOpened?: boolean
 }
 
+// One WhatsApp conversation, from /api/inbox/whatsapp. "unanswered" counts the
+// customer's messages since our last reply — the same rule as the leads
+// table's badge and the bell (lib/wawaiting.ts).
+interface WaThread {
+  leadId: string; siteId: string; siteName: string
+  name: string; phone: string; body: string
+  at: string | null; direction: 'in' | 'out'
+  messages: number; unanswered: number; hasMedia: boolean
+  agents: string[]; lastOutAt: string | null; failed: boolean; owner: string | null
+}
+
 export default function InboxPage() {
   const [threads, setThreads] = useState<Thread[] | null>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'unavailable' | 'error'>('loading')
-  const [folder, setFolder] = useState<'inbox' | 'sent' | 'drafts'>('inbox')
+  const [folder, setFolder] = useState<'inbox' | 'sent' | 'drafts' | 'whatsapp'>('inbox')
+  const [waThreads, setWaThreads] = useState<WaThread[]>([])
+  const [openWa, setOpenWa] = useState<WaThread | null>(null)
   const [onlyUnread, setOnlyUnread] = useState(false)
   const [open, setOpen] = useState<Thread | null>(null)
   const [composeNew, setComposeNew] = useState(false)
@@ -61,11 +75,17 @@ export default function InboxPage() {
     })
     .catch(() => setStatus('error')), [q])
 
+  // The WhatsApp list rides on the same minute poll. A 403 (no telephony) just
+  // leaves the folder empty; it never takes the mail Inbox down with it.
+  const loadWa = useCallback(() => fetch('/api/inbox/whatsapp')
+    .then(async (r) => { if (r.ok) { const d = await r.json(); setWaThreads(d.threads ?? []) } })
+    .catch(() => { /* keep the last list */ }), [])
+
   useEffect(() => {
-    load()
-    const iv = setInterval(load, 60000)
+    load(); loadWa()
+    const iv = setInterval(() => { load(); loadWa() }, 60000)
     return () => clearInterval(iv)
-  }, [load])
+  }, [load, loadWa])
 
   // Drafts live where the composer keeps them: localStorage, one per lead.
   const readDrafts = useCallback(() => {
@@ -91,17 +111,19 @@ export default function InboxPage() {
     : folder === 'inbox' ? all.filter((t) => !onlyUnread || t.unread > 0)
     : folder === 'sent' ? sent
     : []
+  const waList = waThreads.filter((t) => !onlyUnread || t.unanswered > 0)
+  const waWaiting = waThreads.filter((t) => t.unanswered > 0).length
   const byLead = new Map(all.map((t) => [t.leadId, t]))
   const pickList = pick.trim()
     ? all.filter((t) => `${t.from} ${t.subject} ${t.siteName}`.toLowerCase().includes(pick.trim().toLowerCase())).slice(0, 12)
     : all.slice(0, 12)
 
-  const openThread = (t: Thread, compose = false) => { setComposeNew(compose); setOpen(t); setPicking(false); setPick('') }
+  const openThread = (t: Thread, compose = false) => { setComposeNew(compose); setOpen(t); setOpenWa(null); setPicking(false); setPick('') }
 
   const NAV = (key: typeof folder, label: string, Icon: LucideIcon, count?: number) => (
-    <button onClick={() => { setFolder(key); setOpen(null) }}
+    <button onClick={() => { setFolder(key); setOpen(null); setOpenWa(null) }}
       className={`w-full flex items-center gap-3 px-4 py-1.5 rounded-r-full text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-        folder === key && !open ? 'bg-blue-100 text-blue-900 font-bold' : 'text-gray-700 hover:bg-gray-200'}`}>
+        folder === key && !open && !openWa ? 'bg-blue-100 text-blue-900 font-bold' : 'text-gray-700 hover:bg-gray-200'}`}>
       <Icon size={16} strokeWidth={folder === key ? 2.2 : 1.8} aria-hidden />
       <span className="flex-1 text-left">{label}</span>
       {count !== undefined && count > 0 && <span className="text-xs font-bold tabular-nums">{count}</span>}
@@ -147,10 +169,10 @@ export default function InboxPage() {
             </label>
           )}
           <GlobalSearch compact />
-          {!open && folder === 'inbox' && !q && (
+          {!open && !openWa && (folder === 'inbox' || folder === 'whatsapp') && !q && (
             <button onClick={() => setOnlyUnread((v) => !v)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${onlyUnread ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
-              Unread only
+              {folder === 'whatsapp' ? 'Unanswered only' : 'Unread only'}
             </button>
           )}
         </div>
@@ -168,11 +190,14 @@ export default function InboxPage() {
           {NAV('inbox', 'Inbox', InboxIcon, unreadTotal)}
           {NAV('sent', 'Sent', Send)}
           {NAV('drafts', 'Drafts', FileText, drafts.length)}
+          {NAV('whatsapp', 'WhatsApp', MessageCircle, waWaiting)}
         </aside>
 
         <main className="flex-1 min-w-0">
           {open ? (
             <ThreadView thread={open} composeNew={composeNew} onChanged={load} />
+          ) : openWa ? (
+            <WaThreadView thread={openWa} onChanged={loadWa} />
           ) : (
           <div className="p-2 sm:p-4 sm:pl-0">
             {/* Compose: pick who it is to — a lead — then the composer opens on their thread. */}
@@ -200,7 +225,7 @@ export default function InboxPage() {
 
             {/* Mobile folder switch — the rail is hidden below sm */}
             <div className="sm:hidden flex gap-1 mb-2">
-              {(['inbox', 'sent', 'drafts'] as const).map((f) => (
+              {(['inbox', 'sent', 'drafts', 'whatsapp'] as const).map((f) => (
                 <button key={f} onClick={() => setFolder(f)}
                   className={`px-3 py-1 rounded-full text-xs font-medium ${folder === f ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200 text-gray-700'}`}>
                   {f[0].toUpperCase() + f.slice(1)}
@@ -258,7 +283,7 @@ export default function InboxPage() {
                 expect. So the search case answers the question it actually
                 raises: mail lives here only if it went through ZeeOps, and the
                 lead can be perfectly fine without it. */}
-            {status === 'ok' && (folder !== 'drafts' || q) && list.length === 0 && (
+            {status === 'ok' && folder !== 'whatsapp' && (folder !== 'drafts' || q) && list.length === 0 && (
               <div className="text-center py-20 px-6">
                 <InboxIcon size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
                 {q ? (
@@ -277,7 +302,45 @@ export default function InboxPage() {
               </div>
             )}
 
-            {status === 'ok' && (folder !== 'drafts' || q) && list.length > 0 && (
+            {folder === 'whatsapp' && !q && waList.length === 0 && (
+              <div className="text-center py-20 px-6">
+                <MessageCircle size={28} strokeWidth={1.5} className="mx-auto text-gray-400 mb-3" aria-hidden />
+                <p className="text-sm font-medium text-gray-700">{onlyUnread ? 'Nobody is waiting on WhatsApp' : 'No WhatsApp conversations yet'}</p>
+              </div>
+            )}
+
+            {folder === 'whatsapp' && !q && waList.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
+                {waList.map((t) => {
+                  const waiting = t.unanswered > 0
+                  const who = t.name || t.phone || '(no name)'
+                  const agents = t.agents.length ? ` · ${t.agents.join(', ')}` : ''
+                  return (
+                    <a key={t.leadId} href={`/leads/${encodeURIComponent(t.leadId)}`}
+                      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); setOpen(null); setOpenWa(t); setPicking(false) }}
+                      className={`block px-3 sm:px-4 py-2 transition-colors hover:shadow-[inset_0_-1px_0_0_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.12)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${waiting ? 'bg-white' : 'bg-gray-50/70'}`}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${waiting ? 'bg-green-600' : 'bg-transparent'}`} aria-hidden />
+                        <span className={`w-40 sm:w-48 shrink-0 text-sm truncate ${waiting ? 'font-bold text-gray-900' : 'text-gray-800'}`} title={`${who}${agents}`}>
+                          {who}{t.messages > 1 && <span className="ml-1 text-xs font-normal text-gray-500 tabular-nums">{t.messages}</span>}
+                        </span>
+                        <span className="min-w-0 flex-1 text-sm truncate">
+                          <span className={waiting ? 'font-bold text-gray-900' : 'text-gray-700'}>{t.direction === 'out' ? 'You: ' : ''}{t.body || (t.hasMedia ? '📎 Attachment' : '')}</span>
+                        </span>
+                        {waiting && <span className="text-[10px] font-semibold text-green-800 border border-green-200 bg-green-50 rounded-full px-1.5 py-px shrink-0" title="The customer's message is the latest one and nobody has replied">Unanswered{t.unanswered > 1 ? ` ${t.unanswered}` : ''}</span>}
+                        {t.failed && <span className="text-[10px] font-semibold text-red-700 border border-red-200 bg-red-50 rounded-full px-1.5 py-px shrink-0" title="Our latest WhatsApp was not delivered">Not delivered</span>}
+                        <span className="hidden md:inline text-[10px] text-gray-500 border border-gray-200 bg-gray-100 rounded-full px-1.5 py-px truncate max-w-[120px] shrink-0">{t.siteName}</span>
+                        <span className={`text-xs shrink-0 tabular-nums w-16 text-right ${waiting ? 'font-bold text-gray-900' : 'text-gray-500'}`} title={t.at ? formatDateTime(t.at) : undefined}>
+                          {gmailDate(t.at)}
+                        </span>
+                      </div>
+                    </a>
+                  )
+                })}
+              </div>
+            )}
+
+            {status === 'ok' && folder !== 'whatsapp' && (folder !== 'drafts' || q) && list.length > 0 && (
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
                 {list.map((t) => {
                   const unread = t.unread > 0
@@ -511,6 +574,97 @@ function ThreadView({ thread, onChanged, composeNew = false }: { thread: Thread;
 // (EmailEntry / InboundEntry / Files, exported from Timeline.tsx), so a
 // message can never read differently here and there; this card only adds the
 // Gmail dressing — avatar, who, when.
+// The WhatsApp conversation, opened from the WhatsApp folder: the same
+// WhatsAppThread the record shows, with the same send path (file straight to
+// Storage, then the message), so a fix there is a fix here.
+function WaThreadView({ thread, onChanged }: { thread: WaThread; onChanged: () => void }) {
+  const [record, setRecord] = useState<LeadRecord | null>(null)
+  const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
+
+  const loadRecord = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/leads/${encodeURIComponent(thread.leadId)}`)
+      if (!r.ok) { setState('error'); return }
+      const d = await r.json()
+      setRecord(d.record as LeadRecord)
+      setState('ok')
+    } catch {
+      setState('error')
+    }
+  }, [thread.leadId])
+
+  useEffect(() => { void Promise.resolve().then(loadRecord) }, [loadRecord])
+
+  async function send(text: string, waFile: File | null): Promise<string | null> {
+    const id = thread.leadId
+    try {
+      let media: { mediaPath: string; mediaName: string; mediaType: string } | null = null
+      if (waFile) {
+        const prep = await fetch(`/api/leads/${encodeURIComponent(id)}/whatsapp/upload`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: waFile.name, mime: waFile.type, size: waFile.size }),
+        })
+        const pd = await prep.json().catch(() => ({}))
+        if (!prep.ok) return pd.error || 'That file could not be sent.'
+        const put = await fetch(pd.uploadUrl, { method: 'PUT', body: waFile, headers: waFile.type ? { 'Content-Type': waFile.type } : undefined })
+        if (!put.ok) return 'The file could not be uploaded.'
+        media = { mediaPath: pd.path, mediaName: waFile.name, mediaType: waFile.type || '' }
+      }
+      const res = await fetch(`/api/leads/${encodeURIComponent(id)}/whatsapp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: text, ...(media ?? {}) }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) return d.error || 'The message could not be sent.'
+      loadRecord(); onChanged()
+      return null
+    } catch {
+      return 'The message could not be sent.'
+    }
+  }
+
+  return (
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+      {state === 'loading' && (
+        <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-28 bg-gray-200/60 rounded-2xl animate-pulse" />
+        ))}</div>
+      )}
+      {state === 'error' && (
+        <div className="text-center py-20">
+          <p className="text-sm font-medium text-gray-700">This conversation could not be loaded.</p>
+          <button onClick={() => { setState('loading'); loadRecord() }}
+            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
+            <RefreshCw size={12} strokeWidth={2} aria-hidden /> Try again
+          </button>
+        </div>
+      )}
+      {state === 'ok' && record && (
+        <>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="text-[11px] text-gray-500 truncate">
+              WhatsApp with <span className="font-medium text-gray-700">{record.contact.name || thread.phone || 'this lead'}</span> · {record.siteName}
+            </p>
+            <Link href={`/leads/${encodeURIComponent(record.id)}`}
+              className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 hover:text-blue-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+              <ExternalLink size={11} strokeWidth={2} aria-hidden /> Open the full record
+            </Link>
+          </div>
+          <WhatsAppThread
+            events={record.timeline}
+            leadId={record.id}
+            state={record.whatsapp?.state}
+            stateReason={record.whatsapp?.reason}
+            canMessage={!!record.contact.phone}
+            onSend={send}
+            onRefresh={() => { loadRecord(); onChanged() }}
+          />
+        </>
+      )}
+    </div>
+  )
+}
+
 function MessageCard({ e, onReply, onRetryFile }: {
   e: TimelineEvent
   leadId: string
