@@ -944,6 +944,9 @@ export default function Dashboard() {
   const [taskBadgeOverdue, setTaskBadgeOverdue] = useState(0)
   // Customer replies nobody has opened, on leads this agent owns.
   const [unreadReplies, setUnreadReplies] = useState(0)
+  // WhatsApp conversations whose newest message is the customer's — the nav's
+  // WhatsApp count, from the same poll that rings for them.
+  const [waWaitingCount, setWaWaitingCount] = useState(0)
   // Previous unread count, so a RISE can chime. Seeded silently on the first
   // poll: opening the dashboard to three waiting replies is not three new
   // events, and alerting for them would train people to ignore the sound.
@@ -1721,10 +1724,11 @@ export default function Dashboard() {
         if (waSeeded.current && nextWa > prevWaWaiting.current) {
           if (workspace === 'packaging') playReplyBell(); else playDashSound()
           awayAlert('A customer wrote on WhatsApp',
-            `${nextWa} conversation${nextWa === 1 ? '' : 's'} waiting on a reply`)
+            `${nextWa} conversation${nextWa === 1 ? '' : 's'} waiting on a reply`, '/whatsapp')
         }
         prevWaWaiting.current = nextWa
         waSeeded.current = true
+        setWaWaitingCount(nextWa)
       })
       .catch(() => {})
     pull()
@@ -2419,6 +2423,7 @@ export default function Dashboard() {
   const canPipeline = hasFeature(workspace, 'pipeline')
   const canTasks = hasFeature(workspace, 'tasks')
   const canEmail = hasFeature(workspace, 'email')
+  const canWhatsApp = hasFeature(workspace, 'telephony')
   const canReports = hasFeature(workspace, 'reports')
   // The sales ledger is an owner's page like Billing: admins only, and the
   // API refuses everyone else regardless.
@@ -2683,6 +2688,17 @@ export default function Dashboard() {
               {/* Same always-rendered pattern as the Chats count: hiding a badge
                   that later appears widens the strip and moves every tab. */}
               <span className={`${NAV_COUNT} ${unreadReplies > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{!countsReady ? '…' : unreadReplies > 999 ? '999+' : unreadReplies}</span>
+            </a>
+          )}
+          {canWhatsApp && (
+            /* WhatsApp beside Inbox (owner, 2026-11-05): the team could not
+               tell a WhatsApp had arrived — it showed only as a badge deep in
+               the leads table. The count is who is waiting on a reply. */
+            <a href="/whatsapp" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/whatsapp') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`}
+              title={waWaitingCount > 0 ? `${waWaitingCount} WhatsApp conversation${waWaitingCount === 1 ? '' : 's'} waiting on a reply` : 'WhatsApp conversations'}>
+              <span className="truncate">WhatsApp</span>
+              <span className={`${NAV_COUNT} ${waWaitingCount > 0 ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{!countsReady ? '…' : waWaitingCount > 999 ? '999+' : waWaitingCount}</span>
             </a>
           )}
           {/* Billing is the month's revenue view and it carries the CSV export
