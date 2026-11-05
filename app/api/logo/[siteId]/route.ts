@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { loadSiteContacts } from '@/lib/signature'
+import { siteDomain } from '@/lib/sitedomains'
+import { siteWorkspace } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 15
@@ -20,7 +22,16 @@ export const maxDuration = 15
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await ctx.params
   const contacts = await loadSiteContacts()
-  const url = contacts.get(siteId)?.logo ?? ''
+  let url = contacts.get(siteId)?.logo ?? ''
+  // A packaging site with no logo on its contact record falls back to the
+  // icon its own pages carry at /apple-touch-icon.png — every one of the new
+  // sites ships that file, and the chat avatar was a bare letter until an
+  // admin typed a logo URL in by hand (shopcustomboxes.co.uk, 5 Nov 2026).
+  // Packaging only: sports keeps exactly the avatar its record says.
+  if (!/^https:\/\//i.test(url) && siteWorkspace(siteId) === 'packaging') {
+    const domain = siteDomain(siteId)
+    if (domain) url = `https://${domain}/apple-touch-icon.png`
+  }
   if (!/^https:\/\//i.test(url)) return new NextResponse('No logo', { status: 404 })
 
   const res = await fetch(url, { headers: { 'User-Agent': 'ZeeOps-Signature/1.0' } })
