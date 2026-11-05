@@ -9,6 +9,7 @@ import { isWidgetBlocked } from '@/lib/workspaces'
 import { SPORTS_SALES_RULES } from '@/lib/sportsbot'
 import { resolveCountryCode } from '@/lib/geo'
 import { siteIdentityPrompt } from '@/lib/sitedomains'
+import { isTestSubmission } from '@/lib/quoteintake'
 import { isBotEnabled, BOT_OFF_ACK_MESSAGE } from '@/lib/botflag'
 import { getBlockedIps, requestIp } from '@/lib/blocklist'
 import { sendPushToWorkspace } from '@/lib/push'
@@ -250,7 +251,7 @@ export async function POST(req: NextRequest) {
               // The billing row gets the same name/phone (merge-only, never a re-count).
               await maybeCaptureLead({ sessionId, siteId, email, name, phone })
             }
-          } else if (score >= 7 && fields.email) {
+          } else if (score >= 7 && fields.email && !isTestSubmission(fields.name, fields.email, fields.phone, '')) {
             const { data: existing } = await supabase
               .from('leads').select('id').eq('site_id', siteId).eq('email', fields.email).limit(1)
             if (!existing || existing.length === 0) {

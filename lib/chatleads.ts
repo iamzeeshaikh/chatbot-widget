@@ -19,7 +19,7 @@
 // Packaging only — called from the chat route behind a workspace gate.
 
 import { supabase } from './supabase'
-import { isGarbageName } from './quoteintake'
+import { isGarbageName, isTestSubmission } from './quoteintake'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
 
 export interface ChatLeadRowInput {
@@ -69,6 +69,8 @@ export async function ensureChatLeadRow(i: ChatLeadRowInput): Promise<ChatLeadRo
     if (!key) return none
     const name = isGarbageName(i.name) ? '' : (i.name ?? '').trim()
     const phone = (i.phone ?? '').trim()
+    // Our own widget tests never become leads (same rule as the form intake).
+    if (isTestSubmission(name, email, phone, '')) return none
     const { data: existing } = await supabase.from('leads').select('id, name, phone')
       .eq('site_id', i.siteId).in('email', Array.from(new Set([email, key])))
       .order('created_at', { ascending: true }).limit(1)

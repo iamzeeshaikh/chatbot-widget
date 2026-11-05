@@ -1,3 +1,8 @@
+import { isOurAddress } from './customercc'
+
+/** The owner's and partners' personal inboxes: a form sent from one is a test. */
+const OWNER_INBOX = /^(?:shanimazhar82|zeeshanmzhr3|shanzeeshan571|uzairzia19|nomanmazhar643)@gmail\.com$/i
+
 // Custom-quote lead intake — leads that arrive as a WordPress contact-form
 // email (never touch the chat widget at all) are pulled in via a small, free
 // Google Apps Script running inside the user's own Gmail account (see
@@ -556,6 +561,10 @@ export function nameFromForwardHeader(body: string): string | null {
  */
 export function isTestSubmission(name: string | null | undefined, email: string | null | undefined, phone: string | null | undefined, body: string): string | null {
   const n = (name ?? '').trim(), e = (email ?? '').trim().toLowerCase()
+  // A form filled in from one of our own addresses — an owner's Gmail or any
+  // address at our own sites — is always us testing (owner, 2026-11-05: "test
+  // lead CRM men na aea kare", the sports team said the same).
+  if (e && (OWNER_INBOX.test(e) || isOurAddress(e))) return `our own test (${e})`
   if (/\[security test\]|security hardening probe|\bescape probe\b|\brelay probe\b|\bautoreply probe\b/i.test(body)) return 'security test probe'
   // Our own tests (owner, 2026-10-23: "claude test etc wali remove karo").
   // Launch/QA forms on new sites (2026-10-26 backfill: "TEST ux", "TEST smtp",

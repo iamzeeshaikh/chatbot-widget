@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { maybeCaptureLead } from '@/lib/leadtracking'
 import { isRetiredLeadSite } from '@/lib/workspaces'
+import { isTestSubmission } from '@/lib/quoteintake'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,6 +26,12 @@ export async function POST(req: NextRequest) {
     // visitor did nothing wrong) but record nothing. Existing leads stay.
     if (isRetiredLeadSite(siteId)) {
       return NextResponse.json({ success: true }, { headers: corsHeaders })
+    }
+
+    // Our own tests (a "TEST …" name, an owner's Gmail, an address at one of
+    // our sites) are acknowledged and not recorded, like a retired site.
+    if (isTestSubmission(name, email, phone, String(message ?? ''))) {
+      return NextResponse.json({ success: true, test: true }, { headers: corsHeaders })
     }
 
     const { error } = await supabase.from('leads').insert([{ site_id: siteId, name, email, phone, message }])
