@@ -245,15 +245,19 @@ interface Pkr { value: number; estimated: boolean; missing: boolean }
 // route's typical haircut off the mid-market rate instead of pretending the
 // whole spread does not exist. The haircuts are deliberate round guesses and
 // are replaced by the real figure the moment a payout is recorded.
-export type PayoutRoute = 'paypal' | 'wise' | 'other'
-export const PAYOUT_ROUTES: readonly PayoutRoute[] = ['paypal', 'wise', 'other']
+//   payoneer — the customer pays Payoneer (ACH / wire / payment request) in
+//            USD → Payoneer converts USD→GBP on withdrawal (~3.4% under
+//            mid-market, measured 3 Nov 2026) → Taptap Send → PKR at about
+//            mid-market with no fee (owner, 2026-11-03).
+export type PayoutRoute = 'paypal' | 'wise' | 'payoneer' | 'other'
+export const PAYOUT_ROUTES: readonly PayoutRoute[] = ['paypal', 'wise', 'payoneer', 'other']
 export const PAYOUT_ROUTE_LABEL: Record<PayoutRoute, string> = {
-  paypal: 'PayPal → GBP → Wise → PKR', wise: 'Wise USD → PKR', other: 'Other',
+  paypal: 'PayPal → GBP → PKR', wise: 'Wise USD → PKR', payoneer: 'Payoneer → GBP → Taptap → PKR', other: 'Other',
 }
-export const ROUTE_HAIRCUT: Record<PayoutRoute, number> = { paypal: 0.04, wise: 0.006, other: 0 }
+export const ROUTE_HAIRCUT: Record<PayoutRoute, number> = { paypal: 0.04, wise: 0.006, payoneer: 0.035, other: 0 }
 
 export function routeOf(method: PaymentMethod): PayoutRoute {
-  return method === 'paypal' ? 'paypal' : method === 'wise' ? 'wise' : 'other'
+  return method === 'paypal' ? 'paypal' : method === 'wise' ? 'wise' : method === 'payoneer' ? 'payoneer' : 'other'
 }
 
 function toPkr(amount: number, currency: SaleCurrency, locked: number | null, suggested: PkrRates | null, haircut = 0): Pkr {
@@ -623,7 +627,7 @@ export interface Payout {
   currency: SaleCurrency
   /** How much of that currency left the PayPal / Wise balance (after their fees). */
   amountOut: number
-  /** PayPal route only: the pounds PayPal paid into Wise. Informational. */
+  /** PayPal / Payoneer routes: the pounds the withdrawal turned into. Informational. */
   gbpReceived: number | null
   /** What landed in the Pakistan bank. */
   pkrReceived: number
@@ -692,7 +696,7 @@ export function cleanPayout(
   if (amountOut === null || amountOut <= 0) return { error: 'How much was withdrawn (in the order currency) is required.' }
   const pkrReceived = parseAmount(r.pkrReceived)
   if (pkrReceived === null || pkrReceived <= 0) return { error: 'How many rupees landed in the bank is required.' }
-  const gbp = route === 'paypal' ? parseAmount(r.gbpReceived) : null
+  const gbp = route === 'paypal' || route === 'payoneer' ? parseAmount(r.gbpReceived) : null
   const dateStr = String(r.date ?? '').slice(0, 10)
   if (!DATE_RE.test(dateStr)) return { error: 'The date the money arrived is required (YYYY-MM-DD).' }
   const now = new Date().toISOString()

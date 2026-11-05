@@ -89,7 +89,7 @@ export function PayoutsCard({ onChanged }: { onChanged: () => void }) {
         </button>
       }>
       <p className="px-3 pt-2 text-[11px] text-gray-500">
-        Every time money is withdrawn, enter what left PayPal or Wise and what landed in the bank. The rate that gives is locked onto the oldest unsettled payments on that route, so their profit stops being an estimate.
+        Every time money is withdrawn, enter what left PayPal, Payoneer or Wise and what landed in the bank. The rate that gives is locked onto the oldest unsettled payments on that route, so their profit stops being an estimate.
       </p>
       {error && <p role="alert" className="px-3 pt-2 text-xs font-medium text-red-700">{error}</p>}
       {notice && <p className="px-3 pt-2 text-xs font-medium text-green-700">{notice}</p>}
@@ -104,8 +104,8 @@ export function PayoutsCard({ onChanged }: { onChanged: () => void }) {
             </select></label>
           <label className="block"><span className={LABEL}>Withdrawn ({form.currency})</span>
             <input inputMode="decimal" className={INPUT} value={form.amountOut} onChange={(e) => set('amountOut', e.target.value)} placeholder="e.g. 2500" required /></label>
-          {form.route === 'paypal' && (
-            <label className="block"><span className={LABEL}>GBP from PayPal</span>
+          {(form.route === 'paypal' || form.route === 'payoneer') && (
+            <label className="block"><span className={LABEL}>GBP received</span>
               <input inputMode="decimal" className={INPUT} value={form.gbpReceived} onChange={(e) => set('gbpReceived', e.target.value)} placeholder="optional" /></label>
           )}
           <label className="block"><span className={LABEL}>PKR in bank</span>
