@@ -2,13 +2,15 @@
 // Costing — the production cost of each sale, entered by whoever knows it
 // (lib/costing.ts). The orders show what was made, never what it sold for.
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Plus, Save, Trash2 } from 'lucide-react'
-import { COST_LABELS, type CostingBucket, type CostingItem } from '@/lib/costing'
+import { ArrowLeft, Plus, Save, Trash2, Truck } from 'lucide-react'
+import { COST_LABELS, SHIPPING_STATUSES, type CostingBucket, type CostingItem, type ShippingStatus } from '@/lib/costing'
 import { PRODUCTION_LABEL } from '@/lib/salescore'
 
 interface Line { id: string; label: string; amount: string; note: string }
 
-const TABS: { key: CostingBucket; label: string; hint: string }[] = [
+type Tab = CostingBucket | 'ship'
+const TABS: { key: Tab; label: string; hint: string }[] = [
+  { key: 'ship', label: 'Shipping', hint: 'Orders not delivered yet. When one ships, set it to Shipped and paste the courier\u2019s tracking number \u2014 it goes onto the order and onto PayPal by itself.' },
   { key: 'needs', label: 'Needs a cost', hint: 'Paid orders with no production cost yet. Enter what each one cost to make.' },
   { key: 'unpaid', label: 'Not paid yet', hint: 'Waiting for the customer’s payment. Add the cost once production starts.' },
   { key: 'done', label: 'Costed', hint: 'Orders from the last 45 days that have a cost. Fix a figure here if it was wrong.' },
@@ -18,6 +20,44 @@ const INPUT = 'rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm 
 const toLines = (it: CostingItem): Line[] =>
   it.costs.length ? it.costs.map((c) => ({ id: c.id, label: c.label, amount: String(c.amount), note: c.note })) : [{ id: '', label: COST_LABELS[0], amount: '', note: '' }]
 const pkr = (n: number) => `Rs ${Math.round(n).toLocaleString('en-PK')}`
+
+const SHIP_LABEL: Record<ShippingStatus, string> = { in_production: 'In production', shipped: 'Shipped', delivered: 'Delivered' }
+
+function ShippingRow({ item, onSaved }: { item: CostingItem; onSaved: (next: CostingItem | null, id: string) => void }) {
+  const [production, setProduction] = useState<ShippingStatus>(() => (SHIPPING_STATUSES as readonly string[]).includes(String(item.production)) ? (item.production as ShippingStatus) : 'in_production')
+  const [tracking, setTracking] = useState(item.tracking)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const dirty = production !== (item.production ?? 'in_production') || tracking.trim() !== item.tracking
+
+  async function save() {
+    setBusy(true); setMsg(null)
+    const r = await fetch('/api/costing/shipping', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ saleId: item.id, production, tracking }),
+    })
+    const j = await r.json().catch(() => ({}))
+    setBusy(false)
+    if (!r.ok) { setMsg({ ok: false, text: j.error || 'Could not save' }); return }
+    setMsg({ ok: true, text: j.paypal ? `Saved. ${j.paypal}` : 'Saved.' })
+    onSaved(j.item ?? null, item.id)
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-[9.5rem_1fr_auto] gap-2 items-center">
+        <select aria-label="Shipping status" className={INPUT} value={production} onChange={(e) => setProduction(e.target.value as ShippingStatus)}>
+          {SHIPPING_STATUSES.map((s) => <option key={s} value={s}>{SHIP_LABEL[s]}</option>)}
+        </select>
+        <input aria-label="Tracking number" placeholder="Tracking number (DHL, UPS, FedEx\u2026)" className={`${INPUT} font-mono`} value={tracking} onChange={(e) => setTracking(e.target.value)} />
+        <button type="button" disabled={busy || !dirty} onClick={() => void save()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"><Truck size={14} aria-hidden /> {busy ? 'Saving\u2026' : 'Save shipping'}</button>
+      </div>
+      {item.shippedAt && <p className="mt-1 text-[11px] text-gray-600">Shipped {item.shippedAt}{item.tracking ? ` \u00b7 tracking ${item.tracking}` : ''}{item.paypalTxns ? ' \u00b7 on PayPal' : ''}</p>}
+      {msg && <p role="alert" className={`mt-1 text-xs ${msg.ok ? 'text-emerald-800' : 'text-red-700'}`}>{msg.text}</p>}
+    </div>
+  )
+}
 
 function OrderCard({ item, onSaved }: { item: CostingItem; onSaved: (next: CostingItem | null, id: string) => void }) {
   const [lines, setLines] = useState<Line[]>(() => toLines(item))
@@ -58,6 +98,8 @@ function OrderCard({ item, onSaved }: { item: CostingItem; onSaved: (next: Costi
       )}
       {item.reference && <p className="mt-0.5 text-[11px] text-gray-500">Ref: {item.reference}</p>}
 
+      <ShippingRow item={item} onSaved={onSaved} />
+
       {item.editable ? (
         <div className="mt-3 space-y-2">
           {lines.map((l, i) => (
@@ -88,7 +130,7 @@ function OrderCard({ item, onSaved }: { item: CostingItem; onSaved: (next: Costi
 export default function CostingPage() {
   const [items, setItems] = useState<CostingItem[] | null>(null)
   const [err, setErr] = useState('')
-  const [tab, setTab] = useState<CostingBucket>('needs')
+  const [tab, setTab] = useState<Tab>('ship')
 
   useEffect(() => {
     try { document.documentElement.classList.toggle('dark', localStorage.getItem('zee-dash-theme') === 'dark') } catch { /* ignore */ }
@@ -100,11 +142,15 @@ export default function CostingPage() {
   }, [])
 
   const counts = useMemo(() => {
-    const c: Record<CostingBucket, number> = { needs: 0, unpaid: 0, done: 0 }
-    for (const it of items ?? []) c[it.bucket]++
+    const c: Record<Tab, number> = { ship: 0, needs: 0, unpaid: 0, done: 0 }
+    for (const it of items ?? []) { c[it.bucket]++; if (it.production !== 'delivered') c.ship++ }
     return c
   }, [items])
-  const shown = (items ?? []).filter((it) => it.bucket === tab)
+  // Shipping: every order not delivered yet, whatever its costing state —
+  // newest first, the ones already marked shipped (waiting on delivery) last.
+  const shown = tab === 'ship'
+    ? (items ?? []).filter((it) => it.production !== 'delivered').sort((a, b) => Number(a.production === 'shipped') - Number(b.production === 'shipped') || b.orderDate.localeCompare(a.orderDate))
+    : (items ?? []).filter((it) => it.bucket === tab)
 
   function onSaved(next: CostingItem | null, id: string) {
     setItems((list) => (list ?? []).flatMap((it) => (it.id !== id ? [it] : next ? [next] : [])))
@@ -118,14 +164,14 @@ export default function CostingPage() {
           <a href="/" aria-label="Back" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"><ArrowLeft size={16} aria-hidden /></a>
           <div>
             <h1 className="text-base font-bold text-gray-900">Costing</h1>
-            <p className="text-xs text-gray-500">What each order cost to make, in rupees. Printing, material, die, inserts, packing and shipping, one line each.</p>
+            <p className="text-xs text-gray-500">Shipping status and tracking for every order, and what each one cost to make, in rupees.</p>
           </div>
         </div>
         <div className="max-w-4xl mx-auto px-4 flex gap-1" role="tablist">
           {TABS.map((t) => (
             <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
               className={`px-3 py-2 text-sm font-semibold border-b-2 ${tab === t.key ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
-              {t.label} <span className={`ml-1 rounded-full px-1.5 text-[11px] ${t.key === 'needs' && counts.needs > 0 ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{counts[t.key]}</span>
+              {t.label} <span className={`ml-1 rounded-full px-1.5 text-[11px] ${t.key === 'needs' && counts.needs > 0 ? 'bg-red-600 text-white' : t.key === 'ship' && counts.ship > 0 ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{counts[t.key]}</span>
             </button>
           ))}
         </div>
@@ -137,7 +183,7 @@ export default function CostingPage() {
         <ul className="space-y-3">
           {shown.map((it) => <OrderCard key={`${it.id}-${it.updatedAt}`} item={it} onSaved={onSaved} />)}
         </ul>
-        {items && shown.length === 0 && <p className="text-sm text-gray-500">{tab === 'needs' ? 'Every paid order has a cost. Nothing to do.' : 'Nothing here.'}</p>}
+        {items && shown.length === 0 && <p className="text-sm text-gray-500">{tab === 'needs' ? 'Every paid order has a cost. Nothing to do.' : tab === 'ship' ? 'Every order is delivered. Nothing to ship.' : 'Nothing here.'}</p>}
       </div>
     </main>
   )

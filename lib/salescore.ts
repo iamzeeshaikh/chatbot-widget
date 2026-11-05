@@ -202,6 +202,11 @@ export interface Sale {
   /** Set by hand; otherwise the status follows the payments. */
   statusOverride: 'refunded' | 'cancelled' | null
   production: ProductionStatus | null
+  /** The courier's tracking number, entered by production (the Costing page)
+   *  and copied onto the PayPal transaction. Absent on sales before Nov 2026. */
+  tracking?: string
+  /** YYYY-MM-DD the parcel left, set the first time production says shipped. */
+  shippedAt?: string
   salesPerson: string
   /** How the sale came about. */
   source: string
@@ -573,6 +578,10 @@ export function cleanSale(
       payments, costs,
       statusOverride: override,
       production,
+      // Kept from the stored sale when the form did not send them: the owner's
+      // Sales form predates these fields and must not wipe what production wrote.
+      tracking: r.tracking === undefined ? (prev?.tracking ?? '') : text(r.tracking, 120),
+      shippedAt: r.shippedAt === undefined ? (prev?.shippedAt ?? '') : date(r.shippedAt),
       salesPerson: text(r.salesPerson, 200),
       source: text(r.source, 300),
       counterparty: text(r.counterparty, 200),

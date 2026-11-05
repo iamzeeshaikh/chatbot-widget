@@ -44,6 +44,10 @@ export interface CostingItem {
   printing: string
   quantity: string
   production: ProductionStatus | null
+  tracking: string
+  shippedAt: string
+  /** The PayPal transactions this sale was paid on — how many the tracking reaches. */
+  paypalTxns: number
   salesPerson: string
   leadId: string | null
   /** PKR lines only; a sale costed in another currency is read-only here. */
@@ -73,6 +77,8 @@ export function costingItem(s: Sale, bucket: CostingBucket): CostingItem {
     reference: s.reference, customer: s.customer, company: s.company, country: s.country,
     orderDate: s.orderDate, product: s.product, size: s.size, material: s.material,
     printing: s.printing, quantity: s.quantity, production: s.production,
+    tracking: s.tracking ?? '', shippedAt: s.shippedAt ?? '',
+    paypalTxns: s.payments.filter((p) => p.method === 'paypal' && p.id.startsWith('pay_pp_')).length,
     salesPerson: s.salesPerson, leadId: s.leadId,
     costs: s.costs.filter((c) => c.currency === 'PKR').map((c) => ({ id: c.id, label: c.label, amount: c.amount, note: c.note })),
     editable: pkrOnly,
@@ -92,4 +98,16 @@ export function cleanCostLines(raw: unknown): SaleCost[] {
     out.push({ id, label, amount, currency: 'PKR', rate: null, note: String(o.note ?? '').trim().slice(0, 300) })
   }
   return out
+}
+
+/** The production statuses the Costing page may set. */
+export const SHIPPING_STATUSES = ['in_production', 'shipped', 'delivered'] as const
+export type ShippingStatus = (typeof SHIPPING_STATUSES)[number]
+
+/** Clean what the shipping form posts: a status from the short list and a tracking number. */
+export function cleanShipping(raw: unknown): { production: ShippingStatus | null; tracking: string } {
+  const o = (raw ?? {}) as Record<string, unknown>
+  const production = (SHIPPING_STATUSES as readonly string[]).includes(String(o.production)) ? (o.production as ShippingStatus) : null
+  const tracking = String(o.tracking ?? '').replace(/\s+/g, '').slice(0, 120)
+  return { production, tracking }
 }
