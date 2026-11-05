@@ -193,6 +193,23 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   TKB: 'thekraftboxesuk',
   // 2026-10-29: packmio.com, Gmail label PM.
   PM: 'packmio',
+  // 2026-11-05: fourteen sites launched 29 Oct - 4 Nov were in no intake map
+  // (owner's "tgp" label on a greaseproof-paper form did nothing). TGP
+  // matches that label.
+  DLP: 'delipapers',
+  TPP: 'theparchmentpaper',
+  SBP: 'shopbutcherpaper',
+  TGP: 'thegreaseproofpaper',
+  TGPU: 'thegreaseproofpaperuk',
+  TMBU: 'themailerboxesuk',
+  TGBU: 'thegiftboxesuk',
+  TCBU: 'thechocolateboxesuk',
+  TCLU: 'thecustomlabelsuk',
+  OCBUS: 'ordercardboardboxesus',
+  TSBU: 'thesoapboxesuk',
+  BCBU: 'buycardboardboxesuk',
+  TDBU: 'thedisplayboxesuk',
+  SCBU: 'shopcustomboxesuk',
 
   // 2026-08-29: the SPORTS workspace joins the quote intake. Nothing about the
   // routing changes — a lead's dashboard is decided by its site_id

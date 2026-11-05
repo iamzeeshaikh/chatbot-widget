@@ -167,7 +167,7 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // SBM and TRP joined on 2026-09-19, the day their labels were created: both
 // sites' form mail names the site nowhere a pattern can read it, so the label
 // is what places it.
-var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP', 'TPB', 'TCST', 'SMB', 'PM']; // SMB = Shop Mylar Bags (owner's Gmail label "smb", 2026-10-26)
+var SITE_CODES = ['SCB', 'TTP', 'SFB', 'KBP', 'TBB', 'ZCB', 'TCP', 'TPC', 'PB', 'TCS', 'TWP', 'CPB', 'TCSL', 'SBM', 'TRP', 'TPB', 'TCST', 'SMB', 'PM', 'TGP']; // SMB = Shop Mylar Bags (owner's Gmail label "smb", 2026-10-26)
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -332,6 +332,21 @@ var SITE_DOMAINS = {
   TBX: 'tuckboxes.co.uk',
   TKB: 'thekraftboxes.co.uk',
   PM: 'packmio.com',
+  // 2026-11-05: the fourteen sites launched 29 Oct - 4 Nov.
+  DLP: 'delipapers.com',
+  TPP: 'theparchmentpaper.com',
+  SBP: 'shopbutcherpaper.com',
+  TGP: 'thegreaseproofpaper.com',
+  TGPU: 'thegreaseproofpaper.co.uk',
+  TMBU: 'themailerboxes.co.uk',
+  TGBU: 'thegiftboxes.co.uk',
+  TCBU: 'thechocolateboxes.co.uk',
+  TCLU: 'thecustomlabels.co.uk',
+  OCBUS: 'ordercardboardboxes.com',
+  TSBU: 'thesoapboxes.co.uk',
+  BCBU: 'buycardboardboxes.co.uk',
+  TDBU: 'thedisplayboxes.co.uk',
+  SCBU: 'shopcustomboxes.co.uk',
 };
 
 /**
