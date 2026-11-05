@@ -49,7 +49,7 @@ function ShippingRow({ item, onSaved }: { item: CostingItem; onSaved: (next: Cos
         <select aria-label="Shipping status" className={INPUT} value={production} onChange={(e) => setProduction(e.target.value as ShippingStatus)}>
           {SHIPPING_STATUSES.map((s) => <option key={s} value={s}>{SHIP_LABEL[s]}</option>)}
         </select>
-        <input aria-label="Tracking number" placeholder="Tracking number (DHL, UPS, FedEx\u2026)" className={`${INPUT} font-mono`} value={tracking} onChange={(e) => setTracking(e.target.value)} />
+        <input aria-label="Tracking number" placeholder="Tracking number (DHL, UPS, FedEx…)" className={`${INPUT} font-mono`} value={tracking} onChange={(e) => setTracking(e.target.value)} />
         <button type="button" disabled={busy || !dirty} onClick={() => void save()}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"><Truck size={14} aria-hidden /> {busy ? 'Saving\u2026' : 'Save shipping'}</button>
       </div>
