@@ -240,3 +240,23 @@ export async function sendInvoice(id: string): Promise<string> {
 export async function deleteDraft(id: string): Promise<void> {
   await call('DELETE', `/v2/invoicing/invoices/${encodeURIComponent(id)}`)
 }
+
+/** Carrier from the number's shape — what PayPal's tracker needs. */
+export function carrierFor(tracking: string): 'UPS' | 'DHL' | 'FEDEX' | 'USPS' | 'OTHER' {
+  const t = tracking.replace(/\s/g, '').toUpperCase()
+  if (/^1Z[0-9A-Z]{16}$/.test(t)) return 'UPS'
+  if (/^\d{10,11}$/.test(t) || /^JD\d{18}$/.test(t)) return 'DHL'
+  if (/^\d{12}$|^\d{15}$/.test(t)) return 'FEDEX'
+  if (/^(94|93|92|95)\d{18,20}$|^\d{20,22}$/.test(t)) return 'USPS'
+  return 'OTHER'
+}
+
+/** Add shipment tracking to a PayPal transaction — what lifts the new-account
+ *  hold once the parcel is delivered. Returns PayPal's error text, or null. */
+export async function addTracking(transactionId: string, tracking: string, status: 'SHIPPED' | 'DELIVERED' = 'SHIPPED'): Promise<string | null> {
+  const r = await call<{ tracker_identifiers?: unknown[]; errors?: { message?: string }[] }>('POST', '/v1/shipping/trackers-batch', {
+    trackers: [{ transaction_id: transactionId, tracking_number: tracking.replace(/\s/g, ''), carrier: carrierFor(tracking), status }],
+  })
+  const err = r.json?.errors?.[0]?.message
+  return err ? String(err) : null
+}

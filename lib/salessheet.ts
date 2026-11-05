@@ -15,6 +15,7 @@
 // customer emails and phone numbers.
 
 import { readSales, writeSale } from './sales'
+import { addTracking, carrierFor, paypalConfigured } from './paypalapi'
 import type { ProductionStatus, Sale } from './salescore'
 
 export const SHEET_ACTOR = 'sales-sheet'
@@ -29,6 +30,8 @@ export interface SheetRow {
   phone: string
   amount: number
   status: string
+  /** The "Tracking" column, when the sheet has one (any column after Status). */
+  tracking: string
 }
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -76,6 +79,11 @@ export function rowsOfTab(tab: string, csv: string): SheetRow[] | null {
   const a1 = (rows[0]?.[0] ?? '').trim().toUpperCase()
   if (!a1.startsWith(tab)) return null
   const out: SheetRow[] = []
+  // A "Tracking" header anywhere after Status names the tracking column; with
+  // no header, column I (the first after Status) is taken as it.
+  const head = rows[1] ?? []
+  let trackCol = head.findIndex((h, i) => i >= 8 && /tracking/i.test(h ?? ''))
+  if (trackCol < 0) trackCol = 8
   for (const r of rows.slice(1)) {
     const invoice = (r[2] ?? '').trim()
     if (!invoice || /^invoice$/i.test(invoice)) continue
@@ -84,6 +92,7 @@ export function rowsOfTab(tab: string, csv: string): SheetRow[] | null {
       name: (r[3] ?? '').trim(), email: (r[4] ?? '').trim().toLowerCase(), phone: (r[5] ?? '').trim(),
       amount: Number(String(r[6] ?? '').replace(/[^0-9.]/g, '')) || 0,
       status: (r[7] ?? '').trim(),
+      tracking: (r[trackCol] ?? '').trim().replace(/^tracking$/i, ''),
     })
   }
   return out
@@ -130,6 +139,7 @@ export interface SheetSyncResult {
   tabs: string[]
   rows: number
   changed: { invoice: string; customer: string; from: string | null; to: ProductionStatus }[]
+  tracked: { invoice: string; customer: string; tracking: string; carrier: string; paypal: string[] }[]
   unmatched: { tab: string; invoice: string; name: string; amount: number; status: string }[]
   dryRun: boolean
   why?: string
@@ -137,7 +147,7 @@ export interface SheetSyncResult {
 
 export async function syncSalesSheet(now = new Date(), opts: { dryRun?: boolean } = {}): Promise<SheetSyncResult> {
   const sheetId = process.env.SALES_SHEET_ID
-  const base: SheetSyncResult = { ok: false, tabs: [], rows: 0, changed: [], unmatched: [], dryRun: !!opts.dryRun }
+  const base: SheetSyncResult = { ok: false, tabs: [], rows: 0, changed: [], tracked: [], unmatched: [], dryRun: !!opts.dryRun }
   if (!sheetId) return { ...base, why: 'SALES_SHEET_ID is not set' }
   const { rows, tabs } = await fetchSheetRows(sheetId, now)
   if (!tabs.length) return { ...base, why: 'the sheet could not be read (is it still link-shared?)' }
@@ -154,21 +164,45 @@ export async function syncSalesSheet(now = new Date(), opts: { dryRun?: boolean 
       if (!/refund|no production|cancel/i.test(row.status)) out.unmatched.push({ tab: row.tab, invoice: row.invoice, name: row.name, amount: row.amount, status: row.status })
       continue
     }
-    const to = productionFor(row.status)
-    if (!to || sale.production === to) continue
     if (sale.statusOverride === 'refunded' || sale.statusOverride === 'cancelled') continue
-    // The sheet only ever moves a job FORWARD. "Delivered" in ZeeOps (from a
+    let next: Sale = sale
+    let dirty = false
+    const noteLines: string[] = []
+
+    // Status → production, forward only. "Delivered" in ZeeOps (from a
     // carrier's tracking) is not undone by a sheet cell that still says Shipped.
-    if ((RANK[sale.production ?? 'not_started'] ?? 0) > (RANK[to] ?? 0)) continue
-    out.changed.push({ invoice: row.invoice, customer: sale.customer, from: sale.production, to })
-    if (opts.dryRun) continue
-    const stamp = now.toISOString()
-    const updated: Sale = {
-      ...sale, production: to, updatedAt: stamp, updatedBy: SHEET_ACTOR,
-      notes: `${sale.notes ?? ''}\n${day}: Shazzy's sales sheet says "${row.status}" (${row.tab} tab) — production set to ${to}${sale.production ? ` (was ${sale.production})` : ''}.`.trim(),
+    const to = productionFor(row.status)
+    if (to && sale.production !== to && (RANK[sale.production ?? 'not_started'] ?? 0) <= (RANK[to] ?? 0)) {
+      out.changed.push({ invoice: row.invoice, customer: sale.customer, from: sale.production, to })
+      next = { ...next, production: to }
+      noteLines.push(`${day}: Shazzy's sales sheet says "${row.status}" (${row.tab} tab) — production set to ${to}${sale.production ? ` (was ${sale.production})` : ''}.`)
+      dirty = true
     }
+
+    // Tracking → the sale's record AND PayPal (the new-account hold lifts a
+    // few days after delivery, but only for transactions that carry tracking).
+    const tracking = row.tracking.replace(/\s/g, '')
+    if (tracking && !(sale.notes ?? '').includes(tracking)) {
+      const carrier = carrierFor(tracking)
+      const paypal: string[] = []
+      if (!opts.dryRun && paypalConfigured()) {
+        for (const p of sale.payments) {
+          if (p.method !== 'paypal' || !p.id.startsWith('pay_pp_')) continue
+          const txn = p.id.slice('pay_pp_'.length)
+          const err = await addTracking(txn, tracking, to === 'delivered' ? 'DELIVERED' : 'SHIPPED').catch((e: unknown) => e instanceof Error ? e.message : 'failed')
+          paypal.push(err ? `${txn}: ${err}` : txn)
+        }
+      }
+      out.tracked.push({ invoice: row.invoice, customer: sale.customer, tracking, carrier, paypal })
+      if ((RANK[next.production ?? 'not_started'] ?? 0) < RANK.shipped) { next = { ...next, production: 'shipped' } }
+      noteLines.push(`${day}: SHIPPED — ${carrier} tracking ${tracking} (from the sales sheet)${paypal.length ? `; PayPal tracking added on ${paypal.join(', ')}` : ''}.`)
+      dirty = true
+    }
+
+    if (!dirty || opts.dryRun) continue
+    const updated: Sale = { ...next, updatedAt: now.toISOString(), updatedBy: SHEET_ACTOR, notes: `${sale.notes ?? ''}\n${noteLines.join('\n')}`.trim() }
     const err = await writeSale(updated)
-    if (err) { out.changed.pop(); console.error('[sales-sheet] write failed', row.invoice, err) }
+    if (err) console.error('[sales-sheet] write failed', row.invoice, err)
   }
   return out
 }
