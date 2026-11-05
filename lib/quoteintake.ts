@@ -595,6 +595,10 @@ export function isTestSubmission(name: string | null | undefined, email: string 
   // site's mail, not ZeeOps (owner, 2026-10-29: "form monitor bh hata").
   if (/^form monitor$/i.test(n) || /\bForm Monitor\b/.test(body)) return 'our own test'
   if (/<\/?[a-z][^>]*>/i.test(n)) return 'HTML tag in the name'
+  // A form bot fills the name with a random run of mixed-case letters
+  // ("pHuTCiXAwgCucEpS", delipapers, Nov 2026): no person's name is 14+
+  // letters with no space and four or more capitals inside it.
+  if (/^[A-Za-z]{14,}$/.test(n) && (n.slice(1).match(/[A-Z]/g) ?? []).length >= 4) return 'random-letter name (form bot)'
   if (/@example\.(com|net|org)$|@[a-z0-9.-]*\.(local|test|invalid|example)$|@localhost$/i.test(e) || /^[a-z]@[a-z]\.(com|net|org)$/i.test(e)) return `test address ${e}`
   const digits = (phone ?? '').replace(/\D/g, '')
   // A filler phone (0000000, 1111111111) on its own is not a test: real
