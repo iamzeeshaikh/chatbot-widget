@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { metaWaConfig, verifyMetaSignature, downloadMetaMedia } from '@/lib/metawa'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from '@/lib/crm'
-import { leadForCaller } from '@/lib/inbound'
+import { leadForCaller, markPitchIfUnanswered } from '@/lib/inbound'
 import { WHATSAPP_LEAD_MESSAGE } from '@/lib/quoteintake'
 import { harvestContact } from '@/lib/contactharvest'
 import { sendPushToWorkspace } from '@/lib/push'
@@ -138,6 +138,7 @@ async function inbound(cfg: NonNullable<ReturnType<typeof metaWaConfig>>, msg: O
     }),
   }])
   await harvestContact(sessionId, siteId, body ?? '')
+  await markPitchIfUnanswered(sessionId, siteId).catch(() => false)
 
   const hidden = hasFeature(workspace, 'contactprivacy')
   const who = !hidden && profileName ? profileName : 'A customer'

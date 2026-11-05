@@ -19,7 +19,9 @@
 // Packaging only — called from the chat route behind a workspace gate.
 
 import { supabase } from './supabase'
-import { isGarbageName, isTestSubmission } from './quoteintake'
+import { isGarbageName, isTestSubmission, isLikelySpamQuote, quoteSessionId } from './quoteintake'
+import { CRM_NOT_A_LEAD_ROLE } from './crm'
+import { BOT_ACTOR } from './quotebotcore'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
 
 export interface ChatLeadRowInput {
@@ -89,7 +91,16 @@ export async function ensureChatLeadRow(i: ChatLeadRowInput): Promise<ChatLeadRo
     if (i.createdAt) insert.created_at = i.createdAt
     const { data: ins, error } = await supabase.from('leads').insert([insert]).select('id').limit(1)
     if (error) { console.error('[chatleads] insert failed:', error.message); return none }
-    return { id: ins?.[0]?.id ? String(ins[0].id) : null, created: true, patched: [] }
+    const newId = ins?.[0]?.id ? String(ins[0].id) : null
+    // Somebody selling to us through the chat (a designer, an SEO agency, a
+    // factory) gets a record — nothing is dropped — but it is marked "not a
+    // lead" at once so it never sits in the counts (owner, 2026-11-05).
+    const typed = message.split('\n').filter((l) => l.startsWith('user:')).map((l) => l.slice(5)).join('\n')
+    if (newId && isLikelySpamQuote(typed, phone || null)) {
+      const mark = JSON.stringify({ spam: true, by: BOT_ACTOR, at: new Date().toISOString(), reason: 'selling to us: vendor, SEO or guest-posting pitch in chat' })
+      await supabase.from('chat_logs').insert([quoteSessionId(newId), i.sessionId].map((sid) => ({ site_id: i.siteId, session_id: sid, role: CRM_NOT_A_LEAD_ROLE, message: mark })))
+    }
+    return { id: newId, created: true, patched: [] }
   } catch (e) {
     console.error('[chatleads] failed (non-fatal):', e instanceof Error ? e.message : e)
     return none

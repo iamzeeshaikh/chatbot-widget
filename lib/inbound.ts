@@ -22,6 +22,9 @@ import { siteFromRecentTap } from './callintent'
 import { phoneKey } from './identity'
 import { quoteSessionId, QUOTE_TAG, isLikelySpamQuote } from './quoteintake'
 import { recordIntakeDrop, INTAKE_DROP_ROLE, INTAKE_DROP_SESSION } from './intakedrop'
+import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_NOT_A_LEAD_ROLE } from './crm'
+import { CRM_EMAIL_ROLE } from './crmemail'
+import { BOT_ACTOR } from './quotebotcore'
 import { SPORTS_SITES, PACKAGING_SITES, type Workspace } from './workspaces'
 
 // ── Which SITE did they contact? ────────────────────────────────────────────
@@ -173,4 +176,30 @@ async function droppedRecently(phone: string): Promise<boolean> {
     .eq('session_id', INTAKE_DROP_SESSION).eq('role', INTAKE_DROP_ROLE)
     .gte('created_at', since).like('message', `%"phone":"%${key}%`).limit(1)
   return !!data?.length
+}
+
+// A pitch that arrives in instalments. The opening WhatsApp is often just
+// "Hi" — the guest-posting / factory / SEO pitch comes in the second message,
+// after a record already exists (Dream, texasfootball, 5 Nov 2026). So every
+// inbound message re-reads the WHOLE conversation while nobody has replied:
+// once it reads as somebody selling to us, the lead is marked "not a lead"
+// (owner, 2026-11-05: WhatsApp pitches must not count either). Marked, never
+// deleted — the same reversible row an agent sets by hand — and only while
+// unanswered: a conversation an agent has joined is theirs to judge.
+export async function markPitchIfUnanswered(sessionId: string, siteId: string): Promise<boolean> {
+  const { data } = await supabase.from('chat_logs').select('role, message')
+    .eq('session_id', sessionId)
+    .in('role', [CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_EMAIL_ROLE, CRM_NOT_A_LEAD_ROLE])
+    .order('created_at', { ascending: true }).limit(200)
+  const rows = data ?? []
+  if (rows.some((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_EMAIL_ROLE || r.role === CRM_NOT_A_LEAD_ROLE)) return false
+  const text = rows.filter((r) => r.role === CRM_WA_IN_ROLE).map((r) => {
+    try { return String(JSON.parse(r.message ?? '{}').body ?? '') } catch { return '' }
+  }).join('\n')
+  if (!text.trim() || !isLikelySpamQuote(text, null)) return false
+  await supabase.from('chat_logs').insert({
+    site_id: siteId, session_id: sessionId, role: CRM_NOT_A_LEAD_ROLE,
+    message: JSON.stringify({ spam: true, by: BOT_ACTOR, at: new Date().toISOString(), reason: 'selling to us: vendor, SEO or guest-posting pitch on WhatsApp' }),
+  })
+  return true
 }

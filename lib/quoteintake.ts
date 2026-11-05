@@ -238,7 +238,7 @@ export function siteIdFromQuoteCode(code: string): string | null {
 // content-specific — NOT a broad "contains a link" check, since real
 // customers legitimately paste reference-image/attachment URLs into these
 // forms and those must never be flagged.
-const SPAM_SIGNATURE_RE = /\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals|\bjackpot\b|no rx\b|prescription without doctor|stop to opt-?out|reply stop|text stop|attendees list|complimentary (bid|quote|audit)|unsubscribe here|no longer wish to receive|live within 24 hours|drive (more )?traffic|directly in front of people|boost your (rankings|traffic|sales)|increase your (traffic|leads|sales)|grow your business online|first page of google|rank higher on google/i
+const SPAM_SIGNATURE_RE = /link[- ]?building|video ads\b|content publication|websites (currently )?available for|\[url=|\[\/url\]|Yo investors|trading bot|crypto[- ]?(coin|trading)s?\b|payday loan|AI-based strateg|Just stumbled on|essay writing service|\bbacklink|guest post|SEO service|online casino|forex signals|\bjackpot\b|no rx\b|prescription without doctor|stop to opt-?out|reply stop|text stop|attendees list|complimentary (bid|quote|audit)|unsubscribe here|no longer wish to receive|live within 24 hours|drive (more )?traffic|directly in front of people|boost your (rankings|traffic|sales)|increase your (traffic|leads|sales)|grow your business online|first page of google|rank higher on google/i
 
 // A rival packaging supplier pitching ITS services through the quote form —
 // the sender wants to sell, not buy, so it is not a lead however polite it is.
@@ -396,6 +396,7 @@ const EXPLOIT_ATTACHMENT_RE = /^.*\b(?:attachment|attached|artwork|file)\b.*\.(?
 // scams, "send me updates" form spam, product-review submissions, ingredient
 // sellers and freelance designers pitching.
 const NOT_A_CUSTOMER_RE = new RegExp([
+  String.raw`send me (the )?(news|updates) (by|via) email|i built a (desktop |free |small )?tool|check the quality of (my|our) (brand|products?)`,
   String.raw`truck(load)? capacity|\bOTR and drayage|drayage trucking|are you moving any freight|competitive (freight )?quote for your (load|shipment)|reliable carriers|\bfreight (broker|forwarding|services)\b`,
   String.raw`\bDDP shipping\b|shipping from china to the usa|customs clearance procedures`,
   String.raw`left a \d-star review|review(s)? (platform|site) where consumers|\bwillro\b`,

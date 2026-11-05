@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { twilioAuth, verifyTwilioSignature, workspaceForBusinessNumber } from '@/lib/twilio'
 import { CRM_WA_IN_ROLE } from '@/lib/crm'
-import { leadForCaller } from '@/lib/inbound'
+import { leadForCaller, markPitchIfUnanswered } from '@/lib/inbound'
 import { WHATSAPP_LEAD_MESSAGE } from '@/lib/quoteintake'
 import { harvestContact } from '@/lib/contactharvest'
 import { sendPushToWorkspace } from '@/lib/push'
@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
       // field (lib/contactharvest.ts). Inside the dedupe guard on purpose: a
       // retried webhook must not re-run the capture either.
       await harvestContact(sessionId, siteId, body ?? '')
+      await markPitchIfUnanswered(sessionId, siteId).catch(() => false)
     }
   }
 
