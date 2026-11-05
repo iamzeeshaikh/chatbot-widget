@@ -124,6 +124,11 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
 
   const days = Math.min(30, Math.max(0, Math.round(opts.days ?? 0)))
   const ids = await searchIntakeMessageIds(INTAKE_MAILBOX, cfg, `${days ? `newer_than:${days}d` : WINDOW} -in:sent -in:chats`, days ? 500 : 300)
+  // Spam too. Gmail files a brand-new site's first form mails there (a
+  // greaseproof-paper quote, 5 Nov 2026, never reached ZeeOps), and a plain
+  // search never sees spam. Same parser and spam checks apply to these.
+  const spam = await searchIntakeMessageIds(INTAKE_MAILBOX, cfg, `in:spam ${days ? `newer_than:${days}d` : WINDOW}`, 200, true).catch(() => [])
+  for (const m of spam) if (!ids.some((x) => x.id === m.id)) ids.push(m)
   out.found = ids.length
   const done = await processedIds(!!opts.retryNotAForm, days || 4)
   const todo = ids.filter((m) => !done.has(m.id)).slice(0, PER_RUN)
