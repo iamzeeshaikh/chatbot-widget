@@ -87,6 +87,13 @@ export function canUseSales(m: Pick<Member, 'role' | 'workspace'> | null | undef
 
 // The master view lives on the packaging dashboard only: on sports the owners
 // see just the sports ledger, like everyone else there.
+/** The Growth page (owner, 2026-11-06: "ye growth kisi or ko show na ho"):
+ *  only the owner's own logins — not other admins, not agents. */
+export const GROWTH_VIEWERS = ['shanimazhar82@gmail.com', 'dev@zeecustomboxes.com', 'packaging@zeeops.dev']
+export function canSeeGrowth(m: Pick<Member, 'role' | 'workspace' | 'email'> | null | undefined): boolean {
+  return canUseSales(m) && m?.workspace === 'packaging' && GROWTH_VIEWERS.includes(String(m?.email ?? '').trim().toLowerCase())
+}
+
 export function isSalesOwner(m: Pick<Member, 'role' | 'workspace' | 'email'> | null | undefined): boolean {
   return canUseSales(m) && m?.workspace === 'packaging' && SALES_OWNERS.includes(String(m?.email ?? '').trim().toLowerCase())
 }

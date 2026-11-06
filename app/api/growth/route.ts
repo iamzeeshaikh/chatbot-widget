@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { readSales, suggestedRates } from '@/lib/sales'
 import { readExpenses } from '@/lib/expenses'
-import { figures, expensePkr, canUseSales } from '@/lib/salescore'
+import { figures, expensePkr, canSeeGrowth } from '@/lib/salescore'
 import { firstResponses } from '@/lib/firstresponse'
 
 export const dynamic = 'force-dynamic'
@@ -38,7 +38,7 @@ const median = (xs: number[]) => {
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canUseSales(member) || member.workspace !== 'packaging') return NextResponse.json({ error: 'Owners only.' }, { status: 403 })
+  if (!canSeeGrowth(member)) return NextResponse.json({ error: 'Not available.' }, { status: 403 })
 
   const nowPkt = new Date(Date.now() + PKT_MS)
   const month = /^\d{4}-\d{2}$/.test(req.nextUrl.searchParams.get('month') ?? '')

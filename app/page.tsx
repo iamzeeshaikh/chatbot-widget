@@ -19,6 +19,7 @@ import {
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
 import { canUseCosting } from '@/lib/costing'
+import { canSeeGrowth } from '@/lib/salescore'
 import { isBotOffBySchedule, isBotOffByScheduleForWorkspace } from '@/lib/botschedule'
 import { isBotEnabled } from '@/lib/botflag'
 import { LEAD_STATUSES, LEAD_STATUS_STYLE, type LeadStatus } from '@/lib/leadstatus'
@@ -2748,7 +2749,7 @@ export default function Dashboard() {
             <a href="/sales" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/sales') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`}>Sales</a>
           )}
-          {canSales && workspace === 'packaging' && (
+          {canSeeGrowth({ role: userRole, workspace, email: userEmail }) && (
             <a href="/growth" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/growth') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Monthly sales target and what moves it">Growth</a>
           )}
