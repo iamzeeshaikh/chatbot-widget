@@ -2748,6 +2748,10 @@ export default function Dashboard() {
             <a href="/sales" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/sales') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`}>Sales</a>
           )}
+          {canSales && workspace === 'packaging' && (
+            <a href="/growth" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/growth') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Monthly sales target and what moves it">Growth</a>
+          )}
         </nav>
 
         {/* ── 3. Controls ── */}
