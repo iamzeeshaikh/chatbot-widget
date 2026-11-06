@@ -68,7 +68,9 @@ export async function GET(req: NextRequest) {
   const usd = (s: { currency: string; orderAmount: number }) => (s.currency === 'USD' ? s.orderAmount : s.orderAmount * ((r?.[s.currency as 'GBP'] ?? 0) / (r?.USD ?? 1)))
   const orderValue = monthSales.reduce((a, { s }) => a + usd(s), 0)
   const received = monthSales.reduce((a, { s, f }) => a + (s.currency === 'USD' ? f.received : 0), 0)
-  const revenuePkr = monthSales.reduce((a, { f }) => a + f.revenuePkr, 0)
+  // Margin is over orders the customer has actually started paying for: an
+  // unpaid invoice (Sydney, Oct 2026) is neither revenue nor profit yet.
+  const revenuePkr = monthSales.filter(({ f }) => f.received > 0).reduce((a, { f }) => a + f.revenuePkr, 0)
   const costed = monthSales.filter(({ f }) => f.profitKnown)
   const costedProfit = costed.reduce((a, { f }) => a + f.profitPkr, 0)
   const costedRevenue = costed.reduce((a, { f }) => a + f.revenuePkr, 0)
