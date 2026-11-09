@@ -55,7 +55,7 @@ const FILE_BUDGET = 9 * 1024 * 1024
 const FILE_MIMES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf'])
 
 type GsContext = {
-  codeFromMessageText_: (body: string, from: string, to: string) => string | null
+  codeFromMessageText_: (body: string, from: string, to: string, subject?: string) => string | null
   leadFromMessage_: (msg: unknown) => (Record<string, unknown> & { email?: string; phone?: string; unreadable?: boolean }) | null
 }
 let gs: GsContext | null = null
@@ -145,7 +145,7 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
       // they are nobody's enquiry. Dropped here, before a parse or a post.
       const machine = isMachineMessage(m.from, m.subject, m.bodyText)
       if (machine) { if (!dryRun) await remember(ref.id, 'machine', { detail: machine }); out.skipped++; continue }
-      let code = g.codeFromMessageText_(m.bodyText, m.from, m.to)
+      let code = g.codeFromMessageText_(m.bodyText, m.from, m.to, m.subject)
       // A customer's own email to info@<site>, forwarded here by one of us
       // (the owner's Gmail gets the original through the info-all group). The
       // forward's "To:" line names the site; the customer is the first address

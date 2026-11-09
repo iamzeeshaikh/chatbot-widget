@@ -380,6 +380,35 @@ function codeFromSenderName_(fromHeader) {
   return code && !isIgnoredLeaf_(code) ? code : null;
 }
 
+/**
+ * A site's own form notice, sent through a shared mailbox (info@zeecustomboxes.com)
+ * with the SITE's name as the display name and the site's domain in the
+ * subject — "Hot Dog Trays" / "Quote request — Hot Dog Serving Tray —
+ * hotdogtrays.com". No footer URL, no sending domain of its own, no Gmail label
+ * the script reads: a Polish pitch through it on 9 Nov 2026 was "not a form".
+ * Both signals must agree — the display name, squashed, is the domain's stem,
+ * AND the subject names that exact domain — so a pitch whose subject merely
+ * mentions our site ("Quick question about hotdogtrays.com") is not enough,
+ * and the .com/.co.uk twins sharing a stem are told apart by the subject.
+ */
+function codeFromSiteNamedSender_(fromHeader, subject) {
+  var m = String(fromHeader || '').match(/^\s*"?([^"<]+?)"?\s*</);
+  var subj = String(subject || '').toLowerCase();
+  if (!m || !subj) return null;
+  var stem = m[1].toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!stem) return null;
+  var found = null;
+  for (var code in SITE_DOMAINS) {
+    var host = String(SITE_DOMAINS[code]).toLowerCase().replace(/^www\./, '');
+    if (host.split('.')[0] !== stem) continue;
+    var re = new RegExp('(^|[^a-z0-9.-])(www\\.)?' + host.replace(/\./g, '\\.') + '($|[^a-z0-9.-])');
+    if (!re.test(subj)) continue;
+    if (found && found !== code) return null; // ambiguous — do not guess
+    found = code;
+  }
+  return found && !isIgnoredLeaf_(found) ? found : null;
+}
+
 // Stop working with this much headroom before Apps Script's 6-minute limit.
 var TIME_BUDGET_MS = 4.5 * 60 * 1000;
 // How many threads to list per label — used only by the listSiteLabels
@@ -754,7 +783,7 @@ function processQuoteLeadsCore_() {
       var umsgs = lookbackMessages_(thread, cutoff);
       for (var um = 0; um < umsgs.length; um++) {
         var ubody = umsgs[um].getPlainBody();
-        var ucode = codeFromMessageText_(ubody, umsgs[um].getFrom(), recipientsOf_(umsgs[um]));
+        var ucode = codeFromMessageText_(ubody, umsgs[um].getFrom(), recipientsOf_(umsgs[um]), umsgs[um].getSubject());
         if (!ucode) continue;
         var uparsed = parseLeadBody_(ubody);
         if (!uparsed.email && !uparsed.phone) continue;
@@ -983,7 +1012,7 @@ function diagnoseThread() {
       // What the message says about itself, which is what decides an
       // unlabelled thread — printed per message because a forward and its
       // original can disagree.
-      var bodyCode = codeFromMessageText_(m.getPlainBody(), m.getFrom(), recipientsOf_(m));
+      var bodyCode = codeFromMessageText_(m.getPlainBody(), m.getFrom(), recipientsOf_(m), m.getSubject());
       Logger.log('    msg ' + (j + 1) + '  ' + m.getDate() +
         '  | newer than watermark: ' + (m.getDate().getTime() > cutoff) +
         '  | site from body: ' + (bodyCode || 'NONE') +
@@ -1441,7 +1470,7 @@ function codeFromOwnRecipient_(toHeader) {
   return found;
 }
 
-function codeFromMessageText_(body, fromHeader, toHeader) {
+function codeFromMessageText_(body, fromHeader, toHeader, subject) {
   var text = String(body || '');
   var i, m, code;
 
@@ -1463,6 +1492,9 @@ function codeFromMessageText_(body, fromHeader, toHeader) {
   if (code) return code;
 
   code = codeFromSenderName_(fromHeader);
+  if (code) return code;
+
+  code = codeFromSiteNamedSender_(fromHeader, subject);
   if (code) return code;
 
   // Guarded, because "a link to one of our sites" on its own is not evidence
