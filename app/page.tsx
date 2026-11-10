@@ -2440,6 +2440,9 @@ export default function Dashboard() {
   // Costing (lib/costing.ts): packaging admins and the costing person.
   const canCosting = canUseCosting({ role: userRole, workspace, email: userEmail })
   const canOpportunities = hasFeature(workspace, 'opportunities') && !ownLeadsOnly
+  // Lost leads to win back (packaging only). Own-leads-only members get it
+  // too — /api/lost narrows them to their own Lost leads.
+  const canLost = hasFeature(workspace, 'lost')
   const showFirstResponse = hasFeature(workspace, 'quotebot')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
@@ -2728,6 +2731,12 @@ export default function Dashboard() {
             // other routes, so it middle-clicks into a new tab.
             <a href="/opportunities" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/opportunities') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Deals that can close, invoices due, customers waiting">Opportunities</a>
+          )}
+          {canLost && (
+            // Lost leads to win back — text only, no count, so nothing in the
+            // bar moves when it loads.
+            <a href="/lost" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/lost') } }}
+              className={`${NAV_TAB} ${NAV_TAB_OFF}`} title="Lost inquiries to win back">Lost</a>
           )}
           {canTasks && (
             <a href="/tasks" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/tasks') } }}

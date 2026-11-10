@@ -204,7 +204,7 @@ const OWN_LEADS_API = [
   '/api/admin/translate', '/api/admin/lead-status', '/api/upload', '/api/pipeline', '/api/pipeline/bulk',
   '/api/search', '/api/search/state', '/api/inbox', '/api/inbox/whatsapp', '/api/tasks', '/api/tasks/count',
   '/api/jobs', '/api/jobs/*', '/api/jobs/*/messages', '/api/jobs/*/production', '/api/crm/version',
-  '/api/calls/target', '/api/twilio/voice/dial',
+  '/api/calls/target', '/api/twilio/voice/dial', '/api/lost', '/api/lost/recover', '/api/lost/reason',
   '/api/leads/*', '/api/leads/*/*', '/api/leads/*/*/*', '/api/leads/*/*/*/*',
   // refused (403) for him — by this rule, or already admin/owner-only
   '/api/admin/analytics', '/api/admin/analytics/breakdown', '/api/admin/visitors-history', '/api/visitor/active',

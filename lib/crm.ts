@@ -68,13 +68,17 @@ export const CRM_WA_LOOKUP_ROLE = 'crm_wa_lookup'
 // another row rather than a delete. See lib/notalead.ts.
 export const CRM_NOT_A_LEAD_ROLE = 'crm_not_a_lead'
 
+// Why a lead was lost (lib/lostreasons.ts) — { reason, note, by, at } on the
+// lead's own session, newest wins. Read by the Lost page (/lost).
+export const CRM_LOST_ROLE = 'crm_lost'
+
 export const CRM_ROLES = [
   'crm_intake_pull',
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,
   CRM_MEMBER_NAME_ROLE, CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_WA_LOOKUP_ROLE,
-  CRM_NOT_A_LEAD_ROLE,
+  CRM_NOT_A_LEAD_ROLE, CRM_LOST_ROLE,
   // What the quote bot learned from the team (lib/botlearn.ts) — reserved site.
   'crm_bot_lessons',
   // PayPal payments synced into the packaging ledger (lib/paypalsync.ts).

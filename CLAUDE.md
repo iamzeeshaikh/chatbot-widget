@@ -68,7 +68,7 @@ chat messages.
 ### Registered control roles today
 `mode`, `contact`, `tags`, `lead_capture`, `reply_author`, `lead_status`, `assignment`,
 `blocked_visitor`, `push_sub`, and the CRM ones — `crm_stage`, `crm_note`, `crm_field`,
-`crm_value`, `crm_task`, `crm_prefs`, `crm_reminder`. The `crm_*` set lives in
+`crm_value`, `crm_task`, `crm_prefs`, `crm_reminder`, `crm_lost` (why a lead was lost). The `crm_*` set lives in
 `CRM_ROLES` (`lib/crm.ts`), which `controlroles.ts` spreads and the conversations route
 subtracts from the message count, so adding a new `crm_*` role to that one array wires
 up both protections at once.
@@ -379,6 +379,22 @@ ships. Two data traps it handles: an agent's own Gmail reply arrives as a
 carries the import time in `created_at` — events are timed by the JSON `at`.
 Alcohol / religious orders are flagged "decline", never counted as chances.
 The result is cached 3 minutes per site scope (it reads ~20MB of mail bodies).
+
+### Lost inquiries (packaging only, 2026-11-10)
+`/lost` + `/api/lost` (`WORKSPACE_FEATURES` 'lost'), `lib/lost.ts`. Every lead whose
+CURRENT stage is Lost, newest lost first, with product/size/qty read off the enquiry
+(`orderDetails` in `lib/lostreasons.ts`), reason, owner, last outreach. **It does not use
+loadPipeline**: the board's 30k control-row cap is reached over a year and drops the newest
+rows (all-time board: 164 Lost cards vs 291 Lost leads in the DB). It folds the stage rows
+alone first (same fold + stagePairAt guard), then reads the rest for just those leads, and
+applies the board's access rules itself (site scope, not-a-lead, pool / team lead /
+own-leads-only, site+email merge, masking). `scratch/lost-dbcount.mjs` checks it against an
+independent DB count. Reason = a `crm_lost` row `{reason, note, by, at}` (+ a CRM note),
+asked for optionally on the record when a packaging lead moves to Lost, or set later on
+/lost (`/api/lost/reason`); only a row at/after the newest move to Lost counts. Recover =
+`/api/lost/recover` (`dryRun: true` reports without writing): applyStageChange to a live
+stage + setAssignment + a "Recovered from Lost by X" note, only for ids currently Lost; an
+own-leads-only member can only assign it to themselves.
 
 ### Opportunities alerts (packaging only, 2026-10-21)
 `/api/crm/opp-alerts` (cron `*/5`, `?dry=1`, `?dry=1&at=<iso>` to preview a
