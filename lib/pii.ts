@@ -35,9 +35,17 @@ const HIDDEN_INLINE = '••••••'
 // workspace has asked for the opposite — see `contactprivacy` in
 // lib/workspaces.ts. Packaging's agents phone their customers back, so nothing
 // is withheld there; sports asked for exactly the reverse.
-export function canSeeContacts(member: Pick<Member, 'role' | 'workspace'> | null | undefined): boolean {
+//
+// A member can also carry the rule ON THEIR OWN (`hideContacts`, user_metadata
+// `hide_contacts`, set from the Members page) — added 2026-11-10 for a new
+// packaging hire on the Mark Taylor login, who works his leads (email,
+// WhatsApp, calls, all sent server-side) without seeing an address or number.
+// It is the same decision, so every read edge that already masks for sports
+// masks for him too, with nothing else to wire up.
+export function canSeeContacts(member: (Pick<Member, 'role' | 'workspace'> & { hideContacts?: boolean }) | null | undefined): boolean {
   if (!member) return false
   if (member.role === 'admin') return true
+  if (member.hideContacts === true) return false
   return !hasFeature(member.workspace, 'contactprivacy')
 }
 

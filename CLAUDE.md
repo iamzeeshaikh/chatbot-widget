@@ -300,6 +300,17 @@ Two consequences that are easy to miss and both were bugs before they were fixed
 - **A value you cannot read, you cannot overwrite**: `/api/leads/[id]/field` refuses
   email/phone from a non-admin, or an agent could point the lead at their own address.
 
+**Per member too (2026-11-10):** a packaging standard member can carry the same rule on
+their own — `hide_contacts: true` in their Supabase auth `user_metadata` (Members page:
+"Hide customer contacts"), read into `Member.hideContacts` by `getMember`/`memberByEmail`.
+`canSeeContacts` returns false for them, so every edge above masks for them with nothing
+else to wire. On for `marktaylor@shopcardboardboxes.com`. Two edges that only packaging has
+were fixed with it: the record's task titles and pending bot draft (`hideContacts` in
+`lib/leadrecord.ts`; the bot-draft send uses the stored draft's To/Cc), and **pushes** —
+`lib/push.ts` scrubs title/body for such a member (fails closed), because the quote bot's
+pushes say `name || email`. `scratch/pii-leak-probe-pk.mjs` (`WHO=mark|samir|admin`,
+`IDS_FROM=mark`) is the packaging probe.
+
 `scratch/pii-leak-probe.mjs` is the regression test and the only honest way to make an
 absence claim: it reads every real address and number for the workspace out of the
 database, then hunts for them in every agent-visible response — and runs the same hunt

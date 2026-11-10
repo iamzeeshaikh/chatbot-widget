@@ -19,6 +19,7 @@ interface Member {
   call_phone: string
   /** Sees only the leads assigned to them (lib/ownleads.ts). */
   own_leads_only?: boolean
+  hide_contacts?: boolean
 }
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 
@@ -112,6 +113,19 @@ export default function MembersPage() {
     setOwnBusy(null)
     if (!r.ok) { setError(j.error || 'Could not change that.'); return }
     setMembers((cur) => cur.map((x) => (x.id === id ? { ...x, own_leads_only: on } : x)))
+  }
+
+  // "Hide customer contacts" (lib/pii.ts) — packaging only.
+  async function toggleHideContacts(id: string, on: boolean) {
+    setOwnBusy(id); setError('')
+    const r = await fetch('/api/admin/members', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, hide_contacts: on }),
+    })
+    const j = await r.json().catch(() => ({}))
+    setOwnBusy(null)
+    if (!r.ok) { setError(j.error || 'Could not change that.'); return }
+    setMembers((cur) => cur.map((x) => (x.id === id ? { ...x, hide_contacts: on } : x)))
   }
 
   async function addMember(e: React.FormEvent) {
@@ -341,6 +355,14 @@ export default function MembersPage() {
                             <input type="checkbox" className="h-3 w-3" checked={!!m.own_leads_only} disabled={ownBusy === m.id}
                               onChange={(e) => toggleOwnLeads(m.id, e.target.checked)} />
                             Own leads only
+                          </label>
+                        )}
+                        {m.role !== 'admin' && workspace === 'packaging' && isAdmin && (
+                          <label className="flex items-center gap-1 mt-1 text-[10px] text-gray-600 cursor-pointer"
+                            title="Works leads (email, WhatsApp, calls through ZeeOps) without ever seeing a customer's email address or phone number">
+                            <input type="checkbox" className="h-3 w-3" checked={!!m.hide_contacts} disabled={ownBusy === m.id}
+                              onChange={(e) => toggleHideContacts(m.id, e.target.checked)} />
+                            Hide customer contacts
                           </label>
                         )}
                       </td>

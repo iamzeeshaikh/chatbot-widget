@@ -1067,6 +1067,23 @@ function hideContacts(rec: LeadRecord, payLinks: string[] = []): LeadRecord {
     captured: { name: softName(rec.captured.name), email: rec.captured.email ? HIDDEN_EMAIL : '', phone: rec.captured.phone ? HIDDEN_PHONE : '' },
     quoteMessage: scrub(rec.quoteMessage),
     notes: rec.notes.map((n) => ({ ...n, body: scrub(n.body) ?? '' })),
+    // Task titles are free text, and the quote bot writes the customer's
+    // address into one ("Send the price quote — someone@… gave size, style and
+    // quantity"). /api/tasks already scrubbed them; the record did not — caught
+    // by the packaging probe on 2026-11-10.
+    openTasks: rec.openTasks.map((t) => ({ ...t, title: scrub(t.title) ?? '' })),
+    doneTasks: rec.doneTasks.map((t) => ({ ...t, title: scrub(t.title) ?? '' })),
+    // The quote bot's pending email carries the recipient and the customer's
+    // own Cc list. The send (/api/leads/[id]/bot-draft) uses the stored draft's
+    // addresses, never these, so masking them costs the agent nothing.
+    botDraft: rec.botDraft && {
+      ...rec.botDraft,
+      to: HIDDEN_EMAIL,
+      cc: rec.botDraft.cc ? HIDDEN_EMAIL : rec.botDraft.cc,
+      subject: scrub(rec.botDraft.subject) ?? '',
+      text: scrub(rec.botDraft.text) ?? '',
+      why: rec.botDraft.why === undefined ? undefined : (scrub(rec.botDraft.why) ?? ''),
+    },
     related: rec.related.map((r) => ({
       ...r, name: r.name ? softName(r.name) : r.name, email: maskEmail(r.email), phone: maskPhone(r.phone),
     })),

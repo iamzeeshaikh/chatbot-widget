@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { canSeeContacts } from '@/lib/pii'
 import { guardLeadAccess, writeControlRow, markThreadRepliesRead } from '@/lib/leadrecord'
 import { googleConfig, sendEmail, GmailAuthError } from '@/lib/gmail'
 import { threadContextFor } from '@/lib/emailsweep'
@@ -51,10 +52,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ ok: true, status: 'discarded' })
   }
 
-  const text = String(body.text ?? '').trim() || draft.text
+  const posted = String(body.text ?? '').trim()
+  // Anything still carrying the mask placeholder is the scrubbed copy coming
+  // back; send the stored text instead of "••••••".
+  const text = (posted && (canSeeContacts(access.member) || !posted.includes('••••••')) ? posted : '') || draft.text
   // The agent may trim the Cc list on the card; only addresses, at most six.
-  const cc = (typeof body.cc === 'string' ? body.cc : draft.cc ?? '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)?.slice(0, 6).join(', ') ?? ''
-  const subject = String(body.subject ?? '').trim().slice(0, 200) || draft.subject
+  // A member who may not see contacts (lib/pii.ts) was shown a masked Cc, so
+  // whatever the browser posts back is not an address list: the stored one is
+  // used as it stands. Likewise text/subject: theirs came scrubbed, so an
+  // unchanged scrubbed copy must not replace the real one.
+  const sees = canSeeContacts(access.member)
+  const cc = (sees && typeof body.cc === 'string' ? body.cc : draft.cc ?? '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)?.slice(0, 6).join(', ') ?? ''
+  const postedSubject = String(body.subject ?? '').trim().slice(0, 200)
+  const subject = (postedSubject && (sees || !postedSubject.includes('••••••')) ? postedSubject : '') || draft.subject
   if (text.length > 20000) return NextResponse.json({ error: 'That message is too long to send.' }, { status: 400 })
   const cfg = googleConfig(PUBLIC_BASE)
   if (!cfg) return NextResponse.json({ error: 'Google OAuth is not configured' }, { status: 503 })

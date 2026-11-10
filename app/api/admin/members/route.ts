@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { storedMemberNames, setMemberDisplayName, memberCallPhone, MAX_MEMBER_NAME } from '@/lib/membername'
 import { agentDisplayName } from '@/lib/agentname'
-import { getMember, revokeSessions, Member, ownLeadsOnlyIds, setOwnLeadsOnly } from '@/lib/auth'
+import { getMember, revokeSessions, Member, ownLeadsOnlyIds, setOwnLeadsOnly, hideContactsIds, setHideContacts } from '@/lib/auth'
 import { workspaceSites } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
@@ -40,12 +40,16 @@ export async function GET(req: NextRequest) {
   // rather than pretending somebody chose it.
   const names = await storedMemberNames()
   // "Own leads only" (lib/ownleads.ts) lives in the auth user's metadata.
-  const limited = await ownLeadsOnlyIds((data ?? []).filter((m) => m.role !== 'admin').map((m) => String(m.id)))
+  const standardIds = (data ?? []).filter((m) => m.role !== 'admin').map((m) => String(m.id))
+  const limited = await ownLeadsOnlyIds(standardIds)
+  // "Hide customer contacts" (lib/pii.ts), same metadata, same read.
+  const hidden = await hideContactsIds(standardIds)
   const members = await Promise.all((data ?? []).map(async (m) => {
     const set = names.get(String(m.email).toLowerCase())
     return {
       ...m,
       own_leads_only: limited.has(String(m.id)),
+      hide_contacts: hidden.has(String(m.id)),
       display_name: set ?? agentDisplayName(m.email),
       display_name_source: set ? 'set' : 'derived',
       // The member's OWN phone — the line the CRM rings when they place a call.
@@ -110,7 +114,7 @@ export async function PATCH(req: NextRequest) {
   const { admin, error } = await requireAdmin(req)
   if (error) return error
 
-  const { id, role, assigned_sites, password, display_name, call_phone, own_leads_only } = await req.json()
+  const { id, role, assigned_sites, password, display_name, call_phone, own_leads_only, hide_contacts } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   if (role && !['admin', 'standard'].includes(role)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
@@ -160,6 +164,17 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: '"Own leads only" is not available on this dashboard.' }, { status: 400 })
     }
     try { await setOwnLeadsOnly(id, own_leads_only) } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'Could not save that.' }, { status: 500 })
+    }
+  }
+
+  // "Hide customer contacts" (lib/pii.ts) — packaging only (sports already
+  // hides them from every standard member by workspace rule).
+  if (typeof hide_contacts === 'boolean') {
+    if (admin!.workspace !== 'packaging') {
+      return NextResponse.json({ error: '"Hide customer contacts" is not available on this dashboard.' }, { status: 400 })
+    }
+    try { await setHideContacts(id, hide_contacts) } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : 'Could not save that.' }, { status: 500 })
     }
   }

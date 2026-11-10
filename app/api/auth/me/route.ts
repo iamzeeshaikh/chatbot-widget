@@ -16,5 +16,8 @@ export async function GET(req: NextRequest) {
     // Sees only the leads assigned to them (lib/ownleads.ts) — the UI hides
     // the screens the API refuses them.
     ownLeadsOnly: member.ownLeadsOnly === true,
+    // May not see customer emails/phones (lib/pii.ts) — every API already
+    // masks for them; this only lets the UI explain why.
+    hideContacts: member.hideContacts === true,
   })
 }

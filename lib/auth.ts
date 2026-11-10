@@ -27,6 +27,10 @@ export interface Member {
   /** Sees only the leads assigned to them (lib/ownleads.ts). Read from the
    *  auth user's user_metadata; never set on admins or built-in accounts. */
   ownLeadsOnly?: boolean
+  /** May not see customer email addresses or phone numbers (lib/pii.ts) —
+   *  the per-member form of the workspace `contactprivacy` rule. Read from
+   *  user_metadata `hide_contacts`; never set on admins or built-in accounts. */
+  hideContacts?: boolean
 }
 
 // Built-in workspace admins. These keep working without any DB row so the
@@ -105,17 +109,20 @@ function verifySession(token: string | undefined): SessionPayload | null {
 // warm serverless instance.
 const REVOKE_KEY = 'sessions_valid_from'
 const REVOKE_TTL_MS = 60_000
-const revokeCache = new Map<string, { readAt: number; validFrom: number; ownLeadsOnly: boolean }>()
+const revokeCache = new Map<string, { readAt: number; validFrom: number; ownLeadsOnly: boolean; hideContacts: boolean }>()
 
-// One metadata read serves both per-member flags kept there: the revocation
-// cutoff and "own leads only" (lib/ownleads.ts).
-async function memberMeta(uid: string): Promise<{ validFrom: number; ownLeadsOnly: boolean }> {
+/** user_metadata key for "hide customer contacts" (lib/pii.ts). */
+export const HIDE_CONTACTS_KEY = 'hide_contacts'
+
+// One metadata read serves every per-member flag kept there: the revocation
+// cutoff, "own leads only" (lib/ownleads.ts) and "hide contacts" (lib/pii.ts).
+async function memberMeta(uid: string): Promise<{ validFrom: number; ownLeadsOnly: boolean; hideContacts: boolean }> {
   const hit = revokeCache.get(uid)
   if (hit && Date.now() - hit.readAt < REVOKE_TTL_MS) return hit
   const { data } = await supabase.auth.admin.getUserById(uid)
   const meta = (data?.user?.user_metadata as Record<string, unknown> | undefined) ?? {}
   const raw = meta[REVOKE_KEY]
-  const entry = { readAt: Date.now(), validFrom: typeof raw === 'number' ? raw : 0, ownLeadsOnly: meta[OWN_LEADS_KEY] === true }
+  const entry = { readAt: Date.now(), validFrom: typeof raw === 'number' ? raw : 0, ownLeadsOnly: meta[OWN_LEADS_KEY] === true, hideContacts: meta[HIDE_CONTACTS_KEY] === true }
   revokeCache.set(uid, entry)
   return entry
 }
@@ -129,6 +136,22 @@ export async function setOwnLeadsOnly(uid: string, on: boolean): Promise<void> {
   revokeCache.delete(uid)
 }
 
+/** Turn "hide customer contacts" on or off for a member (lib/pii.ts). */
+export async function setHideContacts(uid: string, on: boolean): Promise<void> {
+  const { data } = await supabase.auth.admin.getUserById(uid)
+  const existing = (data?.user?.user_metadata as Record<string, unknown> | undefined) ?? {}
+  const { error } = await supabase.auth.admin.updateUserById(uid, { user_metadata: { ...existing, [HIDE_CONTACTS_KEY]: on } })
+  if (error) throw new Error(error.message)
+  revokeCache.delete(uid)
+}
+
+/** Which of these member ids carry "hide customer contacts" — Members page. */
+export async function hideContactsIds(uids: string[]): Promise<Set<string>> {
+  const out = new Set<string>()
+  await Promise.all(uids.map(async (uid) => { if ((await memberMeta(uid)).hideContacts) out.add(uid) }))
+  return out
+}
+
 /** Addresses of this workspace's own-leads-only members — the workspace-wide
  *  push broadcasts (new chat, new quote, inbound WhatsApp) skip them, because
  *  those name customers on leads that are not theirs. */
@@ -136,6 +159,16 @@ export async function ownLeadsOnlyEmails(ws: Workspace): Promise<Set<string>> {
   const { data } = await supabase.from('members').select('id, email, role').eq('workspace', ws)
   const rows = (data ?? []).filter((m) => m.role !== 'admin')
   const flagged = await ownLeadsOnlyIds(rows.map((m) => String(m.id)))
+  return new Set(rows.filter((m) => flagged.has(String(m.id))).map((m) => String(m.email).trim().toLowerCase()))
+}
+
+/** Addresses of this workspace's "hide customer contacts" members — a push is
+ *  drawn by the OS, outside every read edge, so lib/push.ts scrubs theirs. */
+export async function hideContactsEmails(ws: Workspace): Promise<Set<string>> {
+  const { data, error } = await supabase.from('members').select('id, email, role').eq('workspace', ws)
+  if (error) throw new Error(error.message)
+  const rows = (data ?? []).filter((m) => m.role !== 'admin')
+  const flagged = await hideContactsIds(rows.map((m) => String(m.id)))
   return new Set(rows.filter((m) => flagged.has(String(m.id))).map((m) => String(m.email).trim().toLowerCase()))
 }
 
@@ -152,7 +185,7 @@ export async function revokeSessions(uid: string): Promise<void> {
   const existing = (data?.user?.user_metadata as Record<string, unknown> | undefined) ?? {}
   const validFrom = Math.floor(Date.now() / 1000)
   await supabase.auth.admin.updateUserById(uid, { user_metadata: { ...existing, [REVOKE_KEY]: validFrom } })
-  revokeCache.set(uid, { readAt: Date.now(), validFrom, ownLeadsOnly: existing[OWN_LEADS_KEY] === true })
+  revokeCache.set(uid, { readAt: Date.now(), validFrom, ownLeadsOnly: existing[OWN_LEADS_KEY] === true, hideContacts: existing[HIDE_CONTACTS_KEY] === true })
 }
 
 // The dashboard this request was addressed to, when the hostname binds one
@@ -198,6 +231,7 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
   // been decided for that rule — a route added later stays closed to them.
   const ownLeadsOnly = data.role !== 'admin' && meta.ownLeadsOnly
   if (ownLeadsOnly && !ownLeadsMayCall(req.nextUrl.pathname)) return null
+  const hideContacts = data.role !== 'admin' && meta.hideContacts
   return {
     id: data.id,
     email: data.email,
@@ -205,6 +239,7 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
     role: data.role as Role,
     assigned_sites: data.assigned_sites ?? [],
     ...(ownLeadsOnly ? { ownLeadsOnly: true } : {}),
+    ...(hideContacts ? { hideContacts: true } : {}),
   }
 }
 
@@ -230,7 +265,9 @@ export async function memberByEmail(email: string): Promise<Member | null> {
     .ilike('email', addr)
     .maybeSingle()
   if (!data) return null
-  const ownLeadsOnly = data.role !== 'admin' && (await memberMeta(data.id)).ownLeadsOnly
+  const meta = data.role !== 'admin' ? await memberMeta(data.id) : null
+  const ownLeadsOnly = !!meta?.ownLeadsOnly
+  const hideContacts = !!meta?.hideContacts
   return {
     id: data.id,
     email: data.email,
@@ -238,6 +275,7 @@ export async function memberByEmail(email: string): Promise<Member | null> {
     role: data.role as Role,
     assigned_sites: data.assigned_sites ?? [],
     ...(ownLeadsOnly ? { ownLeadsOnly: true } : {}),
+    ...(hideContacts ? { hideContacts: true } : {}),
   }
 }
 

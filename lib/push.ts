@@ -7,7 +7,8 @@
 import webpush from 'web-push'
 import { supabase } from './supabase'
 import type { Workspace } from './workspaces'
-import { ownLeadsOnlyEmails } from './auth'
+import { ownLeadsOnlyEmails, hideContactsEmails } from './auth'
+import { scrubText } from './pii'
 
 export const PUSH_SUB_ROLE = 'push_sub'
 const PUSH_SITE = 'zeeops-push'
@@ -131,7 +132,30 @@ export async function sendPushToWorkspace(ws: Workspace, payload: PushPayload): 
   } catch (err) {
     console.error('[push] own-leads lookup failed (non-fatal):', err instanceof Error ? err.message : err)
   }
-  return deliver(subs, payload)
+  return deliverRespectingPrivacy(ws, subs, payload)
+}
+
+// A member with "hide customer contacts" (lib/pii.ts) gets the push with any
+// address or number scrubbed out of its title and body — a notification is
+// drawn by the OS, outside every read edge, and several senders (the quote
+// bot's "name || email" among them) put the customer's address in it. Fails
+// CLOSED for the scrub: if the lookup errors, everyone gets the scrubbed copy
+// rather than nobody getting anything.
+function scrubbedPayload(p: PushPayload): PushPayload {
+  return { ...p, title: scrubText(p.title) ?? '', body: scrubText(p.body) ?? '' }
+}
+
+async function deliverRespectingPrivacy(ws: Workspace, subs: SubRow[], payload: PushPayload): Promise<void> {
+  if (subs.length === 0) return
+  let hidden: Set<string> | null
+  try { hidden = await hideContactsEmails(ws) } catch (err) {
+    console.error('[push] hide-contacts lookup failed — scrubbing every copy:', err instanceof Error ? err.message : err)
+    hidden = null
+  }
+  const isHidden = (s: SubRow) => hidden === null || hidden.has((s.email ?? '').trim().toLowerCase())
+  const open = subs.filter((s) => !isHidden(s))
+  const masked = subs.filter(isHidden)
+  await Promise.all([deliver(open, payload), deliver(masked, scrubbedPayload(payload))])
 }
 
 // One member's devices only. Task reminders are personal — the assignee gets
@@ -145,7 +169,7 @@ export async function sendPushToMember(email: string, ws: Workspace, payload: Pu
   if (!target) return 0
   const subs = (await safeSubs(ws)).filter((s) => (s.email ?? '').trim().toLowerCase() === target)
   if (subs.length === 0) return 0
-  await deliver(subs, payload)
+  await deliverRespectingPrivacy(ws, subs, payload)
   return subs.length
 }
 

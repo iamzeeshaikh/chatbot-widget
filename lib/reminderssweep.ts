@@ -19,7 +19,7 @@
 // additionally kept apart by a short lease row.
 
 import { supabase, fetchAllPages, warnIfCapped } from './supabase'
-import { HARDCODED_ACCOUNTS, type Role } from './auth'
+import { HARDCODED_ACCOUNTS, hideContactsIds, type Role } from './auth'
 import { canSeeContacts, scrubText } from './pii'
 import { workspaceSites, siteWorkspace, hasFeature, type Workspace } from './workspaces'
 import { formatDueLabel, pktDayKey } from './datetime'
@@ -66,7 +66,7 @@ interface LedgerRow { message: string; created_at: string }
 // ── Access ───────────────────────────────────────────────────────────────────
 // Recomputed on every run, never trusted from the task: a member removed from a
 // site after a task was assigned to them must stop receiving its reminders.
-interface Access { sites: Set<string>; workspace: Workspace; role: Role }
+interface Access { sites: Set<string>; workspace: Workspace; role: Role; hideContacts?: boolean }
 
 async function loadAccess(): Promise<Map<string, Access>> {
   const out = new Map<string, Access>()
@@ -77,11 +77,16 @@ async function loadAccess(): Promise<Map<string, Access>> {
       role: 'admin',
     })
   }
-  const { data } = await supabase.from('members').select('email, role, workspace, assigned_sites')
+  const { data } = await supabase.from('members').select('id, email, role, workspace, assigned_sites')
+  // "Hide customer contacts" (lib/pii.ts) is per member, in auth metadata.
+  const hidden = await hideContactsIds((data ?? []).filter((m) => m.role !== 'admin').map((m) => String(m.id)))
   for (const m of data ?? []) {
     const ws = m.workspace as Workspace
     const sites = m.role === 'admin' ? workspaceSites(ws) : (m.assigned_sites ?? [])
-    out.set(String(m.email).toLowerCase(), { sites: new Set(sites), workspace: ws, role: (m.role === 'admin' ? 'admin' : 'standard') })
+    out.set(String(m.email).toLowerCase(), {
+      sites: new Set(sites), workspace: ws, role: (m.role === 'admin' ? 'admin' : 'standard'),
+      ...(m.role !== 'admin' && hidden.has(String(m.id)) ? { hideContacts: true } : {}),
+    })
   }
   return out
 }
