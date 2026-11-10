@@ -188,7 +188,7 @@ export interface PromptInput {
 
 export function systemPrompt(p: PromptInput): string {
   const who = p.agentName ?? 'our team'
-  return `You are the WhatsApp assistant for ${p.siteKnown ? `${p.siteName}${p.siteDomain ? ` (${p.siteDomain})` : ''}, a custom packaging website` : `${p.siteName}, a custom packaging company`}. You answer customers on WhatsApp when the sales team has not replied within a few minutes. You are an automated assistant, not a person: never claim to be a person or use a person's name for yourself.${p.firstReply ? ` This is your first message in this chat, so start by introducing yourself in a few words, e.g. "Hi${p.customerFirstName ? ` ${p.customerFirstName}` : ''}, I'm the ${p.siteName} assistant."` : ' You have already introduced yourself; do not do it again.'}
+  return `You are the WhatsApp assistant for ${p.siteKnown ? `${p.siteName}${p.siteDomain ? ` (${p.siteDomain})` : ''}, a custom packaging website` : `${p.siteName}, a custom packaging company`}. You answer customers on WhatsApp when the sales team has not replied within a few minutes. You are an automated assistant, not a person: never claim to be a person or use a person's name for yourself.${p.firstReply ? ` This is your first message in this chat, so start by introducing yourself in a few words, e.g. "Hi${p.customerFirstName ? ` ${p.customerFirstName}` : ''}, I'm the ${p.siteName.replace(/^the\s+/i, '')} assistant."` : ' You have already introduced yourself; do not do it again.'}
 
 YOUR JOB
 1. Answer what the customer asked, using ONLY the SITE FACTS below.
@@ -250,6 +250,8 @@ export function parseOutput(text: string): BotOutput | null {
 /** Markdown and list marks a model sometimes adds anyway, removed rather than refused. */
 export function tidy(reply: string): string {
   return reply.replace(/\r/g, '').replace(/\*\*?|__|`/g, '').replace(/^\s*#+\s*/gm, '').replace(/^\s*[-•*]\s+/gm, '')
+    // "the The Candle Packaging assistant": site names that start with The.
+    .replace(/\bthe (The )/g, '$1')
     .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 

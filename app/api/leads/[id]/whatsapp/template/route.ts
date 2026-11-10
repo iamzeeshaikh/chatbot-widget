@@ -5,7 +5,7 @@ import { twilioConfig, twilioProblem, sendWhatsAppTemplate } from '@/lib/twilio'
 import { metaWaConfig, sendMetaTemplate } from '@/lib/metawa'
 import { CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { WA_TEMPLATES, templateByName, renderTemplate, templateStatuses, cleanVar } from '@/lib/watemplates'
-import { waLeadContext } from '@/lib/wacontext'
+import { waLeadContext, greetableFirstName } from '@/lib/wacontext'
 import { memberDisplayName } from '@/lib/membername'
 
 export const dynamic = 'force-dynamic'
@@ -20,7 +20,8 @@ export const maxDuration = 30
 async function varsFor(member: Member, id: string): Promise<{ vars: string[]; line: 'twilio' | 'meta' } | null> {
   const ctx = await waLeadContext(id)
   if (!ctx) return null
-  const agent = (await memberDisplayName(member.email)).split(/\s+/)[0] || 'the team'
+  // A shared login (packaging@, info@) has no person's name to sign with.
+  const agent = greetableFirstName((await memberDisplayName(member.email)).split(/\s+/)[0]) ?? 'the team'
   return {
     line: ctx.line,
     vars: [cleanVar(ctx.firstName ?? '', 'there'), cleanVar(agent, 'the team'), cleanVar(ctx.siteName, 'ZEE Pack')],
