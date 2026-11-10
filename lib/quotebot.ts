@@ -1311,6 +1311,24 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   if (!cfg) return { ok: false, state: 'failed', why: 'Google OAuth is not configured' }
   const latestMsg = sentRows[sentRows.length - 1]
   const thread = await threadContextFor(id, latestMsg.gmailId)
+  // The intake sync lags Gmail by several minutes, so a customer's answer or
+  // the agent's own Gmail reply may not be on the lead yet (owner, 2026-11-10:
+  // Jamie said "let's do it", Samir asked for the address from Gmail, and the
+  // bot still "floated this back" 16 minutes later). Any message in the thread
+  // that the lead does not know about, newer than our last word, stops it.
+  if (thread?.threadId) {
+    const known = new Set([
+      ...sentRows.map((e) => e.gmailId),
+      ...rows.filter((r) => r.role === CRM_EMAIL_IN_ROLE).map((r) => parseCrmEmailIn(r.message)?.gmailId),
+    ].filter(Boolean))
+    let msgs
+    try { msgs = await fetchThread(agent, cfg, thread.threadId) } catch (e) {
+      // Not knowing is not permission: try again next run.
+      return { ok: false, state: 'failed', why: `could not check Gmail for new mail (${e instanceof Error ? e.message : 'error'})` }
+    }
+    const unseen = msgs.find((m) => !known.has(m.gmailId) && Date.parse(m.at) > lastAt)
+    if (unseen) return { ok: true, state: 'not-due', n, why: 'new mail in the Gmail thread is not on the lead yet' }
+  }
   const subject = /^re:/i.test(latestMsg.subject) ? latestMsg.subject : `Re: ${latestMsg.subject}`
   if (!(await ledger(id, siteId, { step: 'quote_fu', n, state: 'claimed', at: now.toISOString(), to, agent }))) {
     return { ok: false, state: 'failed', why: 'ledger write failed' }
