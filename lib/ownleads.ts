@@ -26,7 +26,7 @@
 //     decided for this rule (OWN_LEADS_API below), so a route added tomorrow
 //     is closed to him until somebody decides what he may see in it.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPages, warnIfCapped } from './supabase'
 import { ASSIGNMENT_ROLE, deriveAssignments, getAssignment } from './assignment'
 import { workspaceSites } from './workspaces'
 import type { Member } from './auth'
@@ -57,10 +57,13 @@ export async function ownsSession(m: Member, sessionId: string): Promise<boolean
   return isOwnedBy(m, await getAssignment(sessionId))
 }
 
+const OWNED_TTL_MS = 15_000
+const ownedCache = new Map<string, { at: number; set: Set<string> }>()
+
 /**
  * Every lead / session currently assigned to this member.
  *
- * Two small queries instead of a fold over every assignment row in the
+ * Paged queries instead of a fold over every assignment row in the
  * workspace (~21k): first the sessions that were EVER assigned to them (an
  * ILIKE on their address, bounded by site scope), then the full assignment
  * history of just those sessions, folded newest-wins, so a lead that has since
@@ -69,24 +72,43 @@ export async function ownsSession(m: Member, sessionId: string): Promise<boolean
 export async function ownedSessions(m: Member): Promise<Set<string>> {
   const me = norm(m.email)
   if (!me) return new Set()
-  const sites = workspaceSites(m.workspace)
-  const { data: hits } = await supabase.from('chat_logs')
-    .select('session_id')
-    .eq('role', ASSIGNMENT_ROLE)
-    .in('site_id', m.assigned_sites.length > 0 ? m.assigned_sites : sites)
-    .ilike('message', me)
-    .limit(5000)
-  const candidates = [...new Set((hits ?? []).map((r) => String(r.session_id)))]
+  // A dashboard fires several of these at once (list + badge + record); a
+  // 15-second memo keeps that to one fold. Assignment changes take at most
+  // that long to show up for him — never longer to be ENFORCED on a record,
+  // which ownsSession() reads fresh.
+  const hit = ownedCache.get(me)
+  if (hit && Date.now() - hit.at < OWNED_TTL_MS) return hit.set
+  const sites = m.assigned_sites.length > 0 ? m.assigned_sites : workspaceSites(m.workspace)
+  // Paged, in a stable order: PostgREST answers at most 1000 rows whatever
+  // .limit() asks for, and this login already holds ~1000 assignments.
+  const hits = await fetchAllPages<{ session_id: string }>(
+    () => supabase.from('chat_logs')
+      .select('session_id')
+      .eq('role', ASSIGNMENT_ROLE)
+      .in('site_id', sites)
+      .ilike('message', me)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }),
+    50_000)
+  warnIfCapped('ownedSessions candidates', hits.length, 50_000)
+  const candidates = [...new Set(hits.map((r) => String(r.session_id)))]
+  const chunks: string[][] = []
+  for (let i = 0; i < candidates.length; i += 150) chunks.push(candidates.slice(i, i + 150))
   const out = new Set<string>()
-  for (let i = 0; i < candidates.length; i += 150) {
-    const chunk = candidates.slice(i, i + 150)
-    const { data } = await supabase.from('chat_logs')
-      .select('session_id, role, message, created_at')
-      .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
-      .order('created_at', { ascending: true }).limit(5000)
-    const folded = deriveAssignments((data ?? []) as { session_id: string; role: string; message: string }[])
-    for (const [sid, email] of Object.entries(folded)) if (norm(email) === me) out.add(sid)
+  // Full history per chunk (paged, oldest first) so the fold sees the newest
+  // row — a truncated history would call a lead his after it was handed on.
+  for (let i = 0; i < chunks.length; i += 4) {
+    const folded = await Promise.all(chunks.slice(i, i + 4).map(async (chunk) => {
+      const rows = await fetchAllPages<{ session_id: string; role: string; message: string }>(
+        () => supabase.from('chat_logs')
+          .select('session_id, role, message, created_at')
+          .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
+          .order('created_at', { ascending: true }).order('id', { ascending: true }),
+        50_000)
+      return deriveAssignments(rows)
+    }))
+    for (const f of folded) for (const [sid, email] of Object.entries(f)) if (norm(email) === me) out.add(sid)
   }
+  ownedCache.set(me, { at: Date.now(), set: out })
   return out
 }
 
