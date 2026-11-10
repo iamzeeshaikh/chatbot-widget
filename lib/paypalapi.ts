@@ -253,10 +253,24 @@ export function carrierFor(tracking: string): 'UPS' | 'DHL' | 'FEDEX' | 'USPS' |
 
 /** Add shipment tracking to a PayPal transaction — what lifts the new-account
  *  hold once the parcel is delivered. Returns PayPal's error text, or null. */
-export async function addTracking(transactionId: string, tracking: string, status: 'SHIPPED' | 'DELIVERED' = 'SHIPPED'): Promise<string | null> {
+export type Carrier = ReturnType<typeof carrierFor>
+
+export async function addTracking(transactionId: string, tracking: string, status: 'SHIPPED' | 'DELIVERED' = 'SHIPPED', carrier?: Carrier): Promise<string | null> {
   const r = await call<{ tracker_identifiers?: unknown[]; errors?: { message?: string }[] }>('POST', '/v1/shipping/trackers-batch', {
-    trackers: [{ transaction_id: transactionId, tracking_number: tracking.replace(/\s/g, ''), carrier: carrierFor(tracking), status }],
+    trackers: [{ transaction_id: transactionId, tracking_number: tracking.replace(/\s/g, ''), carrier: carrier ?? carrierFor(tracking), status }],
   })
   const err = r.json?.errors?.[0]?.message
   return err ? String(err) : null
+}
+
+/** Does PayPal already hold this tracker on this transaction? true / false, or
+ *  null when PayPal could not be asked (the caller then posts anyway — PayPal
+ *  itself refuses an exact duplicate). */
+export async function hasTracker(transactionId: string, tracking: string): Promise<boolean | null> {
+  try {
+    const id = `${transactionId}-${tracking.replace(/\s/g, '')}`
+    const r = await fetch(`${API}/v1/shipping/trackers/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${await token()}` } })
+    if (r.status === 404) return false
+    return r.ok ? true : null
+  } catch { return null }
 }

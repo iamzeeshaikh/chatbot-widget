@@ -6,6 +6,7 @@ import { jobVisibleTo, ownedSessionsIfLimited } from '@/lib/ownleads'
 import { listJobs, writeJob, listMessages, workspaceMembers, notifyJob } from '@/lib/jobstore'
 import { cleanJobInput, statusesOf, JOB_STATUS_LABEL, type Job } from '@/lib/jobs'
 import { buildJobBrief } from '@/lib/jobbrief'
+import { syncJobShippingToSale } from '@/lib/saleshipping'
 import { formFromInvoice, newestInvoiceDoc, withoutContacts } from '@/lib/productionform'
 
 export const dynamic = 'force-dynamic'
@@ -24,6 +25,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params
   const c = await load(req, id)
   if ('error' in c) return c.error
+  // Admin dry run of the job → sale shipping push (lib/saleshipping.ts): says
+  // which sale it would touch and what PayPal already holds, writes nothing.
+  if (req.nextUrl.searchParams.get('saleSync') === 'dry') {
+    if (c.m.role !== 'admin') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    return NextResponse.json({ ok: true, job: c.job.number, saleSync: await syncJobShippingToSale(c.job, c.m.email, { dryRun: true }) })
+  }
   const needsDraft = c.job.track === 'production' && !c.job.production
   const [messages, members, brief, invoice] = await Promise.all([
     listMessages(c.m.workspace, id), workspaceMembers(c.m.workspace),
@@ -65,12 +72,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const err = await writeJob(c.m.workspace, next)
   if (err) return NextResponse.json({ error: 'That did not save.' }, { status: 500 })
 
+  // Tracking typed into a production job goes onto its direct sale and onto
+  // PayPal, exactly as the Costing page does it (lib/saleshipping.ts). It never
+  // fails the save; a job with no matching sale is logged and left alone.
+  const ship = next.production?.shipping
+  const saleSync = next.track === 'production' && (ship?.tracking || next.status === 'shipped')
+    ? await syncJobShippingToSale(next, c.m.email)
+    : undefined
+
   if (input.status && input.status !== c.job.status) {
     await notifyJob(c.m.workspace, next, c.m, `${next.number} is now ${JOB_STATUS_LABEL[next.status]}`, next.title)
   } else if (input.assignee && input.assignee !== c.job.assignee) {
     await notifyJob(c.m.workspace, next, c.m, `Job ${next.number} assigned to you`, next.title)
   }
-  return NextResponse.json({ ok: true, job: isJobsOnly(c.m.email) ? { ...next, production: withoutContacts(next.production) } : next })
+  return NextResponse.json({ ok: true, job: isJobsOnly(c.m.email) ? { ...next, production: withoutContacts(next.production) } : next, ...(saleSync ? { saleSync: { action: saleSync.action, paypalNote: saleSync.paypalNote ?? '' } } : {}) })
 }
 
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
