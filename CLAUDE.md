@@ -750,3 +750,29 @@ by the message id. Meta error codes (131047 = 24h window) are mapped beside Twil
 63xxx in `waErrorHint`. **An unpublished Meta app receives no production webhooks** —
 publishing is a dashboard click the owner makes. `scratch/metawa-sig.test.mjs` checks
 the signature verifier against the real module.
+
+### WhatsApp templates + the WhatsApp assistant (packaging only, 2026-11-10)
+**Templates** (`lib/watemplates.ts`, `/api/leads/[id]/whatsapp/template`, feature
+`watemplates`): three texts — `zeeops_followup` (MARKETING), `zeeops_quote_ready`,
+`zeeops_order_update` (UTILITY) — exist on BOTH lines: Twilio Content SIDs for the US
+line, the same names on the UK WABA via Meta Graph. Only templates whose approval the
+provider reports live (cached 10 min) are offered; the composer shows "Send template"
+whenever the 24-hour window is shut. Sent rows are ordinary `crm_wa_out` rows with
+`template: <name>` — an agent sent them, so they count as human contact.
+
+**Assistant** (`lib/wabot.ts` pure, `lib/wabotsweep.ts` I/O, `/api/crm/wa-bot` cron every
+minute, `?dryRun=1&sample=<days>&replay=1` to judge it on real threads): answers a
+packaging customer on WhatsApp when no person has within `delayMin` (3) minutes, on
+Claude only (`WA_BOT_MODEL`, default `claude-sonnet-5-5`; `llmComplete({ noFallback })` —
+never Groq). Silent for 24 h after any agent WhatsApp/email/call, past stage
+new/contacted, on not-a-lead, on pitches and "ok/thanks", over `maxPerDay` (6), and on
+anything older than 90 min (so a first run never answers a backlog). Per-lead switch:
+`crm_wa_bot_off` (`/api/leads/[id]/wa-bot`, the "Bot on/off" chip); workspace switch:
+`crm_wa_bot_cfg` on reserved site `zeeops-wabot` (POST `/api/crm/wa-bot`), env
+`WA_BOT=off` is the hard kill. Ledger `crm_wa_bot` per answered inbound sid is written
+BEFORE the send (at-most-once). Figures (MOQ, "Starting from", turnaround) must appear
+in the site's own text (`lib/sitefacts.ts`: live llms.txt + homepage FAQ JSON-LD +
+`sites.system_prompt`) or `replyProblem` refuses the reply. **Its rows carry
+`bot: true` and every "has a person answered?" check must skip them** —
+`isBotWaRow()` (quotebot, inbound pitch re-read, wawaiting, leadrecord, opportunities,
+firstresponse already do). Add the same guard to any new reader of `crm_wa_out`.

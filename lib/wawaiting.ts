@@ -11,6 +11,7 @@
 
 import { supabase } from './supabase'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from './crm'
+import { isBotWaRow } from './whatsapp'
 
 /** Session ids, within `siteIds`, whose newest WhatsApp message is the
  *  customer's. `only` narrows the answer to sessions the caller cares about. */
@@ -19,7 +20,7 @@ export async function waWaitingSessions(siteIds: string[], only?: Set<string>): 
   if (siteIds.length === 0) return waiting
   const { data } = await supabase
     .from('chat_logs')
-    .select('session_id, role, created_at')
+    .select('session_id, role, message, created_at')
     .in('site_id', siteIds)
     .in('role', [CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE])
     // Ascending, so the LAST row seen for a session is the newest one — the
@@ -29,7 +30,8 @@ export async function waWaitingSessions(siteIds: string[], only?: Set<string>): 
   for (const r of data ?? []) {
     if (only && !only.has(r.session_id)) continue
     if (r.role === CRM_WA_IN_ROLE) waiting.add(r.session_id)
-    else waiting.delete(r.session_id)
+    // The WhatsApp assistant's reply leaves the customer waiting on a PERSON.
+    else if (!isBotWaRow(r.message)) waiting.delete(r.session_id)
   }
   return waiting
 }

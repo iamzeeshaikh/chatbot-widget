@@ -64,7 +64,7 @@ export async function firstResponses(
           by = e.bot ? 'bot' : e.sentBy.toLowerCase()
         } else if (r.role === CRM_WA_OUT_ROLE) {
           via = 'whatsapp'
-          try { by = String(JSON.parse(r.message)?.by ?? JSON.parse(r.message)?.sentBy ?? '').toLowerCase() } catch { by = '' }
+          try { const o = JSON.parse(r.message); by = o?.bot === true ? 'bot' : String(o?.by ?? o?.sentBy ?? '').toLowerCase() } catch { by = '' }
         } else if (r.role === CRM_CALL_ROLE) {
           via = 'call'
           try { by = String(JSON.parse(r.message)?.by ?? '').toLowerCase() } catch { by = '' }

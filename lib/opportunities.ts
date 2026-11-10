@@ -402,6 +402,9 @@ export function foldLeads(leads: OppLead[], rows: OppRow[], ctx: OppContext): Le
       }
       case 'crm_wa_out': {
         if (!o) break
+        // The WhatsApp assistant (lib/wabot.ts) answering is not a person
+        // answering: the customer is still waiting on us for the price.
+        if (o.bot === true) break
         ours(s, at, agentKey(str(o.sentBy)))
         quoteFrom(s, str(o.body), at)
         human(s, at)

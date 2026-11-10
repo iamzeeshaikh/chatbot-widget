@@ -26,6 +26,7 @@ import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_NOT_A_LEAD_ROLE } from './crm'
 import { CRM_EMAIL_ROLE } from './crmemail'
 import { BOT_ACTOR } from './quotebotcore'
 import { SPORTS_SITES, PACKAGING_SITES, type Workspace } from './workspaces'
+import { isBotWaRow } from './whatsapp'
 
 // ── Which SITE did they contact? ────────────────────────────────────────────
 // A phone call carries no site. Five websites print the same number, so the
@@ -192,7 +193,7 @@ export async function markPitchIfUnanswered(sessionId: string, siteId: string): 
     .in('role', [CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_EMAIL_ROLE, CRM_NOT_A_LEAD_ROLE])
     .order('created_at', { ascending: true }).limit(200)
   const rows = data ?? []
-  if (rows.some((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_EMAIL_ROLE || r.role === CRM_NOT_A_LEAD_ROLE)) return false
+  if (rows.some((r) => (r.role === CRM_WA_OUT_ROLE && !isBotWaRow(r.message)) || r.role === CRM_EMAIL_ROLE || r.role === CRM_NOT_A_LEAD_ROLE)) return false
   const text = rows.filter((r) => r.role === CRM_WA_IN_ROLE).map((r) => {
     try { return String(JSON.parse(r.message ?? '{}').body ?? '') } catch { return '' }
   }).join('\n')

@@ -186,6 +186,47 @@ export async function sendWhatsApp(
 }
 
 /**
+ * Send an APPROVED template (Twilio Content API) — the one kind of message
+ * WhatsApp delivers outside the 24-hour window. `variables` fill {{1}}, {{2}}…
+ * Same accepted-not-delivered caveat as sendWhatsApp: the status callback says
+ * what really happened.
+ */
+export async function sendWhatsAppTemplate(
+  cfg: TwilioConfig, to: string, contentSid: string, variables: Record<string, string>, statusCallback?: string,
+): Promise<SentWhatsApp> {
+  const form = new URLSearchParams({
+    From: cfg.whatsappFrom,
+    To: `whatsapp:${to.replace(/^whatsapp:/, '')}`,
+    ContentSid: contentSid,
+    ContentVariables: JSON.stringify(variables),
+  })
+  if (statusCallback) form.set('StatusCallback', statusCallback)
+  const res = await fetch(`${API}/Accounts/${cfg.sid}/Messages.json`, {
+    method: 'POST',
+    headers: { Authorization: authHeader(cfg), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form,
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(String(j?.message ?? `Twilio refused the template (${res.status})`))
+  return { sid: String(j.sid ?? ''), status: String(j.status ?? '') }
+}
+
+/** WhatsApp approval state of Content templates, by Content SID
+ *  ('approved' | 'pending' | 'received' | 'rejected' | …). */
+export async function twilioTemplateStatuses(cfg: TwilioConfig): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const res = await fetch('https://content.twilio.com/v1/ContentAndApprovals?PageSize=200', {
+    headers: { Authorization: authHeader(cfg) },
+  })
+  if (!res.ok) throw new Error(`Twilio refused the template list (${res.status})`)
+  const j = await res.json()
+  for (const c of (j.contents ?? []) as { sid?: string; approval_requests?: { status?: string } }[]) {
+    if (c.sid) out.set(c.sid, String(c.approval_requests?.status ?? ''))
+  }
+  return out
+}
+
+/**
  * Numbers this account is allowed to call.
  *
  * A TRIAL account may only dial numbers verified in the console, and the

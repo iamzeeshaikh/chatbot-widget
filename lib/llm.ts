@@ -79,6 +79,14 @@ interface CompleteOpts {
    * a limit rather than a request.
    */
   anthropicMaxTokens?: number
+  /** Claude 5 effort (output_config.effort). Omitted = the model's default. */
+  effort?: 'low' | 'medium' | 'high'
+  /**
+   * Claude or nothing. The WhatsApp assistant writes straight to customers
+   * under rules a different model was never tested against, so for it a
+   * failure must mean silence (an agent answers), never a Groq answer.
+   */
+  noFallback?: boolean
 }
 
 async function callAnthropic(o: CompleteOpts): Promise<{ text: string; model: string; stopReason: string }> {
@@ -97,6 +105,7 @@ async function callAnthropic(o: CompleteOpts): Promise<{ text: string; model: st
       // model", 400) — which silently sent every CLAUDE_WORK_MODEL call to the
       // Haiku/Groq fallback until 2026-10-15. Only older models get one.
       ...(/-5(-|$)/.test(model) ? {} : { temperature: o.temperature ?? 0.7 }),
+      ...(o.effort ? { output_config: { effort: o.effort } } : {}),
       system: o.system,
       messages: o.messages,
     }),
@@ -138,6 +147,9 @@ async function callGroq(o: CompleteOpts): Promise<{ text: string; model: string;
  * caller that trims a cut-off sentence needs to know which happened.
  */
 export async function llmComplete(o: CompleteOpts): Promise<LlmResult & { stopReason: string }> {
+  if (o.noFallback && !anthropicReady()) {
+    return { text: '', provider: 'none', model: o.model || CLAUDE_CHAT_MODEL, error: true, stopReason: '' }
+  }
   if (anthropicReady()) {
     try {
       const r = await callAnthropic(o)
@@ -147,7 +159,7 @@ export async function llmComplete(o: CompleteOpts): Promise<LlmResult & { stopRe
       // LOUD on purpose. The silent version of this line is what let a dead
       // model run for days.
       console.error(`[llm] Claude FAILED (${o.model || CLAUDE_CHAT_MODEL}): ${msg}`)
-      if (!process.env.GROQ_API_KEY) {
+      if (o.noFallback || !process.env.GROQ_API_KEY) {
         return { text: '', provider: 'none', model: o.model || CLAUDE_CHAT_MODEL, error: true, stopReason: '' }
       }
       try {

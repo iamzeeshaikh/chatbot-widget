@@ -72,8 +72,16 @@ export const CRM_NOT_A_LEAD_ROLE = 'crm_not_a_lead'
 // lead's own session, newest wins. Read by the Lost page (/lost).
 export const CRM_LOST_ROLE = 'crm_lost'
 
+// The WhatsApp assistant (lib/wabot.ts, lib/wabotsweep.ts): its per-lead
+// ledger (one row per answered inbound, written BEFORE the send), the per-lead
+// "Bot off" switch, and the workspace switch on the reserved zeeops-wabot site.
+export const CRM_WA_BOT_ROLE = 'crm_wa_bot'
+export const CRM_WA_BOT_OFF_ROLE = 'crm_wa_bot_off'
+export const CRM_WA_BOT_CFG_ROLE = 'crm_wa_bot_cfg'
+
 export const CRM_ROLES = [
   'crm_intake_pull',
+  CRM_WA_BOT_ROLE, CRM_WA_BOT_OFF_ROLE, CRM_WA_BOT_CFG_ROLE,
   CRM_STAGE_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE, CRM_VALUE_ROLE, CRM_TASK_ROLE,
   CRM_PREFS_ROLE, CRM_REMINDER_ROLE, CRM_EMAIL_ROLE,
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, CRM_EMAIL_SWEEP_ROLE,

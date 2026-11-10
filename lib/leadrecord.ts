@@ -42,7 +42,7 @@ import { foldDrafts, type BotDraft } from './botdraft'
 import { CRM_NOT_A_LEAD_ROLE } from './crm'
 import { phoneKey } from './identity'
 import { parseCall, callDurationLabel, type CallEntry } from './call'
-import { parseWaMessage, waDeliveryLabel, waErrorHint, type WaMessage } from './whatsapp'
+import { parseWaMessage, waDeliveryLabel, waErrorHint, isBotWaRow, type WaMessage } from './whatsapp'
 import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry, splitQuoted } from './emailreply'
@@ -850,7 +850,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     const label = waDeliveryLabel(w)
     push({
       id: `wa-${w.sid || at}`, at, kind: outbound ? 'wa_out' : 'wa_in', group: 'messages',
-      actor: outbound ? AGENT_LABEL(w.sentBy ?? '') : 'Customer',
+      actor: outbound ? (w.bot ? 'WhatsApp assistant' : AGENT_LABEL(w.sentBy ?? '')) : 'Customer',
       // The number is NOT in the title: a masked record would otherwise leak it
       // in the one line that is always visible.
       title: label.title,
@@ -959,7 +959,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
   let lastWaInbound = false
   for (const r of logs) {
     if (r.role === CRM_WA_IN_ROLE) lastWaInbound = true
-    else if (r.role === CRM_WA_OUT_ROLE) lastWaInbound = false
+    else if (r.role === CRM_WA_OUT_ROLE && !isBotWaRow(r.message)) lastWaInbound = false
   }
 
   // Newest row wins, so un-marking is another row rather than a delete.

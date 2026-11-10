@@ -30,6 +30,12 @@ export interface WaMessage {
   status?: string
   /** Twilio's numeric reason for a failure, e.g. 63016. */
   errorCode?: number
+  /** Outbound only: written by the WhatsApp assistant (lib/wabot.ts), not a
+   *  person. Every "has an agent answered?" check must skip these rows. */
+  bot?: boolean
+  /** Outbound only: an approved template (lib/watemplates.ts) by its name,
+   *  sent because the 24-hour window was closed. */
+  template?: string
 }
 
 /** What a person should read on the timeline. The distinction that matters is
@@ -79,8 +85,20 @@ export function parseWaMessage(message: string | null | undefined): WaMessage | 
       direction: o.direction === 'outbound' ? 'outbound' : 'inbound',
       status: typeof o.status === 'string' ? o.status : undefined,
       errorCode: typeof o.errorCode === 'number' ? o.errorCode : undefined,
+      // Carried through parse on purpose: the status callbacks re-write the
+      // row as `{ ...parseWaMessage(original), status }`, so a field dropped
+      // here would vanish from the newest copy of the message.
+      bot: o.bot === true ? true : undefined,
+      template: typeof o.template === 'string' && o.template ? o.template : undefined,
     }
   } catch {
     return null
   }
+}
+
+/** A crm_wa_out row the WhatsApp assistant wrote — not a person answering.
+ *  Cheap on purpose (no full parse): it runs over every row of every lead in
+ *  the follow-up and stand-down checks. */
+export function isBotWaRow(message: string | null | undefined): boolean {
+  return !!message && message.includes('"bot":true') && parseWaMessage(message)?.bot === true
 }

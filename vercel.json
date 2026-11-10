@@ -43,6 +43,10 @@
     {
       "path": "/api/crm/sales-sheet",
       "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/crm/wa-bot",
+      "schedule": "* * * * *"
     }
   ]
 }

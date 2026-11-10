@@ -31,6 +31,7 @@
 // is a ledger row with its reason, so "why didn't the bot answer this one?"
 // always has an answer.
 
+import { isBotWaRow } from './whatsapp'
 import { supabase, fetchAllPages, warnIfCapped } from './supabase'
 import { isUkSite } from './metawa'
 import { recentIntakeLags } from './intakelag'
@@ -418,7 +419,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       if (!dryRun) await ledger(id, lead.site_id, { step: 'first', state: 'skipped', at: now.toISOString(), why, ...extra })
     }
 
-    const human = rows.find((r) => r.role === CRM_EMAIL_ROLE || r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE)
+    const human = rows.find((r) => r.role === CRM_EMAIL_ROLE || (r.role === CRM_WA_OUT_ROLE && !isBotWaRow(r.message)) || r.role === CRM_CALL_ROLE)
     if (human) { await skip(`an agent already reached out (${human.role})`); continue }
     if (currentStage(rows) !== 'new') { await skip(`stage is already ${currentStage(rows)}`); continue }
 
@@ -430,7 +431,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     // reached the record the list shows.
     const chat = kind === 'chat' ? await chatSessionFor(lead) : null
     if (chat) {
-      const cHuman = chat.rows.find((r) => r.role === CRM_EMAIL_ROLE || r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE)
+      const cHuman = chat.rows.find((r) => r.role === CRM_EMAIL_ROLE || (r.role === CRM_WA_OUT_ROLE && !isBotWaRow(r.message)) || r.role === CRM_CALL_ROLE)
       if (cHuman) { await skip(`an agent already reached out on the chat (${cHuman.role})`); continue }
       const cStage = currentStage(chat.rows)
       if (cStage !== 'new') { await skip(`chat stage is already ${cStage}`); continue }
@@ -833,7 +834,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   })
   // Not a stop: the reply pass answers it (or hands it over) on this same run.
   if (pending) return { ok: true, state: 'not-due', why: 'the customer replied — waiting for the reply to be answered' }
-  const human = after.find((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
+  const human = after.find((r) => (r.role === CRM_WA_OUT_ROLE && !isBotWaRow(r.message)) || r.role === CRM_CALL_ROLE
     || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot))
   if (human) return { ok: true, state: 'stopped', why: `an agent reached the customer themselves (${human.role})` }
   // Moved on by a person (quote sent, won, lost, on hold...) — not ours to chase.
@@ -952,7 +953,7 @@ export async function answerReply(
   const firstAt = utcMs(first.at)
   const ours = (logRows ?? []).filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
   const person = (logRows ?? []).find((r) => utcMs(r.created_at) > firstAt - 1000 && (
-    r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
+    (r.role === CRM_WA_OUT_ROLE && !isBotWaRow(r.message)) || r.role === CRM_CALL_ROLE
     || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot)))
   if (person) return standDown(`an agent already reached the customer (${person.role})`)
   const botThread = ours.find((e) => e.bot && e.threadId)?.threadId
@@ -1277,7 +1278,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
     if (!opts.dryRun) await closeBotCallTasks(id, siteId)
     return { ok: true, state: 'stopped', why: 'the customer answered the quote — over to the agent' }
   }
-  const human = afterGrace.find((r) => r.role === CRM_WA_OUT_ROLE || r.role === CRM_CALL_ROLE
+  const human = afterGrace.find((r) => (r.role === CRM_WA_OUT_ROLE && !isBotWaRow(r.message)) || r.role === CRM_CALL_ROLE
     || (r.role === CRM_EMAIL_ROLE && !parseCrmEmail(r.message)?.bot))
   if (human) return { ok: true, state: 'stopped', why: `the agent is following up themselves (${human.role})` }
 

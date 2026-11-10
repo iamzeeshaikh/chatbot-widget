@@ -208,3 +208,41 @@ export async function downloadMetaMedia(cfg: MetaWaConfig, mediaId: string): Pro
     type: meta.mime_type ?? res.headers.get('content-type') ?? 'application/octet-stream',
   }
 }
+
+/**
+ * Send an APPROVED template on the UK line — the only message Meta delivers
+ * outside the 24-hour window. `params` fill the body's {{1}}, {{2}}… in order.
+ */
+export async function sendMetaTemplate(
+  cfg: MetaWaConfig, to: string, name: string, language: string, params: string[],
+): Promise<SentMeta> {
+  const recipient = to.replace(/^whatsapp:/, '').replace(/\D/g, '')
+  let out: { messages?: { id: string }[] }
+  try {
+    out = await graph(cfg, `/${cfg.phoneNumberId}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp', recipient_type: 'individual', to: recipient, type: 'template',
+        template: {
+          name, language: { code: language },
+          components: params.length ? [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) }] : [],
+        },
+      }),
+    })
+  } catch (e) {
+    if (e instanceof MetaError) throw new Error(metaErrorHint(e.code) || e.message)
+    throw e
+  }
+  const sid = out.messages?.[0]?.id
+  if (!sid) throw new Error('WhatsApp accepted the template but returned no id.')
+  return { sid, status: 'sent' }
+}
+
+/** Approval state of the UK account's templates, by name ('APPROVED' | 'PENDING' | 'REJECTED' …). */
+export async function metaTemplateStatuses(cfg: MetaWaConfig): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (!cfg.wabaId) return out
+  const j = await graph<{ data?: { name?: string; status?: string }[] }>(cfg, `/${cfg.wabaId}/message_templates?fields=name,status&limit=100`)
+  for (const t of j.data ?? []) if (t.name) out.set(t.name, String(t.status ?? ''))
+  return out
+}

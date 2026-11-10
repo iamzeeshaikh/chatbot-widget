@@ -170,13 +170,16 @@ export function workspaceSites(ws: Workspace): string[] {
 // 'trafficdetail' (2026-10-21) — clicking a site in the Overview's "Traffic by
 // site" modal breaks that site's visits down by country, source, page and
 // device. Packaging only, as asked.
-export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony' | 'sales' | 'quotebot' | 'jobs' | 'opportunities' | 'trafficdetail' | 'lost'
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony' | 'sales' | 'quotebot' | 'jobs' | 'opportunities' | 'trafficdetail' | 'lost' | 'wabot' | 'watemplates'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   // 'sales' (2026-09-16): each business keeps its own sales ledger — Model Town
   // direct and the old lead-partner orders here, jersey sales on sports — with
   // a master view across both for the owner accounts (lib/salescore.ts).
-  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony', 'sales', 'quotebot', 'jobs', 'opportunities', 'trafficdetail', 'lost']),
+  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony', 'sales', 'quotebot', 'jobs', 'opportunities', 'trafficdetail', 'lost',
+    // WhatsApp assistant + template messages (2026-11-10): packaging only —
+    // sports must not change at all (owner).
+    'wabot', 'watemplates']),
   // Sports carries the CRM as of 2026-08-29, at the user's request. The reason
   // it did not before was that it had nothing to run a CRM on: chat had been off
   // on all five sites since 2026-08-05 and the workspace had produced one lead

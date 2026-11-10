@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert, Mic, Square, Trash2, Phone, Loader2 } from 'lucide-react'
+import { MessageCircle, Paperclip, Send, Check, CheckCheck, TriangleAlert, Mic, Square, Trash2, Phone, Loader2, Bot, FileText } from 'lucide-react'
 import type { TimelineEvent } from '@/lib/leadrecord'
 import { formatDateTime } from '@/lib/datetime'
 
@@ -226,6 +226,61 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
 
   const { open, closesAt } = windowOpen(events)
 
+  // ── The WhatsApp assistant's switch for this lead (packaging only) ────────
+  // The route answers 403 on a workspace without the assistant, and then the
+  // chip simply never appears.
+  const [bot, setBot] = useState<{ off: boolean; workspaceOn: boolean; delayMin: number } | null>(null)
+  const [botBusy, setBotBusy] = useState(false)
+  useEffect(() => {
+    let dead = false
+    fetch(`/api/leads/${encodeURIComponent(leadId)}/wa-bot`).then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!dead && j && typeof j.off === 'boolean') setBot(j) }).catch(() => {})
+    return () => { dead = true }
+  }, [leadId])
+  async function toggleBot() {
+    if (!bot || botBusy) return
+    setBotBusy(true)
+    try {
+      const r = await fetch(`/api/leads/${encodeURIComponent(leadId)}/wa-bot`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ off: !bot.off }),
+      })
+      if (r.ok) setBot({ ...bot, off: !bot.off })
+    } finally { setBotBusy(false) }
+  }
+
+  // ── Approved templates, for when the 24-hour window is shut ──────────────
+  type Tpl = { name: string; label: string; status: string; preview: string }
+  const [tplOpen, setTplOpen] = useState(false)
+  const [tpls, setTpls] = useState<{ line: string; templates: Tpl[] } | null>(null)
+  const [tplHidden, setTplHidden] = useState(false)
+  const [tplPick, setTplPick] = useState('')
+  const [tplBusy, setTplBusy] = useState(false)
+  const [tplError, setTplError] = useState('')
+  async function openTemplates() {
+    setTplOpen(true); setTplError('')
+    if (tpls) return
+    const r = await fetch(`/api/leads/${encodeURIComponent(leadId)}/whatsapp/template`).catch(() => null)
+    if (!r || r.status === 403) { setTplHidden(true); setTplOpen(false); return }
+    const j = await r.json().catch(() => null)
+    if (!r.ok || !j) { setTplError(j?.error || 'Templates could not be loaded.'); return }
+    setTpls(j)
+    const first = (j.templates as Tpl[]).find((t) => t.status === 'approved')
+    if (first) setTplPick(first.name)
+  }
+  async function sendTemplate() {
+    if (!tplPick || tplBusy) return
+    setTplBusy(true); setTplError('')
+    try {
+      const r = await fetch(`/api/leads/${encodeURIComponent(leadId)}/whatsapp/template`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: tplPick }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { setTplError(j.error || 'WhatsApp refused the template.'); return }
+      setTplOpen(false)
+      onRefresh()
+    } finally { setTplBusy(false) }
+  }
+
   async function send() {
     if (sending || (!text.trim() && !file)) return
     setSending(true); setError('')
@@ -271,13 +326,24 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
             <span className="sr-only">Call</span>
           </button>
         )}
+        {bot && (
+          <button onClick={toggleBot} disabled={botBusy}
+            title={!bot.workspaceOn ? 'The WhatsApp assistant is switched off for the whole workspace'
+              : bot.off ? 'The assistant will not answer this customer. Click to let it answer again.'
+              : `If nobody answers within ${bot.delayMin} minutes, the assistant replies (silent for 24 hours after any agent contact). Click to turn it off for this lead.`}
+            className={`${onCall && canMessage ? '' : 'ml-auto '}shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border transition-colors ${
+              bot.off || !bot.workspaceOn ? 'text-gray-600 bg-gray-100 border-gray-300' : 'text-sky-800 bg-sky-100 border-sky-200'}`}>
+            <Bot size={11} strokeWidth={2.25} aria-hidden />
+            {!bot.workspaceOn ? 'Assistant off (all)' : bot.off ? 'Bot off' : 'Bot on'}
+          </button>
+        )}
         {/* The 24-hour rule, stated before it bites rather than after. */}
         {closesAt !== null && (
           <span
             title={open
               ? 'WhatsApp allows a free-form reply for 24 hours after the customer’s last message'
               : 'Outside the 24-hour window — WhatsApp will refuse a free-form message until they write again'}
-            className={`${onCall && canMessage ? '' : 'ml-auto '}shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
+            className={`${(onCall && canMessage) || bot ? '' : 'ml-auto '}shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
               open ? 'text-green-800 bg-green-100 border-green-200' : 'text-amber-800 bg-amber-50 border-amber-300'}`}
           >
             {open ? `Window open · ${hoursLeft(closesAt)}` : 'Window closed'}
@@ -339,6 +405,11 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
                     )
                   })}
 
+                  {mine && (e.wa?.bot || e.wa?.template) && (
+                    <p className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-green-50/90">
+                      {e.wa?.bot ? <><Bot size={10} aria-hidden /> Assistant</> : <><FileText size={10} aria-hidden /> Template</>}
+                    </p>
+                  )}
                   {e.body && (
                     <p className="text-[13px] leading-snug whitespace-pre-wrap break-words">{e.body}</p>
                   )}
@@ -447,6 +518,53 @@ export default function WhatsAppThread({ events, leadId, state, stateReason, can
             More than 24 hours have passed since their last message, so WhatsApp will refuse this
             until they write again.
           </p>
+        )}
+        {/* Outside the window (or before they have ever written) only an
+            approved template is delivered — offered here, blanks pre-filled. */}
+        {!open && canMessage && !tplHidden && (
+          tplOpen ? (
+            <div className="mt-2 rounded-xl border border-gray-300 bg-gray-50 p-2.5">
+              <div className="flex items-center gap-2">
+                <FileText size={13} className="text-green-700 shrink-0" aria-hidden />
+                <span className="text-[12px] font-semibold text-gray-800">Send template{tpls ? ` · ${tpls.line} line` : ''}</span>
+                <button onClick={() => setTplOpen(false)} className="ml-auto rounded px-1 text-gray-500 hover:bg-gray-200" aria-label="Close">&times;</button>
+              </div>
+              {!tpls && !tplError && <p className="mt-1.5 text-[11px] text-gray-500">Loading templates…</p>}
+              {tpls && (
+                <>
+                  <div className="mt-1.5 space-y-1">
+                    {tpls.templates.map((t) => (
+                      <label key={t.name} className={`flex items-center gap-2 text-[12px] ${t.status === 'approved' ? 'text-gray-800 cursor-pointer' : 'text-gray-400'}`}>
+                        <input type="radio" name="wa-tpl" disabled={t.status !== 'approved'} checked={tplPick === t.name} onChange={() => setTplPick(t.name)} />
+                        {t.label}
+                        {t.status !== 'approved' && <span className="text-[10px] text-gray-500">({t.status === 'pending' ? 'waiting for WhatsApp approval' : t.status})</span>}
+                      </label>
+                    ))}
+                  </div>
+                  {tplPick && (
+                    <p className="mt-2 rounded-lg bg-green-600 px-3 py-2 text-[12px] leading-snug text-white whitespace-pre-wrap">
+                      {tpls.templates.find((t) => t.name === tplPick)?.preview}
+                    </p>
+                  )}
+                  {!tpls.templates.some((t) => t.status === 'approved') && (
+                    <p className="mt-1.5 text-[11px] text-gray-500">No template is approved on this line yet.</p>
+                  )}
+                  <div className="mt-2 flex justify-end">
+                    <button onClick={sendTemplate} disabled={!tplPick || tplBusy}
+                      className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-green-700 disabled:opacity-40">
+                      {tplBusy ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Send size={13} aria-hidden />} Send template
+                    </button>
+                  </div>
+                </>
+              )}
+              {tplError && <p role="alert" className="mt-1.5 text-[11px] text-red-700">{tplError}</p>}
+            </div>
+          ) : (
+            <button onClick={openTemplates}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-green-300 bg-white px-2.5 py-1 text-[12px] font-semibold text-green-700 hover:bg-green-50">
+              <FileText size={13} aria-hidden /> Send template
+            </button>
+          )
         )}
       </div>
     </section>
