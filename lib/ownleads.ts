@@ -27,7 +27,7 @@
 //     is closed to him until somebody decides what he may see in it.
 
 import { supabase } from './supabase'
-import { ASSIGNMENT_ROLE, deriveAssignments, getAssignment } from './assignment'
+import { ASSIGNMENT_ROLE, getAssignment } from './assignment'
 import { workspaceSites } from './workspaces'
 import type { Member } from './auth'
 
@@ -57,8 +57,15 @@ export async function ownsSession(m: Member, sessionId: string): Promise<boolean
   return isOwnedBy(m, await getAssignment(sessionId))
 }
 
-const OWNED_TTL_MS = 30_000
-const ownedCache = new Map<string, { at: number; set: Set<string> }>()
+const OWNED_TTL_MS = 20_000
+/** Re-read this much before the watermark on every refresh, so a row whose
+ *  created_at lands a little behind one already seen is not missed. */
+const OVERLAP_MS = 10 * 60_000
+
+/** Per member, per server instance: the newest assignee of every session that
+ *  was ever assigned to them, plus the newest assignment row folded in. */
+interface OwnedState { owner: Map<string, string>; watermark: string; at: number; sites: string }
+const ownedState = new Map<string, OwnedState>()
 const ownedInFlight = new Map<string, Promise<Set<string>>>()
 
 /** Every page of a query, in its stable order — and a THROW, not a partial
@@ -78,34 +85,54 @@ async function allPages<T>(make: () => { range: (a: number, b: number) => Promis
 /**
  * Every lead / session currently assigned to this member.
  *
- * Instead of folding every assignment row in the workspace (~27k): first the
- * sessions that were EVER assigned to them (an ILIKE on their address, bounded
- * by site scope), then the full assignment history of just those sessions via
- * the session index, folded newest-wins, so a lead that has since been handed
- * to somebody else drops out.
+ * First call on an instance: the sessions EVER assigned to them (an ILIKE on
+ * their address, bounded by site scope), then the full assignment history of
+ * just those sessions via the session index, folded newest-wins — so a lead
+ * that has since been handed to somebody else drops out. That costs a few
+ * seconds for a login with thousands of past assignments.
  *
- * Memoised 30s per member with in-flight sharing — a dashboard fires several
- * of these at once. Assignment changes therefore take up to 30s to show in his
- * LISTS; a record is still decided fresh by ownsSession(). On any database
- * error the answer is the empty set: he sees nothing rather than too much.
+ * After that it is INCREMENTAL: every refresh reads only assignment rows newer
+ * than the watermark (the created_at index) and applies them — a row naming
+ * him adds the session, any other row on one of his sessions moves it on.
+ * Every assignment is written by setAssignment() at server time, so nothing
+ * lands behind the watermark by more than the overlap re-read.
+ *
+ * Shared in flight and memoised 20s. Assignment changes therefore take up to
+ * that long to show in his LISTS; a record is still decided fresh by
+ * ownsSession(). On any database error the answer is the empty set: he sees
+ * nothing rather than too much.
  */
 export async function ownedSessions(m: Member): Promise<Set<string>> {
   const me = norm(m.email)
   if (!me) return new Set()
-  const hit = ownedCache.get(me)
-  if (hit && Date.now() - hit.at < OWNED_TTL_MS) return hit.set
+  const sites = m.assigned_sites.length > 0 ? m.assigned_sites : workspaceSites(m.workspace)
+  const prev = ownedState.get(me)
+  const fresh = prev && prev.sites === sites.join(',') && Date.now() - prev.at < OWNED_TTL_MS
+  if (fresh) return mineOf(prev, me)
   const running = ownedInFlight.get(me)
   if (running) return running
-  const job = foldOwned(m, me)
-    .then((set) => { ownedCache.set(me, { at: Date.now(), set }); return set })
-    .catch((e) => { console.error('[ownedSessions] failed — showing nothing:', e instanceof Error ? e.message : e); return new Set<string>() })
+  const job = (prev && prev.sites === sites.join(',') ? refreshOwned(prev, sites, me) : foldOwned(sites, me))
+    .then((state) => { ownedState.set(me, state); return mineOf(state, me) })
+    .catch((e) => {
+      ownedState.delete(me)
+      console.error('[ownedSessions] failed — showing nothing:', e instanceof Error ? e.message : e)
+      return new Set<string>()
+    })
     .finally(() => ownedInFlight.delete(me))
   ownedInFlight.set(me, job)
   return job
 }
 
-async function foldOwned(m: Member, me: string): Promise<Set<string>> {
-  const sites = m.assigned_sites.length > 0 ? m.assigned_sites : workspaceSites(m.workspace)
+function mineOf(state: OwnedState, me: string): Set<string> {
+  const out = new Set<string>()
+  for (const [sid, owner] of state.owner) if (owner === me) out.add(sid)
+  return out
+}
+
+type AssignRow = { session_id: string; message: string; created_at: string }
+
+async function foldOwned(sites: string[], me: string): Promise<OwnedState> {
+  const startedAt = new Date().toISOString()
   const hits = await allPages<{ session_id: string }>(() => supabase.from('chat_logs')
     .select('session_id')
     .eq('role', ASSIGNMENT_ROLE)
@@ -115,17 +142,37 @@ async function foldOwned(m: Member, me: string): Promise<Set<string>> {
   const candidates = [...new Set(hits.map((r) => String(r.session_id)))]
   const chunks: string[][] = []
   for (let i = 0; i < candidates.length; i += 250) chunks.push(candidates.slice(i, i + 250))
-  const out = new Set<string>()
+  const owner = new Map<string, string>()
   for (let i = 0; i < chunks.length; i += 6) {
-    const folded = await Promise.all(chunks.slice(i, i + 6).map(async (chunk) => deriveAssignments(
-      await allPages<{ session_id: string; role: string; message: string }>(() => supabase.from('chat_logs')
-        .select('session_id, role, message')
-        .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
-        .order('created_at', { ascending: true }).order('id', { ascending: true })),
-    )))
-    for (const f of folded) for (const [sid, email] of Object.entries(f)) if (norm(email) === me) out.add(sid)
+    const pages = await Promise.all(chunks.slice(i, i + 6).map((chunk) => allPages<AssignRow>(() => supabase.from('chat_logs')
+      .select('session_id, message, created_at')
+      .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }))))
+    for (const rows of pages) for (const r of rows) owner.set(String(r.session_id), norm(r.message))
   }
-  return out
+  // The watermark is when this fold STARTED: anything written while it ran is
+  // re-read by the next refresh rather than assumed seen.
+  return { owner, watermark: startedAt, at: Date.now(), sites: sites.join(',') }
+}
+
+async function refreshOwned(prev: OwnedState, sites: string[], me: string): Promise<OwnedState> {
+  const startedAt = new Date().toISOString()
+  const since = new Date(Date.parse(prev.watermark) - OVERLAP_MS).toISOString()
+  const rows = await allPages<AssignRow>(() => supabase.from('chat_logs')
+    .select('session_id, message, created_at')
+    .eq('role', ASSIGNMENT_ROLE)
+    .in('site_id', sites)
+    .gte('created_at', since)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }))
+  const owner = new Map(prev.owner)
+  // Ascending, so the newest row per session is applied last. Re-applying the
+  // overlap is harmless: the same rows in the same order give the same answer.
+  for (const r of rows) {
+    const sid = String(r.session_id)
+    const who = norm(r.message)
+    if (who === me || owner.has(sid)) owner.set(sid, who)
+  }
+  return { owner, watermark: startedAt, at: Date.now(), sites: prev.sites }
 }
 
 /** The 403 a flagged member gets from a screen that is about everybody's
