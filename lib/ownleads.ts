@@ -26,7 +26,7 @@
 //     decided for this rule (OWN_LEADS_API below), so a route added tomorrow
 //     is closed to him until somebody decides what he may see in it.
 
-import { supabase, fetchAllPages, warnIfCapped } from './supabase'
+import { supabase } from './supabase'
 import { ASSIGNMENT_ROLE, deriveAssignments, getAssignment } from './assignment'
 import { workspaceSites } from './workspaces'
 import type { Member } from './auth'
@@ -57,58 +57,74 @@ export async function ownsSession(m: Member, sessionId: string): Promise<boolean
   return isOwnedBy(m, await getAssignment(sessionId))
 }
 
-const OWNED_TTL_MS = 15_000
+const OWNED_TTL_MS = 30_000
 const ownedCache = new Map<string, { at: number; set: Set<string> }>()
+const ownedInFlight = new Map<string, Promise<Set<string>>>()
+
+/** Every page of a query, in its stable order — and a THROW, not a partial
+ *  answer, if any page fails. A partial history here is not "fewer leads": a
+ *  missing hand-over row would make a lead look his after it had moved on. */
+async function allPages<T>(make: () => { range: (a: number, b: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }> }): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; from < 200_000; from += 1000) {
+    const { data, error } = await make().range(from, from + 999)
+    if (error) throw new Error(error.message)
+    out.push(...(data ?? []))
+    if (!data || data.length < 1000) return out
+  }
+  throw new Error('ownedSessions: row cap reached')
+}
 
 /**
  * Every lead / session currently assigned to this member.
  *
- * Paged queries instead of a fold over every assignment row in the
- * workspace (~21k): first the sessions that were EVER assigned to them (an
- * ILIKE on their address, bounded by site scope), then the full assignment
- * history of just those sessions, folded newest-wins, so a lead that has since
- * been handed to somebody else drops out.
+ * Instead of folding every assignment row in the workspace (~27k): first the
+ * sessions that were EVER assigned to them (an ILIKE on their address, bounded
+ * by site scope), then the full assignment history of just those sessions via
+ * the session index, folded newest-wins, so a lead that has since been handed
+ * to somebody else drops out.
+ *
+ * Memoised 30s per member with in-flight sharing — a dashboard fires several
+ * of these at once. Assignment changes therefore take up to 30s to show in his
+ * LISTS; a record is still decided fresh by ownsSession(). On any database
+ * error the answer is the empty set: he sees nothing rather than too much.
  */
 export async function ownedSessions(m: Member): Promise<Set<string>> {
   const me = norm(m.email)
   if (!me) return new Set()
-  // A dashboard fires several of these at once (list + badge + record); a
-  // 15-second memo keeps that to one fold. Assignment changes take at most
-  // that long to show up for him — never longer to be ENFORCED on a record,
-  // which ownsSession() reads fresh.
   const hit = ownedCache.get(me)
   if (hit && Date.now() - hit.at < OWNED_TTL_MS) return hit.set
+  const running = ownedInFlight.get(me)
+  if (running) return running
+  const job = foldOwned(m, me)
+    .then((set) => { ownedCache.set(me, { at: Date.now(), set }); return set })
+    .catch((e) => { console.error('[ownedSessions] failed — showing nothing:', e instanceof Error ? e.message : e); return new Set<string>() })
+    .finally(() => ownedInFlight.delete(me))
+  ownedInFlight.set(me, job)
+  return job
+}
+
+async function foldOwned(m: Member, me: string): Promise<Set<string>> {
   const sites = m.assigned_sites.length > 0 ? m.assigned_sites : workspaceSites(m.workspace)
-  // Paged, in a stable order: PostgREST answers at most 1000 rows whatever
-  // .limit() asks for, and this login already holds ~1000 assignments.
-  const hits = await fetchAllPages<{ session_id: string }>(
-    () => supabase.from('chat_logs')
-      .select('session_id')
-      .eq('role', ASSIGNMENT_ROLE)
-      .in('site_id', sites)
-      .ilike('message', me)
-      .order('created_at', { ascending: true }).order('id', { ascending: true }),
-    50_000)
-  warnIfCapped('ownedSessions candidates', hits.length, 50_000)
+  const hits = await allPages<{ session_id: string }>(() => supabase.from('chat_logs')
+    .select('session_id')
+    .eq('role', ASSIGNMENT_ROLE)
+    .in('site_id', sites)
+    .ilike('message', me)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }))
   const candidates = [...new Set(hits.map((r) => String(r.session_id)))]
   const chunks: string[][] = []
-  for (let i = 0; i < candidates.length; i += 150) chunks.push(candidates.slice(i, i + 150))
+  for (let i = 0; i < candidates.length; i += 250) chunks.push(candidates.slice(i, i + 250))
   const out = new Set<string>()
-  // Full history per chunk (paged, oldest first) so the fold sees the newest
-  // row — a truncated history would call a lead his after it was handed on.
-  for (let i = 0; i < chunks.length; i += 4) {
-    const folded = await Promise.all(chunks.slice(i, i + 4).map(async (chunk) => {
-      const rows = await fetchAllPages<{ session_id: string; role: string; message: string }>(
-        () => supabase.from('chat_logs')
-          .select('session_id, role, message, created_at')
-          .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
-          .order('created_at', { ascending: true }).order('id', { ascending: true }),
-        50_000)
-      return deriveAssignments(rows)
-    }))
+  for (let i = 0; i < chunks.length; i += 6) {
+    const folded = await Promise.all(chunks.slice(i, i + 6).map(async (chunk) => deriveAssignments(
+      await allPages<{ session_id: string; role: string; message: string }>(() => supabase.from('chat_logs')
+        .select('session_id, role, message')
+        .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
+        .order('created_at', { ascending: true }).order('id', { ascending: true })),
+    )))
     for (const f of folded) for (const [sid, email] of Object.entries(f)) if (norm(email) === me) out.add(sid)
   }
-  ownedCache.set(me, { at: Date.now(), set: out })
   return out
 }
 
