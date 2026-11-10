@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { isOwnLeadsOnly, ownLeadsRefusal } from '@/lib/ownleads'
 import { hasFeature } from '@/lib/workspaces'
 import { loadOpportunities } from '@/lib/opportunityload'
 
@@ -13,6 +14,8 @@ export const maxDuration = 60
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Own-leads-only (lib/ownleads.ts): this screen is about everybody's leads.
+  if (isOwnLeadsOnly(member)) return ownLeadsRefusal()
   if (!hasFeature(member.workspace, 'opportunities')) {
     return NextResponse.json({ error: 'Opportunities are not enabled for this workspace' }, { status: 403 })
   }

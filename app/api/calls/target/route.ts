@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { ownsSession } from '@/lib/ownleads'
 import { hasFeature } from '@/lib/workspaces'
 import { dialable } from '@/lib/identity'
 import { findLeadByPhone, leadForCaller } from '@/lib/inbound'
@@ -39,6 +40,11 @@ export async function POST(req: NextRequest) {
 
   const existing = await findLeadByPhone(number, member.workspace)
   if (existing) {
+    // Own-leads-only (lib/ownleads.ts): a number that belongs to somebody
+    // else's lead is not his to ring — and its name is not his to learn.
+    if (!(await ownsSession(member, existing.sessionId))) {
+      return NextResponse.json({ error: 'This number belongs to a lead assigned to someone else. Ask your team lead to assign it to you.' }, { status: 403 })
+    }
     return NextResponse.json({
       ok: true, created: false,
       leadId: existing.sessionId, name: existing.name, siteId: existing.siteId,

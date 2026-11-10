@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
 import { isJobsOnly } from '@/lib/jobsonly'
+import { jobVisibleTo, ownedSessionsIfLimited } from '@/lib/ownleads'
 import { listJobs, writeJob, listMessages, workspaceMembers, notifyJob } from '@/lib/jobstore'
 import { cleanJobInput, statusesOf, JOB_STATUS_LABEL, type Job } from '@/lib/jobs'
 import { buildJobBrief } from '@/lib/jobbrief'
@@ -15,6 +16,7 @@ async function load(req: NextRequest, id: string) {
   if (!hasFeature(m.workspace, 'jobs')) return { error: NextResponse.json({ error: 'Not available for this workspace' }, { status: 403 }) }
   const job = (await listJobs(m.workspace)).find((j) => j.id === id)
   if (!job || (job.siteId && !canAccessSite(m, job.siteId))) return { error: NextResponse.json({ error: 'Not found' }, { status: 404 }) }
+  if (!jobVisibleTo(m, job, await ownedSessionsIfLimited(m))) return { error: NextResponse.json({ error: 'This job is on a lead that is not yours.' }, { status: 403 }) }
   return { m, job }
 }
 

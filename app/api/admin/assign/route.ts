@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, canAccessSite } from '@/lib/auth'
+import { ownsSession } from '@/lib/ownleads'
 import { getAssignment, setAssignment } from '@/lib/assignment'
 
 // Claim ("pick up") or release a conversation. The assignee is recorded by
@@ -14,7 +15,9 @@ export async function POST(req: NextRequest) {
   if (!sessionId || !siteId || (action !== 'claim' && action !== 'release')) {
     return NextResponse.json({ error: 'Missing or invalid fields' }, { status: 400 })
   }
-  if (!canAccessSite(member, siteId)) {
+  // Own-leads-only (lib/ownleads.ts): only a chat already assigned to him —
+  // he cannot claim the queue or a colleague's chat.
+  if (!canAccessSite(member, siteId) || !(await ownsSession(member, sessionId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

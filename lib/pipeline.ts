@@ -29,6 +29,7 @@ import { notALeadSessions } from './notalead'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
 import { ASSIGNMENT_ROLE } from './assignment'
 import { canSeeAllLeads, visibleToMember } from './teamlead'
+import { isOwnLeadsOnly, ownedSessions } from './ownleads'
 import { quoteSessionId, leadSource } from './quoteintake'
 import {
   CRM_STAGE_ROLE, CRM_VALUE_ROLE, CRM_STAGES, stagesForWorkspace, DEFAULT_CURRENCY,
@@ -403,7 +404,13 @@ export async function loadPipeline(
   // built from what this member can actually see, rather than counting cards
   // they will never be shown.
   const seesAll = await canSeeAllLeads(member)
-  if (!seesAll) list = list.filter((c) => visibleToMember(c.owner, member.email, false))
+  if (!seesAll) list = list.filter((c) => visibleToMember(c.owner, member.email, false, isOwnLeadsOnly(member)))
+  if (isOwnLeadsOnly(member)) {
+    const mine = await ownedSessions(member)
+    // The card opens c.id, so that is the one that must be his; the merged
+    // siblings are narrowed too, because a stage change writes to all of them.
+    list = list.filter((c) => mine.has(c.id)).map((c) => ({ ...c, mergedIds: c.mergedIds.filter((x) => mine.has(x)) }))
+  }
 
   if (until) list = list.filter((c) => !c.createdAt || c.createdAt <= until)
   if (filters.owner) {

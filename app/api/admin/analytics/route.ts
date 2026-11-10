@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import { isOwnLeadsOnly, ownLeadsRefusal } from '@/lib/ownleads'
 import { findBurstKeys } from '@/lib/botfilter'
 import { buildBuckets, isRange, tally, toPktMs, PKT_MS, type Range } from '@/lib/analytics'
 
@@ -34,6 +35,8 @@ const answers = new Map<string, { at: number; body: unknown }>()
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ points: [] }, { status: 401 })
+  // Own-leads-only (lib/ownleads.ts): this screen is about everybody's leads.
+  if (isOwnLeadsOnly(member)) return ownLeadsRefusal({ points: [], totalUnique: 0 })
   const scope = await siteScope(member)
   const allowed = Array.from(scope)
 

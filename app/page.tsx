@@ -934,6 +934,9 @@ export default function Dashboard() {
   const [tab, setTab] = useState<'overview' | 'conversations' | 'visitors' | 'billing' | 'performance'>('overview')
 
   const [userRole, setUserRole] = useState<'admin' | 'standard'>('standard')
+  // Sees only the leads assigned to them (lib/ownleads.ts): Visitors and
+  // Opportunities are refused by the API, so their entries are hidden.
+  const [ownLeadsOnly, setOwnLeadsOnly] = useState(false)
   const [userEmail, setUserEmail] = useState('')
   const [userSites, setUserSites] = useState<string[]>([])
   // Each member belongs to exactly one dashboard ("workspace"), which drives the
@@ -964,6 +967,7 @@ export default function Dashboard() {
       .then((r) => { if (!r.ok) throw new Error('unauth'); return r.json() })
       .then((m) => {
         setUserRole(m.role); setUserEmail(m.email); setUserSites(m.sites ?? []); setWorkspace(m.workspace)
+        setOwnLeadsOnly(m.ownLeadsOnly === true)
         setAuthReady(true)
       })
       .catch(() => { window.location.href = '/login' })
@@ -1777,16 +1781,19 @@ export default function Dashboard() {
 
   // Poll on EVERY tab (not just Conversations) so visitor alerts always fire.
   useEffect(() => {
-    if (!authReady) return
+    if (!authReady || ownLeadsOnly) return
     fetchVisitors()
     const iv = setInterval(whenVisible(fetchVisitors), VISITOR_POLL_MS)
     return () => clearInterval(iv)
-  }, [authReady, fetchVisitors, visibleTick])
+  }, [authReady, ownLeadsOnly, fetchVisitors, visibleTick])
 
   // Visitor history: fetched when the Visitors tab opens, refreshed every 30s
   // while it stays open (history is not latency-critical like the live list).
   useEffect(() => {
     if (tab !== 'visitors' || !authReady) return
+    // Not available to an own-leads-only member (lib/ownleads.ts); the API
+    // refuses it too, so nothing is fetched.
+    if (ownLeadsOnly) return
     const load = async () => {
       const data = await fetch('/api/admin/visitors-history').then((r) => r.json()).catch(() => ({ visitors: [] }))
       setVisitorHistory(data.visitors ?? [])
@@ -1796,7 +1803,7 @@ export default function Dashboard() {
     load()
     const iv = setInterval(whenVisible(load), 30000)
     return () => clearInterval(iv)
-  }, [tab, authReady, visibleTick])
+  }, [tab, authReady, ownLeadsOnly, visibleTick])
 
   const fetchMessages = useCallback(async (sessionId: string) => {
     const data = await fetch(`/api/admin/messages?sessionId=${sessionId}`).then((r) => r.json()).catch(() => ({ messages: [] }))
@@ -2432,7 +2439,7 @@ export default function Dashboard() {
   const canJobs = hasFeature(workspace, 'jobs')
   // Costing (lib/costing.ts): packaging admins and the costing person.
   const canCosting = canUseCosting({ role: userRole, workspace, email: userEmail })
-  const canOpportunities = hasFeature(workspace, 'opportunities')
+  const canOpportunities = hasFeature(workspace, 'opportunities') && !ownLeadsOnly
   const showFirstResponse = hasFeature(workspace, 'quotebot')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
@@ -2670,7 +2677,7 @@ export default function Dashboard() {
                 and a min-width keep 1, 2 and 3 digits the same width. */}
             <span className={`${NAV_COUNT} ${roleSessions.length > 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{!countsReady ? '…' : roleSessions.length > 999 ? '999+' : roleSessions.length}</span>
           </a>
-          <a href="/?tab=visitors" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('visitors') }} aria-current={tab === 'visitors' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'visitors' ? NAV_TAB_ON : NAV_TAB_OFF}`}
+          {!ownLeadsOnly && (<a href="/?tab=visitors" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setTab('visitors') }} aria-current={tab === 'visitors' ? 'page' : undefined} className={`${NAV_TAB} ${tab === 'visitors' ? NAV_TAB_ON : NAV_TAB_OFF}`}
             title={`${roleVisitors.length} visitor${roleVisitors.length === 1 ? '' : 's'} on your sites right now`}>
             <span className="truncate">Visitors</span>
             {/* A dot carries "live" in a fraction of the width the word did —
@@ -2680,7 +2687,7 @@ export default function Dashboard() {
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${roleVisitors.length > 0 ? 'bg-white/90' : 'bg-gray-400'}`} aria-hidden />
               {!countsReady ? '…' : roleVisitors.length > 999 ? '999+' : roleVisitors.length}
             </span>
-          </a>
+          </a>)}
           {canEmail && (
             <a href="/inbox" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigateTo('/inbox') } }}
               className={`${NAV_TAB} ${NAV_TAB_OFF}`}

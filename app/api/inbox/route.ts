@@ -7,6 +7,7 @@ import { CRM_EMAIL_ROLE, parseCrmEmail } from '@/lib/crmemail'
 import { ASSIGNMENT_ROLE } from '@/lib/assignment'
 import { CRM_EMAIL_OPEN_ROLE, parseCrmEmailOpen } from '@/lib/emailtrack'
 import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
+import { isOwnLeadsOnly, ownedSessions } from '@/lib/ownleads'
 import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
 import { PAY_LINK_ROLE, payLinksInRows, redactLinks } from '@/lib/paylink'
 import { asUtcIso } from '@/lib/visitor'
@@ -197,6 +198,9 @@ export async function GET(req: NextRequest) {
   const addParty = (t: Thread, who: string) => { if (who && !t.participants.includes(who)) t.participants.push(who) }
 
   const seesAll = await canSeeAllLeads(member)
+  // Own-leads-only (lib/ownleads.ts): checked against the full assignment fold
+  // too, not only the per-chunk owner map below.
+  const ownedSet = isOwnLeadsOnly(member) ? await ownedSessions(member) : null
   const owner = seesAll ? new Map<string, string | null>() : await ownersFor(Array.from(threads.keys()))
   const hideContactsHere = !canSeeContacts(member)
   // A subject or a snippet can carry a payment link — the customer quotes it
@@ -219,7 +223,8 @@ export async function GET(req: NextRequest) {
   const out = Array.from(threads.values())
     .filter((t) => t.messages > 0)
     .filter((t) => !q || t.matched)
-    .filter((t) => visibleToMember(owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId), member.email, seesAll))
+    .filter((t) => visibleToMember(owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId), member.email, seesAll, isOwnLeadsOnly(member)))
+    .filter((t) => !ownedSet || ownedSet.has(t.leadId))
     .map((t) => ({
       leadId: t.leadId,
       siteId: t.siteId,

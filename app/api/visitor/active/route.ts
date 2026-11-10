@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import { isOwnLeadsOnly, ownLeadsRefusal } from '@/lib/ownleads'
 import { unpackVisitor, LIVE_MAX_ON_SITE_MS, asUtcIso } from '@/lib/visitor'
 import { filterLiveFlood } from '@/lib/botfilter'
 
@@ -19,6 +20,8 @@ export async function OPTIONS() {
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ visitors: [] }, { status: 401, headers: corsHeaders })
+  // Own-leads-only (lib/ownleads.ts): this screen is about everybody's leads.
+  if (isOwnLeadsOnly(member)) return ownLeadsRefusal({ visitors: [] })
   const scope = await siteScope(member)
 
   // "Live" = active within the last 60s. The widget pings every 30s, so 60s

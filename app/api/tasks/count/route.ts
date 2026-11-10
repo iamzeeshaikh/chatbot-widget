@@ -7,6 +7,7 @@ import { unreadRepliesFor } from '@/lib/unread'
 import { waWaitingSessions } from '@/lib/wawaiting'
 import { memberSites } from '@/lib/auth'
 import { canSeeContacts, scrubText, HIDDEN_EMAIL } from '@/lib/pii'
+import { isOwnLeadsOnly, ownedSessions } from '@/lib/ownleads'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +41,13 @@ export async function GET(req: NextRequest) {
       ? waWaitingSessions(await memberSites(member))
       : Promise.resolve(new Set<string>()),
   ])
+  // Own-leads-only (lib/ownleads.ts): the reply and WhatsApp badges count his
+  // leads only, the same set every list shows him.
+  if (isOwnLeadsOnly(member)) {
+    const owned = await ownedSessions(member)
+    for (let i = unread.length - 1; i >= 0; i--) if (!owned.has(unread[i].leadId)) unread.splice(i, 1)
+    for (const sid of [...waiting]) if (!owned.has(sid)) waiting.delete(sid)
+  }
   const mine = tasks.filter((t) => t.assignee === member.email)
   return NextResponse.json({
     count: needsAttentionCount(mine),

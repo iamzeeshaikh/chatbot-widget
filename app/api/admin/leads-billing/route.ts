@@ -9,6 +9,7 @@ import { unpackVisitor } from '@/lib/visitor'
 import { notALeadSessions } from '@/lib/notalead'
 import { QUOTE_TAG, CHECKOUT_TAG, stripQuoteTag, quoteSessionId } from '@/lib/quoteintake'
 import { billableKey } from '@/lib/billablekey'
+import { isOwnLeadsOnly, ownedSessions } from '@/lib/ownleads'
 
 export const dynamic = 'force-dynamic'
 
@@ -215,8 +216,11 @@ export async function GET(req: NextRequest) {
   // number a client actually pays against, so a pitch left in it is a charge
   // for something that was never a customer.
   const notLeads = await notALeadSessions(Array.from(scope))
+  // Own-leads-only (lib/ownleads.ts): the Overview tiles count his leads only.
+  const mine = isOwnLeadsOnly(member) ? await ownedSessions(member) : null
   const leads = [...chatLeads, ...quoteLeads, ...checkoutLeads]
     .filter((l) => !notLeads.has(l.session_id))
+    .filter((l) => !mine || mine.has(l.session_id))
     .sort((a, b) => new Date(b.captured_at).getTime() - new Date(a.captured_at).getTime())
 
   // Billable count: the same customer sometimes contacts through both the

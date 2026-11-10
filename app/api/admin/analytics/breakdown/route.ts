@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import { isOwnLeadsOnly, ownLeadsRefusal } from '@/lib/ownleads'
 import { findBurstKeys } from '@/lib/botfilter'
 import { buildBuckets, isRange, tally, toPktMs, PKT_MS, type Range } from '@/lib/analytics'
 import { hasFeature } from '@/lib/workspaces'
@@ -49,6 +50,8 @@ interface SiteRow {
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  // Own-leads-only (lib/ownleads.ts): this screen is about everybody's leads.
+  if (isOwnLeadsOnly(member)) return ownLeadsRefusal()
   const allowed = Array.from(await siteScope(member))
   if (allowed.length === 0) return NextResponse.json({ sites: [], label: '', total: null })
 

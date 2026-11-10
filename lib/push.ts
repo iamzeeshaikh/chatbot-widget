@@ -7,6 +7,7 @@
 import webpush from 'web-push'
 import { supabase } from './supabase'
 import type { Workspace } from './workspaces'
+import { ownLeadsOnlyEmails } from './auth'
 
 export const PUSH_SUB_ROLE = 'push_sub'
 const PUSH_SITE = 'zeeops-push'
@@ -120,7 +121,17 @@ export interface PushPayload {
 
 // Fire-and-forget: never throws (a push failure must never break chat).
 export async function sendPushToWorkspace(ws: Workspace, payload: PushPayload): Promise<void> {
-  return deliver(await safeSubs(ws), payload)
+  let subs = await safeSubs(ws)
+  // Own-leads-only members (lib/ownleads.ts) are left out of the broadcast: it
+  // names customers on leads that are not theirs. Fail open — a lookup error
+  // must never cost the rest of the team their alert.
+  try {
+    const skip = await ownLeadsOnlyEmails(ws)
+    if (skip.size > 0) subs = subs.filter((s) => !skip.has((s.email ?? '').trim().toLowerCase()))
+  } catch (err) {
+    console.error('[push] own-leads lookup failed (non-fatal):', err instanceof Error ? err.message : err)
+  }
+  return deliver(subs, payload)
 }
 
 // One member's devices only. Task reminders are personal — the assignee gets

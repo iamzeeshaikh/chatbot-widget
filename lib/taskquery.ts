@@ -10,6 +10,7 @@
 // chat_logs, but the table has no index on `role`, so this must stay bounded
 // and must not be polled hard.
 
+import { isOwnLeadsOnly, isOwnedBy, ownedSessions } from './ownleads'
 import { supabase, fetchAllPages } from './supabase'
 import { memberSites, type Member } from './auth'
 import { CONTACT_ROLE } from './visitor'
@@ -74,7 +75,13 @@ export async function loadMemberTasks(member: Member): Promise<TaskWithLead[]> {
     byId.set(t.id, { task: t, sessionId: r.session_id, siteId: r.site_id })
   }
 
-  const live = Array.from(byId.values()).filter((e) => !e.task.deleted)
+  let live = Array.from(byId.values()).filter((e) => !e.task.deleted)
+  // Own-leads-only (lib/ownleads.ts): tasks on his own leads, plus any task
+  // somebody assigned to him by name.
+  if (isOwnLeadsOnly(member)) {
+    const mine = await ownedSessions(member)
+    live = live.filter((e) => mine.has(e.sessionId) || isOwnedBy(member, e.task.assignee))
+  }
   if (live.length === 0) return []
 
   const [siteNames, leadNames] = await Promise.all([

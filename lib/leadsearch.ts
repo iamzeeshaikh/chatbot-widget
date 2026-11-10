@@ -20,6 +20,7 @@
 // no index on `role`, so finding those 88 rows means scanning all 40k. It is
 // fast now and grows with the table. See the index note in CLAUDE.md.
 
+import { isOwnLeadsOnly, ownedSessions } from './ownleads'
 import { supabase } from './supabase'
 import { memberSites, type Member } from './auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from './pii'
@@ -207,6 +208,12 @@ export async function searchLeads(member: Member, rawTerm: string): Promise<{
   for (const h of hits) {
     if (h.matchedOn === 'name' || h.matchedOn === 'email') continue
     if (h.siteName.toLowerCase().includes(lower)) h.matchedOn = 'site'
+  }
+
+  // Own-leads-only (lib/ownleads.ts): a hit he could not open is not shown.
+  if (isOwnLeadsOnly(member)) {
+    const mine = await ownedSessions(member)
+    for (let i = hits.length - 1; i >= 0; i--) if (!mine.has(hits[i].id)) hits.splice(i, 1)
   }
 
   // Most recent first — an agent taking a call wants the live one.

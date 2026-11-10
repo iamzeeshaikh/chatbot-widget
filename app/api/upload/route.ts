@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, canAccessSite } from '@/lib/auth'
+import { ownsSession } from '@/lib/ownleads'
 import { getMode, setMode } from '@/lib/mode'
 import { recordReplyAuthor } from '@/lib/replyauthor'
 import { getAssignment, setAssignment } from '@/lib/assignment'
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     if (!(file instanceof File) || !siteId || !sessionId) {
       return NextResponse.json({ error: 'Missing file, siteId or sessionId' }, { status: 400, headers: corsHeaders })
     }
-    if (isAgent && !canAccessSite(member, siteId)) {
+    if (isAgent && (!canAccessSite(member, siteId) || !(await ownsSession(member, sessionId)))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403, headers: corsHeaders })
     }
     // HARD LOCK (agents only): a chat assigned to another agent is exclusive —

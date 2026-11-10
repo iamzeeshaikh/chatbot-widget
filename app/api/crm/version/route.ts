@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, memberSites } from '@/lib/auth'
+import { ownsSession } from '@/lib/ownleads'
 import { supabase } from '@/lib/supabase'
 import { CRM_ROLES } from '@/lib/crm'
 import { ASSIGNMENT_ROLE } from '@/lib/assignment'
@@ -28,7 +29,9 @@ export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const leadId = req.nextUrl.searchParams.get('lead')
+  // Own-leads-only (lib/ownleads.ts): no marker for a lead that is not his.
+  const asked = req.nextUrl.searchParams.get('lead')
+  const leadId = asked && (await ownsSession(member, asked)) ? asked : null
   const sites = memberSites(member)
   if (sites.length === 0) return NextResponse.json({ crm: null, lead: null })
 

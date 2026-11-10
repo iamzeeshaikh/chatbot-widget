@@ -3,6 +3,7 @@
 import type { NextRequest } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { isJobsOnly, jobsOnlyMayCall } from './jobsonly'
+import { OWN_LEADS_KEY, ownLeadsMayCall, ownsSession } from './ownleads'
 import { supabase } from './supabase'
 // `type` on Workspace so the import erases cleanly — it is a type, and marking
 // it lets these modules load under Node's native TypeScript stripping (which is
@@ -23,6 +24,9 @@ export interface Member {
   workspace: Workspace
   role: Role
   assigned_sites: string[]
+  /** Sees only the leads assigned to them (lib/ownleads.ts). Read from the
+   *  auth user's user_metadata; never set on admins or built-in accounts. */
+  ownLeadsOnly?: boolean
 }
 
 // Built-in workspace admins. These keep working without any DB row so the
@@ -101,16 +105,45 @@ function verifySession(token: string | undefined): SessionPayload | null {
 // warm serverless instance.
 const REVOKE_KEY = 'sessions_valid_from'
 const REVOKE_TTL_MS = 60_000
-const revokeCache = new Map<string, { readAt: number; validFrom: number }>()
+const revokeCache = new Map<string, { readAt: number; validFrom: number; ownLeadsOnly: boolean }>()
 
-async function sessionsValidFrom(uid: string): Promise<number> {
+// One metadata read serves both per-member flags kept there: the revocation
+// cutoff and "own leads only" (lib/ownleads.ts).
+async function memberMeta(uid: string): Promise<{ validFrom: number; ownLeadsOnly: boolean }> {
   const hit = revokeCache.get(uid)
-  if (hit && Date.now() - hit.readAt < REVOKE_TTL_MS) return hit.validFrom
+  if (hit && Date.now() - hit.readAt < REVOKE_TTL_MS) return hit
   const { data } = await supabase.auth.admin.getUserById(uid)
-  const raw = (data?.user?.user_metadata as Record<string, unknown> | undefined)?.[REVOKE_KEY]
-  const validFrom = typeof raw === 'number' ? raw : 0
-  revokeCache.set(uid, { readAt: Date.now(), validFrom })
-  return validFrom
+  const meta = (data?.user?.user_metadata as Record<string, unknown> | undefined) ?? {}
+  const raw = meta[REVOKE_KEY]
+  const entry = { readAt: Date.now(), validFrom: typeof raw === 'number' ? raw : 0, ownLeadsOnly: meta[OWN_LEADS_KEY] === true }
+  revokeCache.set(uid, entry)
+  return entry
+}
+
+/** Turn "own leads only" on or off for a member (lib/ownleads.ts). */
+export async function setOwnLeadsOnly(uid: string, on: boolean): Promise<void> {
+  const { data } = await supabase.auth.admin.getUserById(uid)
+  const existing = (data?.user?.user_metadata as Record<string, unknown> | undefined) ?? {}
+  const { error } = await supabase.auth.admin.updateUserById(uid, { user_metadata: { ...existing, [OWN_LEADS_KEY]: on } })
+  if (error) throw new Error(error.message)
+  revokeCache.delete(uid)
+}
+
+/** Addresses of this workspace's own-leads-only members — the workspace-wide
+ *  push broadcasts (new chat, new quote, inbound WhatsApp) skip them, because
+ *  those name customers on leads that are not theirs. */
+export async function ownLeadsOnlyEmails(ws: Workspace): Promise<Set<string>> {
+  const { data } = await supabase.from('members').select('id, email, role').eq('workspace', ws)
+  const rows = (data ?? []).filter((m) => m.role !== 'admin')
+  const flagged = await ownLeadsOnlyIds(rows.map((m) => String(m.id)))
+  return new Set(rows.filter((m) => flagged.has(String(m.id))).map((m) => String(m.email).trim().toLowerCase()))
+}
+
+/** Which of these member ids carry "own leads only" — for the Members page. */
+export async function ownLeadsOnlyIds(uids: string[]): Promise<Set<string>> {
+  const out = new Set<string>()
+  await Promise.all(uids.map(async (uid) => { if ((await memberMeta(uid)).ownLeadsOnly) out.add(uid) }))
+  return out
 }
 
 /** Kill every session this member currently holds. Call after a password change. */
@@ -119,7 +152,7 @@ export async function revokeSessions(uid: string): Promise<void> {
   const existing = (data?.user?.user_metadata as Record<string, unknown> | undefined) ?? {}
   const validFrom = Math.floor(Date.now() / 1000)
   await supabase.auth.admin.updateUserById(uid, { user_metadata: { ...existing, [REVOKE_KEY]: validFrom } })
-  revokeCache.set(uid, { readAt: Date.now(), validFrom })
+  revokeCache.set(uid, { readAt: Date.now(), validFrom, ownLeadsOnly: existing[OWN_LEADS_KEY] === true })
 }
 
 // The dashboard this request was addressed to, when the hostname binds one
@@ -147,26 +180,31 @@ export async function getMember(req: NextRequest): Promise<Member | null> {
     return { id: `builtin:${acct.email}`, email: acct.email, workspace: acct.workspace, role: 'admin', assigned_sites: [] }
   }
 
-  const [{ data }, validFrom] = await Promise.all([
+  const [{ data }, meta] = await Promise.all([
     supabase
       .from('members')
       .select('id, email, workspace, role, assigned_sites')
       .eq('id', session.uid)
       .maybeSingle(),
-    sessionsValidFrom(session.uid),
+    memberMeta(session.uid),
   ])
   if (!data) return null
   if (bound && data.workspace !== bound) return null
-  if ((session.iat ?? 0) < validFrom) return null
+  if ((session.iat ?? 0) < meta.validFrom) return null
   // A jobs-only account (lib/jobsonly.ts) is nobody outside the Jobs API —
   // decided here, once, so no route can forget to check it.
   if (isJobsOnly(data.email) && !jobsOnlyMayCall(req.nextUrl.pathname)) return null
+  // An own-leads-only member (lib/ownleads.ts) is nobody on an API that has not
+  // been decided for that rule — a route added later stays closed to them.
+  const ownLeadsOnly = data.role !== 'admin' && meta.ownLeadsOnly
+  if (ownLeadsOnly && !ownLeadsMayCall(req.nextUrl.pathname)) return null
   return {
     id: data.id,
     email: data.email,
     workspace: data.workspace as Workspace,
     role: data.role as Role,
     assigned_sites: data.assigned_sites ?? [],
+    ...(ownLeadsOnly ? { ownLeadsOnly: true } : {}),
   }
 }
 
@@ -192,12 +230,14 @@ export async function memberByEmail(email: string): Promise<Member | null> {
     .ilike('email', addr)
     .maybeSingle()
   if (!data) return null
+  const ownLeadsOnly = data.role !== 'admin' && (await memberMeta(data.id)).ownLeadsOnly
   return {
     id: data.id,
     email: data.email,
     workspace: data.workspace as Workspace,
     role: data.role as Role,
     assigned_sites: data.assigned_sites ?? [],
+    ...(ownLeadsOnly ? { ownLeadsOnly: true } : {}),
   }
 }
 
@@ -239,5 +279,7 @@ export async function siteOfSession(sessionId: string): Promise<string | null> {
 
 export async function canAccessSession(member: Member, sessionId: string): Promise<boolean> {
   const siteId = await siteOfSession(sessionId)
-  return siteId ? canAccessSite(member, siteId) : false
+  if (!siteId || !canAccessSite(member, siteId)) return false
+  // An own-leads-only member reaches a chat only while it is assigned to them.
+  return ownsSession(member, sessionId)
 }

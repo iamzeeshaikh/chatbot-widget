@@ -22,6 +22,7 @@
 
 import { supabase } from './supabase'
 import { canAccessSite, type Member } from './auth'
+import { isOwnLeadsOnly, ownedSessions } from './ownleads'
 import { isQuoteSessionId } from './quoteintake'
 
 // How many leads one request may touch. 400 leads is two writes each; the cap
@@ -65,11 +66,15 @@ export async function resolveSitesForIds(
     for (const r of data ?? []) if (r.site_id && !siteOf.has(r.session_id)) siteOf.set(r.session_id, r.site_id)
   }
 
+  // Own-leads-only (lib/ownleads.ts): a lead that is not currently his is
+  // out of scope exactly like a lead on a site he cannot see.
+  const mine = isOwnLeadsOnly(member) ? await ownedSessions(member) : null
   for (const id of ids) {
     const site = siteOf.get(id)
     if (!site) { skipped.push({ id, reason: 'not-found' }); continue }
     // Per lead, not per batch.
     if (!canAccessSite(member, site)) { skipped.push({ id, reason: 'no-access' }); continue }
+    if (mine && !mine.has(id)) { skipped.push({ id, reason: 'no-access' }); continue }
     allowed.set(id, site)
   }
   return { allowed, skipped }

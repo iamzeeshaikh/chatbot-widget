@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { isOwnLeadsOnly, ownLeadsRefusal } from '@/lib/ownleads'
 import { readSales, writeSale, suggestedRates } from '@/lib/sales'
 import { figures, type Sale } from '@/lib/salescore'
 import { canUseCosting, costingBucket, costingItem, cleanShipping } from '@/lib/costing'
@@ -16,6 +17,8 @@ export const maxDuration = 60
 export async function POST(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Own-leads-only (lib/ownleads.ts): this screen is about everybody's leads.
+  if (isOwnLeadsOnly(member)) return ownLeadsRefusal()
   if (!canUseCosting(member)) return NextResponse.json({ error: 'Costing is not open to this account.' }, { status: 403 })
   const body = await req.json().catch(() => ({}))
   const saleId = String(body?.saleId ?? '').trim()

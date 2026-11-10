@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getMember, siteOfSession, canAccessSite } from '@/lib/auth'
+import { ownsSession } from '@/lib/ownleads'
 import { canSeeContacts, HIDDEN_EMAIL, HIDDEN_PHONE } from '@/lib/pii'
 import { unpackVisitor, CONTACT_ROLE, parseContact, EMPTY_CONTACT, VisitorContact, TAGS_ROLE, parseTags, normalizeTags, asUtcIso } from '@/lib/visitor'
 import { isControlRole } from '@/lib/controlroles'
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
   // or from its chat logs. Authorize against that site so the same workspace +
   // assigned-site isolation applies as everywhere else.
   const siteId = v?.site_id ?? logs[0]?.site_id ?? null
-  if (!siteId || !canAccessSite(member, siteId)) {
+  if (!siteId || !canAccessSite(member, siteId) || !(await ownsSession(member, sessionId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
   const packed = unpackVisitor(v?.page_url ?? null)
@@ -194,7 +195,7 @@ export async function PATCH(req: NextRequest) {
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
   const siteId = await resolveSite(sessionId)
-  if (!siteId || !canAccessSite(member, siteId)) {
+  if (!siteId || !canAccessSite(member, siteId) || !(await ownsSession(member, sessionId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
@@ -227,7 +228,7 @@ export async function POST(req: NextRequest) {
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
   const siteId = await resolveSite(sessionId)
-  if (!siteId || !canAccessSite(member, siteId)) {
+  if (!siteId || !canAccessSite(member, siteId) || !(await ownsSession(member, sessionId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 

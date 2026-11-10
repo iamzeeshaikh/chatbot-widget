@@ -17,6 +17,8 @@ interface Member {
   display_name_source: 'set' | 'derived'
   /** The member's own phone — the line the CRM rings when they place a call. */
   call_phone: string
+  /** Sees only the leads assigned to them (lib/ownleads.ts). */
+  own_leads_only?: boolean
 }
 interface Site { site_id: string; name: string; bot_name: string; primary_color: string }
 
@@ -96,6 +98,20 @@ export default function MembersPage() {
     if (!r.ok) { setError(j.error || 'Could not change that.'); return }
     const e = email.toLowerCase()
     setLeads((cur) => (lead ? [...cur, e] : cur.filter((x) => x !== e)))
+  }
+
+  // "Own leads only" (lib/ownleads.ts) — packaging only.
+  const [ownBusy, setOwnBusy] = useState<string | null>(null)
+  async function toggleOwnLeads(id: string, on: boolean) {
+    setOwnBusy(id); setError('')
+    const r = await fetch('/api/admin/members', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, own_leads_only: on }),
+    })
+    const j = await r.json().catch(() => ({}))
+    setOwnBusy(null)
+    if (!r.ok) { setError(j.error || 'Could not change that.'); return }
+    setMembers((cur) => cur.map((x) => (x.id === id ? { ...x, own_leads_only: on } : x)))
   }
 
   async function addMember(e: React.FormEvent) {
@@ -318,6 +334,14 @@ export default function MembersPage() {
                               make team lead
                             </button>
                           ) : null
+                        )}
+                        {m.role !== 'admin' && workspace === 'packaging' && isAdmin && (
+                          <label className="flex items-center gap-1 mt-1 text-[10px] text-gray-600 cursor-pointer"
+                            title="Sees only the leads assigned to him or her — no unassigned leads, nobody else's leads, prices or design requests">
+                            <input type="checkbox" className="h-3 w-3" checked={!!m.own_leads_only} disabled={ownBusy === m.id}
+                              onChange={(e) => toggleOwnLeads(m.id, e.target.checked)} />
+                            Own leads only
+                          </label>
                         )}
                       </td>
                       <td className="px-4 py-3">

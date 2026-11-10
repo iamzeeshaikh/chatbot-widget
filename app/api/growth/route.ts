@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
+import { isOwnLeadsOnly, ownLeadsRefusal } from '@/lib/ownleads'
 import { readSales, suggestedRates } from '@/lib/sales'
 import { readExpenses } from '@/lib/expenses'
 import { figures, expensePkr, canSeeGrowth } from '@/lib/salescore'
@@ -38,6 +39,8 @@ const median = (xs: number[]) => {
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Own-leads-only (lib/ownleads.ts): this screen is about everybody's leads.
+  if (isOwnLeadsOnly(member)) return ownLeadsRefusal()
   if (!canSeeGrowth(member)) return NextResponse.json({ error: 'Not available.' }, { status: 403 })
 
   const nowPkt = new Date(Date.now() + PKT_MS)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
 import { isJobsOnly } from '@/lib/jobsonly'
+import { jobVisibleTo, ownedSessionsIfLimited, ownsSession } from '@/lib/ownleads'
 import { resolveLeadSite } from '@/lib/leadrecord'
 import { listJobs, jobCount, writeJob, workspaceMembers, notifyJob } from '@/lib/jobstore'
 import { withoutContacts } from '@/lib/productionform'
@@ -24,7 +25,8 @@ export async function GET(req: NextRequest) {
   const lead = req.nextUrl.searchParams.get('lead')
   const [jobs, members] = await Promise.all([listJobs(c.m.workspace), workspaceMembers(c.m.workspace)])
   // A job tied to a lead on a site this member cannot see stays out of view.
-  const visible = jobs.filter((j) => !j.siteId || canAccessSite(c.m, j.siteId))
+  const mine = await ownedSessionsIfLimited(c.m)
+  const visible = jobs.filter((j) => (!j.siteId || canAccessSite(c.m, j.siteId)) && jobVisibleTo(c.m, j, mine))
   const jobsOnly = isJobsOnly(c.m.email)
   const list = (lead ? visible.filter((j) => j.leadId === lead) : visible)
     .map((j) => (jobsOnly && j.production ? { ...j, production: withoutContacts(j.production) } : j))
@@ -41,7 +43,7 @@ export async function POST(req: NextRequest) {
   let siteId = ''
   if (input.leadId) {
     const r = await resolveLeadSite(input.leadId)
-    if (!r || !canAccessSite(c.m, r.siteId)) return NextResponse.json({ error: 'That lead is not one you can open.' }, { status: 403 })
+    if (!r || !canAccessSite(c.m, r.siteId) || !(await ownsSession(c.m, input.leadId))) return NextResponse.json({ error: 'That lead is not one you can open.' }, { status: 403 })
     siteId = r.siteId
     leadName = r.lead?.name || r.lead?.email || ''
   }

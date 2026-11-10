@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
+import { isOwnLeadsOnly, ownLeadsRefusal } from '@/lib/ownleads'
 import { unpackVisitor, asUtcIso } from '@/lib/visitor'
 import { findBurstKeys, burstKey } from '@/lib/botfilter'
 import { getBlockedIps } from '@/lib/blocklist'
@@ -20,6 +21,8 @@ const MAX_CHAT_ROWS = 20000
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ visitors: [] }, { status: 401 })
+  // Own-leads-only (lib/ownleads.ts): this screen is about everybody's leads.
+  if (isOwnLeadsOnly(member)) return ownLeadsRefusal({ visitors: [], blockedIps: [] })
   const scope = siteScope(member)
   const allowed = Array.from(scope)
   if (allowed.length === 0) return NextResponse.json({ visitors: [] })

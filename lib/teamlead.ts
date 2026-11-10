@@ -14,6 +14,7 @@
 import { supabase } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import type { Member } from './auth'
+import { isOwnLeadsOnly } from './ownleads'
 
 export const CRM_TEAM_LEAD_ROLE = 'crm_team_lead'
 export const TEAM_LEAD_SESSION = 'zeeops-crm-team-leads'
@@ -56,14 +57,18 @@ export async function setTeamLead(email: string, lead: boolean, by: string): Pro
  */
 export async function canSeeAllLeads(member: Member): Promise<boolean> {
   if (member.role === 'admin') return true
+  // "Own leads only" beats team lead (lib/ownleads.ts).
+  if (isOwnLeadsOnly(member)) return false
   return (await teamLeads()).has(member.email.trim().toLowerCase())
 }
 
 /** The filter itself, so every list applies the same rule. */
+/** `ownOnly` (lib/ownleads.ts): the unassigned pool is NOT visible either. */
 export function visibleToMember(
-  assignee: string | null | undefined, memberEmail: string, seesAll: boolean,
+  assignee: string | null | undefined, memberEmail: string, seesAll: boolean, ownOnly = false,
 ): boolean {
   if (seesAll) return true
   const owner = (assignee ?? '').trim().toLowerCase()
-  return !owner || owner === memberEmail.trim().toLowerCase()
+  if (!owner) return !ownOnly
+  return owner === memberEmail.trim().toLowerCase()
 }

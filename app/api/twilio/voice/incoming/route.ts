@@ -6,7 +6,7 @@ import { findLeadByPhone } from '@/lib/inbound'
 import type { Workspace } from '@/lib/workspaces'
 import { voicemailTwiml } from '@/lib/voicemail'
 import { recordAttrs, RECORDING_NOTICE } from '@/lib/callrecording'
-import { HARDCODED_ACCOUNTS } from '@/lib/auth'
+import { HARDCODED_ACCOUNTS, ownLeadsOnlyEmails } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +48,10 @@ function escapeXml(v: string): string {
 async function ringableAgents(workspace: Workspace): Promise<string[]> {
   const { data } = await supabase
     .from('members').select('email').eq('workspace', workspace).limit(MAX_CLIENT_LEGS)
-  const emails = (data ?? []).map((m) => String(m.email || '').toLowerCase()).filter(Boolean)
+  // Own-leads-only members (lib/ownleads.ts) do not ring: an inbound caller is
+  // not yet anybody's lead. Fail open on a lookup error.
+  const skip = await ownLeadsOnlyEmails(workspace).catch(() => new Set<string>())
+  const emails = (data ?? []).map((m) => String(m.email || '').toLowerCase()).filter((e) => e && !skip.has(e))
   const builtin = HARDCODED_ACCOUNTS.find((a) => a.workspace === workspace)?.email
   if (builtin && !emails.includes(builtin) && emails.length < MAX_CLIENT_LEGS) emails.push(builtin)
   return emails

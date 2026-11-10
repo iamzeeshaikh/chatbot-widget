@@ -7,6 +7,7 @@ import { parseWaMessage } from '@/lib/whatsapp'
 import { ASSIGNMENT_ROLE } from '@/lib/assignment'
 import { LEAD_CAPTURE_ROLE } from '@/lib/leadtracking'
 import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
+import { isOwnLeadsOnly, ownedSessions } from '@/lib/ownleads'
 import { canSeeContacts, scrubText, HIDDEN_PHONE } from '@/lib/pii'
 import { asUtcIso } from '@/lib/visitor'
 import { storedMemberNames } from '@/lib/membername'
@@ -133,6 +134,8 @@ export async function GET(req: NextRequest) {
 
   const ids = Array.from(threads.keys())
   const seesAll = await canSeeAllLeads(member)
+  // Own-leads-only (lib/ownleads.ts): checked against the full assignment fold too.
+  const ownedSet = isOwnLeadsOnly(member) ? await ownedSessions(member) : null
   const [owner, names, memberNames, siteRows] = await Promise.all([
     seesAll ? Promise.resolve(new Map<string, string | null>()) : ownersFor(ids),
     namesFor(ids),
@@ -148,7 +151,8 @@ export async function GET(req: NextRequest) {
   }
 
   const out = Array.from(threads.values())
-    .filter((t) => visibleToMember(owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId), member.email, seesAll))
+    .filter((t) => visibleToMember(owner.get(t.leadId) ?? defaultOwnerForSite(t.siteId), member.email, seesAll, isOwnLeadsOnly(member)))
+    .filter((t) => !ownedSet || ownedSet.has(t.leadId))
     .map((t) => ({
       leadId: t.leadId,
       siteId: t.siteId,

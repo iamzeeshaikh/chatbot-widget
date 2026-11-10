@@ -5,6 +5,7 @@ import { canSeeContacts, maskEmail, scrubText } from '@/lib/pii'
 import type { Workspace } from '@/lib/workspaces'
 import { deriveModes, MODE_ROLE } from '@/lib/mode'
 import { deriveAssignments, ASSIGNMENT_ROLE } from '@/lib/assignment'
+import { isOwnLeadsOnly, isOwnedBy } from '@/lib/ownleads'
 import { CONTACT_ROLE, TAGS_ROLE, parseTags, parseContact, asUtcIso } from '@/lib/visitor'
 import { parseAttachment } from '@/lib/attachment'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
@@ -51,7 +52,11 @@ export async function GET(req: NextRequest) {
   // thing said in the chat — often the visitor's own address — and the lead
   // badge carries the address outright.
   const hide = !canSeeContacts(member)
-  const out = <T extends { sessions: { preview: string; lead: { name: string | null; email: string | null } | null }[] }>(r: T): T => {
+  const ownOnly = isOwnLeadsOnly(member)
+  const out = <T extends { sessions: { preview: string; assignedTo: string | null; lead: { name: string | null; email: string | null } | null }[] }>(r: T): T => {
+    // Own-leads-only (lib/ownleads.ts): his assigned chats and nothing else —
+    // not the unassigned queue, not a colleague's.
+    if (ownOnly) r.sessions = r.sessions.filter((s) => isOwnedBy(member, s.assignedTo))
     if (!hide) return r
     for (const s of r.sessions) {
       s.preview = scrubText(s.preview) ?? ''

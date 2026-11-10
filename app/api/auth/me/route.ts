@@ -13,5 +13,8 @@ export async function GET(req: NextRequest) {
     role: member.role,
     workspace: member.workspace,
     sites: memberSites(member),
+    // Sees only the leads assigned to them (lib/ownleads.ts) — the UI hides
+    // the screens the API refuses them.
+    ownLeadsOnly: member.ownLeadsOnly === true,
   })
 }

@@ -11,6 +11,7 @@ import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtra
 import { notALeadSessions, sessionForLead } from '@/lib/notalead'
 import { CRM_STAGE_ROLE, isCrmStage } from '@/lib/crm'
 import { canSeeAllLeads, visibleToMember } from '@/lib/teamlead'
+import { isOwnLeadsOnly, ownedSessions } from '@/lib/ownleads'
 import { ASSIGNMENT_ROLE, deriveAssignments } from '@/lib/assignment'
 import { waWaitingSessions } from '@/lib/wawaiting'
 
@@ -241,7 +242,15 @@ export async function GET(req: NextRequest) {
   if (!(await canSeeAllLeads(member))) {
     for (let i = merged.length - 1; i >= 0; i--) {
       const sid = sessionForLead(merged[i] as { id: string; session_id?: string | null })
-      if (!visibleToMember(owned[sid] ?? defaultOwnerForSite(String((merged[i] as { site_id?: unknown }).site_id ?? '')), member.email, false)) merged.splice(i, 1)
+      if (!visibleToMember(owned[sid] ?? defaultOwnerForSite(String((merged[i] as { site_id?: unknown }).site_id ?? '')), member.email, false, isOwnLeadsOnly(member))) merged.splice(i, 1)
+    }
+  }
+  // Own-leads-only (lib/ownleads.ts): a lead stays only when its current
+  // assignment is this member, checked against the full assignment fold.
+  if (isOwnLeadsOnly(member)) {
+    const mine = await ownedSessions(member)
+    for (let i = merged.length - 1; i >= 0; i--) {
+      if (!mine.has(sessionForLead(merged[i] as { id: string; session_id?: string | null }))) merged.splice(i, 1)
     }
   }
 

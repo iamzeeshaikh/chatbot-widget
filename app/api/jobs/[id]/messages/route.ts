@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember, canAccessSite } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
+import { jobVisibleTo, ownedSessionsIfLimited } from '@/lib/ownleads'
 import { listJobs, writeMessage, notifyJob } from '@/lib/jobstore'
 
 export const dynamic = 'force-dynamic'
@@ -13,6 +14,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!hasFeature(m.workspace, 'jobs')) return NextResponse.json({ error: 'Not available for this workspace' }, { status: 403 })
   const job = (await listJobs(m.workspace)).find((j) => j.id === id)
   if (!job || (job.siteId && !canAccessSite(m, job.siteId))) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!jobVisibleTo(m, job, await ownedSessionsIfLimited(m))) return NextResponse.json({ error: 'This job is on a lead that is not yours.' }, { status: 403 })
   const { body } = await req.json().catch(() => ({}))
   const text = String(body ?? '').trim().slice(0, 4000)
   if (!text) return NextResponse.json({ error: 'The message is empty.' }, { status: 400 })

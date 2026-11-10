@@ -20,6 +20,7 @@ import { REPLY_AUTHOR_ROLE, parseReplyAuthor } from './replyauthor'
 import { parseAttachment, type AttachmentInfo } from './attachment'
 import { isQuoteSessionId, quoteSessionId, stripQuoteTag, isCheckoutLeadMessage, isQuoteLeadMessage, leadSource } from './quoteintake'
 import { canSeeAllLeads, visibleToMember } from './teamlead'
+import { isOwnLeadsOnly, ownedSessions } from './ownleads'
 import { getAssignment } from './assignment'
 import { digitsOnly, samePhone } from './identity'
 import { workspaceSites, hasFeature, type WorkspaceFeature, defaultOwnerForSite } from './workspaces'
@@ -236,7 +237,7 @@ export async function guardLeadAccess(
   // stops the moment somebody has the id.
   if (!(await canSeeAllLeads(member))) {
     const owner = (await getAssignment(id)) ?? defaultOwnerForSite(resolved.siteId)
-    if (!visibleToMember(owner, member.email, false)) return { ok: false, status: 403 }
+    if (!visibleToMember(owner, member.email, false, isOwnLeadsOnly(member))) return { ok: false, status: 403 }
   }
   return { ok: true, member, siteId: resolved.siteId }
 }
@@ -1263,5 +1264,10 @@ export async function findRelatedLeads(
     })
   }
 
-  return Array.from(out.values()).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 25)
+  // Own-leads-only (lib/ownleads.ts): the same customer's OTHER leads are shown
+  // only when they are his too — a colleague's record is not his to see.
+  const mine = isOwnLeadsOnly(member) ? await ownedSessions(member) : null
+  return Array.from(out.values())
+    .filter((r) => !mine || mine.has(r.id))
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 25)
 }
