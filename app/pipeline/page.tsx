@@ -24,6 +24,8 @@ import Board from './Board'
 import ListView from './ListView'
 import BulkBar, { type BulkResult } from './BulkBar'
 import GlobalSearch from '@/app/components/GlobalSearch'
+import LostReasonDialog from '@/app/components/LostReasonPicker'
+import type { LostReason } from '@/lib/lostreasons'
 import { useLiveVersion } from '@/app/components/useLiveVersion'
 
 type Mode = 'board' | 'list'
@@ -63,6 +65,11 @@ export default function PipelinePage() {
   const [excluded, setExcluded] = useState(0)
   const [status, setStatus] = useState<'loading' | 'ok' | 'error' | 'unavailable'>('loading')
   const [movingId, setMovingId] = useState<string | null>(null)
+  // Packaging: a move to Lost needs a reason (the server says so in
+  // lostReasonRequired). The drag / select parks the card here and the move
+  // happens only after a reason is picked; Cancel leaves it where it was.
+  const [lostRequired, setLostRequired] = useState(false)
+  const [lostPending, setLostPending] = useState<PipelineCard | null>(null)
   const [loadingMore, setLoadingMore] = useState<CrmStage | null>(null)
   const [error, setError] = useState('')
   const [narrow, setNarrow] = useState(false)
@@ -134,6 +141,7 @@ export default function PipelinePage() {
         const d = await res.json()
         setColumns(d.columns ?? EMPTY_COLUMNS)
         if (Array.isArray(d.stages) && d.stages.length) setStages(d.stages)
+        setLostRequired(!!d.lostReasonRequired)
         setOptions(d.options ?? { sites: [], owners: [] })
         setMe(d.me ?? '')
         setTotal(d.total ?? 0)
@@ -175,8 +183,10 @@ export default function PipelinePage() {
   // failure the whole previous column set is restored.
   const snapshot = useRef<PipelineColumn[] | null>(null)
 
-  const move = useCallback(async (card: PipelineCard, to: CrmStage) => {
+  const move = useCallback(async (card: PipelineCard, to: CrmStage, lost?: { reason: LostReason; note: string }) => {
     if (card.stage === to || movingId) return
+    // Ask first; nothing has moved yet, so a cancel needs no snap-back.
+    if (to === 'lost' && lostRequired && !lost) { setLostPending(card); return }
     const from = card.stage
     setError('')
     setMovingId(card.id)
@@ -217,7 +227,8 @@ export default function PipelinePage() {
         const res = await fetch(`/api/leads/${encodeURIComponent(id)}/stage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stage: to, previous: from }),
+          // A merged card: the same reason for every record of the customer.
+          body: JSON.stringify({ stage: to, previous: from, ...(lost ? { lostReason: lost.reason, lostNote: lost.note } : {}) }),
         })
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
@@ -235,7 +246,7 @@ export default function PipelinePage() {
       setMovingId(null)
       snapshot.current = null
     }
-  }, [columns, movingId, load])
+  }, [columns, movingId, load, lostRequired])
 
   const allCards = useMemo(() => columns.flatMap((c) => c.cards), [columns])
 
@@ -339,7 +350,7 @@ export default function PipelinePage() {
   // would silently change what "47 selected" refers to.
   useLiveVersion({
     watch: 'crm', intervalMs: 45_000,
-    paused: bulkBusy || selected.size > 0 || !!bulkResult,
+    paused: bulkBusy || selected.size > 0 || !!bulkResult || !!lostPending,
     onChange: () => { load() },
   })
 
@@ -480,10 +491,16 @@ export default function PipelinePage() {
         )}
       </main>
 
+      {lostPending && (
+        <LostReasonDialog subject={lostPending.name || 'this lead'}
+          onCancel={() => setLostPending(null)}
+          onConfirm={(reason, note) => { const c = lostPending; setLostPending(null); move(c, 'lost', { reason, note }) }} />
+      )}
+
       {/* List mode only: the board has no row to tick. */}
       {mode === 'list' && (
         <BulkBar
-          count={selected.size} allMatching={allMatching} stages={stages}
+          count={selected.size} allMatching={allMatching} stages={stages} lostRequired={lostRequired}
           owners={options.owners} me={me} busy={bulkBusy} result={bulkResult}
           onApply={(body) => runBulkAction(body)}
           onUndo={undoBulk}

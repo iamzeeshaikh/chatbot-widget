@@ -13,7 +13,8 @@
     "test:oppalerts": "node --import ./scripts/ts-resolve.mjs scripts/oppalerts.test.ts",
     "test:invoice": "node --import ./scripts/ts-resolve.mjs scripts/invoice.test.ts",
     "test:cc": "node --import ./scripts/ts-resolve.mjs scripts/customercc.test.ts",
-    "test:intakesites": "node --import ./scripts/ts-resolve.mjs scripts/intakesites.test.ts"
+    "test:intakesites": "node --import ./scripts/ts-resolve.mjs scripts/intakesites.test.ts",
+    "test:lostweekly": "node --import ./scripts/ts-resolve.mjs scripts/lostweekly.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.0",

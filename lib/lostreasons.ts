@@ -5,8 +5,9 @@
 // in CRM_ROLES) on the lead's own session: { reason, note, by, at }. Newest row
 // wins, and only a row written at or after the lead's newest move to Lost
 // counts — a reason from an earlier time it was lost (and then recovered) must
-// not be shown against the current one. Optional: a lead dragged to Lost on the
-// board has no reason until somebody picks one on the Lost page.
+// not be shown against the current one. Required since 2026-11-11 for every
+// human move to Lost (lib/lostwrite.ts); leads lost before that get one on the
+// Lost page.
 
 export const LOST_REASONS = [
   { key: 'size', label: "Size or spec we can't make" },

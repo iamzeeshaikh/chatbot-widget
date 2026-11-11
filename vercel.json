@@ -47,6 +47,10 @@
     {
       "path": "/api/crm/wa-bot",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/crm/lost-weekly",
+      "schedule": "0 5 * * 1"
     }
   ]
 }

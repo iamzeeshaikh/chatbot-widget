@@ -28,7 +28,8 @@ import {
   CRM_STAGES, CRM_STAGE_LABEL, CRM_STAGE_STYLE, CRM_STAGE_DOT, CRM_CURRENCIES, isInvoiceable,
   CURRENCY_SYMBOL, isDeadStage, type CrmStage, type CrmCurrency,
 } from '@/lib/crm'
-import { LOST_REASONS } from '@/lib/lostreasons'
+import type { LostReason } from '@/lib/lostreasons'
+import LostReasonDialog from '@/app/components/LostReasonPicker'
 import { isImageMime } from '@/lib/attachment'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import WhatsAppThread from './WhatsAppThread'
@@ -72,8 +73,9 @@ export default function LeadRecordPage() {
   const [noteDraft, setNoteDraft] = useState('')
   const [addingNote, setAddingNote] = useState(false)
   const [stageError, setStageError] = useState('')
-  // Just moved to Lost (packaging): ask, optionally, why — /api/lost/reason.
-  const [lostAsk, setLostAsk] = useState<{ reason: string; note: string; busy: boolean; err: string } | null>(null)
+  // Moving a packaging lead to Lost asks why FIRST (required, 2026-11-11):
+  // the reason rides on the same /stage request. null = not asking.
+  const [lostAsk, setLostAsk] = useState<{ busy: boolean; err: string } | null>(null)
   // Tasks mid-write. Keyed by task id so completing one doesn't grey out the
   // rest of the list.
   const [taskBusy, setTaskBusy] = useState<Set<string>>(new Set())
@@ -211,14 +213,29 @@ export default function LeadRecordPage() {
   // Optimistic: the pill moves the instant it's clicked and rolls back to the
   // previous stage if the write fails, so the page never shows a stage the
   // database doesn't have.
-  async function changeStage(next: CrmStage) {
+  async function changeStage(next: CrmStage, lost?: { reason: LostReason; note: string }) {
     if (!record || next === record.stage) return
+    // Packaging: no move to Lost without a reason — ask, and move only once
+    // one is picked. The select is bound to record.stage, so it stays put.
+    if (next === 'lost' && isPackagingLead && !lost) { setLostAsk({ busy: false, err: '' }); return }
     const previous = record.stage
     setStageError('')
+    if (lost) {
+      // Wait for the server here instead of moving optimistically: a refusal
+      // belongs in the dialog, next to the reason.
+      setLostAsk({ busy: true, err: '' })
+      try {
+        await post('/stage', { stage: next, previous, lostReason: lost.reason, lostNote: lost.note })
+        setLostAsk(null)
+        load()
+      } catch (err) {
+        setLostAsk({ busy: false, err: err instanceof Error ? err.message : 'Could not move it to Lost' })
+      }
+      return
+    }
     setRecord({ ...record, stage: next, stageBy: me, stageAt: new Date().toISOString() })
     try {
       await post('/stage', { stage: next, previous })
-      setLostAsk(next === 'lost' && isPackagingLead ? { reason: '', note: '', busy: false, err: '' } : null)
       load()
     } catch (err) {
       setRecord((r) => (r ? { ...r, stage: previous } : r))
@@ -802,32 +819,10 @@ export default function LeadRecordPage() {
               <StageRail stage={record.stage} />
               <div className="border-t border-gray-100 pt-2" />
 
-              {lostAsk && record.stage === 'lost' && (
-                /* Optional: why it was lost, for the Lost page (/lost). */
-                <div className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-2 space-y-1.5">
-                  <p className="text-[11px] font-semibold text-gray-700">Why was it lost? <span className="font-normal text-gray-500">(optional — shown on the Lost page)</span></p>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <select aria-label="Lost reason" value={lostAsk.reason} onChange={(e) => setLostAsk({ ...lostAsk, reason: e.target.value })}
-                      className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800">
-                      <option value="">Pick a reason…</option>
-                      {LOST_REASONS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
-                    </select>
-                    <input value={lostAsk.note} maxLength={500} onChange={(e) => setLostAsk({ ...lostAsk, note: e.target.value })}
-                      placeholder="Note, e.g. 14x14x12 — we can't make it"
-                      className="flex-1 min-w-[140px] rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800" />
-                    <button type="button" disabled={!lostAsk.reason || lostAsk.busy}
-                      onClick={async () => {
-                        setLostAsk({ ...lostAsk, busy: true, err: '' })
-                        const res = await fetch('/api/lost/reason', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [record.id], reason: lostAsk.reason, note: lostAsk.note }) }).catch(() => null)
-                        const j = await res?.json().catch(() => ({}))
-                        if (!res?.ok) { setLostAsk({ ...lostAsk, busy: false, err: j?.error || j?.skipped?.[0]?.why || 'Not saved' }); return }
-                        setLostAsk(null); load()
-                      }}
-                      className="text-xs font-semibold px-2.5 py-1 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-40">Save</button>
-                    <button type="button" onClick={() => setLostAsk(null)} className="text-xs text-gray-500 hover:text-gray-800 px-1">Skip</button>
-                  </div>
-                  {lostAsk.err && <p className="text-[11px] text-red-700">{lostAsk.err}</p>}
-                </div>
+              {lostAsk && (
+                <LostReasonDialog subject="this lead" busy={lostAsk.busy} error={lostAsk.err}
+                  onCancel={() => setLostAsk(null)}
+                  onConfirm={(reason, note) => changeStage('lost', { reason, note })} />
               )}
 
               {stageError && (

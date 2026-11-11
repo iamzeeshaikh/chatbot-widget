@@ -28,6 +28,8 @@ import { formatTime, formatDateTime, dateDividerLabel } from '@/lib/datetime'
 import { isQuoteLeadMessage, stripQuoteTag, cleanQuoteSubject, leadSource, type LeadSource } from '@/lib/quoteintake'
 import { billableKey } from '@/lib/billablekey'
 import { memberPhotoUrl } from '@/lib/memberphoto'
+import type { LostReason } from '@/lib/lostreasons'
+import LostReasonDialog from '@/app/components/LostReasonPicker'
 
 const SITE_URLS: Record<string, string> = {
   texasfootball: 'texasfootballuniforms.com',
@@ -1193,6 +1195,8 @@ export default function Dashboard() {
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
   /** The lead whose stage is mid-flight, so its checkbox and dropdown lock. */
   const [stagingLeadId, setStagingLeadId] = useState<string | null>(null)
+  // Packaging: moving a lead to Lost asks why first (required, 2026-11-11).
+  const [lostAskLead, setLostAskLead] = useState<{ id: string; busy: boolean; err: string } | null>(null)
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', message: '' })
   const [savingEdit, setSavingEdit] = useState(false)
   const [visitors, setVisitors] = useState<Visitor[]>([])
@@ -2340,9 +2344,27 @@ export default function Dashboard() {
   // because a checkbox that waits a second before ticking gets clicked twice.
   // It posts to the SAME endpoint the pipeline board drags onto, so a stage set
   // here and a stage set there are one act with one audit trail.
-  async function setLeadStage(lead: Lead, stage: CrmStage) {
+  async function setLeadStage(lead: Lead, stage: CrmStage, lost?: { reason: LostReason; note: string }) {
     const previous = lead.stage ?? 'new'
     if (previous === stage) return
+    if (stage === 'lost' && hasFeature(workspace, 'lost')) {
+      // The select is bound to lead.stage, so it stays put until a reason is
+      // picked; the move waits for the server so a refusal shows in the dialog.
+      if (!lost) { setLostAskLead({ id: lead.id, busy: false, err: '' }); return }
+      setLostAskLead({ id: lead.id, busy: true, err: '' })
+      const res = await fetch(`/api/leads/${encodeURIComponent(leadRecordId(lead))}/stage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage, previous, lostReason: lost.reason, lostNote: lost.note }),
+      }).catch(() => null)
+      if (!res?.ok) {
+        const j = await res?.json().catch(() => ({}))
+        setLostAskLead({ id: lead.id, busy: false, err: j?.error || 'Could not move it to Lost' })
+        return
+      }
+      setLostAskLead(null)
+      setLeads((prev) => prev.map((l) => l.id === lead.id ? { ...l, stage } : l))
+      return
+    }
     setStagingLeadId(lead.id)
     setLeads((prev) => prev.map((l) => l.id === lead.id ? { ...l, stage } : l))
     try {
@@ -3474,6 +3496,12 @@ export default function Dashboard() {
                                     <option key={st} value={st}>{CRM_STAGE_LABEL[st]}</option>
                                   ))}
                                 </select>
+                                {lostAskLead?.id === lead.id && (
+                                  <LostReasonDialog subject={displayName(lead).real ? displayName(lead).text : 'this lead'}
+                                    busy={lostAskLead.busy} error={lostAskLead.err}
+                                    onCancel={() => setLostAskLead(null)}
+                                    onConfirm={(reason, note) => setLeadStage(lead, 'lost', { reason, note })} />
+                                )}
                               </td>
                               {showFirstResponse && <td className="px-3 py-3 whitespace-nowrap"><FirstResponseCell lead={lead} /></td>}
 

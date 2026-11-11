@@ -19,6 +19,8 @@ import { CRM_STAGES, CRM_STAGE_LABEL, type CrmStage } from '@/lib/crm'
 
 // The stages this dashboard offers; see stagesForWorkspace in lib/crm.ts.
 import { TASK_TYPES, TASK_TYPE_LABEL, defaultDueDate, DEFAULT_DUE_TIME, type TaskType } from '@/lib/tasks'
+import type { LostReason } from '@/lib/lostreasons'
+import { LostReasonFields } from '@/app/components/LostReasonPicker'
 
 export interface BulkResult {
   applied: number
@@ -35,9 +37,11 @@ type Pending =
   | null
 
 export default function BulkBar({
-  count, allMatching, owners, me, busy, result, onApply, onUndo, onClear, onDismissResult, stages,
+  count, allMatching, owners, me, busy, result, onApply, onUndo, onClear, onDismissResult, stages, lostRequired,
 }: {
   count: number
+  /** Packaging: "Set to Lost" asks why first (one reason for every lead). */
+  lostRequired?: boolean
   stages?: readonly CrmStage[]
   allMatching: boolean
   owners: string[]
@@ -49,7 +53,10 @@ export default function BulkBar({
   onClear: () => void
   onDismissResult: () => void
 }) {
-  const [pending, setPending] = useState<Pending>(null)
+  const [pending, setPendingRaw] = useState<Pending>(null)
+  const [lost, setLost] = useState<{ reason: LostReason | ''; note: string }>({ reason: '', note: '' })
+  const setPending = (p: Pending) => { setPendingRaw(p); setLost({ reason: '', note: '' }) }
+  const askLost = !!lostRequired && pending?.kind === 'stage' && pending.stage === 'lost'
   const [task, setTask] = useState({
     title: '', type: 'follow_up' as TaskType,
     dueDate: defaultDueDate(), dueTime: DEFAULT_DUE_TIME, assignee: '',
@@ -133,6 +140,14 @@ export default function BulkBar({
                   <span className="text-[10px] text-gray-500">PKT</span>
                 </div>
               </div>
+            ) : askLost ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-gray-900">
+                  Set {leads} to <span className="text-amber-800">Lost</span> — why were they lost?
+                </p>
+                <LostReasonFields reason={lost.reason} note={lost.note} disabled={busy}
+                  onReason={(r) => setLost({ ...lost, reason: r })} onNote={(n) => setLost({ ...lost, note: n })} />
+              </div>
             ) : (
               <p className="text-xs font-semibold text-gray-900">
                 {pending.kind === 'stage'
@@ -145,10 +160,13 @@ export default function BulkBar({
 
             <div className="flex items-center gap-1.5 mt-2">
               <button
-                disabled={busy || (pending.kind === 'task' && !task.title.trim())}
+                disabled={busy || (pending.kind === 'task' && !task.title.trim()) || (askLost && !lost.reason)}
                 onClick={() => {
                   if (pending.kind === 'stage') {
-                    onApply({ action: 'stage', stage: pending.stage }, `Set ${leads} to ${CRM_STAGE_LABEL[pending.stage]}`)
+                    onApply({
+                      action: 'stage', stage: pending.stage,
+                      ...(askLost ? { lostReason: lost.reason, lostNote: lost.note.trim() } : {}),
+                    }, `Set ${leads} to ${CRM_STAGE_LABEL[pending.stage]}`)
                   } else if (pending.kind === 'owner') {
                     onApply({ action: 'owner', email: pending.email }, pending.email ? `Assign ${leads}` : `Unassign ${leads}`)
                   } else {

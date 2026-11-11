@@ -390,8 +390,20 @@ alone first (same fold + stagePairAt guard), then reads the rest for just those 
 applies the board's access rules itself (site scope, not-a-lead, pool / team lead /
 own-leads-only, site+email merge, masking). `scratch/lost-dbcount.mjs` checks it against an
 independent DB count. Reason = a `crm_lost` row `{reason, note, by, at}` (+ a CRM note),
-asked for optionally on the record when a packaging lead moves to Lost, or set later on
-/lost (`/api/lost/reason`); only a row at/after the newest move to Lost counts. Recover =
+**required** (2026-11-11) whenever a person moves a packaging lead to Lost: `/api/leads/[id]/stage`
+and `/api/pipeline/bulk` refuse `stage: 'lost'` without `lostReason` (400 "Pick why this lead was
+lost.") and write the reason in the same request via `lib/lostwrite.ts` (shared with
+`/api/lost/reason`, which still sets it later on /lost for old leads). Every UI that can move to
+Lost asks FIRST (`app/components/LostReasonPicker.tsx`: record select, board drag, list select,
+dashboard leads list, bulk bar). `applyStageChange` is unchanged — bots never move to Lost. Bulk
+undo back INTO Lost copies the previous reason forward (`carryLostReasonForward`). Only a row
+at/after the newest move to Lost counts.
+**Weekly report**: `/api/crm/lost-weekly` (cron Mon 05:00 UTC = 10:00 PKT, `?dryRun=1`),
+`lib/lostweekly.ts` (pure, `npm run test:lostweekly`) + `lib/lostweeklysweep.ts`: per agent, leads
+they moved to Lost in 7 days by reason + Lost leads they own with no reason, from `loadLost`; push
+(no device → own-Gmail email, `emailFallback`) + a "Review your Lost leads" task on their newest
+reason-less lead; admins get a combined summary. Ledger `crm_opp_alert` rows on session
+`zeeops-lost-weekly`, written before the send. Recover =
 `/api/lost/recover` (`dryRun: true` reports without writing): applyStageChange to a live
 stage + setAssignment + a "Recovered from Lost by X" note, only for ids currently Lost; an
 own-leads-only member can only assign it to themselves.

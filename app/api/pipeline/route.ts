@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { lostReasonRequired } from '@/lib/lostwrite'
 import { getMember } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
 import { loadPipeline, CARDS_PER_COLUMN, type PipelineFilters } from '@/lib/pipeline'
@@ -67,6 +68,8 @@ export async function GET(req: NextRequest) {
       ...result,
       me: member.email,
       stages: stagesForWorkspace(member.workspace),
+      // A move to Lost must carry a reason here (lib/lostwrite.ts).
+      lostReasonRequired: lostReasonRequired(member.workspace),
       perColumn: CARDS_PER_COLUMN,
     })
   } catch (err) {

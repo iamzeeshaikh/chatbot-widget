@@ -16,6 +16,9 @@ import {
   type BulkOutcome,
 } from '@/lib/bulk'
 import { currentStateForIds } from '@/lib/leadstate'
+import {
+  LOST_REASON_REQUIRED, lostReasonRequired, readLostInput, writeLostReason, carryLostReasonForward,
+} from '@/lib/lostwrite'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -87,6 +90,15 @@ export async function POST(req: NextRequest) {
       if (!isCrmStage(body.stage)) return NextResponse.json({ error: 'Invalid stage' }, { status: 400 })
       for (const id of targets) perLead.set(id, body.stage)
     }
+    // Packaging: a move to Lost must say why (lib/lostwrite.ts) — one reason
+    // for the whole selection, written per lead right after its stage row.
+    // Refused before anything is written. Undo ('stage-restore') back INTO
+    // Lost carries each lead's previous reason forward instead.
+    const reasonWs = lostReasonRequired(member.workspace)
+    const lost = action === 'stage' && body.stage === 'lost' && reasonWs ? readLostInput(body) : null
+    if (action === 'stage' && body.stage === 'lost' && reasonWs && !lost) {
+      return NextResponse.json({ error: LOST_REASON_REQUIRED }, { status: 400 })
+    }
 
     const before = await currentStateForIds(targets)
     // One timestamp for the whole action: the leads moved together, and the
@@ -102,6 +114,13 @@ export async function POST(req: NextRequest) {
         leadId: w.id, siteId: allowed.get(w.id)!, stage: w.stage,
         previous: w.previous, actorEmail: member.email, at,
       })
+      if (res.ok && w.stage === 'lost') {
+        if (lost) {
+          await writeLostReason({ leadId: w.id, siteId: allowed.get(w.id)!, reason: lost.reason, note: lost.note, by: member.email, at })
+        } else if (action === 'stage-restore' && reasonWs) {
+          await carryLostReasonForward(w.id, allowed.get(w.id)!, at)
+        }
+      }
       return { ok: res.ok, error: res.error }
     })
 

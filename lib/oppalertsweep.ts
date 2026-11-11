@@ -72,7 +72,7 @@ async function claim(p: Plan, now: Date): Promise<string | null> {
   return error?.message ?? null
 }
 
-async function packagingAgents(): Promise<AgentInfo[]> {
+export async function packagingAgents(): Promise<AgentInfo[]> {
   const [{ data }, names] = await Promise.all([
     supabase.from('members').select('email, role, workspace'),
     storedMemberNames(),
@@ -96,7 +96,7 @@ const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.de
 // No push device for this agent: put the alert in their own inbox, from their
 // own connected Gmail (a note to self — the only mailbox we can send from on
 // their behalf). Gmail on a phone rings for it, which is the point.
-async function emailFallback(p: Plan): Promise<{ email?: boolean; unreachable?: string }> {
+export async function emailFallback(p: Pick<Plan, 'to' | 'title' | 'body' | 'url'>): Promise<{ email?: boolean; unreachable?: string }> {
   const cfg = googleConfig(PUBLIC_BASE)
   if (!cfg) return { unreachable: 'Google OAuth is not configured' }
   const conn = await connectionFor(p.to)
