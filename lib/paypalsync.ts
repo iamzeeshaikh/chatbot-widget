@@ -42,6 +42,7 @@ export interface PaypalSyncResult {
   unpaidNotInLedger: { invoice: string; customer: string; amount: number; status: string }[]
   /** Rates locked from PayPal's own USD→GBP conversion (see lockRates). */
   ratesLocked: { customer: string; date: string; usdNet: number; gbp: number; rate: number }[]
+  feesFilled: { customer: string; date: string; fee: number }[]
   errors: string[]
 }
 
@@ -86,7 +87,7 @@ function findSale(inv: PpInvoice, sales: Sale[], links: Map<string, { leadId: st
 
 export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<PaypalSyncResult> {
   const dryRun = !!opts.dryRun
-  const res: PaypalSyncResult = { ok: true, dryRun, invoices: 0, applied: [], unmatchedPaid: [], unpaidNotInLedger: [], ratesLocked: [], errors: [] }
+  const res: PaypalSyncResult = { ok: true, dryRun, invoices: 0, applied: [], unmatchedPaid: [], unpaidNotInLedger: [], ratesLocked: [], feesFilled: [], errors: [] }
   if (!paypalConfigured()) { res.ok = false; res.errors.push('PAYPAL_PACKAGING_CLIENT_ID / SECRET are not set'); return res }
   const [invoices, sales, links, done] = await Promise.all([listInvoices(), readSales('packaging'), linkIndex(), doneIds()])
   res.invoices = invoices.length
@@ -203,7 +204,10 @@ export const WISE_GBP_PKR_CUT = 0.006
  */
 async function lockRates(dryRun: boolean, res: PaypalSyncResult): Promise<void> {
   const sales = (await readSales('packaging')).filter((s) => s.stream === 'pk_direct' && !s.deleted && s.currency === 'USD')
-  const open = sales.flatMap((s) => s.payments.filter((p) => p.method === 'paypal' && !p.rate).map((p) => ({ s, p })))
+  // A payment synced the moment it is paid has no fee yet (PayPal's
+  // transaction report lags by hours); pick those up again here too.
+  const FEE_MISSING = ' — fee not found yet'
+  const open = sales.flatMap((s) => s.payments.filter((p) => p.method === 'paypal' && (!p.rate || (p.note ?? '').includes(FEE_MISSING))).map((p) => ({ s, p })))
   if (!open.length) return
   const first = open.map((x) => x.p.date).sort()[0]
   const from = new Date(Math.max(+new Date(`${first}T00:00:00Z`) - 3 * 864e5, Date.now() - 360 * 864e5)).toISOString().slice(0, 10)
@@ -219,6 +223,17 @@ async function lockRates(dryRun: boolean, res: PaypalSyncResult): Promise<void> 
       if (near.length === 1) sale = near[0]
     }
     if (!sale) continue
+    if ((p.note ?? '').includes(FEE_MISSING) && sale.fee > 0) {
+      res.feesFilled.push({ customer: s.customer, date: p.date, fee: sale.fee })
+      if (!dryRun) {
+        p.fee = sale.fee
+        // The rate was worked out on the gross; redo it on the net.
+        p.rate = null
+        p.note = (p.note ?? '').replace(FEE_MISSING, '').replace(/ · rate [\d.]+ PKR\/USD:.*$/, '')
+        touched.add(s)
+      }
+    }
+    if (p.rate) continue
     const gbp = txns.find((t) => t.code === 'T0200' && t.currency === 'GBP' && t.amount > 0 && t.ref === sale!.id)
     if (!gbp) continue
     const gbpPkr = await gbpPkrOn(gbp.date)
