@@ -62,7 +62,7 @@ export async function runLostWeekly(opts: { dry?: boolean; now?: Date } = {}): P
   const sum = summarizeLost(lost.rows, agents, now)
   const plan = planLostWeekly(sum, agents, weekKey, PUBLIC_BASE)
   const taskFor = new Map(sum.perAgent.filter((s) => s.ownedNoReason > 0 && s.taskLead).map((s) => [s.email, s]))
-  const taskTitle = (s: AgentLostSummary) => `Review your Lost leads — ${s.ownedNoReason} have no reason yet (open the Lost page)`
+  const taskTitle = (s: AgentLostSummary) => `Review your Lost leads — ${s.ownedNoReason} ${s.ownedNoReason === 1 ? 'has' : 'have'} no reason yet (open the Lost page)`
   const result: LostWeeklyRun = {
     ok: true, dry, now: now.toISOString(), weekKey, totals: sum.totals, perAgent: sum.perAgent, others: sum.others,
     would: [], sent: [], alreadySent: [], errors: [],

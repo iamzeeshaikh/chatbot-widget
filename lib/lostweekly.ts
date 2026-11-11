@@ -106,7 +106,9 @@ export function planLostWeekly(
     lines.push(s.weekTotal
       ? `You moved ${s.weekTotal} lead${s.weekTotal === 1 ? '' : 's'} to Lost in the last 7 days: ${splitLine(s.week)}.`
       : 'You moved no leads to Lost in the last 7 days.')
-    if (s.ownedNoReason) lines.push(`${s.ownedNoReason} of your Lost leads still have no reason — please pick one for each.`)
+    if (s.ownedNoReason) lines.push(s.ownedNoReason === 1
+      ? '1 of your Lost leads still has no reason — please pick one.'
+      : `${s.ownedNoReason} of your Lost leads still have no reason — please pick one for each.`)
     out.push({
       kind: 'agent', key: `lostweekly:${weekKey}:${s.email}`, to: s.email,
       title: `${first(s.name, s.email)}, your Lost leads this week`,
