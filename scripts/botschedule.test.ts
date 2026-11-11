@@ -4,7 +4,7 @@
 //
 // All boundary times are expressed in UTC and chosen to map to the PKT (UTC+5)
 // moment described in each label, so we exercise the real timezone conversion.
-import { isBotOffBySchedule, isScheduledOn, pktParts } from '../lib/botschedule.ts'
+import { isBotOffBySchedule, isScheduledOn, pktParts, PACKAGING_BOT_ALWAYS_ON } from '../lib/botschedule.ts'
 
 const PACK = 'shopcardboardboxes' // packaging workspace (scheduled)
 const SPORT = 'texasfootball' // sports workspace (never affected)
@@ -61,7 +61,8 @@ let failures = 0
 for (const c of cases) {
   const got = isBotOffBySchedule(c.site, utcFor(c.utc))
   const p = pktParts(utcFor(c.utc))
-  const pass = got === c.expectOff
+  // Always-on overrides the windows: nothing is ever off by schedule.
+  const pass = got === (PACKAGING_BOT_ALWAYS_ON ? false : c.expectOff)
   if (!pass) failures++
   console.log(`${pass ? '✓' : '✗ FAIL'} ${c.label}  [PKT day=${p.day} hour=${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}] botOff=${got}`)
 }

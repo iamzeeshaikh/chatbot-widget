@@ -23,6 +23,10 @@
 // the ON window opens (the schedule never persists any mode).
 //
 // ── Edit these constants to change the schedule ──────────────────────────────
+// Owner 2026-11-11: "24 kardo" — the packaging bot now answers around the
+// clock, like the WhatsApp assistant. The windows below are kept (and still
+// tested) so the old schedule comes back by setting this to false.
+export const PACKAGING_BOT_ALWAYS_ON = true
 import { siteWorkspace, type Workspace } from './workspaces'
 
 // Only this workspace follows the schedule. Others (sports) are always-on.
@@ -79,7 +83,7 @@ export function isScheduledOn(day: number, hour: number): boolean {
 // they're never affected. Used where there is no single site in hand, e.g. the
 // dashboard's workspace-wide "Bot on/off" chip.
 export function isBotOffByScheduleForWorkspace(ws: Workspace | null, now: Date = new Date()): boolean {
-  if (ws !== SCHEDULED_WORKSPACE) return false
+  if (ws !== SCHEDULED_WORKSPACE || PACKAGING_BOT_ALWAYS_ON) return false
   const { day, hour } = pktParts(now)
   return !isScheduledOn(day, hour)
 }
