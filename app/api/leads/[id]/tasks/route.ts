@@ -41,7 +41,9 @@ async function latestRevision(sessionId: string, taskId: string): Promise<CrmTas
 function assigneeAllowed(email: string, siteId: string, membersRows: { email: string; role: string; assigned_sites: string[] | null }[]): boolean {
   const m = membersRows.find((r) => r.email === email)
   if (!m) return false
-  return m.role === 'admin' || (m.assigned_sites ?? []).includes(siteId)
+  // An empty site list means the whole workspace (memberSites, lib/auth.ts).
+  const sites = m.assigned_sites ?? []
+  return m.role === 'admin' || sites.length === 0 || sites.includes(siteId)
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

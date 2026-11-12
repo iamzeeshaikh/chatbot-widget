@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getMember, HARDCODED_ACCOUNTS } from '@/lib/auth'
+import { getMember, canAccessSite, HARDCODED_ACCOUNTS, type Member } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
 import { supabase } from '@/lib/supabase'
 import { writeControlRow } from '@/lib/leadrecord'
@@ -151,10 +151,14 @@ export async function POST(req: NextRequest) {
             .select('email, role, assigned_sites').eq('workspace', member.workspace)
             .ilike('email', target).maybeSingle()
           if (!data) return NextResponse.json({ error: 'That member is not in this workspace' }, { status: 400 })
-          const sites: string[] = data.assigned_sites ?? []
+          // canAccessSite, as the single-lead owner route uses: an EMPTY site list
+          // means the whole workspace (memberSites, lib/auth.ts). The old
+          // "admin or site in list" check refused every packaging agent, so a
+          // team lead's bulk assign silently changed nothing (Saifullah, 2026-11-12).
+          const candidate: Member = { id: '', email: data.email, workspace: member.workspace, role: data.role, assigned_sites: data.assigned_sites ?? [] }
           for (const id of targets) {
             const site = allowed.get(id)!
-            if (data.role === 'admin' || sites.includes(site)) perLead.set(id, target)
+            if (canAccessSite(candidate, site)) perLead.set(id, target)
           }
         } else {
           for (const id of targets) perLead.set(id, target)
