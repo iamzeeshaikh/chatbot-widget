@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import RichText from './RichText'
 import { plainToHtml } from '@/lib/richtext'
+import { matchSiteAlias } from '@/lib/sitealias'
 import {
   X, Send, TriangleAlert, Link2, Loader2, Plus, CornerUpLeft, Paperclip, FileText, Image as ImageIcon,
 } from 'lucide-react'
@@ -163,13 +164,7 @@ export default function EmailComposer({ leadId, leadEmail, leadName, siteId, sit
   // lead came from, so the only way to know was to already know.
   const siteAlias = useMemo(() => {
     if (!status?.aliases.length) return null
-    const site = siteId.toLowerCase()
-    const name = siteName.toLowerCase().replace(/[^a-z]/g, '')
-    return status.aliases.find((a) => {
-      const local = a.email.split('@')[0].toLowerCase()
-      const domain = (a.email.split('@')[1] ?? '').toLowerCase().replace(/[^a-z]/g, '')
-      return domain.includes(site) || domain.includes(name) || local.includes(site)
-    }) ?? null
+    return matchSiteAlias(status.aliases, siteId, siteName)
   }, [status, siteId, siteName])
 
   // That address first, the rest after. Every address stays available on

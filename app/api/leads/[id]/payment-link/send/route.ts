@@ -5,6 +5,7 @@ import { hasFeature } from '@/lib/workspaces'
 import { twilioConfig, twilioProblem, sendWhatsApp } from '@/lib/twilio'
 import { CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { canSeeContacts } from '@/lib/pii'
+import { matchSiteAlias } from '@/lib/sitealias'
 import { connectedAddresses, connectionFor, googleConfig, sendEmail, verifiedAliases, GmailAuthError, GmailRateError, configProblem, type SendAsAlias } from '@/lib/gmail'
 import { CRM_EMAIL_ROLE, MAX_SUBJECT, makeSnippet, newEmailId, type CrmEmailEntry } from '@/lib/crmemail'
 import { plainToHtml } from '@/lib/richtext'
@@ -32,14 +33,7 @@ const MAX_NOTE = 600
 
 /** The alias that belongs to this lead's site — the same rule the composer uses. */
 function aliasForSite(aliases: { email: string; displayName: string; isPrimary: boolean; isDefault: boolean }[], siteId: string, siteName: string) {
-  const site = siteId.toLowerCase()
-  const name = siteName.toLowerCase().replace(/[^a-z]/g, '')
-  const match = aliases.find((a) => {
-    const local = a.email.split('@')[0].toLowerCase()
-    const domain = (a.email.split('@')[1] ?? '').toLowerCase().replace(/[^a-z]/g, '')
-    return domain.includes(site) || (name && domain.includes(name)) || local.includes(site)
-  })
-  return match ?? aliases.find((a) => a.isDefault) ?? aliases.find((a) => a.isPrimary) ?? aliases[0] ?? null
+  return matchSiteAlias(aliases, siteId, siteName) ?? aliases.find((a) => a.isDefault) ?? aliases.find((a) => a.isPrimary) ?? aliases[0] ?? null
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

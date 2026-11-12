@@ -50,6 +50,7 @@ import {
 import { applyStageChange } from './stagechange'
 import { threadContextFor, isNoiseSender } from './emailsweep'
 import { CRM_EMAIL_IN_ROLE, parseCrmEmailIn } from './emailreply'
+import { matchSiteAlias } from './sitealias'
 import { googleConfig, verifiedAliases, sendEmail, fetchThread, GmailAuthError, type SendAsAlias } from './gmail'
 import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
@@ -250,13 +251,7 @@ async function addressAlreadyContacted(address: string, now: Date, notLeads: Set
 
 /** The alias on this site's own domain — the same matcher the composer uses. */
 function siteAlias(aliases: SendAsAlias[], siteId: string, siteName: string): SendAsAlias | null {
-  const site = siteId.toLowerCase()
-  const name = siteName.toLowerCase().replace(/[^a-z]/g, '')
-  return aliases.find((a) => {
-    const local = a.email.split('@')[0].toLowerCase()
-    const domain = (a.email.split('@')[1] ?? '').toLowerCase().replace(/[^a-z]/g, '')
-    return domain.includes(site) || (!!name && domain.includes(name)) || local.includes(site)
-  }) ?? null
+  return matchSiteAlias(aliases, siteId, siteName)
 }
 
 /**
