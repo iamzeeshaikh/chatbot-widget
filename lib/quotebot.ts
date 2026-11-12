@@ -51,6 +51,7 @@ import { applyStageChange } from './stagechange'
 import { threadContextFor, isNoiseSender } from './emailsweep'
 import { CRM_EMAIL_IN_ROLE, parseCrmEmailIn } from './emailreply'
 import { matchSiteAlias } from './sitealias'
+import { currentSender } from './leadsender'
 import { googleConfig, verifiedAliases, sendEmail, fetchThread, GmailAuthError, type SendAsAlias } from './gmail'
 import { makeSnippet, newEmailId, isAddress, parseCrmEmail, type CrmEmailEntry } from './crmemail'
 import { openPixelHtml } from './emailtrack'
@@ -863,7 +864,8 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
 
   const cfg = googleConfig(PUBLIC_BASE)
   if (!cfg) return { ok: false, state: 'failed', why: 'Google OAuth is not configured' }
-  const sig = await buildSendSignature({ memberEmail: first.agent, workspace: 'packaging', siteId, from: first.from, base: PUBLIC_BASE })
+  const sender = await currentSender(id, siteId, first.agent, first.from, cfg)
+  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: 'packaging', siteId, from: sender.from, base: PUBLIC_BASE })
   const emailId = newEmailId()
   const finalText = sig.text ? `${fu.text}\n\n${sig.text}` : fu.text
   const finalHtml = `${emailHtml(fu.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
@@ -873,19 +875,19 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   }
   let sent
   try {
-    sent = await sendEmail(first.agent, cfg, {
-      from: first.from, to: first.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
-      threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
+    sent = await sendEmail(sender.agent, cfg, {
+      from: sender.from, to: first.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
+      threadId: sender.moved ? undefined : thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
     })
   } catch (e) {
-    const why = e instanceof GmailAuthError ? `${first.agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
+    const why = e instanceof GmailAuthError ? `${sender.agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
     await ledger(id, siteId, { step: 'followup', n, state: 'failed', at: new Date().toISOString(), why, to: first.to, agent: first.agent })
     return { ok: false, state: 'failed', n, why }
   }
 
   const at = new Date().toISOString()
   const entry: CrmEmailEntry = {
-    id: emailId, sentBy: first.agent, from: first.from, to: first.to, cc: cc || undefined, subject,
+    id: emailId, sentBy: sender.agent, from: sender.from, to: first.to, cc: cc || undefined, subject,
     body: finalText, html: finalHtml, snippet: makeSnippet(fu.text), at,
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
     direction: 'outbound', bot: true,
@@ -900,7 +902,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
       id: newTaskId(),
       title: `Call ${who} — ${n} follow-ups and no reply yet (bot)`.slice(0, 200),
       type: 'call', due_at: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
-      assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+      assignee: sender.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
     await sendPushToMember(first.agent, 'packaging', {
@@ -910,7 +912,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
     }).catch(() => 0)
   }
 
-  await ledger(id, siteId, { step: 'followup', n, state: 'sent', at, to: first.to, agent: first.agent, from: first.from, emailId, offer: fu.offer ?? undefined })
+  await ledger(id, siteId, { step: 'followup', n, state: 'sent', at, to: first.to, agent: sender.agent, from: sender.from, emailId, offer: fu.offer ?? undefined })
   return { ok: true, state: 'sent', n, text: fu.text, callTask }
 }
 
@@ -1045,24 +1047,25 @@ export async function answerReply(
   if (!(await ledger(id, siteId, { step: 'reply', state: 'claimed', at: now.toISOString(), inboundId: latest.gmailId, agent: first.agent }))) {
     return { state: 'failed', why: 'ledger write failed' }
   }
-  const sig = await buildSendSignature({ memberEmail: first.agent, workspace: 'packaging', siteId, from: first.from, base: PUBLIC_BASE })
+  const sender = await currentSender(id, siteId, first.agent, first.from, cfg)
+  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: 'packaging', siteId, from: sender.from, base: PUBLIC_BASE })
   const emailId = newEmailId()
   const finalText = sig.text ? `${answer.text}\n\n${sig.text}` : answer.text
   const finalHtml = `${emailHtml(answer.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
   let sent
   try {
-    sent = await sendEmail(first.agent, cfg, {
-      from: first.from, to: first.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
-      threadId: thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
+    sent = await sendEmail(sender.agent, cfg, {
+      from: sender.from, to: first.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
+      threadId: sender.moved ? undefined : thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
     })
   } catch (e) {
-    const why = e instanceof GmailAuthError ? `${first.agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
+    const why = e instanceof GmailAuthError ? `${sender.agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
     await ledger(id, siteId, { step: 'reply', state: 'failed', at: new Date().toISOString(), why, inboundId: latest.gmailId, agent: first.agent })
     return { state: 'failed', why }
   }
   const at = new Date().toISOString()
   const entry: CrmEmailEntry = {
-    id: emailId, sentBy: first.agent, from: first.from, to: first.to, cc: cc || undefined, subject,
+    id: emailId, sentBy: sender.agent, from: sender.from, to: first.to, cc: cc || undefined, subject,
     body: finalText, html: finalHtml, snippet: makeSnippet(answer.text), at,
     gmailId: sent.id, threadId: sent.threadId, messageId: sent.messageId,
     direction: 'outbound', bot: true,
@@ -1077,7 +1080,7 @@ export async function answerReply(
       id: newTaskId(),
       title: `Send the price quote — ${who} has now given the missing details (bot replied)`.slice(0, 200),
       type: 'email', due_at: new Date(Date.now() + 3 * 3600 * 1000).toISOString(),
-      assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
+      assignee: sender.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
     await sendPushToMember(first.agent, 'packaging', {
@@ -1086,7 +1089,7 @@ export async function answerReply(
     }).catch(() => 0)
   }
   await ledger(id, siteId, {
-    step: 'reply', state: 'sent', at, inboundId: latest.gmailId, agent: first.agent, from: first.from, to: first.to,
+    step: 'reply', state: 'sent', at, inboundId: latest.gmailId, agent: sender.agent, from: sender.from, to: first.to,
     complete: answer.complete, missing: missingOf(assessment), emailId,
   })
   return { state: 'sent', complete: answer.complete, text: answer.text }
