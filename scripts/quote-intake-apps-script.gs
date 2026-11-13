@@ -218,6 +218,9 @@ var LABEL_ALIASES = {
   // "Extra Outsource Projects/tds" is The Die Cut Stickers (owner confirmed
   // 2026-10-24); its code is TDCS, so the short leaf matched nothing.
   'tds': 'TDCS',
+  // The Custom Labels UK files under the owner's Gmail label "tcl" (seen on a
+  // "PRICE THESE LABELS" form mail, 2026-11-13); its code is TCLU.
+  'tcl': 'TCLU',
 };
 
 // The one place a label leaf becomes a site code. Returns the code, or null.
