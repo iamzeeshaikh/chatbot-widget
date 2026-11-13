@@ -348,6 +348,20 @@ export default function LeadRecordPage() {
     }
   }
 
+  // Moving a form or phone lead to its real site (POST /site). A full reload
+  // follows: the signature, the From alias and the logo all key off the site.
+  const [siteError, setSiteError] = useState('')
+  const [savingSite, setSavingSite] = useState(false)
+  async function saveSite(siteId: string) {
+    if (!record || !siteId || siteId === record.siteId) return
+    setSiteError('')
+    setSavingSite(true)
+    try { await post('/site', { siteId }); window.location.reload() } catch (e) {
+      setSiteError(e instanceof Error ? e.message : 'That did not save.')
+      setSavingSite(false)
+    }
+  }
+
   async function addNote() {
     const body = noteDraft.trim()
     if (!body) return
@@ -711,7 +725,21 @@ export default function LeadRecordPage() {
                 <span className="font-medium text-gray-900">{record.sourceLabel}</span>
               </Prop>
               <Prop label="Site" title={record.siteName}>
-                <span className="font-medium text-gray-900">{record.siteName}</span>
+                {record.siteChoices.length > 1 ? (
+                  <>
+                    <select value={record.siteId} onChange={(e) => saveSite(e.target.value)} disabled={savingSite}
+                      aria-label="Lead site"
+                      className="w-full bg-transparent border border-transparent hover:border-gray-300 focus:border-gray-400 rounded pl-1 pr-1 py-0.5 text-xs font-medium text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer transition-colors disabled:opacity-50">
+                      {!record.siteChoices.some((c) => c.id === record.siteId) && <option value={record.siteId}>{record.siteName}</option>}
+                      {record.siteChoices.map((c) => (
+                        <option key={c.id} value={c.id} className="bg-white text-gray-800">{c.name}</option>
+                      ))}
+                    </select>
+                    {siteError && <p className="mt-1 text-[11px] font-medium text-red-700">{siteError}</p>}
+                  </>
+                ) : (
+                  <span className="font-medium text-gray-900">{record.siteName}</span>
+                )}
               </Prop>
               {(record.country || record.referrer) && (
                 <Prop label="Origin" title={[record.country, record.referrer].filter(Boolean).join(' · ')}>

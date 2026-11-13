@@ -8,6 +8,7 @@ import {
   loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml,
 } from '@/lib/signature'
 import { supabase } from '@/lib/supabase'
+import { siteIdForSender } from '@/lib/sitedomains'
 import { storedMemberNames } from '@/lib/membername'
 
 export const dynamic = 'force-dynamic'
@@ -42,12 +43,14 @@ export async function GET(req: NextRequest) {
   // names and no person. So a chat name that matches one of the site names is
   // rejected and the line is left out — better incomplete than wrong.
   const agent = agents.get(member.email.toLowerCase()) ?? null
-  const siteId = req.nextUrl.searchParams.get('siteId') ?? ''
+  const rawSiteId = req.nextUrl.searchParams.get('siteId') ?? ''
   // The address the composer is actually sending FROM, which on these sites is
   // a per-site alias — samirkhan@peptidesboxes.com, not the login. Signing a
   // Peptides email with a Shop Cardboard Boxes address invites the customer to
   // reply somewhere nobody is reading.
   const from = req.nextUrl.searchParams.get('from')?.trim() ?? ''
+  // The preview signs as the From address's brand, as the send does (lib/sendsignature.ts).
+  const siteId = rawSiteId ? siteIdForSender(from, rawSiteId) : ''
 
   // A brand-new agent has filled nothing in, and a signature that is only an
   // email address is worse than useless. Their display name and the site's own

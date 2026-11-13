@@ -26,6 +26,7 @@ import { memberSites, type Member } from './auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from './pii'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
 import { asUtcIso } from './visitor'
+import { CRM_FIELD_ROLE, parseCrmField } from './crm'
 import {
   quoteSessionId, isQuoteLeadMessage, isCheckoutLeadMessage, stripQuoteTag, cleanQuoteSubject,
 } from './quoteintake'
@@ -122,7 +123,7 @@ export async function searchLeads(member: Member, rawTerm: string): Promise<{
   // gets to verify it. The last-9 form matches every spelling of the number.
   const phonePattern = phoneish ? loosePhonePattern(phoneKey(term) ?? qDigits) : null
 
-  const [leadsRes, capsRes, sitesRes] = await Promise.all([
+  const [leadsRes, capsRes, sitesRes, fieldsRes] = await Promise.all([
     supabase.from('leads')
       .select('id, site_id, name, email, phone, message, created_at')
       .in('site_id', allowed)
@@ -145,6 +146,17 @@ export async function searchLeads(member: Member, rawTerm: string): Promise<{
       .order('created_at', { ascending: false })
       .limit(ROW_CAP),
     supabase.from('sites').select('site_id, name'),
+    // Name / email / phone edited on the record (crm_field rows). A phone-call
+    // lead is created with only a number; the agent fills the name and email in
+    // later, and without this the lead could only ever be found by its number
+    // (Saifullah, 2026-11-13).
+    supabase.from('chat_logs')
+      .select('session_id, site_id, message, created_at')
+      .eq('role', CRM_FIELD_ROLE)
+      .in('site_id', allowed)
+      .or([`message.ilike.${like}`, ...(phonePattern ? [`message.ilike.${phonePattern}`] : [])].join(','))
+      .order('created_at', { ascending: false })
+      .limit(ROW_CAP),
   ])
 
   const siteName: Record<string, string> = {}
@@ -200,6 +212,49 @@ export async function searchLeads(member: Member, rawTerm: string): Promise<{
       matchedOn, snippet, at: asUtcIso(l.created_at),
     })
     seen.add(id)
+  }
+
+  // ── leads found by a value edited on the record ────────────────────────────
+  const editedIds = Array.from(new Set(((fieldsRes.data ?? []) as CaptureRow[]).map((r) => r.session_id))).filter((sid) => !seen.has(sid))
+  if (editedIds.length) {
+    // Every edit on those leads, oldest first, so the latest value per field wins
+    // and a lead is only a hit on what it says NOW, not on a value since replaced.
+    const [{ data: edits }, { data: base }] = await Promise.all([
+      supabase.from('chat_logs').select('session_id, site_id, message, created_at')
+        .eq('role', CRM_FIELD_ROLE).in('session_id', editedIds).order('created_at', { ascending: true }),
+      supabase.from('leads').select('id, site_id, name, email, phone, message, created_at')
+        .in('id', editedIds.map((sid) => sid.replace(/^quote-/, ''))),
+    ])
+    const baseOf = new Map(((base ?? []) as LeadRow[]).map((l) => [quoteSessionId(l.id), l]))
+    const current = new Map<string, { site: string; at: string; name?: string; email?: string; phone?: string }>()
+    for (const r of (edits ?? []) as CaptureRow[]) {
+      const f = parseCrmField(r.message)
+      if (!f) continue
+      const cur = current.get(r.session_id) ?? { site: r.site_id, at: r.created_at }
+      cur[f.field] = f.value
+      current.set(r.session_id, cur)
+    }
+    for (const [sid, cur] of current) {
+      const l = baseOf.get(sid)
+      if (!l) continue // chat leads were already covered through their capture row
+      const name = (cur.name ?? l.name ?? '').trim()
+      const email = cur.email ?? l.email
+      const phone = cur.phone ?? l.phone
+      const matchedOn: MatchField | null =
+        name.toLowerCase().includes(lower) ? 'name'
+        : normEmail(email).includes(lower) ? 'email'
+        : (phoneish && phoneMatches(phone, term)) ? 'phone'
+        : null
+      if (!matchedOn) continue
+      const body = stripQuoteTag(l.message)
+      hits.push({
+        id: sid, siteId: l.site_id, siteName: siteName[l.site_id] ?? l.site_id,
+        name: name || email || 'Unnamed lead', email, phone,
+        kind: isCheckoutLeadMessage(l.message) ? 'checkout' : isQuoteLeadMessage(l.message) ? 'quote' : 'chat',
+        matchedOn, snippet: matchedOn === 'name' || matchedOn === 'email' ? null : snippetAround(body, term), at: asUtcIso(l.created_at),
+      })
+      seen.add(sid)
+    }
   }
 
   // ── site-name matches ──────────────────────────────────────────────────────

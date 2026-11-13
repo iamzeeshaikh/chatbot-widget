@@ -157,6 +157,8 @@ export interface LeadRecord {
   related: RelatedLead[]
   timeline: TimelineEvent[]
   assignableMembers: string[]
+  /** Sites this lead may be moved to (form/phone leads only; empty for chats). */
+  siteChoices: { id: string; name: string }[]
   messageCount: number
 }
 
@@ -932,6 +934,15 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     const sites = m.assigned_sites ?? []
     if (sites.length === 0 || sites.includes(siteId)) assignable.add(m.email)
   }
+  // A form or phone lead can be moved to the site it really belongs to — a call
+  // on the shared number is filed on a placeholder site (lib/inbound.ts). A chat
+  // came from one widget, so its site is a fact and is not offered.
+  let siteChoices: { id: string; name: string }[] = []
+  if (isQuoteSessionId(id)) {
+    const { data: rows } = await supabase.from('sites').select('site_id, name').in('site_id', memberSites(member))
+    siteChoices = (rows ?? []).map((r) => ({ id: String(r.site_id), name: String(r.name ?? r.site_id) }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
   // The current owner stays listed even if they no longer qualify, or the
   // dropdown would silently show somebody else's lead as unassigned.
   if (owner) assignable.add(owner)
@@ -1014,6 +1025,7 @@ export async function loadLeadRecord(member: Member, id: string): Promise<LeadRe
     related,
     timeline,
     assignableMembers: Array.from(assignable).sort(),
+    siteChoices,
     messageCount: realMessages.length,
   }
 

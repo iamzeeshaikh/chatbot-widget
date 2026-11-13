@@ -107,3 +107,15 @@ export function siteIdentityPrompt(siteId: string, siteName: string): string {
     ``,
   ].join('\n')
 }
+
+// The site whose own domain a send-as address is on, else `fallback`. A reply
+// signs as the brand it is sent FROM: an agent who switches the From to
+// info@thecustomfolders.com on a lead filed under Shop Cardboard Boxes (a
+// phone-call placeholder) must not sign it "Shop Cardboard Boxes" with that
+// logo (Saifullah, 2026-11-13).
+export function siteIdForSender(from: string, fallback: string): string {
+  const domain = (from.split('@')[1] ?? '').trim().toLowerCase()
+  if (!domain) return fallback
+  for (const [id, d] of Object.entries(SITE_DOMAINS)) if (d.toLowerCase() === domain) return id
+  return fallback
+}

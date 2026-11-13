@@ -5,6 +5,7 @@
 // copies of these rules would drift, and a customer would get one signature
 // from the agent and a different one from "the agent" an hour later.
 
+import { siteIdForSender } from './sitedomains'
 import { supabase } from './supabase'
 import { loadAgentSignatures, loadSiteContacts, renderSignature, renderSignatureHtml } from './signature'
 import { storedMemberNames } from './membername'
@@ -19,6 +20,8 @@ export async function buildSendSignature(opts: {
   /** Absolute base for the logo URL — the recipient's client fetches it from outside. */
   base: string
 }): Promise<{ text: string; html: string }> {
+  // Signed as the brand the From address belongs to (lib/sitedomains.ts).
+  opts = { ...opts, siteId: siteIdForSender(opts.from, opts.siteId) }
   const [agentSigs, siteContacts, allSites, chatNames] = await Promise.all([
     loadAgentSignatures(), loadSiteContacts(),
     supabase.from('sites').select('site_id, name'), storedMemberNames(),
