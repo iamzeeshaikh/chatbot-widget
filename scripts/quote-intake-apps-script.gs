@@ -221,6 +221,11 @@ var LABEL_ALIASES = {
   // The Custom Labels UK files under the owner's Gmail label "tcl" (seen on a
   // "PRICE THESE LABELS" form mail, 2026-11-13); its code is TCLU.
   'tcl': 'TCLU',
+  'tclu': 'TCLU',
+  // The Mailer Boxes UK: owner's label is "tmb" and he may rename it to the
+  // code itself (2026-11-13). TMBU is not in SITE_CODES, so both need an entry.
+  'tmb': 'TMBU',
+  'tmbu': 'TMBU',
 };
 
 // The one place a label leaf becomes a site code. Returns the code, or null.
