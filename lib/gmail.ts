@@ -365,6 +365,15 @@ async function gapi(
       ? {}
       : await res.json().catch(() => ({})) as GoogleError & Record<string, unknown>
     if (!isRateLimited(res.status, json)) return { res, json }
+    // Gmail named a time: stop now and leave the mailbox alone until then.
+    const named = parseRetryAfter(String(json?.error?.message ?? ''))
+    if (named && named - Date.now() > COOLDOWN_MIN_MS) {
+      const until = Math.min(named + 30_000, Date.now() + COOLDOWN_MAX_MS)
+      const bearer = (new Headers(init.headers ?? {}).get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+      const owner = tokenOwner.get(bearer)
+      if (owner) await startCooldown(owner, until)
+      throw new GmailRateError(pausedMessage(until), until - Date.now())
+    }
     if (attempt >= limit) {
       throw new GmailRateError(
         `Gmail is rate-limiting this mailbox at the moment, so ${what} did not go through. ` +
@@ -373,6 +382,81 @@ async function gapi(
     }
     await sleep(backoffMs(attempt, res.headers.get('retry-after'), patient))
   }
+}
+
+// ── mailbox cooldown ─────────────────────────────────────────────────────────
+// Gmail has two kinds of "slow down". The ordinary one clears in a second or two
+// and the retries above ride it out. The other names a time: "User-rate limit
+// exceeded. Retry after 2026-11-16T18:21:44Z", about fifteen minutes ahead, and
+// it applies to the whole mailbox, whichever client is asking. On 2026-11-16 one
+// agent's mailbox sat in that state for over an hour while four crons and the
+// composer kept asking every few minutes, each answer naming a time fifteen
+// minutes after the ask. So when Gmail names a time we stop: the mailbox is left
+// completely alone until then, by every instance, and callers are told when.
+// Stored as a control row because instances share no memory.
+export const GMAIL_COOLDOWN_ROLE = 'gmail_cooldown'
+export const GMAIL_COOLDOWN_SESSION = 'zeeops-crm-gmail-cooldown'
+/** A named wait shorter than this is ordinary throttling; the retries handle it. */
+const COOLDOWN_MIN_MS = 45_000
+/** Never trust a named time further out than this; ask again after it. */
+const COOLDOWN_MAX_MS = 30 * 60_000
+const COOLDOWN_RECHECK_MS = 60_000
+const cooldownMem = new Map<string, { until: number; checked: number }>()
+/** Which mailbox an access token belongs to, so gapi() can name the mailbox. */
+const tokenOwner = new Map<string, string>()
+
+/** The time Gmail asked us to wait until, if its error message names one. */
+export function parseRetryAfter(message: string): number | null {
+  const m = /retry after\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i.exec(String(message ?? ''))
+  if (!m) return null
+  const t = Date.parse(m[1])
+  return Number.isFinite(t) ? t : null
+}
+
+function pausedMessage(until: number): string {
+  const at = new Date(until).toLocaleTimeString('en-US', { timeZone: 'Asia/Karachi', hour: 'numeric', minute: '2-digit' })
+  return `Gmail has paused this mailbox until about ${at} (Pakistan time). ZeeOps is leaving it alone until then, ` +
+    'because asking again restarts the wait. The connection is fine \u2014 send from another connected mailbox meanwhile, or try again after that time.'
+}
+
+/** Epoch ms this mailbox is paused until, or 0. One database read a minute per instance at most. */
+async function coolingUntil(email: string): Promise<number> {
+  const key = email.toLowerCase()
+  const now = Date.now()
+  const mem = cooldownMem.get(key)
+  if (mem && (mem.until > now || now - mem.checked < COOLDOWN_RECHECK_MS)) return mem.until
+  let until = 0
+  try {
+    const { data } = await supabase
+      .from('chat_logs')
+      .select('message, created_at')
+      .eq('role', GMAIL_COOLDOWN_ROLE)
+      .eq('session_id', GMAIL_COOLDOWN_SESSION)
+      .gte('created_at', new Date(now - COOLDOWN_MAX_MS - 60_000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(50)
+    for (const r of data ?? []) {
+      try {
+        const o = JSON.parse(r.message) as { email?: string; until?: number }
+        if (o?.email?.toLowerCase() === key && Number(o.until) > until) until = Number(o.until)
+      } catch { /* skip */ }
+    }
+  } catch { /* a failed read must never block mail; treat as not paused */ }
+  cooldownMem.set(key, { until, checked: now })
+  return until
+}
+
+async function startCooldown(email: string, until: number): Promise<void> {
+  const key = email.toLowerCase()
+  cooldownMem.set(key, { until, checked: Date.now() })
+  try {
+    await supabase.from('chat_logs').insert({
+      site_id: REMINDER_SITE,
+      session_id: GMAIL_COOLDOWN_SESSION,
+      role: GMAIL_COOLDOWN_ROLE,
+      message: JSON.stringify({ email: key, until, at: new Date().toISOString() }),
+    })
+  } catch { /* the in-memory pause still holds for this instance */ }
 }
 
 // ── caches ───────────────────────────────────────────────────────────────────
@@ -397,6 +481,8 @@ const ALIAS_CACHE_MS = 5 * 60 * 1000
 /** Fresh access token for an agent, or a clear error saying to reconnect. */
 export async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<string> {
   const key = email.toLowerCase()
+  const paused = await coolingUntil(key)
+  if (paused > Date.now()) throw new GmailRateError(pausedMessage(paused), paused - Date.now())
   const hit = tokenCache.get(key)
   if (hit && hit.expires > Date.now()) return hit.token
 
@@ -446,6 +532,7 @@ export async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<
     // A minute of headroom, so a token never expires mid-flight.
     expires: Date.now() + Math.min(lifetimeMs - 60_000, TOKEN_CACHE_MAX_MS),
   })
+  tokenOwner.set(token, key)
   return token
 }
 
