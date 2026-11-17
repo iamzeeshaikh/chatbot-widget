@@ -17,7 +17,7 @@ import {
   CreditCard, Info, Check, X, TrendingDown, LogOut, MessageCircle, PhoneCall, ExternalLink, type LucideIcon,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
-import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature } from '@/lib/workspaces'
+import { LEAD_TRACKED_SITES, WORKSPACE_LABEL, hasFeature, type Workspace } from '@/lib/workspaces'
 import { canUseCosting } from '@/lib/costing'
 import { canSeeGrowth } from '@/lib/salescore'
 import { isBotOffBySchedule, isBotOffByScheduleForWorkspace } from '@/lib/botschedule'
@@ -948,6 +948,9 @@ export default function Dashboard() {
   // reads the KIND above, and this flag carries the one thing that differs on
   // screen so far, its name. The server alone decides whose data is shown.
   const [isZeeDesk, setIsZeeDesk] = useState(false)
+  // The member's real workspace, for feature checks: ZeeDesk looks like
+  // packaging but does not carry every packaging feature yet.
+  const team: Workspace = isZeeDesk ? 'zeedesk' : workspace
   const [authReady, setAuthReady] = useState(false)
   // Navigation badge for /tasks — overdue + due today for this member.
   const [taskBadge, setTaskBadge] = useState(0)
@@ -1691,7 +1694,7 @@ export default function Dashboard() {
     if (!authReady) return
     // A workspace without tasks has no badge to poll for — and the endpoint
     // would 403 on every tick.
-    if (!hasFeature(workspace, 'tasks')) return
+    if (!hasFeature(team, 'tasks')) return
     const pull = () => fetch('/api/tasks/count')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -2334,7 +2337,7 @@ export default function Dashboard() {
   async function setLeadStage(lead: Lead, stage: CrmStage, lost?: { reason: LostReason; note: string }) {
     const previous = lead.stage ?? 'new'
     if (previous === stage) return
-    if (stage === 'lost' && hasFeature(workspace, 'lost')) {
+    if (stage === 'lost' && hasFeature(team, 'lost')) {
       // The select is bound to lead.stage, so it stays put until a reason is
       // picked; the move waits for the server so a refusal shows in the dialog.
       if (!lost) { setLostAskLead({ id: lead.id, busy: false, err: '' }); return }
@@ -2436,23 +2439,23 @@ export default function Dashboard() {
   const hasTrackedSite = userSites.some((id) => LEAD_TRACKED_SITES.includes(id))
   // The CRM surfaces are per-workspace (WORKSPACE_FEATURES in lib/workspaces.ts).
   // Hiding them here is the courtesy half; their API routes refuse independently.
-  const canRecords = hasFeature(workspace, 'records')
-  const canPipeline = hasFeature(workspace, 'pipeline')
-  const canTasks = hasFeature(workspace, 'tasks')
-  const canEmail = hasFeature(workspace, 'email')
-  const canWhatsApp = hasFeature(workspace, 'telephony')
-  const canReports = hasFeature(workspace, 'reports')
+  const canRecords = hasFeature(team, 'records')
+  const canPipeline = hasFeature(team, 'pipeline')
+  const canTasks = hasFeature(team, 'tasks')
+  const canEmail = hasFeature(team, 'email')
+  const canWhatsApp = hasFeature(team, 'telephony')
+  const canReports = hasFeature(team, 'reports')
   // The sales ledger is an owner's page like Billing: admins only, and the
   // API refuses everyone else regardless.
-  const canSales = hasFeature(workspace, 'sales') && userRole === 'admin'
-  const canJobs = hasFeature(workspace, 'jobs')
+  const canSales = hasFeature(team, 'sales') && userRole === 'admin'
+  const canJobs = hasFeature(team, 'jobs')
   // Costing (lib/costing.ts): packaging admins and the costing person.
-  const canCosting = canUseCosting({ role: userRole, workspace, email: userEmail })
-  const canOpportunities = hasFeature(workspace, 'opportunities') && !ownLeadsOnly
+  const canCosting = canUseCosting({ role: userRole, workspace: team, email: userEmail })
+  const canOpportunities = hasFeature(team, 'opportunities') && !ownLeadsOnly
   // Lost leads to win back (packaging only). Own-leads-only members get it
   // too — /api/lost narrows them to their own Lost leads.
-  const canLost = hasFeature(workspace, 'lost')
-  const showFirstResponse = hasFeature(workspace, 'quotebot')
+  const canLost = hasFeature(team, 'lost')
+  const showFirstResponse = hasFeature(team, 'quotebot')
   // The product is a chat inbox, a pipeline, tasks and email now, so the old
   // "Chat Widget" undersold it. Confirmed with the user before changing.
   // The product's name. Do not change it without asking — it was renamed to
@@ -2464,7 +2467,7 @@ export default function Dashboard() {
   // the favicon, which dashboard you are in is answerable at a glance — which
   // was the whole complaint: both were blue and both said the same thing.
   const dashTitle = isZeeDesk ? 'ZeeDesk' : brand === 'sports' ? 'ZeeOps Sports' : 'ZeeOps Chat Widget'
-  const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
+  const accentColor = isZeeDesk ? '#1f73b7' : brand === 'sports' ? '#16a34a' : '#2563eb'
 
   // Effective bot state for the open conversation. The packaging schedule can put
   // the bot OFF even when the conversation's stored mode is still 'bot', so the
@@ -2646,7 +2649,7 @@ export default function Dashboard() {
           reserved at a fixed width and merely hidden until it has a value, and
           the active tab is a background change only — no border, no extra
           padding — so selecting a tab cannot re-flow the row. See CLAUDE.md. */}
-      <div ref={headerRef}
+      <div ref={headerRef} data-appbar
         className="border-b border-gray-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] px-3 sm:px-5 pt-2.5 pb-2 sm:pt-3 sm:pb-2.5 flex items-center flex-wrap gap-x-2 xl:gap-x-3 sticky top-0 z-10">
         {/* The workspace accent, once, as a hairline across the top of the
             app bar — a div rather than a border, because the dark theme's
@@ -3079,7 +3082,7 @@ export default function Dashboard() {
                 {breakdownOpen && (
                   <SiteBreakdown data={breakdown} loading={breakdownLoading} error={breakdownError}
                     accent={accentColor} onClose={() => setBreakdownOpen(false)}
-                    canDrill={hasFeature(workspace, 'trafficdetail')} />
+                    canDrill={hasFeature(team, 'trafficdetail')} />
                 )}
               </div>
 
@@ -3770,13 +3773,13 @@ export default function Dashboard() {
                         original single self-contained HTML download, untouched.
                         The API route enforces the same gate server-side. */}
                     <a href={`/api/admin/chat-download?sessionId=${encodeURIComponent(selectedSession.session_id)}`} download
-                      title={hasFeature(workspace, 'chatpdf')
+                      title={hasFeature(team, 'chatpdf')
                         ? 'Download this chat as a PDF, images included'
                         : 'Download this chat as an HTML file, images included'}
                       className="text-xs font-medium px-2.5 py-1 rounded-lg border border-gray-300 bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors flex items-center gap-1.5">
-                      <Download size={12} strokeWidth={2} aria-hidden /> {hasFeature(workspace, 'chatpdf') ? 'PDF' : 'Download'}
+                      <Download size={12} strokeWidth={2} aria-hidden /> {hasFeature(team, 'chatpdf') ? 'PDF' : 'Download'}
                     </a>
-                    {hasFeature(workspace, 'chatpdf') && (
+                    {hasFeature(team, 'chatpdf') && (
                       <a href={`/api/admin/chat-download?sessionId=${encodeURIComponent(selectedSession.session_id)}&format=html`} download
                         title="Download this chat as an HTML file instead (renders emoji and non-English text)"
                         className="text-[11px] text-gray-500 hover:text-gray-800 underline">HTML</a>
