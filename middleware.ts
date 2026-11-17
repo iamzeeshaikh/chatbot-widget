@@ -12,6 +12,11 @@ function cookieUid(value: string): string {
   } catch { return '' }
 }
 
+function uiWorkspace(value: string | undefined): string {
+  if (!value) return ''
+  try { return String(JSON.parse(atob(decodeURIComponent(value)))?.workspace ?? '') } catch { return '' }
+}
+
 export function middleware(req: NextRequest) {
   const session = req.cookies.get('zee-session')
   if (!session) {
@@ -20,6 +25,13 @@ export function middleware(req: NextRequest) {
   // The designer/estimator's account lives on /jobs (lib/jobsonly.ts).
   if (JOBS_ONLY_UIDS.includes(cookieUid(session.value)) && !req.nextUrl.pathname.startsWith('/jobs')) {
     return NextResponse.redirect(new URL('/jobs', req.url))
+  }
+  // A ZeeDesk member gets that team's own interface (app/zd) at the root. The
+  // readable cookie only picks which UI to serve; every API still decides
+  // access from the signed session. Anything unreadable falls through to the
+  // normal dashboard, so this can never lock anybody out.
+  if (req.nextUrl.pathname === '/' && uiWorkspace(req.cookies.get('zee-auth')?.value) === 'zeedesk') {
+    return NextResponse.rewrite(new URL('/zd', req.url))
   }
   return NextResponse.next()
 }
