@@ -401,6 +401,14 @@ const COOLDOWN_MIN_MS = 45_000
 /** Never trust a named time further out than this; ask again after it. */
 const COOLDOWN_MAX_MS = 30 * 60_000
 const COOLDOWN_RECHECK_MS = 60_000
+/**
+ * After a pause ends, background work (sweeps, intake, crons) stays away this
+ * much longer. On 2026-11-17 a mailbox came out of each pause straight into a
+ * cron's five parallel reads, was paused again within the second, and an agent
+ * waiting to send never got a turn for hours. The person at the composer goes
+ * first, and alone.
+ */
+const BACKGROUND_EXTRA_MS = 10 * 60_000
 const cooldownMem = new Map<string, { until: number; checked: number }>()
 /** Which mailbox an access token belongs to, so gapi() can name the mailbox. */
 const tokenOwner = new Map<string, string>()
@@ -432,7 +440,7 @@ async function coolingUntil(email: string): Promise<number> {
       .select('message, created_at')
       .eq('role', GMAIL_COOLDOWN_ROLE)
       .eq('session_id', GMAIL_COOLDOWN_SESSION)
-      .gte('created_at', new Date(now - COOLDOWN_MAX_MS - 60_000).toISOString())
+      .gte('created_at', new Date(now - COOLDOWN_MAX_MS - BACKGROUND_EXTRA_MS - 60_000).toISOString())
       .order('created_at', { ascending: false })
       .limit(50)
     for (const r of data ?? []) {
@@ -479,10 +487,14 @@ const aliasCache = new Map<string, { at: number; list: SendAsAlias[] }>()
 const ALIAS_CACHE_MS = 5 * 60 * 1000
 
 /** Fresh access token for an agent, or a clear error saying to reconnect. */
-export async function accessTokenFor(email: string, cfg: GoogleConfig): Promise<string> {
+export async function accessTokenFor(email: string, cfg: GoogleConfig, forSend = false): Promise<string> {
   const key = email.toLowerCase()
   const paused = await coolingUntil(key)
   if (paused > Date.now()) throw new GmailRateError(pausedMessage(paused), paused - Date.now())
+  // Just out of a pause: only a person's own send may use the mailbox yet.
+  if (!forSend && paused && paused + BACKGROUND_EXTRA_MS > Date.now()) {
+    throw new GmailRateError(pausedMessage(paused + BACKGROUND_EXTRA_MS), paused + BACKGROUND_EXTRA_MS - Date.now())
+  }
   const hit = tokenCache.get(key)
   if (hit && hit.expires > Date.now()) return hit.token
 
@@ -547,7 +559,7 @@ export interface SendAsAlias {
 // The list Google itself considers verified. The client is never trusted for
 // this: a from-address is checked against THIS list at send time, so an agent
 // cannot spoof an address Google has not confirmed they own.
-export async function verifiedAliases(email: string, cfg: GoogleConfig): Promise<SendAsAlias[]> {
+export async function verifiedAliases(email: string, cfg: GoogleConfig, forSend = false): Promise<SendAsAlias[]> {
   // Verified aliases change about once a year. Re-reading them on every single
   // send spent a Gmail call — and the quota that went with it — proving
   // something that had not moved since the last message.
@@ -555,7 +567,14 @@ export async function verifiedAliases(email: string, cfg: GoogleConfig): Promise
   const cached = aliasCache.get(key)
   if (cached && Date.now() - cached.at < ALIAS_CACHE_MS) return cached.list
 
-  const token = await accessTokenFor(email, cfg)
+  let token: string
+  try {
+    token = await accessTokenFor(email, cfg, forSend)
+  } catch (e) {
+    // A paused mailbox still has the aliases it had ten minutes ago.
+    if (cached && e instanceof GmailRateError) return cached.list
+    throw e
+  }
   const { res, json: j } = await gapi(
     `${API}/settings/sendAs`, { headers: { Authorization: `Bearer ${token}` } },
     'your send-as addresses could not be read', true,
@@ -714,12 +733,17 @@ function buildMime(m: OutgoingEmail, messageId: string): string {
   return out.join('\r\n')
 }
 
-export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: OutgoingEmail): Promise<SentResult> {
-  const token = await accessTokenFor(agentEmail, cfg)
+/**
+ * `byPerson` is true when somebody pressed Send. Their email is the first thing
+ * allowed through a mailbox that has just come out of a Gmail pause; a bot's
+ * email waits with the rest of the background work.
+ */
+export async function sendEmail(agentEmail: string, cfg: GoogleConfig, m: OutgoingEmail, byPerson = false): Promise<SentResult> {
+  const token = await accessTokenFor(agentEmail, cfg, byPerson)
 
   // Verify the From against Google's own list on every send — the composer's
   // dropdown is a convenience, not the authority.
-  const aliases = await verifiedAliases(agentEmail, cfg)
+  const aliases = await verifiedAliases(agentEmail, cfg, byPerson)
   const match = aliases.find((a) => a.email.toLowerCase() === m.from.trim().toLowerCase())
   if (!match) {
     throw new Error(`"${m.from}" is not a verified send-as address on your Google account.`)

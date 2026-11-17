@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 
   const cfg = googleConfig(req.nextUrl.origin)!
   try {
-    const aliases = await verifiedAliases(member.email, cfg)
+    const aliases = await verifiedAliases(member.email, cfg, true)
     return NextResponse.json({
       connected: true, configured: true, connectedAt: conn.connectedAt, aliases,
       canReadReplies: conn.canRead,

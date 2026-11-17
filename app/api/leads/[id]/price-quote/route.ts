@@ -26,7 +26,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!record) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   const cfg = googleConfig(req.nextUrl.origin)
   let aliases: { email: string; displayName: string }[] = []
-  try { if (cfg) aliases = (await verifiedAliases(access.member.email, cfg)).map((a) => ({ email: a.email, displayName: a.displayName })) } catch { aliases = [] }
+  try { if (cfg) aliases = (await verifiedAliases(access.member.email, cfg, true)).map((a) => ({ email: a.email, displayName: a.displayName })) } catch { aliases = [] }
   const to = await leadRecipient(id)
   const lastIn = [...record.timeline].reverse().find((e) => e.kind === 'email_in')
   const cc = to ? customerCc({ customer: to, leadText: record.quoteMessage }) : []
@@ -85,13 +85,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const msg = { from, to, cc: cc || undefined, subject, body: finalText, html: finalHtml, inReplyTo: thread?.inReplyTo, references: thread?.references,
       attachments: pdf ? [{ name: pdf.name, mime: 'application/pdf', bytes: pdf.bytes }] : undefined }
     try {
-      sent = await sendEmail(access.member.email, cfg, { ...msg, threadId: thread?.threadId })
+      sent = await sendEmail(access.member.email, cfg, { ...msg, threadId: thread?.threadId }, true)
     } catch (e) {
       // The thread lives in another agent's mailbox (the customer wrote to
       // Steve, Samir sends the quote): Gmail answers 404. The headers still
       // thread it in the customer's mail client, so send without the id.
       if (!thread?.threadId || !/not found/i.test(e instanceof Error ? e.message : '')) throw e
-      sent = await sendEmail(access.member.email, cfg, msg)
+      sent = await sendEmail(access.member.email, cfg, msg, true)
     }
   } catch (e) {
     if (e instanceof GmailRateError) return NextResponse.json({ error: e.message }, { status: 429 })

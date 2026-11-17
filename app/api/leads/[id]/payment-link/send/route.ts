@@ -141,7 +141,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   let aliases: SendAsAlias[]
   try {
-    aliases = await verifiedAliases(access.member.email, cfg)
+    aliases = await verifiedAliases(access.member.email, cfg, true)
   } catch (e) {
     if (e instanceof GmailRateError) return NextResponse.json({ error: e.message, retryable: true }, { status: 429 })
     if (e instanceof GmailAuthError) return NextResponse.json({ error: e.message, needsReconnect: true }, { status: 401 })
@@ -189,7 +189,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   try {
     sent = await sendEmail(access.member.email, cfg, {
       from: alias.email, to, subject, body: finalText, html: finalHtml,
-    })
+    }, true)
   } catch (e) {
     if (e instanceof GmailRateError) return NextResponse.json({ error: e.message, retryable: true }, { status: 429 })
     if (e instanceof GmailAuthError) return NextResponse.json({ error: e.message, needsReconnect: true }, { status: 401 })

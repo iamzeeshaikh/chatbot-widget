@@ -185,7 +185,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       inReplyTo: thread?.inReplyTo,
       references: thread?.references,
       attachments: files,
-    })
+    }, true)
   } catch (e) {
     if (e instanceof GmailRateError) {
       // Gmail was busy, not broken. This used to arrive as a 403 and be read as

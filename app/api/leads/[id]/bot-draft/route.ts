@@ -84,7 +84,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     sent = await sendEmail(sender.agent, cfg, {
       from: sender.from, to: draft.to, cc: cc || undefined, subject, body: finalText, html: finalHtml,
       threadId: sender.moved ? undefined : thread?.threadId, inReplyTo: thread?.inReplyTo, references: thread?.references,
-    })
+    }, true)
   } catch (e) {
     const why = e instanceof GmailAuthError ? `${sender.agent}'s Gmail needs reconnecting` : (e instanceof Error ? e.message : 'Gmail rejected the message')
     return NextResponse.json({ error: why }, { status: 502 })
