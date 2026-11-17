@@ -44,7 +44,10 @@ export const HARDCODED_ACCOUNTS: { email: string; password: string; workspace: W
   { email: 'sports@zeeops.dev', password: BUILTIN_ADMIN_PASSWORD, workspace: 'sports' },
   // ZeeDesk's bootstrap admin, on its own domain so nothing in that team's
   // login names ZeeOps.
-  { email: 'admin@zeedesk.dev', password: BUILTIN_ADMIN_PASSWORD, workspace: 'zeedesk' },
+  // Its OWN password (ZEEDESK_ADMIN_PASSWORD), never the shared one: whoever
+  // is given this login must not thereby hold the packaging and sports ones.
+  // Unset means the account cannot sign in at all.
+  { email: 'admin@zeedesk.dev', password: process.env.ZEEDESK_ADMIN_PASSWORD || '', workspace: 'zeedesk' },
 ]
 
 // ── Signed session token: `<payload>.<hmac>` ─────────────────────────────────

@@ -6,6 +6,8 @@ import ReplyBell from "./components/ReplyBell";
 import Softphone from "./components/Softphone";
 import DialPad from "./components/DialPad";
 import WorkspaceChrome from "./components/WorkspaceChrome";
+import { headers } from "next/headers";
+import { workspaceForHost } from "@/lib/workspaces";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,7 +19,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
+const ZEEOPS_METADATA: Metadata = {
   title: "ZeeOps Dashboard",
   description: "ZeeOps chatbot management dashboard",
   // Installable-app (PWA) metadata for agents' phones/desktops.
@@ -36,6 +38,21 @@ export const metadata: Metadata = {
   // translate="no" note on <html> below for why that matters here.
   other: { google: "notranslate" },
 };
+
+// The ZeeDesk hosts answer under their own name: that team's pages must not
+// carry the other dashboards' name in a title, a description or the
+// home-screen label.
+const ZEEDESK_METADATA: Metadata = {
+  title: "ZeeDesk",
+  description: "ZeeDesk workspace",
+  appleWebApp: { capable: true, title: "ZeeDesk", statusBarStyle: "default" },
+  other: { google: "notranslate" },
+};
+
+export async function generateMetadata(): Promise<Metadata> {
+  const host = (await headers()).get("host");
+  return workspaceForHost(host) === "zeedesk" ? ZEEDESK_METADATA : ZEEOPS_METADATA;
+}
 
 export default function RootLayout({
   children,

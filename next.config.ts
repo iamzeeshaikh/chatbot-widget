@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/api/intake/pull': ['./scripts/quote-intake-apps-script.gs'],
     '/api/intake/script': ['./scripts/quote-intake-apps-script.gs', './scripts/sports-quote-intake-apps-script.gs'],
+    '/w.js': ['./public/widget.js'],
   },
   async headers() {
     return [

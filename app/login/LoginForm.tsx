@@ -121,7 +121,7 @@ export default function LoginForm({ workspace }: { workspace: Workspace | null }
               required
               autoComplete="email"
               className={`w-full bg-gray-200 border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none ${brand.focus} transition-colors`}
-              placeholder="you@zeeops.dev"
+              placeholder={workspace === 'zeedesk' ? 'you@zeedesk.dev' : 'you@zeeops.dev'}
             />
           </div>
           <div>

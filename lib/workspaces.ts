@@ -296,6 +296,9 @@ export const HOST_WORKSPACES: Record<string, Workspace> = {
   'chat.zeeops.dev': 'packaging',
   'crm.zeeops.dev': 'packaging',
   'app.zeedesk.dev': 'zeedesk',
+  // The widget host. It serves the ZeeDesk sites' widget and API calls; bound
+  // so that its login page can never admit another team's account.
+  'chat.zeedesk.dev': 'zeedesk',
 }
 
 // Where to send someone who turned up at the wrong dashboard.
