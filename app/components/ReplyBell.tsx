@@ -42,27 +42,27 @@ export function ringReplyBell() {
   if (!c) return
   try {
     if (c.state === 'suspended') void c.resume()
-    const master = c.createGain(); master.gain.value = 1
-    const shaper = c.createWaveShaper()
-    const curve = new Float32Array(1024)
-    for (let i = 0; i < 1024; i++) { const x = (i / 1023) * 2 - 1; curve[i] = Math.tanh(x * 1.6) }
-    shaper.curve = curve
-    master.connect(shaper); shaper.connect(c.destination)
-    const partials: [number, number][] = [[0.5, 0.55], [1, 1], [1.2, 0.45], [1.5, 0.35], [2, 0.5], [2.74, 0.2]]
-    const strike = (freq: number, t: number) => {
-      for (const [ratio, peak] of partials) {
-        const osc = c.createOscillator(); const gain = c.createGain()
-        osc.connect(gain); gain.connect(master)
-        osc.type = 'sine'; osc.frequency.value = freq * ratio
-        gain.gain.setValueAtTime(0, t)
-        gain.gain.linearRampToValueAtTime(peak, t + 0.008)
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 1.1)
-        osc.start(t); osc.stop(t + 1.15)
-      }
+    // The same warm chord, struck twice, as playReplyBell on the dashboard
+    // (app/page.tsx) — the owner's pick of 2026-11-17. Keep the two in step.
+    const master = c.createGain(); master.gain.value = 0.8
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000
+    master.connect(lp); lp.connect(c.destination)
+    const voice = (type: OscillatorType, freq: number, t: number, decay: number, peak: number) => {
+      const osc = c.createOscillator(); const gain = c.createGain()
+      osc.connect(gain); gain.connect(master)
+      osc.type = type; osc.frequency.value = freq
+      gain.gain.setValueAtTime(0, t)
+      gain.gain.linearRampToValueAtTime(peak, t + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + decay)
+      osc.start(t); osc.stop(t + decay + 0.05)
     }
     const t0 = c.currentTime
-    for (const round of [0, 1]) { strike(784, t0 + round); strike(587, t0 + round + 0.45) }
-    strike(784, t0 + 2)
+    for (const at of [0, 1.4]) {
+      ;[523, 659, 784].forEach((freq, i) => {
+        voice('sine', freq, t0 + at + i * 0.03, 1.3, 0.6)
+        voice('triangle', freq * 2, t0 + at + i * 0.03, 0.7, 0.1)
+      })
+    }
   } catch { /* ignore */ }
 }
 

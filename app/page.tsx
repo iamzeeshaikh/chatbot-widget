@@ -1432,52 +1432,40 @@ export default function Dashboard() {
     return () => { ['pointerdown', 'keydown', 'click'].forEach((ev) => window.removeEventListener(ev, unlock, true)) }
   }, [getDashCtx])
 
-  // LOUD, piercing alert for the agent on a new visitor message. Three layered
-  // oscillators per note (sine + bright triangle + sharp sawtooth) at max gain,
-  // driven through a soft limiter so it cuts through a noisy room without harsh
-  // digital clipping. Reuses the shared, already-unlocked context.
+  // New visitor message: a soft two-tap "pop" (D5 then A5), played twice so a
+  // busy agent still catches it. The owner picked it by ear on 2026-11-17 over
+  // the old three-note rising bell, which the team found unpleasant; "twice"
+  // is his ask too. Reuses the shared, already-unlocked context.
   const playDashSound = useCallback(() => {
     if (!soundOn) return
     const ctx = getDashCtx()
     if (!ctx) return
     try {
       if (ctx.state === 'suspended' && ctx.resume) ctx.resume()
-
       const master = ctx.createGain()
       master.gain.value = 0.9
-      const shaper = ctx.createWaveShaper()
-      const curve = new Float32Array(1024)
-      for (let c = 0; c < 1024; c++) {
-        const x = (c / 1023) * 2 - 1
-        curve[c] = Math.tanh(x * 1.1) // gentler saturation = warm, not harsh
+      const lp = ctx.createBiquadFilter()
+      lp.type = 'lowpass'; lp.frequency.value = 6000
+      master.connect(lp); lp.connect(ctx.destination)
+      const tap = (freq: number, t: number, decay: number) => {
+        const osc = ctx.createOscillator(); const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(master)
+        osc.type = 'sine'; osc.frequency.value = freq
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(0.9, t + 0.005)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + decay)
+        osc.start(t); osc.stop(t + decay + 0.05)
       }
-      shaper.curve = curve
-      master.connect(shaper); shaper.connect(ctx.destination)
-
-      // Warm, pleasant three-note rising bell (C6→E6→G6) — sine body + a soft
-      // triangle overtone, no bright sawtooth. Still cuts through a room, but easy
-      // on the ear and repeatable.
-      ;[[1047, 0], [1319, 0.14], [1568, 0.28]].forEach(([freq, delay]) => {
-        const t = ctx.currentTime + delay
-        ;([['sine', freq, 0.95], ['triangle', freq * 2, 0.18]] as [OscillatorType, number, number][]).forEach(([type, f, peak]) => {
-          const osc = ctx.createOscillator(); const gain = ctx.createGain()
-          osc.connect(gain); gain.connect(master)
-          osc.type = type; osc.frequency.value = f
-          gain.gain.setValueAtTime(0, t)
-          gain.gain.linearRampToValueAtTime(peak, t + 0.02)
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6)
-          osc.start(t); osc.stop(t + 0.65)
-        })
-      })
+      const t0 = ctx.currentTime
+      ;[0, 0.55].forEach((at) => { tap(587, t0 + at, 0.12); tap(880, t0 + at + 0.1, 0.22) })
     } catch { /* ignore */ }
   }, [soundOn, getDashCtx])
 
-  // THE BIG BELL — a customer answered (email reply or WhatsApp). The owner
-  // asked for a proper, heavy bell for these ("notification ki proper bell
-  // honi chahie moti wali", 2026-10-14): a reply is money waiting, and the
-  // light chat chime was easy to miss. A low church-bell "ding-dong" struck
-  // three times (~3s), built from inharmonic bell partials with a long decay,
-  // at full gain through the same soft limiter. Same mute switch as the rest.
+  // A customer answered (email reply or WhatsApp): a warm C-major chord, struck
+  // twice. Replaces the heavy church "ding-dong" of 2026-10-14, which the owner
+  // came to dislike; he chose this one by ear on 2026-11-17 and asked for it to
+  // sound twice. Same mute switch as the rest. Keep in step with
+  // app/components/ReplyBell.tsx, which rings the same bell off the dashboard.
   const playReplyBell = useCallback(() => {
     if (!soundOn) return
     const ctx = getDashCtx()
@@ -1485,31 +1473,26 @@ export default function Dashboard() {
     try {
       if (ctx.state === 'suspended' && ctx.resume) ctx.resume()
       const master = ctx.createGain()
-      master.gain.value = 1
-      const shaper = ctx.createWaveShaper()
-      const curve = new Float32Array(1024)
-      for (let c = 0; c < 1024; c++) { const x = (c / 1023) * 2 - 1; curve[c] = Math.tanh(x * 1.6) }
-      shaper.curve = curve
-      master.connect(shaper); shaper.connect(ctx.destination)
-      // Bell partials relative to the strike note (hum, prime, tierce, quint, nominal).
-      const partials: [number, number][] = [[0.5, 0.55], [1, 1], [1.2, 0.45], [1.5, 0.35], [2, 0.5], [2.74, 0.2]]
-      const strike = (freq: number, t: number) => {
-        partials.forEach(([ratio, peak]) => {
-          const osc = ctx.createOscillator(); const gain = ctx.createGain()
-          osc.connect(gain); gain.connect(master)
-          osc.type = 'sine'; osc.frequency.value = freq * ratio
-          gain.gain.setValueAtTime(0, t)
-          gain.gain.linearRampToValueAtTime(peak, t + 0.008)
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 1.1)
-          osc.start(t); osc.stop(t + 1.15)
-        })
+      master.gain.value = 0.8
+      const lp = ctx.createBiquadFilter()
+      lp.type = 'lowpass'; lp.frequency.value = 6000
+      master.connect(lp); lp.connect(ctx.destination)
+      const voice = (type: OscillatorType, freq: number, t: number, decay: number, peak: number) => {
+        const osc = ctx.createOscillator(); const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(master)
+        osc.type = type; osc.frequency.value = freq
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(peak, t + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + decay)
+        osc.start(t); osc.stop(t + decay + 0.05)
       }
       const t0 = ctx.currentTime
-      ;[0, 1].forEach((round) => {
-        strike(784, t0 + round * 1.0)          // ding (G5)
-        strike(587, t0 + round * 1.0 + 0.45)   // dong (D5)
+      ;[0, 1.4].forEach((at) => {
+        ;[523, 659, 784].forEach((freq, i) => {
+          voice('sine', freq, t0 + at + i * 0.03, 1.3, 0.6)
+          voice('triangle', freq * 2, t0 + at + i * 0.03, 0.7, 0.1)
+        })
       })
-      strike(784, t0 + 2.0)
     } catch { /* ignore */ }
   }, [soundOn, getDashCtx])
 
