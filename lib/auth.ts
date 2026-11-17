@@ -165,6 +165,18 @@ export async function ownLeadsOnlyEmails(ws: Workspace): Promise<Set<string>> {
   return new Set(rows.filter((m) => flagged.has(String(m.id))).map((m) => String(m.email).trim().toLowerCase()))
 }
 
+/** Every login that belongs to this workspace: its members plus its built-in
+ *  admin. Rows kept on the shared control site (signatures, display names) are
+ *  keyed by address, so this is what scopes them to one team: an admin must
+ *  never be shown, or be able to edit, another team's people. */
+export async function workspaceEmails(ws: Workspace): Promise<Set<string>> {
+  const { data, error } = await supabase.from('members').select('email').eq('workspace', ws)
+  if (error) throw new Error(error.message)
+  const out = new Set((data ?? []).map((m) => String(m.email).trim().toLowerCase()).filter(Boolean))
+  for (const a of HARDCODED_ACCOUNTS) if (a.workspace === ws) out.add(a.email.toLowerCase())
+  return out
+}
+
 /** Addresses of this workspace's "hide customer contacts" members — a push is
  *  drawn by the OS, outside every read edge, so lib/push.ts scrubs theirs. */
 export async function hideContactsEmails(ws: Workspace): Promise<Set<string>> {

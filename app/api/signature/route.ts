@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getMember, memberSites } from '@/lib/auth'
+import { getMember, memberSites, workspaceEmails } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
 import { writeControlRow } from '@/lib/leadrecord'
 import { REMINDER_SITE } from '@/lib/reminders'
@@ -32,8 +32,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Email is not enabled for this workspace' }, { status: 403 })
   }
 
-  const [agents, sites, mine, chatNames] = await Promise.all([
+  const [agents, sites, mine, chatNames, team] = await Promise.all([
     loadAgentSignatures(), loadSiteContacts(), memberSites(member), storedMemberNames(),
+    member.role === 'admin' ? workspaceEmails(member.workspace) : Promise.resolve(null),
   ])
   // ── the name, when the agent has not set one ──────────────────────────────
   // The chat widget's display name is used, because for eight of the nine
@@ -92,8 +93,11 @@ export async function GET(req: NextRequest) {
           logoSrc: `${req.nextUrl.origin}/api/logo/${encodeURIComponent(siteId)}`,
         })
       : '',
-    // Admins get everyone's, so they can fill in a new starter's details.
-    all: member.role === 'admin' ? Array.from(agents.values()) : undefined,
+    // Admins get their own team's, so they can fill in a new starter's
+    // details. Signatures live on the shared control site, keyed by address:
+    // without this filter a sports or ZeeDesk admin was handed the Model Town
+    // agents' names (found 2026-11-17 while adding the third workspace).
+    all: member.role === 'admin' ? Array.from(agents.values()).filter((a) => team!.has(String(a.email).toLowerCase())) : undefined,
   })
 }
 
@@ -108,6 +112,10 @@ export async function POST(req: NextRequest) {
   const target = String(body.email ?? '').trim().toLowerCase() || member.email.toLowerCase()
   if (target !== member.email.toLowerCase() && member.role !== 'admin') {
     return NextResponse.json({ error: 'You can only edit your own signature.' }, { status: 403 })
+  }
+  // An admin edits their own team only: the row is keyed by address alone.
+  if (target !== member.email.toLowerCase() && !(await workspaceEmails(member.workspace)).has(target)) {
+    return NextResponse.json({ error: 'That person is not on this dashboard.' }, { status: 403 })
   }
 
   const entry = {
