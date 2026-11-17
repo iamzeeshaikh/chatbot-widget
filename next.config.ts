@@ -7,6 +7,20 @@ const nextConfig: NextConfig = {
     '/api/intake/script': ['./scripts/quote-intake-apps-script.gs', './scripts/sports-quote-intake-apps-script.gs'],
     '/w.js': ['./public/widget.js'],
   },
+  // Paths that exist for the ZeeOps dashboards only. On a ZeeDesk host they do
+  // not resolve: the original widget file names chat.zeeops.dev, and the
+  // install page is written for the ZeeOps app. Done here, by host, rather
+  // than in middleware, so the widget every site loads never passes through
+  // code that could fail.
+  async rewrites() {
+    const zeedesk = [{ type: 'host' as const, value: '(app|chat)\\.zeedesk\\.dev' }]
+    return {
+      beforeFiles: [
+        { source: '/widget.js', has: zeedesk, destination: '/_not-found' },
+        { source: '/install', has: zeedesk, destination: '/_not-found' },
+      ],
+    }
+  },
   async headers() {
     return [
       {

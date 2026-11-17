@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { JOBS_ONLY_UIDS } from './lib/jobsonly'
-import { workspaceForHost } from './lib/workspaces'
 
 // The member id inside the session cookie, read WITHOUT verifying it. That is
 // enough for a redirect and nothing more: the real refusal for a jobs-only
@@ -13,18 +12,7 @@ function cookieUid(value: string): string {
   } catch { return '' }
 }
 
-// Paths that exist for the ZeeOps dashboards only. On a ZeeDesk host they
-// answer 404: the original widget file names chat.zeeops.dev, and the install
-// page is written for the ZeeOps app.
-const ZEEOPS_ONLY = ['/widget.js', '/install']
-
 export function middleware(req: NextRequest) {
-  const pathname = req.nextUrl.pathname
-  if (ZEEOPS_ONLY.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
-    const host = (req.headers.get('host') || '').toLowerCase().split(':')[0]
-    if (workspaceForHost(host) === 'zeedesk') return new NextResponse('Not found', { status: 404 })
-    return NextResponse.next()
-  }
   const session = req.cookies.get('zee-session')
   if (!session) {
     return NextResponse.redirect(new URL('/login', req.url))
@@ -41,5 +29,5 @@ export const config = {
   // task queue. This only bounces signed-out browsers to /login — per-site
   // access for a signed-in member is enforced server-side in /api/leads/[id]
   // and /api/tasks.
-  matcher: ['/', '/members', '/leads/:path*', '/tasks', '/pipeline', '/reports', '/jobs', '/jobs/:path*', '/inbox', '/whatsapp', '/sales', '/growth', '/opportunities', '/widget.js', '/install', '/install/:path*'],
+  matcher: ['/', '/members', '/leads/:path*', '/tasks', '/pipeline', '/reports', '/jobs', '/jobs/:path*', '/inbox', '/whatsapp', '/sales', '/growth', '/opportunities'],
 }
