@@ -61,7 +61,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = 'sports-2026-11-17';
+var SCRIPT_VERSION = 'sports-2026-11-17b';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -1589,6 +1589,13 @@ function looksLikeName_(line) {
   if (/^(hi|hello|hey|dear|greetings|good (morning|afternoon|evening))\b/i.test(line)) return false;
   if (/(quote request|enquiry|inquiry|form submission|new message|thank you|submitted|website)/i.test(line)) return false;
   if (/[:—–]/.test(line)) return false;
+  // A hand-written email is prose, and its short lines are not names: a
+  // numbered point ("4. Payment terms" became a customer's name, 16 Nov 2026),
+  // a sign-off ("Thanks,"), or a job title under it ("Purchasing Assistant").
+  // An empty name is right there: the dashboard shows the address instead.
+  if (/\d/.test(line) || /^[-*•]/.test(line) || /[.,;!?]$/.test(line)) return false;
+  if (/^(thanks|thank you|regards|best|kind regards|best regards|sincerely|cheers|warm regards|yours)\b/i.test(line)) return false;
+  if (/\b(assistant|manager|director|department|dept|team|purchasing|procurement|buyer|owner|founder|officer|coordinator|supervisor|sales|marketing|operations|terms|pricing|price|payment|shipping|delivery|lead time|quantity|units)\b/i.test(line)) return false;
   var words = line.split(/\s+/);
   if (words.length > 5) return false;
   return /[A-Za-z]/.test(line);
