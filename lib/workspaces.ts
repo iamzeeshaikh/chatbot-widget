@@ -1,8 +1,29 @@
-// The two separate dashboards ("workspaces"). Every member belongs to exactly
-// one workspace and can never see the other. Site groupings mirror the original
+// The separate dashboards ("workspaces"). Every member belongs to exactly one
+// workspace and can never see another. Site groupings mirror the original
 // hardcoded dashboard split.
+//
+// 'zeedesk' (2026-11-17) is a SECOND packaging sales team: the owner's DHA
+// office, with its own sites, agents, mailboxes and phone numbers, and no view
+// of the Model Town team's ('packaging') customers or the other way round. It
+// sells the same products the same way, so it carries every packaging feature —
+// ask workspaceKind() when the question is "does this behave like packaging?"
+// and compare the workspace itself only when the question is "whose data?".
+export type Workspace = 'sports' | 'packaging' | 'zeedesk'
 
-export type Workspace = 'sports' | 'packaging'
+/** How a workspace sells: which features, wording and flows apply to it. */
+export type WorkspaceKind = 'sports' | 'packaging'
+export const WORKSPACE_KIND: Record<Workspace, WorkspaceKind> = {
+  sports: 'sports',
+  packaging: 'packaging',
+  zeedesk: 'packaging',
+}
+export function workspaceKind(ws: Workspace): WorkspaceKind {
+  return WORKSPACE_KIND[ws]
+}
+export const WORKSPACES: readonly Workspace[] = ['sports', 'packaging', 'zeedesk']
+export function isWorkspace(v: unknown): v is Workspace {
+  return typeof v === 'string' && (WORKSPACES as readonly string[]).includes(v)
+}
 
 // Active packaging-workspace sites. The other site configs (zeepack,
 // burgersleeves, leadgen) still exist in the Supabase sites table — they're
@@ -108,8 +129,19 @@ export function isRetiredLeadSite(siteId: string): boolean {
   return RETIRED_LEAD_SITES.has(siteId)
 }
 
+// The ZeeDesk team's sites (owner's DHA office). Empty until its first sites
+// launch; a site listed here must appear in no other roster.
+export const ZEEDESK_SITES: string[] = []
+
+// A Record, not a ternary: with `ws === 'sports' ? … : PACKAGING_SITES` any
+// workspace added later silently received the Model Town team's sites.
+const SITES_BY_WORKSPACE: Record<Workspace, string[]> = {
+  sports: SPORTS_SITES,
+  packaging: PACKAGING_SITES,
+  zeedesk: ZEEDESK_SITES,
+}
 export function workspaceSites(ws: Workspace): string[] {
-  return ws === 'sports' ? SPORTS_SITES : PACKAGING_SITES
+  return SITES_BY_WORKSPACE[ws] ?? []
 }
 
 // ── Per-workspace feature gate ───────────────────────────────────────────────
@@ -230,12 +262,14 @@ export function defaultOwnerForSite(siteId: string): string | null {
 export function siteWorkspace(siteId: string): Workspace | null {
   if (SPORTS_SITES.includes(siteId)) return 'sports'
   if (PACKAGING_SITES.includes(siteId)) return 'packaging'
+  if (ZEEDESK_SITES.includes(siteId)) return 'zeedesk'
   return null
 }
 
 export const WORKSPACE_LABEL: Record<Workspace, string> = {
   sports: 'Sports',
   packaging: 'Packaging',
+  zeedesk: 'ZeeDesk',
 }
 
 // ── Which dashboard a hostname serves ────────────────────────────────────────
@@ -254,12 +288,14 @@ export const HOST_WORKSPACES: Record<string, Workspace> = {
   'sports.zeeops.dev': 'sports',
   'chat.zeeops.dev': 'packaging',
   'crm.zeeops.dev': 'packaging',
+  'app.zeedesk.dev': 'zeedesk',
 }
 
 // Where to send someone who turned up at the wrong dashboard.
 export const WORKSPACE_HOME: Record<Workspace, string> = {
   sports: 'https://sports.zeeops.dev',
   packaging: 'https://chat.zeeops.dev',
+  zeedesk: 'https://app.zeedesk.dev',
 }
 
 export function workspaceForHost(host: string | null | undefined): Workspace | null {
@@ -289,6 +325,6 @@ export const WIDGET_BLOCKED_COUNTRIES = new Set(['PK', 'IN', 'LK', 'BD', 'NP'])
 export function isWidgetBlocked(siteId: string, countryCode: string): boolean {
   if (!countryCode) return false
   const ws = siteWorkspace(siteId)
-  if (ws !== 'packaging' && ws !== 'sports') return false
+  if (!ws) return false
   return WIDGET_BLOCKED_COUNTRIES.has(countryCode.toUpperCase())
 }
