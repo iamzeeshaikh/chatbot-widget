@@ -282,15 +282,30 @@ async function alreadyCaptured(sessionIds: string[]): Promise<Set<string>> {
   if (sessionIds.length === 0) return out
   // Both directions: an agent's reply sent from Gmail itself is recorded as an
   // outbound row, and a CRM send already is one — neither may be written twice.
-  const { data } = await supabase
-    .from('chat_logs')
-    .select('role, message')
-    .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_ROLE])
-    .in('session_id', sessionIds)
-    .limit(4000)
-  for (const r of data ?? []) {
-    const e = r.role === CRM_EMAIL_ROLE ? parseCrmEmail(r.message) : parseCrmEmailIn(r.message)
-    if (e?.gmailId) out.add(e.gmailId)
+  // Read in pages, in a fixed order, until there are no more. This asked for
+  // 4000 rows in one go, but the database hands back 1000 at most and said
+  // nothing: once a run's leads held more than 1000 email rows, the ones left
+  // out looked new and were written again, which made more rows, which left
+  // more out. On 2026-11-17 one mailbox's 102 sent emails became 1,791 rows.
+  // A read that fails stops the run rather than letting it write duplicates.
+  const PAGE = 1000
+  for (let i = 0; i < sessionIds.length; i += 150) {
+    const chunk = sessionIds.slice(i, i + 150)
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('chat_logs')
+        .select('role, message')
+        .in('role', [CRM_EMAIL_IN_ROLE, CRM_EMAIL_ROLE])
+        .in('session_id', chunk)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1)
+      if (error) throw new Error(`Could not read captured emails: ${error.message}`)
+      for (const r of data ?? []) {
+        const e = r.role === CRM_EMAIL_ROLE ? parseCrmEmail(r.message) : parseCrmEmailIn(r.message)
+        if (e?.gmailId) out.add(e.gmailId)
+      }
+      if (!data || data.length < PAGE) break
+    }
   }
   return out
 }
