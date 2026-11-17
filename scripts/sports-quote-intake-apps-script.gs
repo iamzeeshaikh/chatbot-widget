@@ -61,7 +61,7 @@
 // of this file is actually running inside Apps Script — the editor's contents
 // are invisible from here, a paste can silently not land, and several rounds
 // of debugging were spent guessing at that.
-var SCRIPT_VERSION = 'sports-2026-09-10';
+var SCRIPT_VERSION = 'sports-2026-11-17';
 
 var WEBHOOK_URL = 'https://chat.zeeops.dev/api/quote-intake';
 
@@ -105,7 +105,10 @@ var IGNORE_LABEL = 'ZeeOps/Ignore';
 // matched by LEAF name (the part after the last "/"), so the parent folder is
 // free to be anything. These five must also exist in QUOTE_SITE_CODES on the
 // server; a code the server does not know comes back as a 400 in the run log.
-var SITE_CODES = ['TFU', 'TVU', 'CSJ', 'FBJ', 'TBJ'];
+// 2026-11-17: the eight sites launched after the first five were never added
+// here, so their form mail was left alone and none of them had a single lead on
+// the dashboard (found when a ZEE Sports Wear quote did not arrive).
+var SITE_CODES = ['TFU', 'TVU', 'CSJ', 'FBJ', 'TBJ', 'ZSW', 'CABJ', 'CABK', 'TFBU', 'THU', 'TBKU', 'CAHJ', 'TRU'];
 
 // The OFF SWITCH. A code listed here keeps its entry in SITE_CODES above but is
 // not swept, not ingested and not counted — codeFromLeaf_ checks this list
@@ -148,6 +151,15 @@ var LABEL_ALIASES = {
   'florida basketball jerseys': 'FBJ',
   'baseball jerseys': 'TBJ',
   'the baseball jerseys': 'TBJ',
+  'zee sports wear': 'ZSW',
+  'zeesportswear': 'ZSW',
+  'california baseball jerseys': 'CABJ',
+  'california basketball jerseys': 'CABK',
+  'the football uniforms': 'TFBU',
+  'the hockey uniforms': 'THU',
+  'the basketball uniforms': 'TBKU',
+  'california hockey jerseys': 'CAHJ',
+  'the rugby uniforms': 'TRU',
 };
 
 // The one place a label leaf becomes a site code. Returns the code, or null.
@@ -182,6 +194,14 @@ var SITE_DOMAINS = {
   CSJ: 'californiasoccerjerseys.com',
   FBJ: 'floridabasketballjerseys.com',
   TBJ: 'thebaseballjerseys.com',
+  ZSW: 'zeesportswear.com',
+  CABJ: 'californiabaseballjerseys.com',
+  CABK: 'californiabasketballjerseys.com',
+  TFBU: 'thefootballuniforms.com',
+  THU: 'thehockeyuniforms.com',
+  TBKU: 'thebasketballuniforms.com',
+  CAHJ: 'californiahockeyjerseys.com',
+  TRU: 'therugbyuniforms.com',
 };
 
 // Stop working with this much headroom before Apps Script's 6-minute limit.
@@ -1165,6 +1185,16 @@ var SENDER_NAME_CODES = {
   'florida basketball jerseys': 'FBJ',
   'the baseball jerseys': 'TBJ',
   'baseball jerseys': 'TBJ',
+  // The exact From names the newer sites' form code sends with (read from each
+  // repo's mail helper, 2026-11-17).
+  'zee sports wear': 'ZSW',
+  'california baseball jerseys': 'CABJ',
+  'california basketball jerseys': 'CABK',
+  'the football uniforms': 'TFBU',
+  'the hockey uniforms': 'THU',
+  'the basketball uniforms': 'TBKU',
+  'california hockey jerseys': 'CAHJ',
+  'the rugby uniforms': 'TRU',
 };
 
 // The display-name half of a From header: `Name <addr@host>` -> `name`.

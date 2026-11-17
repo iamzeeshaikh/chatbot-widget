@@ -229,6 +229,15 @@ export const QUOTE_SITE_CODES: Record<string, string> = {
   TBJ: 'baseballjerseys',
   // The parent brand's own site, live 2026-09-08.
   ZSW: 'zeesportswear',
+  // The seven sports sites launched in Oct-Nov 2026. Their codes were missing
+  // here and in the sports script until 2026-11-17, so no form lead ever arrived.
+  CABJ: 'californiabaseball',
+  CABK: 'californiabasketball',
+  TFBU: 'thefootballuniforms',
+  THU: 'thehockeyuniforms',
+  TBKU: 'thebasketballuniforms',
+  CAHJ: 'californiahockey',
+  TRU: 'therugbyuniforms',
 }
 
 /**

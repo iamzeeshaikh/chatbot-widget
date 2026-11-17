@@ -17,6 +17,12 @@ export async function GET(req: NextRequest) {
   const ok = !!secret && secret === process.env.QUOTE_INTAKE_SECRET
   // A signed-in admin may read it too, to check what the loader will run.
   if (!ok) { const m = await getMember(req); if (m?.role !== 'admin') return new NextResponse('Unauthorized', { status: 401 }) }
-  const src = readFileSync(path.join(process.cwd(), 'scripts', 'quote-intake-apps-script.gs'), 'utf8')
+  // ?set=sports serves the sports engine to the sports mailbox's loader
+  // (scripts/sports-quote-intake-loader.gs). Sports was still a hand-pasted
+  // script until 2026-11-17, and its copy had fallen eight sites behind.
+  const file = req.nextUrl.searchParams.get('set') === 'sports'
+    ? 'sports-quote-intake-apps-script.gs'
+    : 'quote-intake-apps-script.gs'
+  const src = readFileSync(path.join(process.cwd(), 'scripts', file), 'utf8')
   return new NextResponse(src, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } })
 }
