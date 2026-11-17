@@ -2061,6 +2061,20 @@ function leadFromMessage_(msg) {
     if (!looksLikeFormSubmission_(plain)) {
       var fromHdr = String(msg.getFrom() || '');
       var fromAddr0 = (fromHdr.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [''])[0].toLowerCase();
+      // Hand-written mail relayed by the info@ group ("Norty Cohen via Info All
+      // Brands <info-all@…>", customer in Reply-To): the sender is the
+      // Reply-To, never an address that happens to sit in the body. Norty
+      // Cohen's enquiry (6 Nov 2026) was filed under a colleague's address
+      // lifted from a tracking link in his signature.
+      var rtHdr = String(msg.getReplyTo() || '');
+      var rtAddr = (rtHdr.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [''])[0];
+      if (rtAddr && !isOwnAddress_(rtAddr) && fromAddr0 && isOwnAddress_(fromAddr0) && /\svia\s/i.test(fromHdr)) {
+        parsed.email = rtAddr;
+        var rtName = rtHdr.replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
+        if (!rtName || rtName.indexOf('@') !== -1) rtName = fromHdr.replace(/<[^>]*>/, '').replace(/\s+via\s+.*$/i, '').replace(/["']/g, '').trim();
+        if (rtName && rtName.indexOf('@') === -1) parsed.name = rtName;
+        return parsed;
+      }
       var nm0 = fromHdr.replace(/<[^>]*>/, '').replace(/\s+via\s+.*$/i, '').replace(/["']/g, '').trim();
       if (fromAddr0 && fromAddr0 === String(parsed.email).toLowerCase() && nm0 && nm0.indexOf('@') === -1) parsed.name = nm0;
     }
