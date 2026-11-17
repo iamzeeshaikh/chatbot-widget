@@ -24,7 +24,7 @@ import { NextRequest } from 'next/server'
 import { supabase, fetchAllPages } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import { siteIdFromQuoteCode, isMachineMessage, customerNameFromBody } from './quoteintake'
-import { siteWorkspace } from './workspaces'
+import { siteWorkspace, workspaceKind } from './workspaces'
 import { googleConfig, searchIntakeMessageIds, fetchThread, fetchAttachment, type InboundMessage } from './gmail'
 import { POST as intakePost } from '@/app/api/quote-intake/route'
 import { isOurAddress } from './customercc'
@@ -160,7 +160,11 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
         if (c && addr) { code = c; fwdEmail = addr }
       }
       const siteId = code ? siteIdFromQuoteCode(code) : null
-      if (!code || !siteId || siteWorkspace(siteId) !== 'packaging') {
+      // Any packaging-kind site: the ZeeDesk team's form mail arrives in this
+      // same intake mailbox, and /api/quote-intake files and announces each
+      // lead under the workspace its site belongs to.
+      const ws = siteId ? siteWorkspace(siteId) : null
+      if (!code || !siteId || !ws || workspaceKind(ws) !== 'packaging') {
         if (!dryRun) await remember(ref.id, 'not-a-form')
         out.skipped++
         continue
