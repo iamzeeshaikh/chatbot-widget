@@ -15,7 +15,7 @@
 import { supabase } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import type { Workspace } from './workspaces'
-import { SPORTS_SITES, PACKAGING_SITES } from './workspaces'
+import { workspaceSites } from './workspaces'
 
 export const CALL_INTENT_ROLE = 'call_intent'
 export const CALL_INTENT_SESSION = 'zeeops-call-intent'
@@ -49,7 +49,7 @@ export async function siteFromRecentTap(
     .gte('created_at', since)
     .order('created_at', { ascending: false }).limit(50)
 
-  const mine = workspace === 'sports' ? SPORTS_SITES : PACKAGING_SITES
+  const mine = workspaceSites(workspace)
   const seen: string[] = []
   for (const r of data ?? []) {
     try {

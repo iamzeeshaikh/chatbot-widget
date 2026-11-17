@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { storedMemberNames, setMemberDisplayName, memberCallPhone, MAX_MEMBER_NAME } from '@/lib/membername'
 import { agentDisplayName } from '@/lib/agentname'
 import { getMember, revokeSessions, Member, ownLeadsOnlyIds, setOwnLeadsOnly, hideContactsIds, setHideContacts } from '@/lib/auth'
-import { workspaceSites } from '@/lib/workspaces'
+import { workspaceSites, workspaceKind } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
 
@@ -160,7 +160,7 @@ export async function PATCH(req: NextRequest) {
   // "Own leads only" (lib/ownleads.ts) — packaging only; an admin is never
   // restricted, so the flag is only meaningful on a standard member.
   if (typeof own_leads_only === 'boolean') {
-    if (admin!.workspace !== 'packaging') {
+    if (workspaceKind(admin!.workspace) !== 'packaging') {
       return NextResponse.json({ error: '"Own leads only" is not available on this dashboard.' }, { status: 400 })
     }
     try { await setOwnLeadsOnly(id, own_leads_only) } catch (e) {
@@ -171,7 +171,7 @@ export async function PATCH(req: NextRequest) {
   // "Hide customer contacts" (lib/pii.ts) — packaging only (sports already
   // hides them from every standard member by workspace rule).
   if (typeof hide_contacts === 'boolean') {
-    if (admin!.workspace !== 'packaging') {
+    if (workspaceKind(admin!.workspace) !== 'packaging') {
       return NextResponse.json({ error: '"Hide customer contacts" is not available on this dashboard.' }, { status: 400 })
     }
     try { await setHideContacts(id, hide_contacts) } catch (e) {

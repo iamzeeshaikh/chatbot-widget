@@ -1,4 +1,4 @@
-import { PACKAGING_SITES, SPORTS_SITES, type Workspace } from './workspaces'
+import { workspaceSites, type Workspace } from './workspaces'
 import { SITE_DOMAINS } from './sitedomains'
 
 // The one-time Gmail history importer (app/api/gmail-import).
@@ -34,7 +34,7 @@ export function workspaceForImportAddress(address: string): Workspace | null {
 export function siteForDomain(domain: string, workspace: Workspace): string | null {
   const d = domain.trim().toLowerCase().replace(/^www\./, '')
   if (!d) return null
-  const mine = workspace === 'sports' ? SPORTS_SITES : PACKAGING_SITES
+  const mine = workspaceSites(workspace)
   for (const siteId of mine) {
     const sd = SITE_DOMAINS[siteId]
     if (sd && sd.toLowerCase() === d) return siteId

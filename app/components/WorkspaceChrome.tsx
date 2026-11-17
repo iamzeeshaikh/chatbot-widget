@@ -23,12 +23,12 @@ const faviconSales = (fill: string) => `data:image/svg+xml,${encodeURIComponent(
 const FAVICON_SALES_PACKAGING = faviconSales('#2563eb')
 const FAVICON_SALES_SPORTS = faviconSales('#16a34a')
 
-function workspaceFromCookie(): 'sports' | 'packaging' | null {
+function workspaceFromCookie(): 'sports' | 'packaging' | 'zeedesk' | null {
   try {
     const raw = document.cookie.split('; ').find((c) => c.startsWith('zee-auth='))?.split('=')[1]
     if (!raw) return null
     const ui = JSON.parse(atob(decodeURIComponent(raw)))
-    return ui?.workspace === 'sports' ? 'sports' : ui?.workspace === 'packaging' ? 'packaging' : null
+    return ui?.workspace === 'sports' ? 'sports' : ui?.workspace === 'packaging' ? 'packaging' : ui?.workspace === 'zeedesk' ? 'zeedesk' : null
   } catch {
     return null
   }
@@ -42,7 +42,9 @@ export default function WorkspaceChrome() {
 
     const sales = pathname === '/sales' || pathname?.startsWith('/sales/')
     const label = brand === 'sports' ? 'Sports' : 'Packaging'
-    document.title = sales ? `Sales · ${label} | ZeeOps` : `${label} Dashboard | ZeeOps`
+    // ZeeDesk's tab never names ZeeOps: that team is not to know the other exists.
+    document.title = brand === 'zeedesk' ? (sales ? 'Sales | ZeeDesk' : 'ZeeDesk')
+      : sales ? `Sales · ${label} | ZeeOps` : `${label} Dashboard | ZeeOps`
     // Read by the [data-ws="sports"] block in globals.css, which remaps the
     // accent utilities the way dark mode is remapped, so the two dashboards are
     // told apart at a glance rather than by reading the title. Packaging keeps

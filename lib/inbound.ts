@@ -25,7 +25,7 @@ import { recordIntakeDrop, INTAKE_DROP_ROLE, INTAKE_DROP_SESSION } from './intak
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_NOT_A_LEAD_ROLE } from './crm'
 import { CRM_EMAIL_ROLE } from './crmemail'
 import { BOT_ACTOR } from './quotebotcore'
-import { SPORTS_SITES, PACKAGING_SITES, type Workspace } from './workspaces'
+import { workspaceSites, type Workspace } from './workspaces'
 import { isBotWaRow } from './whatsapp'
 
 // ── Which SITE did they contact? ────────────────────────────────────────────
@@ -52,7 +52,7 @@ import { isBotWaRow } from './whatsapp'
  *  the two workspaces share a Twilio account but not a customer list, and a
  *  packaging caller must never be matched onto a sports lead. */
 function sitesOf(workspace: Workspace): string[] {
-  return workspace === 'sports' ? SPORTS_SITES : PACKAGING_SITES
+  return workspaceSites(workspace)
 }
 
 /** The site that owns a given business number, or null if we cannot tell. */

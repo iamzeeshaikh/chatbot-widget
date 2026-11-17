@@ -44,6 +44,12 @@ const WORKSPACE_NUMBERS: Record<Workspace, { phone: string; whatsapp: string }> 
     phone: process.env.TWILIO_PACKAGING_PHONE_NUMBER ?? '',
     whatsapp: process.env.TWILIO_PACKAGING_WHATSAPP_FROM ?? '',
   },
+  // ZeeDesk's own line. Empty until its number is bought: the lookup fails
+  // closed, so it can never send from the Model Town team's number.
+  zeedesk: {
+    phone: process.env.TWILIO_ZEEDESK_PHONE_NUMBER ?? '',
+    whatsapp: process.env.TWILIO_ZEEDESK_WHATSAPP_FROM ?? '',
+  },
 }
 
 export function twilioConfig(workspace: Workspace): TwilioConfig | null {
@@ -90,7 +96,9 @@ export function workspaceForBusinessNumber(to: string | null | undefined): Works
 // They only decide whose customer an inbound call/message belongs to; outbound
 // still uses the workspace's main number above.
 function extraNumbers(ws: Workspace): string[] {
-  const raw = ws === 'packaging' ? process.env.TWILIO_PACKAGING_EXTRA_NUMBERS : process.env.TWILIO_SPORTS_EXTRA_NUMBERS
+  const raw = ws === 'packaging' ? process.env.TWILIO_PACKAGING_EXTRA_NUMBERS
+    : ws === 'zeedesk' ? process.env.TWILIO_ZEEDESK_EXTRA_NUMBERS
+    : process.env.TWILIO_SPORTS_EXTRA_NUMBERS
   return String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 }
 

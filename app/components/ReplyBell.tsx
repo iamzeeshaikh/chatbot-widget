@@ -26,7 +26,8 @@ function isPackaging(): boolean {
   try {
     const raw = document.cookie.split('; ').find((c) => c.startsWith('zee-auth='))?.split('=')[1]
     if (!raw) return false
-    return JSON.parse(atob(decodeURIComponent(raw)))?.workspace === 'packaging'
+    const ws = JSON.parse(atob(decodeURIComponent(raw)))?.workspace
+    return ws === 'packaging' || ws === 'zeedesk'
   } catch {
     return false
   }

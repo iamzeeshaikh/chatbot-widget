@@ -21,7 +21,7 @@
 // takes effect within a minute everywhere.
 
 import { supabase } from './supabase'
-import type { Workspace } from './workspaces'
+import { isWorkspace, type Workspace } from './workspaces'
 
 export const BLOCKED_ROLE = 'blocked_visitor'
 // Control rows need a site_id; the list spans sites, so it lives under a marker id.
@@ -42,7 +42,7 @@ export function parseBlockEntry(message: string | null | undefined): BlockEntry 
         block: o.block !== false,
         by: typeof o.by === 'string' ? o.by : '',
         at: typeof o.at === 'string' ? o.at : '',
-        ws: o.ws === 'sports' || o.ws === 'packaging' ? o.ws : LEGACY_WORKSPACE,
+        ws: isWorkspace(o.ws) ? o.ws : LEGACY_WORKSPACE,
       }
     }
   } catch { /* not a block row */ }

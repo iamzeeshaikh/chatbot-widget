@@ -28,7 +28,7 @@ import {
   parsePrefs, prefsFor, quietHoldUntil,
 } from './reminders'
 import { sendPushToMember } from './push'
-import { siteWorkspace, hasFeature, SPORTS_SITES } from './workspaces'
+import { siteWorkspace, hasFeature, SPORTS_SITES, type Workspace } from './workspaces'
 import { SITE_DOMAINS } from './sitedomains'
 import { QUOTE_TAG, isLikelySpamQuote } from './quoteintake'
 import { recordIntakeDrop, INTAKE_DROP_ROLE, INTAKE_DROP_SESSION } from './intakedrop'
@@ -363,7 +363,7 @@ async function customerThreads(
  * for this on 2026-10-15 after Jennifer Overman's "Proof and payment" mails sat
  * in Gmail for two weeks. Packaging agents keep the narrower customer search.
  */
-export const MIRRORED_MAILBOXES: Record<string, { workspace: 'sports' | 'packaging'; fallbackSite: string }> = {
+export const MIRRORED_MAILBOXES: Record<string, { workspace: Workspace; fallbackSite: string }> = {
   'info@thebaseballjerseys.com': { workspace: 'sports', fallbackSite: 'baseballjerseys' },
 }
 const OWN_DOMAINS = new Set([...Object.values(SITE_DOMAINS), 'zeeops.dev', 'zeesportswear.com', 'shopcardboardboxes.com', 'zeecustomboxes.com'])

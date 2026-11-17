@@ -57,7 +57,7 @@ export default function MembersPage() {
       .then((r) => { if (!r.ok) throw new Error('unauth'); return r.json() })
       .then((m) => {
         if (m.role !== 'admin') { router.replace('/'); return }
-        setWorkspace(m.workspace)
+        setWorkspace(m.workspace === 'sports' ? 'sports' : 'packaging')
         setIsAdmin(true)
         setAuthChecked(true)
       })

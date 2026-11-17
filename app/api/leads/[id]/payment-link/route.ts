@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { guardLeadAccess, leadPhone, leadRecipient } from '@/lib/leadrecord'
-import { hasFeature } from '@/lib/workspaces'
+import { hasFeature, type Workspace } from '@/lib/workspaces'
 import { cleanPayLink, payChannels, payLinkFor, readPayLink, savePayLink, whatsappWindowOpen } from '@/lib/paylink'
 
 export const dynamic = 'force-dynamic'
@@ -32,7 +32,7 @@ async function ctxFor(req: NextRequest, id: string) {
  * for the address and the number alike, so only the server can say whether
  * either exists.
  */
-async function stateFor(member: Parameters<typeof payLinkFor>[0] & { workspace: 'sports' | 'packaging' }, id: string) {
+async function stateFor(member: Parameters<typeof payLinkFor>[0] & { workspace: Workspace }, id: string) {
   const [{ link, sent }, to, phone] = await Promise.all([readPayLink(id), leadRecipient(id), leadPhone(id)])
   const channels = payChannels({
     email: Boolean(to), phone: Boolean(phone),

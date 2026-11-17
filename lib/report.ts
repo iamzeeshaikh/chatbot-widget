@@ -132,7 +132,7 @@ export async function buildReport(member: Member, range: ReportRange): Promise<R
   const base: ReportData = {
     range, periodLabel: describeRange(range),
     workspace: member.workspace,
-    workspaceLabel: member.workspace === 'packaging' ? 'ZeeOps Packaging' : 'ZeeOps Sports',
+    workspaceLabel: member.workspace === 'zeedesk' ? 'ZeeDesk' : member.workspace === 'packaging' ? 'ZeeOps Packaging' : 'ZeeOps Sports',
     generatedAt: new Date().toISOString(),
     totals: emptyMetrics(), agents: [], sites: [], days: [], leadDetail: [],
     agentTotals: { chats: 0, replies: 0, leads: 0, slowReplies: 0, measuredReplies: 0 },

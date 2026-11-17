@@ -944,6 +944,10 @@ export default function Dashboard() {
   // Each member belongs to exactly one dashboard ("workspace"), which drives the
   // whole theme — sports admins never see packaging and vice versa.
   const [workspace, setWorkspace] = useState<'sports' | 'packaging'>('packaging')
+  // ZeeDesk is a second packaging team: every packaging-or-sports branch below
+  // reads the KIND above, and this flag carries the one thing that differs on
+  // screen so far, its name. The server alone decides whose data is shown.
+  const [isZeeDesk, setIsZeeDesk] = useState(false)
   const [authReady, setAuthReady] = useState(false)
   // Navigation badge for /tasks — overdue + due today for this member.
   const [taskBadge, setTaskBadge] = useState(0)
@@ -968,7 +972,7 @@ export default function Dashboard() {
     fetch('/api/auth/me')
       .then((r) => { if (!r.ok) throw new Error('unauth'); return r.json() })
       .then((m) => {
-        setUserRole(m.role); setUserEmail(m.email); setUserSites(m.sites ?? []); setWorkspace(m.workspace)
+        setUserRole(m.role); setUserEmail(m.email); setUserSites(m.sites ?? []); setWorkspace(m.workspace === 'sports' ? 'sports' : 'packaging'); setIsZeeDesk(m.workspace === 'zeedesk')
         setOwnLeadsOnly(m.ownLeadsOnly === true)
         setAuthReady(true)
       })
@@ -2459,7 +2463,7 @@ export default function Dashboard() {
   // mid-work is a change nobody asked for. Between this, the green accent and
   // the favicon, which dashboard you are in is answerable at a glance — which
   // was the whole complaint: both were blue and both said the same thing.
-  const dashTitle = brand === 'sports' ? 'ZeeOps Sports' : 'ZeeOps Chat Widget'
+  const dashTitle = isZeeDesk ? 'ZeeDesk' : brand === 'sports' ? 'ZeeOps Sports' : 'ZeeOps Chat Widget'
   const accentColor = brand === 'sports' ? '#16a34a' : '#2563eb'
 
   // Effective bot state for the open conversation. The packaging schedule can put

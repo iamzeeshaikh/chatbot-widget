@@ -14,6 +14,7 @@
 // Client-safe module (no supabase import) so the record page can share the
 // stage list, colors and parsers with the API routes.
 
+import type { Workspace } from './workspaces'
 import type { LeadStatus } from './leadstatus'
 import { CRM_TASK_ROLE } from './tasks'
 import { CRM_PREFS_ROLE, CRM_REMINDER_ROLE } from './reminders'
@@ -263,7 +264,7 @@ export const CRM_DEAD_STAGES: readonly CrmStage[] = [
 // somehow carries one still renders its own label and colour on either board.
 const SPORTS_ONLY_STAGES: readonly CrmStage[] = ['duplicate', 'manufacturer']
 
-export function stagesForWorkspace(workspace: 'sports' | 'packaging'): readonly CrmStage[] {
+export function stagesForWorkspace(workspace: Workspace): readonly CrmStage[] {
   return workspace === 'sports' ? CRM_STAGES : CRM_STAGES.filter((s) => !SPORTS_ONLY_STAGES.includes(s))
 }
 

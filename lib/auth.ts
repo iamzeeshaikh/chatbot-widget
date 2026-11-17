@@ -42,6 +42,9 @@ const BUILTIN_ADMIN_PASSWORD = process.env.BUILTIN_ADMIN_PASSWORD || ''
 export const HARDCODED_ACCOUNTS: { email: string; password: string; workspace: Workspace }[] = [
   { email: 'packaging@zeeops.dev', password: BUILTIN_ADMIN_PASSWORD, workspace: 'packaging' },
   { email: 'sports@zeeops.dev', password: BUILTIN_ADMIN_PASSWORD, workspace: 'sports' },
+  // ZeeDesk's bootstrap admin, on its own domain so nothing in that team's
+  // login names ZeeOps.
+  { email: 'admin@zeedesk.dev', password: BUILTIN_ADMIN_PASSWORD, workspace: 'zeedesk' },
 ]
 
 // ── Signed session token: `<payload>.<hmac>` ─────────────────────────────────

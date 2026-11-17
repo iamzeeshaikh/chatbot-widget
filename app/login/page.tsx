@@ -13,6 +13,7 @@ async function hostWorkspace() {
 
 export async function generateMetadata(): Promise<Metadata> {
   const ws = await hostWorkspace()
+  if (ws === 'zeedesk') return { title: 'Sign in | ZeeDesk' }
   return { title: ws ? `Sign in · ${WORKSPACE_LABEL[ws]} Dashboard | ZeeOps` : 'Sign in | ZeeOps' }
 }
 

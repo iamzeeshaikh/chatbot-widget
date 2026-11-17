@@ -42,6 +42,19 @@ const BRANDS = {
       </svg>
     ),
   },
+  zeedesk: {
+    title: 'ZeeDesk',
+    subtitle: 'Sign in to your workspace',
+    mark: 'bg-blue-600',
+    button: 'bg-blue-600 hover:bg-blue-700',
+    focus: 'focus:border-blue-500',
+    link: 'text-blue-600 hover:text-blue-700',
+    icon: (
+      <svg viewBox="0 0 24 24" className="w-7 h-7 fill-white" aria-hidden>
+        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
+      </svg>
+    ),
+  },
   neutral: {
     title: 'Welcome back',
     subtitle: 'Sign in to your dashboard',
