@@ -13,7 +13,7 @@
 // The stagePairAt guard is the same one loadPipeline uses to ignore the mirror
 // row written alongside a real stage change.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial } from './supabase'
 import { chunks } from './bulk'
 import { CRM_STAGE_ROLE, isCrmStage, parseCrmStage, stageFromLeadStatus, type CrmStage } from './crm'
 import { LEAD_STATUS_ROLE, parseLeadStatus } from './leadstatus'
@@ -26,14 +26,15 @@ export async function currentStateForIds(ids: string[]): Promise<Map<string, Lea
   for (const id of ids) out.set(id, { stage: 'new', owner: null })
 
   for (const chunk of chunks(ids, 200)) {
-    const { data } = await supabase
+    // Paged: a busy lead carries 150+ assignment rows, so 200 leads can hold
+    // well over the 1,000 rows one response returns — and oldest-first, the
+    // rows left out are the newest, i.e. the current stage and owner.
+    const rows = await fetchAllPagesSerial<{ session_id: string; role: string; message: string; created_at: string }>(() => supabase
       .from('chat_logs')
       .select('session_id, role, message, created_at')
       .in('session_id', chunk)
       .in('role', [CRM_STAGE_ROLE, LEAD_STATUS_ROLE, ASSIGNMENT_ROLE])
-      .order('created_at', { ascending: true })
-
-    const rows = data ?? []
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), 100000)
     const stagePairAt = new Set<string>()
     for (const r of rows) if (r.role === CRM_STAGE_ROLE) stagePairAt.add(`${r.session_id}|${r.created_at}`)
 

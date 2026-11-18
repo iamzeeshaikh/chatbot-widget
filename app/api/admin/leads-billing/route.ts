@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, inChunks } from '@/lib/supabase'
+import { supabase, inChunks, fetchAllPagesSerial, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, LEAD_TRACKED_SITES } from '@/lib/leadtracking'
@@ -32,46 +32,57 @@ export async function GET(req: NextRequest) {
   const from = fromParam || new Date(`${y}-${pad(m + 1)}-01T00:00:00+05:00`).toISOString()
   const to = toParam || new Date(`${m === 11 ? y + 1 : y}-${pad(m === 11 ? 1 : m + 2)}-01T00:00:00+05:00`).toISOString()
 
-  const [rowsRes, quoteRowsRes, checkoutRowsRes, sitesRes] = await Promise.all([
-    supabase
+  // Every lead list on this page is read in pages. A plain select returns 1,000
+  // rows at most and says nothing, and these are the rows the month's billable
+  // count is made of: 899 leads arrived in October 2026 across all sites, so
+  // the next busy month — or any range longer than a month — would have been
+  // billed short without a word.
+  const PERIOD_ROW_CAP = 50000
+  type CaptureRow = { session_id: string; site_id: string; message: string; created_at: string }
+  type LeadRow = { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string }
+  const [captureList, quoteList, checkoutList, sitesRes] = await Promise.all([
+    fetchAllPagesSerial<CaptureRow>(() => supabase
       .from('chat_logs')
       .select('session_id, site_id, message, created_at')
       .eq('role', LEAD_CAPTURE_ROLE)
       .gte('created_at', from)
       .lt('created_at', to)
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false }).order('id', { ascending: true }), PERIOD_ROW_CAP),
     // Custom-quote leads (WordPress form emails, ingested via the Google Apps
     // Script → /api/quote-intake — see lib/quoteintake.ts). Same `leads`
     // table the bot's own qualification writes to, told apart by the message
     // prefix since there's no separate table/column for it.
-    supabase
+    fetchAllPagesSerial<LeadRow>(() => supabase
       .from('leads')
       .select('id, site_id, name, email, phone, message, created_at')
       .ilike('message', `${QUOTE_TAG}%`)
       .gte('created_at', from)
       .lt('created_at', to)
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false }).order('id', { ascending: true }), PERIOD_ROW_CAP),
     // Checkout leads (WooCommerce cart orders, same Gmail → Apps Script path).
     // They belong in the period TOTAL and in the per-site breakdown, but must
     // never reach the Billable figure — a completed sale isn't a lead the
     // agency generated, so charging per-lead for it would be wrong.
-    supabase
+    fetchAllPagesSerial<LeadRow>(() => supabase
       .from('leads')
       .select('id, site_id, name, email, phone, message, created_at')
       .ilike('message', `${CHECKOUT_TAG}%`)
       .gte('created_at', from)
       .lt('created_at', to)
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false }).order('id', { ascending: true }), PERIOD_ROW_CAP),
     supabase.from('sites').select('site_id, name'),
   ])
+  warnIfCapped('billing: chat leads', captureList.length, PERIOD_ROW_CAP)
+  warnIfCapped('billing: quote leads', quoteList.length, PERIOD_ROW_CAP)
+  warnIfCapped('billing: checkout leads', checkoutList.length, PERIOD_ROW_CAP)
 
   const siteName: Record<string, string> = {}
   for (const s of sitesRes.data ?? []) siteName[s.site_id] = s.name
 
   // Only sites the member can access (workspace + assigned-site isolation).
-  const rows = (rowsRes.data ?? []).filter((r) => scope.has(r.site_id))
-  const quoteRows = (quoteRowsRes.data ?? []).filter((r) => scope.has(r.site_id))
-  const checkoutRows = (checkoutRowsRes.data ?? []).filter((r) => scope.has(r.site_id))
+  const rows = captureList.filter((r) => scope.has(r.site_id))
+  const quoteRows = quoteList.filter((r) => scope.has(r.site_id))
+  const checkoutRows = checkoutList.filter((r) => scope.has(r.site_id))
 
   // Enrichment for the period's lead sessions (queried by session id, NOT the
   // date window — a status can be set long after the lead was captured):
@@ -97,14 +108,17 @@ export async function GET(req: NextRequest) {
     inChunks(sessionIds, (ids) => supabase.from('active_visitors').select('session_id, country, page_url')
       .in('session_id', ids)),
     // Previous period's lead count, for the month-over-month comparison.
-    supabase.from('chat_logs').select('session_id, site_id')
-      .eq('role', LEAD_CAPTURE_ROLE).gte('created_at', prevFrom).lt('created_at', from),
-    supabase.from('leads').select('site_id')
-      .ilike('message', `${QUOTE_TAG}%`).gte('created_at', prevFrom).lt('created_at', from),
+    fetchAllPagesSerial<{ session_id: string; site_id: string }>(() => supabase.from('chat_logs').select('session_id, site_id')
+      .eq('role', LEAD_CAPTURE_ROLE).gte('created_at', prevFrom).lt('created_at', from)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), PERIOD_ROW_CAP).then((data) => ({ data })),
+    fetchAllPagesSerial<{ site_id: string }>(() => supabase.from('leads').select('site_id')
+      .ilike('message', `${QUOTE_TAG}%`).gte('created_at', prevFrom).lt('created_at', from)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), PERIOD_ROW_CAP).then((data) => ({ data })),
     // Kept as its own query rather than an .or() — the tags contain spaces and
     // brackets, which PostgREST's or() filter syntax would need escaping for.
-    supabase.from('leads').select('site_id')
-      .ilike('message', `${CHECKOUT_TAG}%`).gte('created_at', prevFrom).lt('created_at', from),
+    fetchAllPagesSerial<{ site_id: string }>(() => supabase.from('leads').select('site_id')
+      .ilike('message', `${CHECKOUT_TAG}%`).gte('created_at', prevFrom).lt('created_at', from)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), PERIOD_ROW_CAP).then((data) => ({ data })),
   ])
 
   const statusBySession = new Map<string, LeadStatus>()

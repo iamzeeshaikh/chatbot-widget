@@ -3,7 +3,7 @@ import { defaultOwnerForSite, siteWorkspace, hasFeature } from '@/lib/workspaces
 import { firstResponses } from '@/lib/firstresponse'
 import { loadAgentSignatures } from '@/lib/signature'
 import { quoteSessionId } from '@/lib/quoteintake'
-import { supabase, fetchAllPages } from '@/lib/supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { canSeeContacts, maskEmail, maskPhone, scrubText } from '@/lib/pii'
 import { CONTACT_ROLE, parseContact } from '@/lib/visitor'
@@ -56,18 +56,28 @@ export async function GET(req: NextRequest) {
   // across sites. Best-effort: leads with no on-record conversation stay unlinked.
   const emails = new Set(leads.map((l) => (l.email || '').trim().toLowerCase()).filter(Boolean))
   if (emails.size > 0 && allowed.length > 0) {
-    const { data: rows } = await supabase
-      .from('chat_logs')
-      .select('session_id, site_id, role, message, created_at')
-      .in('site_id', allowed)
-      .in('role', [LEAD_CAPTURE_ROLE, CONTACT_ROLE, 'user'])
-      .order('created_at', { ascending: false })
-      .limit(8000)
+    // Read in pages, and only the rows that can carry an address. This asked
+    // for 8,000 rows and got the newest 1,000 — the database returns no more —
+    // which by Nov 2026 reached back about two weeks out of 8,755, so every
+    // lead whose chat was older than that lost its conversation link. A visitor
+    // message is only useful here when it holds an email address, so those are
+    // filtered in the query (an address always contains "@"; extractEmail below
+    // still decides) rather than shipping every chat line on each load.
+    const LINK_ROW_CAP = 20000
+    const rows = await fetchAllPagesSerial<{ session_id: string; site_id: string; role: string; message: string; created_at: string }>(
+      () => supabase
+        .from('chat_logs')
+        .select('session_id, site_id, role, message, created_at')
+        .in('site_id', allowed)
+        .or(`role.in.(${LEAD_CAPTURE_ROLE},${CONTACT_ROLE}),and(role.eq.user,message.like.%@%)`)
+        .order('created_at', { ascending: false }).order('id', { ascending: true }),
+      LINK_ROW_CAP)
+    warnIfCapped('leads list: conversation links', rows.length, LINK_ROW_CAP)
 
     // rank: lead_capture (3) > contact (2) > user message (1). Higher wins; for
     // equal rank the most recent row wins (rows are newest-first already).
     const best: Record<string, { rank: number; session_id: string }> = {}
-    for (const r of rows ?? []) {
+    for (const r of rows) {
       let email: string | null = null
       let rank = 0
       if (r.role === LEAD_CAPTURE_ROLE) { email = parseLeadCapture(r.message)?.email ?? null; rank = 3 }
@@ -154,12 +164,16 @@ export async function GET(req: NextRequest) {
   const humanSessions = new Set<string>()
   if (chatSessions.length > 0) {
     for (let i = 0; i < chatSessions.length; i += 200) {
-      const { data: admins } = await supabase
+      // Paged: one row per agent reply, so 200 chats can hold more than the
+      // 1,000 rows a response returns, and a chat left out read as the bot's.
+      const chunk = chatSessions.slice(i, i + 200)
+      const admins = await fetchAllPagesSerial<{ session_id: string }>(() => supabase
         .from('chat_logs')
         .select('session_id')
         .eq('role', 'admin')
-        .in('session_id', chatSessions.slice(i, i + 200))
-      for (const r of admins ?? []) humanSessions.add(r.session_id)
+        .in('session_id', chunk)
+        .order('id', { ascending: true }), 100000)
+      for (const r of admins) humanSessions.add(r.session_id)
     }
   }
   for (const l of merged as Array<Record<string, unknown>>) {
@@ -228,11 +242,13 @@ export async function GET(req: NextRequest) {
   // Side by side, not one after another — nine sequential round trips cost
   // seconds on every Overview load.
   const ownerRows: OwnerRow[] = (await Promise.all(ownerChunks.map(async (chunk) => {
-    const { data } = await supabase.from('chat_logs')
+    // Each chunk is paged too: some leads carry 150+ assignment rows, one chunk
+    // of 150 held 1,292 (Nov 2026), and read oldest-first the rows past 1,000
+    // are the newest — the current owner of the leads in that chunk.
+    return fetchAllPagesSerial<OwnerRow>(() => supabase.from('chat_logs')
       .select('session_id, role, message, created_at')
       .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
-      .order('created_at', { ascending: true }).limit(1000)
-    return (data ?? []) as OwnerRow[]
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), 100000)
   }))).flat()
   ownerRows.sort((a, b) => a.created_at.localeCompare(b.created_at))
   const owned = deriveAssignments(ownerRows)

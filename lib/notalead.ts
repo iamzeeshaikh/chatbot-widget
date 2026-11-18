@@ -15,7 +15,7 @@
 // the site cards, Billing and the month-end report — and the counts say how
 // many were excluded rather than quietly returning a smaller number.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { CRM_NOT_A_LEAD_ROLE } from './crm'
 import { quoteSessionId } from './quoteintake'
 
@@ -45,13 +45,17 @@ export function parseNotALead(message: string | null | undefined): NotALeadMark 
 export async function notALeadSessions(siteIds: string[]): Promise<Set<string>> {
   const out = new Set<string>()
   if (siteIds.length === 0) return out
-  const { data } = await supabase
+  // Paged: a plain select stops at 1,000 rows, and oldest-first that would
+  // hide the NEWEST marks — a pitch marked today would count as a lead again.
+  const NOT_A_LEAD_ROW_CAP = 50000
+  const data = await fetchAllPagesSerial<{ session_id: string; message: string }>(() => supabase
     .from('chat_logs')
     .select('session_id, message')
     .in('site_id', siteIds)
     .eq('role', CRM_NOT_A_LEAD_ROLE)
-    .order('created_at', { ascending: true })
-  for (const r of data ?? []) {
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), NOT_A_LEAD_ROW_CAP)
+  warnIfCapped('not-a-lead marks', data.length, NOT_A_LEAD_ROW_CAP)
+  for (const r of data) {
     const m = parseNotALead(r.message)
     if (!m) continue
     if (m.spam) out.add(r.session_id)

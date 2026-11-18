@@ -89,6 +89,30 @@ export async function fetchAllPages<T>(makeQuery: () => PageQuery<T>, maxRows: n
   return all
 }
 
+/**
+ * fetchAllPages, one page at a time.
+ *
+ * Same contract (a factory with a stable .order(), a maxRows cap, rows so far
+ * on a failed page), but it asks for page two only after page one came back
+ * full. fetchAllPages opens up to six requests at once, which is right for a
+ * read known to be thousands of rows and wasteful for the many lists that are
+ * a few dozen rows today and simply must not stop being read at 1,000: an
+ * unsubscribe list, a dedupe ledger, the rows of one chunk of session ids.
+ * For those this costs exactly the one request the plain select did.
+ */
+export async function fetchAllPagesSerial<T>(makeQuery: () => PageQuery<T>, maxRows: number): Promise<T[]> {
+  const all: T[] = []
+  for (let from = 0; from < maxRows; from += SUPA_PAGE_ROWS) {
+    const to = Math.min(from + SUPA_PAGE_ROWS, maxRows) - 1
+    const { data, error } = await makeQuery().range(from, to)
+    if (error) { console.error('[supabase] fetchAllPagesSerial page failed:', error.message); return all }
+    if (!data || data.length === 0) return all
+    all.push(...data)
+    if (data.length < to - from + 1) return all
+  }
+  return all
+}
+
 // ── Long .in() lists ──────────────────────────────────────────────────────────
 // PostgREST carries an .in() filter in the URL. ~1,500 session ids is a ~74KB
 // URL: Supabase answers 414 (no rows, so every lead read as status 'new' with

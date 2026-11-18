@@ -32,7 +32,7 @@
 // always has an answer.
 
 import { isBotWaRow } from './whatsapp'
-import { supabase, fetchAllPages, warnIfCapped } from './supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { isUkSite } from './metawa'
 import { recentIntakeLags } from './intakelag'
 import { workspaceSites, hasFeature } from './workspaces'
@@ -691,10 +691,14 @@ async function withFollowUps(result: BotRunResult, now: Date, dryRun: boolean, b
   const open = [...state.entries()].filter(([, v]) => v.waiting && !v.stopped)
   const inbound = new Map<string, { gmailId: string; at: number; from: string; body: string }[]>()
   for (let i = 0; i < open.length; i += 100) {
-    const { data: inRows } = await supabase.from('chat_logs').select('session_id, message, created_at')
-      .eq('role', CRM_EMAIL_IN_ROLE).in('session_id', open.slice(i, i + 100).map(([id]) => id))
-      .gte('created_at', since).order('created_at', { ascending: true })
-    for (const r of inRows ?? []) {
+    // Paged: read oldest-first, a 1,000-row response would leave out the NEWEST
+    // replies, and a reply the bot cannot see is a follow-up sent to somebody
+    // who has already answered.
+    const openIds = open.slice(i, i + 100).map(([id]) => id)
+    const inRows = await fetchAllPagesSerial<{ session_id: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, message, created_at')
+      .eq('role', CRM_EMAIL_IN_ROLE).in('session_id', openIds)
+      .gte('created_at', since).order('created_at', { ascending: true }).order('id', { ascending: true }), 100000)
+    for (const r of inRows) {
       const e = parseCrmEmailIn(r.message)
       if (!e || isNoiseSender(e.from)) continue
       const list = inbound.get(r.session_id) ?? []
@@ -1176,10 +1180,12 @@ async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budg
   const live = [...st.entries()].filter(([, q]) => q.quotedAt && !q.stopped)
   for (let i = 0; i < live.length; i += 100) {
     const chunk = live.slice(i, i + 100)
-    const { data: inRows } = await supabase.from('chat_logs').select('session_id, role, message, created_at')
-      .in('role', [CRM_EMAIL_IN_ROLE, CRM_WA_IN_ROLE]).in('session_id', chunk.map(([id]) => id))
-      .gte('created_at', since).order('created_at', { ascending: true })
-    for (const r of inRows ?? []) {
+    // Paged, for the same reason as the first-reply follow-ups above.
+    const chunkIds = chunk.map(([id]) => id)
+    const inRows = await fetchAllPagesSerial<{ session_id: string; role: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, role, message, created_at')
+      .in('role', [CRM_EMAIL_IN_ROLE, CRM_WA_IN_ROLE]).in('session_id', chunkIds)
+      .gte('created_at', since).order('created_at', { ascending: true }).order('id', { ascending: true }), 100000)
+    for (const r of inRows) {
       const q = st.get(r.session_id)!
       if (q.stopped || new Date(r.created_at).getTime() <= (q.quotedAt ?? 0) + 60 * 1000) continue
       if (r.role === CRM_EMAIL_IN_ROLE && isNoiseSender(parseCrmEmailIn(r.message)?.from ?? '')) continue

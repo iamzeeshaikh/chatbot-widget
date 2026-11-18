@@ -1,6 +1,6 @@
 // Reading and writing jobs (lib/jobs.ts). Server only.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial } from './supabase'
 import type { Member } from './auth'
 import { loadAgentSignatures } from './signature'
 import { storedMemberNames } from './membername'
@@ -13,22 +13,28 @@ import {
 
 const CAP = 20000
 
+// Every snapshot of every job, oldest first, read in pages: one row is written
+// per save, a plain select stops at 1,000 rows whatever .limit() asks for, and
+// past that the newest jobs would leave the list and a job number be reused.
+function jobRows(ws: Workspace): Promise<{ message: string }[]> {
+  return fetchAllPagesSerial<{ message: string }>(() => supabase.from('chat_logs').select('message')
+    .eq('session_id', jobSession(ws)).eq('role', CRM_JOB_ROLE)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), CAP)
+}
+
 /** Every live job in the workspace, newest first. */
 export async function listJobs(ws: Workspace): Promise<Job[]> {
-  const { data } = await supabase.from('chat_logs').select('message')
-    .eq('session_id', jobSession(ws)).eq('role', CRM_JOB_ROLE)
-    .order('created_at', { ascending: true }).limit(CAP)
-  if ((data ?? []).length >= CAP) console.warn('[jobs] job snapshot query hit its cap')
+  const data = await jobRows(ws)
+  if (data.length >= CAP) console.warn('[jobs] job snapshot query hit its cap')
   const byId = new Map<string, Job>()
-  for (const r of data ?? []) { const j = parseJob(r.message); if (j) byId.set(j.id, j) }
+  for (const r of data) { const j = parseJob(r.message); if (j) byId.set(j.id, j) }
   return [...byId.values()].filter((j) => !j.deleted).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
 /** Including deleted ones — for numbering, so a number is never reused. */
 export async function jobCount(ws: Workspace): Promise<number> {
-  const { data } = await supabase.from('chat_logs').select('message')
-    .eq('session_id', jobSession(ws)).eq('role', CRM_JOB_ROLE).limit(CAP)
-  return new Set((data ?? []).map((r) => parseJob(r.message)?.id).filter(Boolean)).size
+  const data = await jobRows(ws)
+  return new Set(data.map((r) => parseJob(r.message)?.id).filter(Boolean)).size
 }
 
 export async function writeJob(ws: Workspace, job: Job): Promise<string | null> {

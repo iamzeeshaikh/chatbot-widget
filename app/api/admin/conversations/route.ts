@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, fetchAllPages, warnIfCapped } from '@/lib/supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 import { canSeeContacts, maskEmail, scrubText } from '@/lib/pii'
 import type { Workspace } from '@/lib/workspaces'
@@ -9,7 +9,7 @@ import { isOwnLeadsOnly, isOwnedBy } from '@/lib/ownleads'
 import { CONTACT_ROLE, TAGS_ROLE, parseTags, parseContact, asUtcIso } from '@/lib/visitor'
 import { parseAttachment } from '@/lib/attachment'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture, extractEmail } from '@/lib/leadtracking'
-import { isControlRole } from '@/lib/controlroles'
+import { isControlRole, CONTROL_ROLES_IN } from '@/lib/controlroles'
 import { CRM_ROLES } from '@/lib/crm'
 import { isBotEnabledForWorkspace } from '@/lib/botflag'
 
@@ -97,16 +97,29 @@ async function withoutControlRows<T extends { session_id: string; preview: strin
   const ids = dirty.map((s) => s.session_id)
   // Same window as the summary itself, so a CRM action on an old lead can't
   // drag its long-finished conversation back into the live list.
-  const { data: rows } = await supabase
-    .from('chat_logs')
-    .select('session_id, role, message, created_at')
-    .in('session_id', ids)
-    .gte('created_at', since)
-    .order('created_at', { ascending: true })
-    .limit(4000)
+  //
+  // Only the real messages are asked for. This used to fetch EVERY row of the
+  // dirty sessions, control rows included, and the dirty set includes the
+  // reserved ledger sessions (reminders, intake pulls, alerts) — 9,931 rows in
+  // one week (Nov 2026) of which the database returned the oldest 1,000, nearly
+  // all ledger rows. A chat whose messages fell outside those 1,000 found no
+  // repair and was dropped from the list: 10 of 12 such chats that week. The
+  // control rows were thrown away below anyway, so they are filtered in the
+  // query (isControlRole stays as the check), and what is left is paged.
+  const REPAIR_ROW_CAP = 20000
+  const rows = await fetchAllPagesSerial<{ session_id: string; role: string; message: string; created_at: string }>(
+    () => supabase
+      .from('chat_logs')
+      .select('session_id, role, message, created_at')
+      .in('session_id', ids)
+      .gte('created_at', since)
+      .not('role', 'in', `(${CONTROL_ROLES_IN})`)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }),
+    REPAIR_ROW_CAP)
+  warnIfCapped('conversations: repair', rows.length, REPAIR_ROW_CAP)
 
   const fixed = new Map<string, { preview: string; last_at: string; last_role: string; message_count: number }>()
-  for (const r of rows ?? []) {
+  for (const r of rows) {
     if (isControlRole(r.role) || r.message === '(session started)') continue
     const prev = fixed.get(r.session_id)
     const att = parseAttachment(r.message)

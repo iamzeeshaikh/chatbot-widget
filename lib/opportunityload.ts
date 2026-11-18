@@ -13,7 +13,7 @@
 // site-scoped and role-filtered in SQL, and every capped read says so
 // (CLAUDE.md §6).
 
-import { supabase, fetchAllPages, warnIfCapped } from './supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { memberSites, type Member } from './auth'
 import { notALeadSessions } from './notalead'
 import { LEAD_CAPTURE_ROLE, parseLeadCapture } from './leadtracking'
@@ -225,9 +225,14 @@ async function build(member: Member, sites: string[]): Promise<OpportunitiesResu
   const stateOf = new Map<string, LeadState>()
   for (const s of untouched) for (const id of s.ids) stateOf.set(id, s)
   for (let i = 0; i < untouchedIds.length; i += 100) {
-    const { data: extra } = await supabase.from('chat_logs').select('session_id, site_id, role, message, created_at')
-      .in('role', ['admin', 'crm_call']).in('session_id', untouchedIds.slice(i, i + 100))
-    for (const r of (extra ?? []) as OppRow[]) {
+    // Paged: a chat an agent worked hard holds dozens of 'admin' rows, and a
+    // reply left out of a 1,000-row response makes an answered lead read as
+    // untouched — which is what the "nobody has answered" alert goes by.
+    const ids = untouchedIds.slice(i, i + 100)
+    const extra = await fetchAllPagesSerial<OppRow>(() => supabase.from('chat_logs').select('session_id, site_id, role, message, created_at')
+      .in('role', ['admin', 'crm_call']).in('session_id', ids)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), 100000)
+    for (const r of extra) {
       const st = stateOf.get(r.session_id)
       if (!st) continue
       let o: Record<string, unknown> | null = null

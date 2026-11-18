@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAllPagesSerial } from '@/lib/supabase'
 import { getMember, siteScope } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -25,11 +25,15 @@ export async function DELETE(req: NextRequest) {
     // Standard members may only delete sessions belonging to their sites.
     const scope = await siteScope(member)
     if (scope) {
-      const { data: rows } = await supabase
+      // Paged: every row of the selected sessions is more than one 1,000-row
+      // response once a few long chats are picked, and a session left out of
+      // it was silently not deleted.
+      const rows = await fetchAllPagesSerial<{ session_id: string; site_id: string }>(() => supabase
         .from('chat_logs')
         .select('session_id, site_id')
         .in('session_id', sessionIds)
-      const allowed = new Set((rows ?? []).filter((r) => scope.has(r.site_id)).map((r) => r.session_id))
+        .order('id', { ascending: true }), 200000)
+      const allowed = new Set(rows.filter((r) => scope.has(r.site_id)).map((r) => r.session_id))
       sessionIds = sessionIds.filter((id: string) => allowed.has(id))
       if (sessionIds.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }

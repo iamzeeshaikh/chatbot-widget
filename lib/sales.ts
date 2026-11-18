@@ -118,10 +118,18 @@ export async function leadFactsFor(leadIds: (string | null | undefined)[]): Prom
   // An agent's reply in the widget is a chat_logs row with role 'admin'
   // (lib/replyauthor.ts). One such row means a human took the chat over;
   // none means the bot alone handled it. One query for every chat session.
-  const { data, error } = await supabase
-    .from('chat_logs').select('session_id').in('session_id', chatIds).eq('role', 'admin').limit(5000)
-  if (error) return out // leave the plain 'chat' fallback rather than guess
-  const human = new Set((data ?? []).map((r) => String(r.session_id)))
+  // Read in pages: every agent reply is a row, so a few hundred chats hold more
+  // than the 1,000 rows one response returns (whatever .limit() asks for), and
+  // a chat whose rows were left out was credited to the bot.
+  const human = new Set<string>()
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('chat_logs').select('session_id').in('session_id', chatIds).eq('role', 'admin')
+      .order('id', { ascending: true }).range(from, from + 999)
+    if (error) return out // leave the plain 'chat' fallback rather than guess
+    for (const r of data ?? []) human.add(String(r.session_id))
+    if (!data || data.length < 1000) break
+  }
   for (const id of chatIds) {
     const f = out.get(id)
     if (f) out.set(id, { ...f, kind: human.has(id) ? 'chat_human' : 'chat_bot' })

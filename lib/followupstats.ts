@@ -7,7 +7,7 @@
 // or 'quote_fu' (after the price), state 'sent'. A reply is a `crm_email_in`
 // on the same lead after that lead's first follow-up; bounces are not replies.
 
-import { supabase, fetchAllPages, warnIfCapped } from './supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { workspaceSites } from './workspaces'
 
 export type ReplyMood = 'interested' | 'later' | 'no'
@@ -78,10 +78,12 @@ export async function loadFollowUpStats(days = 30): Promise<FollowUpStats> {
   const ids = [...lead.keys()]
   const firstIn = new Map<string, { at: string; body: string }>()
   for (let i = 0; i < ids.length; i += 100) {
-    const { data } = await supabase.from('chat_logs').select('session_id, message, created_at')
-      .in('session_id', ids.slice(i, i + 100)).eq('role', 'crm_email_in').gte('created_at', since)
-      .order('created_at', { ascending: true }).range(0, 9999)
-    for (const r of data ?? []) {
+    // Paged: .range(0, 9999) still comes back as 1,000 rows at most.
+    const chunk = ids.slice(i, i + 100)
+    const data = await fetchAllPagesSerial<{ session_id: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, message, created_at')
+      .in('session_id', chunk).eq('role', 'crm_email_in').gte('created_at', since)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), 100000)
+    for (const r of data) {
       const l = lead.get(r.session_id)
       if (!l || firstIn.has(r.session_id) || r.created_at <= l.first) continue
       let o: { from?: string; body?: string }

@@ -18,7 +18,7 @@
 // the daily digest still covers anything outstanding. Two runs that overlap are
 // additionally kept apart by a short lease row.
 
-import { supabase, fetchAllPages, warnIfCapped } from './supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { HARDCODED_ACCOUNTS, hideContactsIds, type Role } from './auth'
 import { canSeeContacts, scrubText } from './pii'
 import { workspaceSites, siteWorkspace, hasFeature, type Workspace } from './workspaces'
@@ -118,15 +118,18 @@ async function loadLiveTasks(): Promise<LiveTask[]> {
 }
 
 async function loadPrefs(): Promise<Map<string, ReminderPrefs>> {
-  const { data } = await supabase
+  // Paged: one row per save, newest wins, and a 1,000-row response read
+  // oldest-first would drop exactly the newest — a reminder somebody has
+  // just switched off would go on being sent.
+  const data = await fetchAllPagesSerial<{ message: string; created_at: string }>(() => supabase
     .from('chat_logs')
     .select('message, created_at')
     .eq('role', CRM_PREFS_ROLE)
     .eq('session_id', PREFS_SESSION)
-    .order('created_at', { ascending: true })
-    .limit(4000)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), 20000)
+  warnIfCapped('reminders: prefs', data.length, 20000)
   const out = new Map<string, ReminderPrefs>()
-  for (const r of data ?? []) {
+  for (const r of data) {
     const p = parsePrefs(r.message)
     if (p) out.set(p.email.toLowerCase(), p) // ascending → newest revision wins
   }
@@ -166,9 +169,10 @@ async function loadLeadNames(ids: string[]): Promise<Record<string, string>> {
 
   const [caps, leads] = await Promise.all([
     chatIds.length
-      ? supabase.from('chat_logs').select('session_id, message, created_at')
+      // Paged, as in lib/taskquery.ts: past 1,000 rows the newest leads lose their name.
+      ? fetchAllPagesSerial<{ session_id: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, message, created_at')
           .in('session_id', chatIds).in('role', [LEAD_CAPTURE_ROLE, CONTACT_ROLE])
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: true }).order('id', { ascending: true }), 50000).then((data) => ({ data }))
       : Promise.resolve({ data: [] as { session_id: string; message: string }[] }),
     quoteIds.length
       ? supabase.from('leads').select('id, name, email, phone').in('id', quoteIds)

@@ -20,7 +20,7 @@
 // a further row restoring each lead's previous value. History keeps both events
 // on purpose — that is the point of an append-only audit trail.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial } from './supabase'
 import { canAccessSite, type Member } from './auth'
 import { isOwnLeadsOnly, ownedSessions } from './ownleads'
 import { isQuoteSessionId } from './quoteintake'
@@ -62,8 +62,12 @@ export async function resolveSitesForIds(
 
   // Chat leads: any row for the session tells us its site.
   for (const chunk of chunks(chatIds, 200)) {
-    const { data } = await supabase.from('chat_logs').select('session_id, site_id').in('session_id', chunk)
-    for (const r of data ?? []) if (r.site_id && !siteOf.has(r.session_id)) siteOf.set(r.session_id, r.site_id)
+    // Every row of every session in the chunk — far more than the 1,000 one
+    // response holds, and a session whose rows were all left out read as
+    // "not found" and was skipped. Paged, in a fixed order.
+    const data = await fetchAllPagesSerial<{ session_id: string; site_id: string }>(() => supabase.from('chat_logs')
+      .select('session_id, site_id').in('session_id', chunk).order('id', { ascending: true }), 200000)
+    for (const r of data) if (r.site_id && !siteOf.has(r.session_id)) siteOf.set(r.session_id, r.site_id)
   }
 
   // Own-leads-only (lib/ownleads.ts): a lead that is not currently his is

@@ -9,7 +9,7 @@
 // not marketing, and the bot's follow-ups also respect it so "stop" means stop.
 
 import { createHmac, timingSafeEqual } from 'crypto'
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial, warnIfCapped } from './supabase'
 
 export const CRM_UNSUB_ROLE = 'crm_unsub'
 const SITE = 'zeeops-crm'
@@ -45,12 +45,19 @@ export async function recordUnsubscribe(email: string, via: string): Promise<voi
   })
 }
 
+// Both lists below decide who must NOT be emailed, so they are read in pages:
+// the database returns 1,000 rows at most whatever .limit() asks for, and read
+// oldest-first that would leave out the NEWEST people to unsubscribe.
+const LIST_ROW_CAP = 50000
+
 /** Every address currently unsubscribed. Small: one row per person who asked. */
 export async function unsubscribedSet(): Promise<Set<string>> {
-  const { data } = await supabase.from('chat_logs').select('message')
-    .eq('role', CRM_UNSUB_ROLE).eq('session_id', SESSION).order('created_at', { ascending: true }).limit(20000)
+  const data = await fetchAllPagesSerial<{ message: string }>(() => supabase.from('chat_logs').select('message')
+    .eq('role', CRM_UNSUB_ROLE).eq('session_id', SESSION)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), LIST_ROW_CAP)
+  warnIfCapped('unsubscribe list', data.length, LIST_ROW_CAP)
   const out = new Set<string>()
-  for (const r of data ?? []) {
+  for (const r of data) {
     try {
       const o = JSON.parse(r.message)
       if (typeof o.email !== 'string') continue
@@ -74,10 +81,12 @@ export async function recordPromoExclude(email: string, by: string, excluded = t
 }
 
 export async function promoExcludedSet(): Promise<Set<string>> {
-  const { data } = await supabase.from('chat_logs').select('message')
-    .eq('role', CRM_PROMO_EXCLUDE_ROLE).eq('session_id', EXCLUDE_SESSION).order('created_at', { ascending: true }).limit(20000)
+  const data = await fetchAllPagesSerial<{ message: string }>(() => supabase.from('chat_logs').select('message')
+    .eq('role', CRM_PROMO_EXCLUDE_ROLE).eq('session_id', EXCLUDE_SESSION)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), LIST_ROW_CAP)
+  warnIfCapped('promo exclude list', data.length, LIST_ROW_CAP)
   const out = new Set<string>()
-  for (const r of data ?? []) {
+  for (const r of data) {
     try {
       const o = JSON.parse(r.message)
       if (typeof o.email !== 'string') continue

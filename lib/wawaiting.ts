@@ -9,7 +9,7 @@
 // RINGS. A count that drifts from the badge would have the bell go off for a
 // lead that shows nothing, which is worse than no bell at all.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from './crm'
 import { isBotWaRow } from './whatsapp'
 
@@ -18,16 +18,21 @@ import { isBotWaRow } from './whatsapp'
 export async function waWaitingSessions(siteIds: string[], only?: Set<string>): Promise<Set<string>> {
   const waiting = new Set<string>()
   if (siteIds.length === 0) return waiting
-  const { data } = await supabase
+  // Read in pages. This asked for 5,000 rows, but the database returns 1,000
+  // at most — and oldest-first, so once packaging passed 1,000 WhatsApp rows
+  // (13 Nov 2026) the newest messages were never read: a customer who wrote
+  // today showed no badge and rang no bell, and one answered since still did.
+  const WA_ROW_CAP = 50000
+  const data = await fetchAllPagesSerial<{ session_id: string; role: string; message: string; created_at: string }>(() => supabase
     .from('chat_logs')
     .select('session_id, role, message, created_at')
     .in('site_id', siteIds)
     .in('role', [CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE])
     // Ascending, so the LAST row seen for a session is the newest one — the
     // fold below depends on that order and silently inverts without it.
-    .order('created_at', { ascending: true })
-    .limit(5000)
-  for (const r of data ?? []) {
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), WA_ROW_CAP)
+  warnIfCapped('whatsapp waiting', data.length, WA_ROW_CAP)
+  for (const r of data) {
     if (only && !only.has(r.session_id)) continue
     if (r.role === CRM_WA_IN_ROLE) waiting.add(r.session_id)
     // The WhatsApp assistant's reply leaves the customer waiting on a PERSON.

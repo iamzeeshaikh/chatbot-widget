@@ -25,7 +25,7 @@
 // To be replaced by a PayPal REST webhook once the owner's PayPal developer
 // verification is done; the matcher below is what that webhook will call.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import { SPORTS_SITES } from './workspaces'
 import { googleConfig, searchPaypalPaidMail, fetchThread, connectionFor } from './gmail'
@@ -136,24 +136,31 @@ export interface PaypalRunResult {
 }
 
 async function processedIds(): Promise<Set<string>> {
-  const { data } = await supabase.from('chat_logs').select('message')
+  // Paged (here and below): the database returns 1,000 rows at most whatever
+  // .limit() asks for. A handled mail missing from this set is paid in twice.
+  const data = await fetchAllPagesSerial<{ message: string }>(() => supabase.from('chat_logs').select('message')
     .eq('site_id', REMINDER_SITE).eq('session_id', LEDGER_SESSION).eq('role', CRM_PAYPAL_PAID_ROLE)
-    .order('created_at', { ascending: false }).limit(2000)
+    .order('created_at', { ascending: false }).order('id', { ascending: true }), 50000)
+  warnIfCapped('paypal paid ledger', data.length, 50000)
   const out = new Set<string>()
-  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.gmailId) out.add(o.gmailId) } catch { /* skip */ } }
+  for (const r of data) { try { const o = JSON.parse(r.message); if (o?.gmailId) out.add(o.gmailId) } catch { /* skip */ } }
   return out
 }
 
 /** Every sports invoice code we know, and the lead it was sent to. */
 export async function codeIndex(): Promise<Map<string, { leadId: string; siteId: string }>> {
   const out = new Map<string, { leadId: string; siteId: string }>()
-  const { data: links } = await supabase.from('chat_logs').select('session_id, site_id, message')
-    .eq('role', 'crm_pay_link').in('site_id', SPORTS_SITES).order('created_at', { ascending: true }).limit(2000)
+  type CodeRow = { session_id: string; site_id: string; message: string }
+  const links = await fetchAllPagesSerial<CodeRow>(() => supabase.from('chat_logs').select('session_id, site_id, message')
+    .eq('role', 'crm_pay_link').in('site_id', SPORTS_SITES)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), 20000)
   // A link an agent pasted straight into an email or a WhatsApp counts too.
-  const { data: sent } = await supabase.from('chat_logs').select('session_id, site_id, message')
+  const sent = await fetchAllPagesSerial<CodeRow>(() => supabase.from('chat_logs').select('session_id, site_id, message')
     .in('role', ['crm_email', 'crm_wa_out']).in('site_id', SPORTS_SITES).ilike('message', '%INV2-%')
-    .order('created_at', { ascending: true }).limit(2000)
-  for (const r of [...(sent ?? []), ...(links ?? [])]) {
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), 20000)
+  warnIfCapped('paypal paid: pay links', links.length, 20000)
+  warnIfCapped('paypal paid: sent links', sent.length, 20000)
+  for (const r of [...sent, ...links]) {
     for (const c of invoiceCodes(r.message ?? '')) out.set(c, { leadId: r.session_id, siteId: r.site_id })
   }
   return out
@@ -162,13 +169,21 @@ export async function codeIndex(): Promise<Map<string, { leadId: string; siteId:
 /** Sports leads of the last six months with every amount they were quoted or invoiced. */
 export async function leadRefs(): Promise<LeadRef[]> {
   const since = new Date(Date.now() - 183 * 86_400_000).toISOString()
-  const [leadsRes, capRes, docsRes, quotedRes, contactRes] = await Promise.all([
-    supabase.from('leads').select('id, site_id, name').in('site_id', SPORTS_SITES).gte('created_at', since).limit(5000),
-    supabase.from('chat_logs').select('session_id, site_id, message').eq('role', 'lead_capture').in('site_id', SPORTS_SITES).gte('created_at', since).limit(5000),
-    supabase.from('chat_logs').select('session_id, message').eq('role', 'crm_invoice_doc').in('site_id', SPORTS_SITES).limit(2000),
-    supabase.from('chat_logs').select('session_id, message').in('role', ['crm_email', 'crm_wa_out', 'crm_invoice']).in('site_id', SPORTS_SITES).gte('created_at', since).ilike('message', '%$%').limit(5000),
-    supabase.from('chat_logs').select('session_id, message').eq('role', 'contact').in('site_id', SPORTS_SITES).gte('created_at', since).limit(5000),
+  // Each of these fed a payment match from at most 1,000 rows, in no stated
+  // order; a lead or a quoted amount left out is a payment nobody is matched to.
+  const REF_CAP = 20000
+  const asc = { ascending: true }
+  const [leadRows, capRows, docRows, quotedRows, contactRows] = await Promise.all([
+    fetchAllPagesSerial<{ id: string; site_id: string; name: string | null }>(() => supabase.from('leads').select('id, site_id, name').in('site_id', SPORTS_SITES).gte('created_at', since).order('created_at', asc).order('id', asc), REF_CAP),
+    fetchAllPagesSerial<{ session_id: string; site_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, site_id, message').eq('role', 'lead_capture').in('site_id', SPORTS_SITES).gte('created_at', since).order('created_at', asc).order('id', asc), REF_CAP),
+    fetchAllPagesSerial<{ session_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, message').eq('role', 'crm_invoice_doc').in('site_id', SPORTS_SITES).order('created_at', asc).order('id', asc), REF_CAP),
+    fetchAllPagesSerial<{ session_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, message').in('role', ['crm_email', 'crm_wa_out', 'crm_invoice']).in('site_id', SPORTS_SITES).gte('created_at', since).ilike('message', '%$%').order('created_at', asc).order('id', asc), REF_CAP),
+    fetchAllPagesSerial<{ session_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, message').eq('role', 'contact').in('site_id', SPORTS_SITES).gte('created_at', since).order('created_at', asc).order('id', asc), REF_CAP),
   ])
+  for (const [what, rows] of [['leads', leadRows], ['captures', capRows], ['invoices', docRows], ['quoted amounts', quotedRows], ['contacts', contactRows]] as const) {
+    warnIfCapped(`paypal paid: ${what}`, rows.length, REF_CAP)
+  }
+  const leadsRes = { data: leadRows }, capRes = { data: capRows }, docsRes = { data: docRows }, quotedRes = { data: quotedRows }, contactRes = { data: contactRows }
   // Other names the customer goes by: the invoice's Bill To and the contact
   // details an agent typed — a chat lead often has no name of its own.
   const altNames = new Map<string, string[]>()

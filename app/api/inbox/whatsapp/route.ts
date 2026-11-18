@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAllPagesSerial } from '@/lib/supabase'
 import { getMember, memberSites } from '@/lib/auth'
 import { hasFeature, defaultOwnerForSite } from '@/lib/workspaces'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from '@/lib/crm'
@@ -51,11 +51,15 @@ async function waRows(sites: string[], since: string): Promise<Row[]> {
 async function ownersFor(leadIds: string[]): Promise<Map<string, string | null>> {
   const owner = new Map<string, string | null>()
   for (let i = 0; i < leadIds.length; i += 100) {
-    const { data } = await supabase.from('chat_logs')
+    // Paged: some leads carry 150+ assignment rows, so 100 of them can pass the
+    // 1,000 rows a response holds, and oldest-first the row left out is the
+    // newest one — the lead's CURRENT owner.
+    const chunk = leadIds.slice(i, i + 100)
+    const data = await fetchAllPagesSerial<{ session_id: string; message: string | null; created_at: string }>(() => supabase.from('chat_logs')
       .select('session_id, message, created_at')
-      .in('session_id', leadIds.slice(i, i + 100)).eq('role', ASSIGNMENT_ROLE)
-      .order('created_at', { ascending: true }).limit(2000)
-    for (const r of data ?? []) owner.set(r.session_id, (r.message ?? '').trim() || null)
+      .in('session_id', chunk).eq('role', ASSIGNMENT_ROLE)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }), 100000)
+    for (const r of data) owner.set(r.session_id, (r.message ?? '').trim() || null)
   }
   return owner
 }

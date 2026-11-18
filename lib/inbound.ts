@@ -84,10 +84,17 @@ export interface InboundLead { sessionId: string; siteId: string; created: boole
 export async function findLeadByPhone(phone: string, workspace: Workspace): Promise<{ leadId: string; sessionId: string; siteId: string; name: string } | null> {
   const key = phoneKey(String(phone || '').trim())
   if (!key) return null
+  // The database finds the candidates; phoneKey below still decides. This used
+  // to read "the newest 2000" leads with a number and compare them here — but
+  // 1,000 rows is all a response ever holds, so with 2,247 packaging leads
+  // carrying a phone (Nov 2026) a customer whose last lead was older than about
+  // two months was a stranger: no name on the ringing call, and a second lead
+  // opened for their WhatsApp. The pattern is the key's nine digits in order
+  // with anything between them, so every spelling of the number matches it.
   const { data: leads } = await supabase.from('leads')
     .select('id, site_id, phone, name')
-    .in('site_id', sitesOf(workspace)).not('phone', 'is', null)
-    .order('created_at', { ascending: false }).limit(2000)
+    .in('site_id', sitesOf(workspace)).ilike('phone', `%${key.split('').join('%')}%`)
+    .order('created_at', { ascending: false }).limit(1000)
   const match = (leads ?? []).find((l) => phoneKey(l.phone) === key)
   if (!match) return null
   return { leadId: match.id, sessionId: quoteSessionId(match.id), siteId: match.site_id, name: match.name ?? '' }

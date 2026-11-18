@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAllPagesSerial } from '@/lib/supabase'
 import { workspaceSites, type Workspace } from '@/lib/workspaces'
 import { CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE } from '@/lib/crm'
 import { makeSnippet, newEmailId } from '@/lib/crmemail'
@@ -145,12 +145,13 @@ export async function POST(req: NextRequest) {
     leadIds.add(sessionId)
 
     // What this session already carries, so a re-run adds nothing twice.
-    const { data: existing } = await supabase.from('chat_logs')
+    // Paged, in a fixed order: a row this cannot see is imported a second time.
+    const existing = await fetchAllPagesSerial<{ id: string; message: string | null }>(() => supabase.from('chat_logs')
       .select('id, message').eq('session_id', sessionId)
-      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE]).limit(1000)
+      .in('role', [CRM_EMAIL_ROLE, CRM_EMAIL_IN_ROLE]).order('id', { ascending: true }), 50000)
     // gmailId → { rowId, entry } for rows this import wrote and can still enrich
     const have = new Map<string, { rowId: string; entry: Record<string, unknown>; imported: boolean }>()
-    for (const r of existing ?? []) {
+    for (const r of existing) {
       try {
         const o = JSON.parse(r.message ?? '{}')
         if (o?.gmailId) have.set(String(o.gmailId), { rowId: String(r.id), entry: o, imported: o.imported === true })

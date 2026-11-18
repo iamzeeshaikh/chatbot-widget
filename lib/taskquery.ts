@@ -11,7 +11,7 @@
 // and must not be polled hard.
 
 import { isOwnLeadsOnly, isOwnedBy, ownedSessions } from './ownleads'
-import { supabase, fetchAllPages } from './supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial } from './supabase'
 import { memberSites, type Member } from './auth'
 import { CONTACT_ROLE } from './visitor'
 import { LEAD_CAPTURE_ROLE } from './leadtracking'
@@ -119,11 +119,13 @@ async function loadLeadNames(sessionIds: string[]): Promise<Record<string, strin
 
   const [captureRes, leadsRes] = await Promise.all([
     chatIds.length
-      ? supabase.from('chat_logs')
+      // Paged: 950 such rows exist in all (Nov 2026), a response holds 1,000,
+      // and oldest-first the newest leads would be the ones left nameless.
+      ? fetchAllPagesSerial<{ session_id: string; role: string; message: string; created_at: string }>(() => supabase.from('chat_logs')
           .select('session_id, role, message, created_at')
           .in('session_id', chatIds)
           .in('role', [LEAD_CAPTURE_ROLE, CONTACT_ROLE])
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: true }).order('id', { ascending: true }), 50000).then((data) => ({ data }))
       : Promise.resolve({ data: [] as { session_id: string; role: string; message: string; created_at: string }[] }),
     quoteLeadIds.length
       ? supabase.from('leads').select('id, name, email, phone').in('id', quoteLeadIds)

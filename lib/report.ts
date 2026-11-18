@@ -23,7 +23,7 @@
 //   billable   leads deduped by site+email across chat and quote, checkout
 //              removed. Identical key to app/api/admin/leads-billing.
 
-import { supabase, fetchAllPages } from './supabase'
+import { supabase, fetchAllPages, fetchAllPagesSerial } from './supabase'
 import { siteScope, HARDCODED_ACCOUNTS, type Member } from './auth'
 import { MODE_ROLE } from './mode'
 import { asUtcIso } from './visitor'
@@ -153,14 +153,22 @@ export async function buildReport(member: Member, range: ReportRange): Promise<R
         .in('site_id', allowed).gte('created_at', from).lt('created_at', to)
         .order('created_at', { ascending: true }),
       ROW_CAP),
-    supabase.from('leads').select('id, site_id, name, email, phone, message, created_at')
-      .ilike('message', `${QUOTE_TAG}%`).gte('created_at', from).lt('created_at', to),
-    supabase.from('leads').select('id, site_id, name, email, phone, message, created_at')
-      .ilike('message', `${CHECKOUT_TAG}%`).gte('created_at', from).lt('created_at', to),
+    // Paged like the two reads above: a plain select returns 1,000 rows at most,
+    // and a month of quote leads is already close to that (899 in Oct 2026).
+    fetchAllPagesSerial<{ id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string }>(
+      () => supabase.from('leads').select('id, site_id, name, email, phone, message, created_at')
+        .ilike('message', `${QUOTE_TAG}%`).gte('created_at', from).lt('created_at', to)
+        .order('created_at', { ascending: true }).order('id', { ascending: true }),
+      ROW_CAP).then((data) => ({ data })),
+    fetchAllPagesSerial<{ id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string }>(
+      () => supabase.from('leads').select('id, site_id, name, email, phone, message, created_at')
+        .ilike('message', `${CHECKOUT_TAG}%`).gte('created_at', from).lt('created_at', to)
+        .order('created_at', { ascending: true }).order('id', { ascending: true }),
+      ROW_CAP).then((data) => ({ data })),
     supabase.from('sites').select('site_id, name'),
     supabase.from('members').select('id, email').eq('workspace', member.workspace),
   ])
-  base.truncated = rows.length >= ROW_CAP || visitorRows.length >= ROW_CAP
+  base.truncated = rows.length >= ROW_CAP || visitorRows.length >= ROW_CAP || quoteRows.data.length >= ROW_CAP || checkoutRows.data.length >= ROW_CAP
 
   const siteName: Record<string, string> = {}
   for (const s of sitesRes.data ?? []) siteName[s.site_id] = s.name

@@ -13,7 +13,7 @@
 // payment itself). A paid invoice with no sale is reported and pushed — never
 // guessed onto one. Unpaid invoices missing from the ledger are listed too.
 
-import { supabase } from './supabase'
+import { supabase, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import { PACKAGING_SITES } from './workspaces'
 import { readSales, writeSale } from './sales'
@@ -49,10 +49,13 @@ export interface PaypalSyncResult {
 /** Payments already handled, and those recorded as "no sale found" (which are
  *  retried once a sale exists, without a second push). */
 async function doneIds(): Promise<Set<string> & { unmatched?: Set<string> }> {
-  const { data } = await supabase.from('chat_logs').select('message').eq('session_id', SESSION).eq('role', CRM_PAYPAL_SYNC_ROLE)
-    .order('created_at', { ascending: true }).range(0, 9999)
+  // Paged: .range(0, 9999) still comes back as 1,000 rows at most, and past
+  // that the newest handled payments would look new and be applied again.
+  const data = await fetchAllPagesSerial<{ message: string }>(() => supabase.from('chat_logs').select('message').eq('session_id', SESSION).eq('role', CRM_PAYPAL_SYNC_ROLE)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), 50000)
+  warnIfCapped('paypal sync ledger', data.length, 50000)
   const last = new Map<string, boolean>()
-  for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.paymentId) last.set(o.paymentId, o.matched === null) } catch { /* skip */ } }
+  for (const r of data) { try { const o = JSON.parse(r.message); if (o?.paymentId) last.set(o.paymentId, o.matched === null) } catch { /* skip */ } }
   const out: Set<string> & { unmatched?: Set<string> } = new Set([...last].filter(([, u]) => !u).map(([k]) => k))
   out.unmatched = new Set([...last].filter(([, u]) => u).map(([k]) => k))
   return out
@@ -64,9 +67,11 @@ async function remember(o: Record<string, unknown>) {
 /** Invoice code → lead, from the payment links saved on packaging leads. */
 async function linkIndex(): Promise<Map<string, { leadId: string; siteId: string }>> {
   const out = new Map<string, { leadId: string; siteId: string }>()
-  const { data } = await supabase.from('chat_logs').select('session_id, site_id, message')
-    .eq('role', 'crm_pay_link').in('site_id', [...PACKAGING_SITES]).order('created_at', { ascending: true }).limit(3000)
-  for (const r of data ?? []) {
+  const data = await fetchAllPagesSerial<{ session_id: string; site_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, site_id, message')
+    .eq('role', 'crm_pay_link').in('site_id', [...PACKAGING_SITES])
+    .order('created_at', { ascending: true }).order('id', { ascending: true }), 20000)
+  warnIfCapped('paypal sync pay links', data.length, 20000)
+  for (const r of data) {
     const m = String(r.message ?? '').match(/invoice\/p\/#([A-Z0-9-]+)/i)
     if (m) out.set(norm(m[1]).replace(/^INV2/, ''), { leadId: r.session_id, siteId: r.site_id })
   }
