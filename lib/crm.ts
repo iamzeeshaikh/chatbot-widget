@@ -121,6 +121,9 @@ export const CRM_ROLES = [
   // a lead, so a preview cannot reach them; registered here as the second line
   // of defence, the same way call_intent is.
   'crm_intake_drop', 'crm_intake_lag',
+  // The watchman's ledger (lib/healthwatch.ts) and the Gmail pause rows
+  // (lib/gmail.ts), both on the reserved zeeops-crm site.
+  'crm_health_alert', 'gmail_cooldown',
   // The sales ledger (lib/sales.ts) — one snapshot per save, on the reserved
   // zeeops-crm site. Registered here as the second line of defence.
   'crm_sale',

@@ -49,6 +49,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/crm/health-watch",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/crm/lost-weekly",
       "schedule": "0 5 * * 1"
     }
