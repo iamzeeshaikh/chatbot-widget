@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ATTACHMENT_BUCKET, MAX_ATTACHMENT_BYTES, buildAttachmentMessage, isAllowedMime, parseAttachment, uniqueAttachmentPath, type AttachmentInfo } from '@/lib/attachment'
 import { supabase } from '@/lib/supabase'
-import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody, isGarbageName, nameFromForwardHeader, isMachineMail, isTestSubmission } from '@/lib/quoteintake'
+import { QUOTE_TAG, CHECKOUT_TAG, siteIdFromQuoteCode, isLikelySpamQuote, isMerchantTestOrder, isCheckoutOrder, checkoutOrderNumber, normalizeQuoteBody, isSameQuoteBody, customerNameFromBody, isGarbageName, nameFromForwardHeader, isMachineMail, isTestSubmission, gluedFormFields } from '@/lib/quoteintake'
 import { isRetiredLeadSite, siteWorkspace } from '@/lib/workspaces'
 import { sendPushToWorkspace } from '@/lib/push'
 import { recordIntakeDrop } from '@/lib/intakedrop'
@@ -115,14 +115,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, retired: true })
   }
 
-  const cleanEmail = typeof email === 'string' ? email.trim() : ''
+  // A form that glues label to value ("Emailtommy@gmail.com") must not leave
+  // the label in the stored address — see gluedFormFields.
+  const glued = gluedFormFields(typeof message === 'string' ? message : '', typeof email === 'string' ? email : '')
+  const cleanEmail = glued?.email ?? (typeof email === 'string' ? email.trim() : '')
   // The phone as a number, not as whatever text shared its line on the form:
   // "Phone (optional): 6154306952" used to be stored as "(optional): 6154306952"
   // and every call to it failed. The presence check below still looks at the
   // RAW value, so a submission whose phone field held junk is stored (without
   // a phone) rather than refused — a 400 here would make the Apps Script retry
   // it on every run for ever.
-  const rawPhone = typeof phone === 'string' ? phone.trim() : ''
+  const rawPhone = (typeof phone === 'string' ? phone.trim() : '') || (glued?.phone ?? '')
   const cleanPhone = phoneFromText(rawPhone) ?? ''
   // `unreadable`: a site-labelled enquiry in which the script found no email
   // or phone. It is still a lead — the team opens it in Gmail — so it is
@@ -137,7 +140,7 @@ export async function POST(req: NextRequest) {
   // mail's heading; the customer's real name is on the form's own Name line.
   const { data: siteNameRows } = await supabase.from('sites').select('name')
   const brandNames = new Set((siteNameRows ?? []).map((r) => String(r.name ?? '').trim().toLowerCase()).filter(Boolean))
-  const rawName = typeof name === 'string' ? name.trim() : ''
+  const rawName = glued?.name ?? (typeof name === 'string' ? name.trim() : '')
   // A brand name or a line the parser grabbed by mistake is not the customer's
   // name: the form's own Name line, else the forwarded From: header, else none.
   const leadName = (!rawName || brandNames.has(rawName.toLowerCase()) || isGarbageName(rawName))

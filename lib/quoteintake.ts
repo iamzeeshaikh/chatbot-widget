@@ -569,6 +569,33 @@ export function isGarbageName(name: string | null | undefined): boolean {
   return false
 }
 
+/**
+ * A form mail whose text part runs each label straight into its value:
+ * "NameTom", "Emailtommy@gmail.com", "Phone—". The intake script's address
+ * pattern then reads the label as part of the address ("Emailtommy@gmail.com"),
+ * every reply to that lead bounces as "address not found", and the name falls
+ * back to the mail's heading ("MOCKUP REQUEST") and the phone is lost. Seen on thebaseballjerseys.com's
+ * Design Your Jersey and Quick forms: 8 leads between 2026-09-20 and
+ * 2026-11-16, 3 of them real customers the team gave up on.
+ *
+ * Returns the fields as the customer typed them, or null when the body is not
+ * in that glued shape (so an address that genuinely starts with "email" is
+ * left alone).
+ */
+export function gluedFormFields(body: string, email: string): { email: string; name: string | null; phone: string | null } | null {
+  const text = String(body || '')
+  const m = text.match(/^[ \t]*E-?mail([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})[ \t]*$/m)
+  if (!m) return null
+  const typed = m[1]
+  const got = String(email || '').trim().toLowerCase()
+  if (got && got !== `email${typed}`.toLowerCase() && got !== `e-mail${typed}`.toLowerCase() && got !== typed.toLowerCase()) return null
+  const n = text.match(/^[ \t]*(?:Full )?Name(?!s\b)([^\n:]{2,60})$/m)?.[1]?.trim() ?? ''
+  const name = n && !/^[—–-]+$/.test(n) && !/@/.test(n) && !isGarbageName(n) ? n : null
+  // The phone is glued the same way ("Phone6196093132") and was dropped.
+  const phone = text.match(/^[ \t]*Phone[ \t]*([+\d][\d\s().-]{6,})$/m)?.[1]?.trim() ?? null
+  return { email: typed, name, phone }
+}
+
 /** The sender named in a forwarded mail's own "From: Jane Doe <jane@x.com>" line. */
 export function nameFromForwardHeader(body: string): string | null {
   const m = String(body || '').match(/^\s*>?\s*From:\s*"?([^"<\n]{2,60}?)"?\s*(?:\||<)/im)
