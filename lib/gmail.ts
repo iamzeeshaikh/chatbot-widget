@@ -409,7 +409,7 @@ const COOLDOWN_RECHECK_MS = 60_000
  * first, and alone.
  */
 const BACKGROUND_EXTRA_MS = 10 * 60_000
-const cooldownMem = new Map<string, { until: number; checked: number }>()
+const cooldownMem = new Map<string, { until: number; background: number; checked: number }>()
 /** Which mailbox an access token belongs to, so gapi() can name the mailbox. */
 const tokenOwner = new Map<string, string>()
 
@@ -427,36 +427,72 @@ function pausedMessage(until: number): string {
     'because asking again restarts the wait. The connection is fine \u2014 send from another connected mailbox meanwhile, or try again after that time.'
 }
 
-/** Epoch ms this mailbox is paused until, or 0. One database read a minute per instance at most. */
-async function coolingUntil(email: string): Promise<number> {
+/** How far back to look for a run of pauses, and the longest background hold. */
+const STREAK_LOOKBACK_MS = 8 * 60 * 60_000
+const BACKGROUND_MAX_EXTRA_MS = 2 * 60 * 60_000
+
+/**
+ * When this mailbox is paused until (`until`), and when background work may
+ * touch it again (`background`), both epoch ms or 0. One database read a minute
+ * per instance at most.
+ *
+ * The background hold doubles with each pause that follows hard on the last:
+ * ten minutes, twenty, forty, up to two hours. On 2026-11-17/18 one mailbox was
+ * refused for nine hours straight while something of ours asked it again every
+ * twenty to thirty minutes; a mailbox Gmail keeps refusing is left in peace.
+ */
+async function cooling(email: string): Promise<{ until: number; background: number }> {
   const key = email.toLowerCase()
   const now = Date.now()
   const mem = cooldownMem.get(key)
-  if (mem && (mem.until > now || now - mem.checked < COOLDOWN_RECHECK_MS)) return mem.until
-  let until = 0
+  if (mem && (mem.until > now || now - mem.checked < COOLDOWN_RECHECK_MS)) return mem
+  const pauses: { at: number; until: number }[] = []
   try {
     const { data } = await supabase
       .from('chat_logs')
       .select('message, created_at')
       .eq('role', GMAIL_COOLDOWN_ROLE)
       .eq('session_id', GMAIL_COOLDOWN_SESSION)
-      .gte('created_at', new Date(now - COOLDOWN_MAX_MS - BACKGROUND_EXTRA_MS - 60_000).toISOString())
+      .gte('created_at', new Date(now - STREAK_LOOKBACK_MS).toISOString())
       .order('created_at', { ascending: false })
-      .limit(50)
+      .limit(500)
     for (const r of data ?? []) {
       try {
-        const o = JSON.parse(r.message) as { email?: string; until?: number }
-        if (o?.email?.toLowerCase() === key && Number(o.until) > until) until = Number(o.until)
+        const o = JSON.parse(r.message) as { email?: string; until?: number; at?: string }
+        if (o?.email?.toLowerCase() !== key || !Number(o.until)) continue
+        pauses.push({ at: Date.parse(o.at ?? r.created_at) || 0, until: Number(o.until) })
       } catch { /* skip */ }
     }
   } catch { /* a failed read must never block mail; treat as not paused */ }
-  cooldownMem.set(key, { until, checked: now })
-  return until
+  const state = pauseState(pauses)
+  cooldownMem.set(key, { ...state, checked: now })
+  return state
+}
+
+/** Pure: newest pause first or in any order; exported for the test. */
+export function pauseState(pauses: { at: number; until: number }[]): { until: number; background: number } {
+  if (pauses.length === 0) return { until: 0, background: 0 }
+  const sorted = [...pauses].sort((a, b) => b.until - a.until)
+  const until = sorted[0].until
+  // A pause belongs to the run when it began before the previous one's own
+  // background hold could have ended, i.e. the mailbox never had a quiet spell.
+  let streak = 1
+  let earliestStart = sorted[0].at
+  for (const p of sorted.slice(1)) {
+    if (p.until >= earliestStart - 5_000 && p.at >= earliestStart - 5_000) continue // same pause, written twice
+    if (earliestStart - p.until > BACKGROUND_MAX_EXTRA_MS + 5 * 60_000) break
+    streak++
+    earliestStart = p.at
+  }
+  const extra = Math.min(BACKGROUND_EXTRA_MS * 2 ** (streak - 1), BACKGROUND_MAX_EXTRA_MS)
+  return { until, background: until + extra }
 }
 
 async function startCooldown(email: string, until: number): Promise<void> {
   const key = email.toLowerCase()
-  cooldownMem.set(key, { until, checked: Date.now() })
+  const before = cooldownMem.get(key)
+  // Keep any longer background hold already worked out; the next read refines it.
+  cooldownMem.set(key, { until, background: Math.max(before?.background ?? 0, until + BACKGROUND_EXTRA_MS), checked: 0 })
   try {
     await supabase.from('chat_logs').insert({
       site_id: REMINDER_SITE,
@@ -489,11 +525,11 @@ const ALIAS_CACHE_MS = 5 * 60 * 1000
 /** Fresh access token for an agent, or a clear error saying to reconnect. */
 export async function accessTokenFor(email: string, cfg: GoogleConfig, forSend = false): Promise<string> {
   const key = email.toLowerCase()
-  const paused = await coolingUntil(key)
+  const { until: paused, background } = await cooling(key)
   if (paused > Date.now()) throw new GmailRateError(pausedMessage(paused), paused - Date.now())
   // Just out of a pause: only a person's own send may use the mailbox yet.
-  if (!forSend && paused && paused + BACKGROUND_EXTRA_MS > Date.now()) {
-    throw new GmailRateError(pausedMessage(paused + BACKGROUND_EXTRA_MS), paused + BACKGROUND_EXTRA_MS - Date.now())
+  if (!forSend && background > Date.now()) {
+    throw new GmailRateError(pausedMessage(background), background - Date.now())
   }
   const hit = tokenCache.get(key)
   if (hit && hit.expires > Date.now()) return hit.token
