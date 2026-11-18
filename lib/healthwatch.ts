@@ -81,8 +81,10 @@ export function longPauses(rows: PauseRow[], now: number): { email: string; sinc
   const out: { email: string; since: number; until: number }[] = []
   for (const [email, list] of by) {
     list.sort((a, b) => b.at - a.at)
-    // Still current: the newest pause has not been over for long.
-    if (now - list[0].until > 40 * 60_000) continue
+    // Still current: nothing has shown the mailbox working since. Background
+    // work stays away for up to two hours after a pause, so silence that long
+    // is not recovery.
+    if (now - list[0].until > 2.25 * HOUR) continue
     let since = list[0].at
     for (const p of list.slice(1)) {
       // The older pause ran into the newer one, give or take the time we stay away afterwards.
