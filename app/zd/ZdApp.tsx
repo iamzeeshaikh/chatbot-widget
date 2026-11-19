@@ -55,17 +55,15 @@ function readHash(): { section: Section; leadId: string } {
   return { section: (SECTIONS as readonly string[]).includes(h) ? (h as Section) : 'chats', leadId: '' }
 }
 
-function RailButton({ icon, label, active, badge, onClick, href }: { icon: React.ReactNode; label: string; active?: boolean; badge?: number; onClick?: () => void; href?: string }) {
-  const cls = `relative w-12 h-12 flex items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${active ? 'bg-[#17494d] text-white' : 'text-[#a8c4c6] hover:bg-[#17494d] hover:text-white'}`
-  const inner = (
-    <>
+function RailButton({ icon, label, text, active, badge, onClick }: { icon: React.ReactNode; label: string; text: string; active?: boolean; badge?: number; onClick?: () => void }) {
+  return (
+    <button type="button" onClick={onClick} title={label} aria-label={label} aria-current={active ? 'page' : undefined}
+      className={`relative w-[72px] py-2 flex flex-col items-center gap-1 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${active ? 'bg-[#17494d] text-white' : 'text-[#c3d6d7] hover:bg-[#17494d] hover:text-white'}`}>
       {icon}
-      {!!badge && <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-[#e34f32] text-white text-[10px] font-bold leading-4 text-center tabular-nums">{badge > 99 ? '99+' : badge}</span>}
-    </>
+      <span className="text-[11px] leading-none font-medium">{text}</span>
+      {!!badge && <span className="absolute top-1 right-3 min-w-[16px] h-4 px-1 rounded-full bg-[#e34f32] text-white text-[10px] font-bold leading-4 text-center tabular-nums">{badge > 99 ? '99+' : badge}</span>}
+    </button>
   )
-  return href
-    ? <a href={href} title={label} aria-label={label} className={cls}>{inner}</a>
-    : <button type="button" onClick={onClick} title={label} aria-label={label} aria-current={active ? 'page' : undefined} className={cls}>{inner}</button>
 }
 
 export default function ZdApp() {
@@ -291,21 +289,21 @@ export default function ZdApp() {
   return (
     <div className="relative h-screen flex bg-white text-[#2f3941] text-[14px] overflow-hidden" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
       {/* ── Rail ── */}
-      <nav aria-label="Sections" className="w-[60px] shrink-0 flex flex-col items-center py-3 gap-1" style={{ backgroundColor: KALE }}>
+      <nav aria-label="Sections" className="w-[84px] shrink-0 flex flex-col items-center py-3 gap-0.5 overflow-y-auto [scrollbar-width:none]" style={{ backgroundColor: KALE }}>
         <div className="w-9 h-9 mb-3 rounded-lg bg-white/95 flex items-center justify-center" title="ZeeDesk">
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden><path d="M4 5h16L8 19h12" fill="none" stroke={KALE} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </div>
-        <RailButton icon={<MessageSquare size={20} />} label="Chats" active={section === 'chats'} badge={waiting.length} onClick={() => setSection('chats')} />
-        <RailButton icon={<Users size={20} />} label="Visitors on your sites" active={section === 'visitors'} onClick={() => setSection('visitors')} />
-        <RailButton icon={<Contact size={20} />} label="Leads" active={section === 'leads' || section === 'lead'} onClick={() => setSection('leads')} />
-        {hasFeature(ws, 'email') && <RailButton icon={<Inbox size={20} />} label="Inbox" active={section === 'inbox'} onClick={() => setSection('inbox')} />}
-        {hasFeature(ws, 'pipeline') && <RailButton icon={<KanbanSquare size={20} />} label="Pipeline" active={section === 'pipeline'} onClick={() => setSection('pipeline')} />}
-        {hasFeature(ws, 'tasks') && <RailButton icon={<CheckSquare size={20} />} label="Tasks" active={section === 'tasks'} onClick={() => setSection('tasks')} />}
-        {hasFeature(ws, 'reports') && <RailButton icon={<BarChart3 size={20} />} label="Reports" active={section === 'reports'} onClick={() => setSection('reports')} />}
+        <RailButton icon={<MessageSquare size={20} />} label="Chats" text="Chats" active={section === 'chats'} badge={waiting.length} onClick={() => setSection('chats')} />
+        <RailButton icon={<Users size={20} />} label="Visitors on your sites" text="Visitors" active={section === 'visitors'} onClick={() => setSection('visitors')} />
+        <RailButton icon={<Contact size={20} />} label="Leads" text="Leads" active={section === 'leads' || section === 'lead'} onClick={() => setSection('leads')} />
+        {hasFeature(ws, 'email') && <RailButton icon={<Inbox size={20} />} label="Inbox" text="Inbox" active={section === 'inbox'} onClick={() => setSection('inbox')} />}
+        {hasFeature(ws, 'pipeline') && <RailButton icon={<KanbanSquare size={20} />} label="Pipeline" text="Pipeline" active={section === 'pipeline'} onClick={() => setSection('pipeline')} />}
+        {hasFeature(ws, 'tasks') && <RailButton icon={<CheckSquare size={20} />} label="Tasks" text="Tasks" active={section === 'tasks'} onClick={() => setSection('tasks')} />}
+        {hasFeature(ws, 'reports') && <RailButton icon={<BarChart3 size={20} />} label="Reports" text="Reports" active={section === 'reports'} onClick={() => setSection('reports')} />}
         <div className="flex-1" />
-        <RailButton icon={<UserCog size={20} />} label={me.role === 'admin' ? 'Team and settings' : 'Your profile'} active={section === 'team'} onClick={() => setSection('team')} />
-        <RailButton icon={sound ? <Volume2 size={20} /> : <VolumeX size={20} />} label={sound ? 'Sound is on' : 'Sound is off'} onClick={toggleSound} />
-        <RailButton icon={<LogOut size={20} />} label="Sign out" onClick={logout} />
+        <RailButton icon={<UserCog size={20} />} label={me.role === 'admin' ? 'Team and settings' : 'Your profile'} text={me.role === 'admin' ? 'Team' : 'Profile'} active={section === 'team'} onClick={() => setSection('team')} />
+        <RailButton icon={sound ? <Volume2 size={20} /> : <VolumeX size={20} />} label={sound ? 'Sound is on' : 'Sound is off'} text={sound ? 'Sound on' : 'Muted'} onClick={toggleSound} />
+        <RailButton icon={<LogOut size={20} />} label="Sign out" text="Sign out" onClick={logout} />
         <div className="mt-1" title={me.email}><Avatar label={short(me.email)} tone="agent" size={34} /></div>
       </nav>
 
