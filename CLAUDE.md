@@ -788,3 +788,29 @@ in the site's own text (`lib/sitefacts.ts`: live llms.txt + homepage FAQ JSON-LD
 `bot: true` and every "has a person answered?" check must skip them** —
 `isBotWaRow()` (quotebot, inbound pitch re-read, wawaiting, leadrecord, opportunities,
 firstresponse already do). Add the same guard to any new reader of `crm_wa_out`.
+
+## ZeeDesk (workspace `zeedesk`) has its own front end
+
+A second packaging team signs in at app.zeedesk.dev and must never see the
+ZeeOps interface. `middleware.ts` rewrites `/` to `/zd` for that workspace and
+redirects `/leads/<id>`, `/pipeline`, `/tasks`, `/inbox`, `/reports` and
+`/members` to `/#lead/<id>`, `/#pipeline` and so on.
+
+- `app/zd/ZdApp.tsx` is the shell (icon rail, chats, visitors, leads). The open
+  screen lives in the URL hash. `app/zd/screens/*.tsx` holds one file per screen:
+  LeadRecord, Pipeline, Tasks, Inbox, Reports, Team.
+- `app/zd/ui.tsx` is its palette and building blocks. ZeeDesk screens import
+  from `lib/` and `app/zd/` only, never from `app/page.tsx`, `app/leads`,
+  `app/components` or the other ZeeOps pages, and never print the word ZeeOps.
+- Screens call the SAME API routes as ZeeOps. A change to a route's shape must
+  be made in both front ends.
+- To see it with data: add a real site id to `ZEEDESK_SITES` in a LOCAL build
+  only (set `NEXT_PUBLIC_SUPABASE_URL` at build time), run `next start -p 3999`,
+  sign in as admin@zeedesk.dev. Restore `lib/workspaces.ts` before committing.
+
+## Daily follow-ups (`/followups`, packaging admins)
+
+`lib/followups.ts` builds one Karachi day of outgoing follow-ups, customer
+replies, who is still waiting and completed tasks; `app/api/admin/followups`
+caches it for 3 minutes; `app/followups/page.tsx` shows it. Every count on the
+page opens the rows behind it, so a new count needs its list in the payload.

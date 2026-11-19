@@ -17,6 +17,8 @@ function uiWorkspace(value: string | undefined): string {
   try { return String(JSON.parse(atob(decodeURIComponent(value)))?.workspace ?? '') } catch { return '' }
 }
 
+const ZD_SCREENS: Record<string, string> = { '/pipeline': 'pipeline', '/tasks': 'tasks', '/inbox': 'inbox', '/reports': 'reports', '/members': 'team' }
+
 export function middleware(req: NextRequest) {
   const session = req.cookies.get('zee-session')
   if (!session) {
@@ -30,8 +32,14 @@ export function middleware(req: NextRequest) {
   // readable cookie only picks which UI to serve; every API still decides
   // access from the signed session. Anything unreadable falls through to the
   // normal dashboard, so this can never lock anybody out.
-  if (req.nextUrl.pathname === '/' && uiWorkspace(req.cookies.get('zee-auth')?.value) === 'zeedesk') {
-    return NextResponse.rewrite(new URL('/zd', req.url))
+  if (uiWorkspace(req.cookies.get('zee-auth')?.value) === 'zeedesk') {
+    const path = req.nextUrl.pathname
+    if (path === '/') return NextResponse.rewrite(new URL('/zd', req.url))
+    // Old links into the other team's screens land on ZeeDesk's own.
+    const lead = path.match(/^\/leads\/([^/]+)\/?$/)
+    if (lead) return NextResponse.redirect(new URL(`/#lead/${lead[1]}`, req.url))
+    const screen = ZD_SCREENS[path]
+    if (screen) return NextResponse.redirect(new URL(`/#${screen}`, req.url))
   }
   return NextResponse.next()
 }

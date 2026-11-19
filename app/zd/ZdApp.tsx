@@ -13,14 +13,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MessageSquare, Users, Inbox, KanbanSquare, CheckSquare, BarChart3, UserCog, LogOut, Volume2, VolumeX,
-  Paperclip, Send, Search, Bot, UserRound, Globe, Monitor, MapPin, Clock, FileText, X, ChevronRight, Contact,
+  Paperclip, Send, Search, UserRound, Globe, Monitor, MapPin, Clock, FileText, X, ChevronRight, Contact,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { hasFeature } from '@/lib/workspaces'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
 import { chatDing, replyDing, unlockSound } from './sound'
+import { Avatar, Empty, PageHead, Table, Td, INPUT, KALE, short, postJson as json, type Me } from './ui'
+import LeadRecord from './screens/LeadRecord'
+import Pipeline from './screens/Pipeline'
+import Tasks from './screens/Tasks'
+import InboxScreen from './screens/Inbox'
+import Reports from './screens/Reports'
+import Team from './screens/Team'
 
-interface Me { email: string; role: string; workspace: string; sites: string[] }
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
 interface LiveVisitor { session_id: string; site_id: string; site_name: string; page_url: string | null; page_title: string | null; referrer: string | null; visits: number; last_seen: string; created_at: string; device_type: string | null; browser: string | null; os: string | null; country: string | null; city: string | null }
@@ -35,23 +41,18 @@ interface VisitorDetail {
 }
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; session_id?: string | null; owner?: string | null; stage?: string; notALead?: boolean }
 
-type Section = 'chats' | 'visitors' | 'leads'
+type Section = 'chats' | 'visitors' | 'leads' | 'inbox' | 'pipeline' | 'tasks' | 'reports' | 'team' | 'lead'
 type View = 'unassigned' | 'mine' | 'all'
+const SECTIONS: readonly Section[] = ['chats', 'visitors', 'leads', 'inbox', 'pipeline', 'tasks', 'reports', 'team']
 
-const KALE = '#03363d'
-const short = (email: string | null | undefined) => (email ? email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '')
-const initials = (s: string) => (s.trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2) || '?').toUpperCase()
 const visitorName = (s: Session) => s.lead?.name || s.lead?.email || `Visitor ${s.session_id.slice(-4).toUpperCase()}`
-const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
-function Avatar({ label, tone = 'visitor', size = 32 }: { label: string; tone?: 'visitor' | 'agent' | 'bot'; size?: number }) {
-  const bg = tone === 'agent' ? '#1f73b7' : tone === 'bot' ? '#68737d' : '#2f5f62'
-  return (
-    <span className="inline-flex items-center justify-center rounded-full text-white font-semibold shrink-0 select-none"
-      style={{ width: size, height: size, backgroundColor: bg, fontSize: Math.round(size * 0.38) }} aria-hidden>
-      {tone === 'bot' ? <Bot size={Math.round(size * 0.55)} /> : initials(label)}
-    </span>
-  )
+// The address bar carries the open screen, so a reload or a shared link lands
+// on the same place: #pipeline, or #lead/<record id>.
+function readHash(): { section: Section; leadId: string } {
+  const h = typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, '')
+  if (h.startsWith('lead/')) { const id = decodeURIComponent(h.slice(5)); if (id) return { section: 'lead', leadId: id } }
+  return { section: (SECTIONS as readonly string[]).includes(h) ? (h as Section) : 'chats', leadId: '' }
 }
 
 function RailButton({ icon, label, active, badge, onClick, href }: { icon: React.ReactNode; label: string; active?: boolean; badge?: number; onClick?: () => void; href?: string }) {
@@ -69,7 +70,10 @@ function RailButton({ icon, label, active, badge, onClick, href }: { icon: React
 
 export default function ZdApp() {
   const [me, setMe] = useState<Me | null>(null)
-  const [section, setSection] = useState<Section>('chats')
+  const [section, setSectionState] = useState<Section>('chats')
+  const [leadId, setLeadId] = useState('')
+  const [leadQuery, setLeadQuery] = useState('')
+  const backTo = useRef<Section>('leads')
   const [sessions, setSessions] = useState<Session[]>([])
   const [loaded, setLoaded] = useState(false)
   const [view, setView] = useState<View>('unassigned')
@@ -102,6 +106,22 @@ export default function ZdApp() {
     window.addEventListener('pointerdown', unlock, { once: true })
     window.addEventListener('keydown', unlock, { once: true })
     return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock) }
+  }, [])
+
+  // ── Which screen is open ──
+  useEffect(() => {
+    const sync = () => { const h = readHash(); setSectionState(h.section); setLeadId(h.leadId) }
+    // Coming back from the Google sign-in lands on "/?gmail=…": that belongs to the profile screen.
+    if (!window.location.hash && new URLSearchParams(window.location.search).has('gmail')) window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#team`)
+    const first = setTimeout(sync, 0)
+    window.addEventListener('hashchange', sync)
+    return () => { clearTimeout(first); window.removeEventListener('hashchange', sync) }
+  }, [])
+  const setSection = useCallback((next: Section) => { window.location.hash = next === 'chats' ? '' : next }, [])
+  const openLead = useCallback((recordId: string) => {
+    const from = readHash().section
+    if (from !== 'lead') backTo.current = from
+    window.location.hash = `lead/${encodeURIComponent(recordId)}`
   }, [])
 
   // ── Conversations: one poll feeds the queue, the rail badge and the chime ──
@@ -173,6 +193,7 @@ export default function ZdApp() {
     openRef.current = id
     setOpenId(id)
   }, [])
+  const openChatFromScreen = useCallback((id: string) => { setView('all'); openChat(id); setSection('chats') }, [openChat, setSection])
   const patch = useCallback((id: string, change: Partial<Session>) => setSessions((prev) => prev.map((s) => (s.session_id === id ? { ...s, ...change } : s))), [])
 
   async function assign(action: 'claim' | 'release') {
@@ -256,6 +277,10 @@ export default function ZdApp() {
   if (!me) return <div className="h-screen flex items-center justify-center text-sm text-[#68737d]">Loading your workspace…</div>
 
   const ws = me.workspace as Parameters<typeof hasFeature>[0]
+  const screen = { me, openLead, openChat: openChatFromScreen }
+  const realLeads = (leads ?? []).filter((l) => !l.notALead)
+  const lq = leadQuery.trim().toLowerCase()
+  const shownLeads = lq ? realLeads.filter((l) => `${l.name ?? ''} ${l.email ?? ''} ${l.phone ?? ''} ${l.product ?? ''} ${l.message ?? ''} ${l.site_id}`.toLowerCase().includes(lq)) : realLeads
   const lockedByOther = !!open?.assignedTo && open.assignedTo !== me.email
   const VIEWS: { key: View; label: string; count: number }[] = [
     { key: 'unassigned', label: 'Waiting', count: waiting.length },
@@ -264,7 +289,7 @@ export default function ZdApp() {
   ]
 
   return (
-    <div className="h-screen flex bg-white text-[#2f3941] text-[14px] overflow-hidden" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+    <div className="relative h-screen flex bg-white text-[#2f3941] text-[14px] overflow-hidden" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
       {/* ── Rail ── */}
       <nav aria-label="Sections" className="w-[60px] shrink-0 flex flex-col items-center py-3 gap-1" style={{ backgroundColor: KALE }}>
         <div className="w-9 h-9 mb-3 rounded-lg bg-white/95 flex items-center justify-center" title="ZeeDesk">
@@ -272,13 +297,13 @@ export default function ZdApp() {
         </div>
         <RailButton icon={<MessageSquare size={20} />} label="Chats" active={section === 'chats'} badge={waiting.length} onClick={() => setSection('chats')} />
         <RailButton icon={<Users size={20} />} label="Visitors on your sites" active={section === 'visitors'} onClick={() => setSection('visitors')} />
-        <RailButton icon={<Contact size={20} />} label="Leads" active={section === 'leads'} onClick={() => setSection('leads')} />
-        {hasFeature(ws, 'email') && <RailButton icon={<Inbox size={20} />} label="Inbox" href="/inbox" />}
-        {hasFeature(ws, 'pipeline') && <RailButton icon={<KanbanSquare size={20} />} label="Pipeline" href="/pipeline" />}
-        {hasFeature(ws, 'tasks') && <RailButton icon={<CheckSquare size={20} />} label="Tasks" href="/tasks" />}
-        {hasFeature(ws, 'reports') && <RailButton icon={<BarChart3 size={20} />} label="Reports" href="/reports" />}
+        <RailButton icon={<Contact size={20} />} label="Leads" active={section === 'leads' || section === 'lead'} onClick={() => setSection('leads')} />
+        {hasFeature(ws, 'email') && <RailButton icon={<Inbox size={20} />} label="Inbox" active={section === 'inbox'} onClick={() => setSection('inbox')} />}
+        {hasFeature(ws, 'pipeline') && <RailButton icon={<KanbanSquare size={20} />} label="Pipeline" active={section === 'pipeline'} onClick={() => setSection('pipeline')} />}
+        {hasFeature(ws, 'tasks') && <RailButton icon={<CheckSquare size={20} />} label="Tasks" active={section === 'tasks'} onClick={() => setSection('tasks')} />}
+        {hasFeature(ws, 'reports') && <RailButton icon={<BarChart3 size={20} />} label="Reports" active={section === 'reports'} onClick={() => setSection('reports')} />}
         <div className="flex-1" />
-        {me.role === 'admin' && <RailButton icon={<UserCog size={20} />} label="Team" href="/members" />}
+        <RailButton icon={<UserCog size={20} />} label={me.role === 'admin' ? 'Team and settings' : 'Your profile'} active={section === 'team'} onClick={() => setSection('team')} />
         <RailButton icon={sound ? <Volume2 size={20} /> : <VolumeX size={20} />} label={sound ? 'Sound is on' : 'Sound is off'} onClick={toggleSound} />
         <RailButton icon={<LogOut size={20} />} label="Sign out" onClick={logout} />
         <div className="mt-1" title={me.email}><Avatar label={short(me.email)} tone="agent" size={34} /></div>
@@ -433,7 +458,7 @@ export default function ZdApp() {
                     <Row label="Site" value={open.site_name} />
                   </dl>
                   {(open.lead?.email || detail?.contact?.email) && (
-                    <a href={`/leads/${encodeURIComponent(open.session_id)}`} className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-[#1f73b7] hover:text-[#144a75]">Open the full record <ChevronRight size={14} aria-hidden /></a>
+                    <button type="button" onClick={() => openLead(open.session_id)} className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-[#1f73b7] hover:text-[#144a75]">Open the full record <ChevronRight size={14} aria-hidden /></button>
                   )}
                 </section>
                 {detail && (
@@ -482,7 +507,7 @@ export default function ZdApp() {
             {visitors.length === 0 ? <Empty text="Nobody is on your sites at the moment. This list refreshes on its own." /> : (
               <Table head={['Visitor', 'Site', 'Page', 'Location', 'Device', 'Last seen']}>
                 {visitors.map((v) => (
-                  <tr key={v.session_id} className="border-t border-[#e9ebed] hover:bg-[#f8f9f9] cursor-pointer" onClick={() => { setSection('chats'); setView('all'); openChat(v.session_id) }}>
+                  <tr key={v.session_id} className="border-t border-[#e9ebed] hover:bg-[#f8f9f9] cursor-pointer" onClick={() => openChatFromScreen(v.session_id)}>
                     <Td strong>Visitor {v.session_id.slice(-4).toUpperCase()}{v.visits > 1 ? ` · visit ${v.visits}` : ''}</Td>
                     <Td>{v.site_name}</Td>
                     <Td>{v.page_title || (v.page_url ?? '').replace(/^https?:\/\/[^/]+/, '') || 'Home'}</Td>
@@ -499,14 +524,16 @@ export default function ZdApp() {
 
       {section === 'leads' && (
         <main className="flex-1 min-w-0 overflow-y-auto">
-          <PageHead title="Leads" sub={leads ? `${leads.filter((l) => !l.notALead).length} in total` : 'Loading…'} />
+          <PageHead title="Leads" sub={leads ? `${shownLeads.length}${shownLeads.length !== realLeads.length ? ` of ${realLeads.length}` : ' in total'}` : 'Loading…'}
+            actions={<input value={leadQuery} onChange={(e) => setLeadQuery(e.target.value)} placeholder="Search name, email, phone or product" aria-label="Search leads" className={`${INPUT} w-[300px]`} />} />
           <div className="px-6 pb-8">
-            {leads && leads.filter((l) => !l.notALead).length === 0 ? <Empty text="No leads yet. A lead appears here when a visitor leaves their details in a chat or sends a quote form." /> : (
+            {leads && shownLeads.length === 0 ? <Empty text={leadQuery ? 'No lead matches that search.' : 'No leads yet. A lead appears here when a visitor leaves their details in a chat or sends a quote form.'} /> : (
               <Table head={['Name', 'Contact', 'Asked for', 'Site', 'Stage', 'Owner', 'Received']}>
-                {(leads ?? []).filter((l) => !l.notALead).slice(0, 300).map((l) => {
+                {shownLeads.slice(0, 300).map((l) => {
                   const recordId = l.session_id || `quote-${l.id}`
                   return (
-                    <tr key={l.id} className="border-t border-[#e9ebed] hover:bg-[#f8f9f9] cursor-pointer" onClick={() => { window.location.href = `/leads/${encodeURIComponent(recordId)}` }}>
+                    <tr key={l.id} tabIndex={0} className="border-t border-[#e9ebed] hover:bg-[#f8f9f9] cursor-pointer outline-none focus-visible:bg-[#edf7ff]"
+                      onClick={() => openLead(recordId)} onKeyDown={(e) => { if (e.key === 'Enter') openLead(recordId) }}>
                       <Td strong>{l.name || 'No name given'}</Td>
                       <Td>{l.email || l.phone || 'No contact'}</Td>
                       <Td>{[l.product, l.quantity].filter(Boolean).join(' · ') || (l.message ?? '').replace(/^\[[^\]]+\]\s*/, '').replace(/\s+/g, ' ').slice(0, 60) || 'Not stated'}</Td>
@@ -519,9 +546,17 @@ export default function ZdApp() {
                 })}
               </Table>
             )}
+            {shownLeads.length > 300 && <p className="mt-3 text-[12px] text-[#68737d]">Showing the newest 300. Search to find an older lead.</p>}
           </div>
         </main>
       )}
+
+      {section === 'lead' && leadId && <LeadRecord key={leadId} me={me} recordId={leadId} openLead={openLead} openChat={openChatFromScreen} onBack={() => setSection(backTo.current)} />}
+      {section === 'inbox' && hasFeature(ws, 'email') && <InboxScreen {...screen} />}
+      {section === 'pipeline' && hasFeature(ws, 'pipeline') && <Pipeline {...screen} />}
+      {section === 'tasks' && hasFeature(ws, 'tasks') && <Tasks {...screen} />}
+      {section === 'reports' && hasFeature(ws, 'reports') && <Reports {...screen} />}
+      {section === 'team' && <Team {...screen} />}
     </div>
   )
 }
@@ -531,23 +566,4 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 function Fact({ icon, text }: { icon: React.ReactNode; text: string }) {
   return <li className="flex items-start gap-2"><span className="mt-0.5 text-[#68737d]" aria-hidden>{icon}</span><span className="min-w-0 break-words">{text}</span></li>
-}
-function PageHead({ title, sub }: { title: string; sub: string }) {
-  return <div className="px-6 pt-5 pb-4"><h1 className="text-[20px] font-semibold">{title}</h1><p className="text-[13px] text-[#68737d]">{sub}</p></div>
-}
-function Empty({ text }: { text: string }) {
-  return <p className="rounded-lg border border-dashed border-[#d8dcde] bg-[#f8f9f9] px-5 py-8 text-center text-[13px] text-[#68737d]">{text}</p>
-}
-function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-[#d8dcde] overflow-x-auto">
-      <table className="w-full text-[13px]">
-        <thead><tr className="bg-[#f8f9f9] text-left text-[11px] uppercase tracking-wide text-[#68737d]">{head.map((h) => <th key={h} className="px-4 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  )
-}
-function Td({ children, strong }: { children: React.ReactNode; strong?: boolean }) {
-  return <td className={`px-4 py-2.5 max-w-[260px] truncate ${strong ? 'font-medium text-[#2f3941]' : 'text-[#49545c]'}`}>{children}</td>
 }
