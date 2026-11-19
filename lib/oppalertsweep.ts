@@ -43,7 +43,7 @@ export interface OppAlertRun {
   pktTime: string
   agents: { email: string; name: string; role: string; devices?: number }[]
   counts: Record<string, AgentCounts>
-  /** `devices` = push endpoints reached; `email` = delivered to the agent's inbox instead. */
+  /** `devices` = push endpoints reached; `email` = also (or instead) delivered to the agent's inbox. */
   sent: (Plan & { devices: number; email?: boolean; unreachable?: string })[]
   would: Plan[]
   held: Held[]
@@ -96,7 +96,7 @@ const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.de
 // No push device for this agent: put the alert in their own inbox, from their
 // own connected Gmail (a note to self — the only mailbox we can send from on
 // their behalf). Gmail on a phone rings for it, which is the point.
-export async function emailFallback(p: Pick<Plan, 'to' | 'title' | 'body' | 'url'>): Promise<{ email?: boolean; unreachable?: string }> {
+export async function emailFallback(p: Pick<Plan, 'to' | 'title' | 'body' | 'url'>, alsoPushed = false): Promise<{ email?: boolean; unreachable?: string }> {
   const cfg = googleConfig(PUBLIC_BASE)
   if (!cfg) return { unreachable: 'Google OAuth is not configured' }
   const conn = await connectionFor(p.to)
@@ -106,7 +106,9 @@ export async function emailFallback(p: Pick<Plan, 'to' | 'title' | 'body' | 'url
     await sendEmail(p.to, cfg, {
       from: p.to, to: p.to,
       subject: `ZeeOps: ${p.title}`,
-      body: `${p.body}\n\nOpen: ${link}\n\n(You are getting this by email because notifications are not turned on in your ZeeOps dashboard — click the bell there to get these as push alerts instead.)`,
+      body: alsoPushed
+        ? `${p.body}\n\nOpen: ${link}`
+        : `${p.body}\n\nOpen: ${link}\n\n(Notifications are not turned on in your ZeeOps dashboard — click the bell there to also get these as push alerts.)`,
     })
     return { email: true }
   } catch (e) {
@@ -163,14 +165,21 @@ export async function runOppAlerts(opts: { dry?: boolean; now?: Date } = {}): Pr
 
   if (dry) { result.would = todo; return result }
 
+  const roleOf = new Map(agents.map((a) => [a.email.toLowerCase(), a.role]))
   for (const p of todo) {
     const err = await claim(p, now)
     if (err) { result.errors.push(`${p.key}: ${err}`); continue }
     try {
       const devices = await sendPushToMember(p.to, 'packaging', { title: p.title, body: p.body, url: p.url, tag: `opp-${p.kind}-${p.to}`, sticky: p.kind !== 'morning' })
-      if (devices > 0) { result.sent.push({ ...p, devices }); continue }
-      const fallback = await emailFallback(p)
-      result.sent.push({ ...p, devices: 0, ...fallback })
+      // An agent gets every alert in their inbox as well as on their devices
+      // (owner, 2026-11-19: Steve turned the bell on, the emails stopped, and he
+      // took that for a fault). Admins keep email as the fallback only: their
+      // escalations are many, and dev@ is the mailbox the quote intake reads.
+      const isAgent = roleOf.get(p.to.toLowerCase()) === 'standard'
+      if (devices > 0 && !isAgent) { result.sent.push({ ...p, devices }); continue }
+      const mail = await emailFallback(p, devices > 0)
+      // A failed copy to the inbox is not a failed alert when a device got it.
+      result.sent.push(devices > 0 ? { ...p, devices, ...(mail.email ? { email: true } : {}) } : { ...p, devices: 0, ...mail })
     } catch (e) {
       result.errors.push(`${p.key}: ${e instanceof Error ? e.message : String(e)}`)
     }

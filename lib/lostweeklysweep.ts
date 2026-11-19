@@ -91,9 +91,10 @@ export async function runLostWeekly(opts: { dry?: boolean; now?: Date } = {}): P
         if (w.error) result.errors.push(`${m.key} task: ${w.error}`)
       }
       const devices = await sendPushToMember(m.to, 'packaging', { title: m.title, body: m.body, url: m.url, tag: `lostweekly-${m.to}`, sticky: true })
-      if (devices > 0) { result.sent.push({ ...m, devices, ...(task ? { task } : {}) }); continue }
-      const fb = await emailFallback(m)
-      result.sent.push({ ...m, devices: 0, ...fb, ...(task ? { task } : {}) })
+      // Agents get it in their inbox as well as on their devices (see runOppAlerts).
+      if (devices > 0 && m.kind !== 'agent') { result.sent.push({ ...m, devices, ...(task ? { task } : {}) }); continue }
+      const fb = await emailFallback(m, devices > 0)
+      result.sent.push(devices > 0 ? { ...m, devices, ...(fb.email ? { email: true } : {}), ...(task ? { task } : {}) } : { ...m, devices: 0, ...fb, ...(task ? { task } : {}) })
     } catch (e) {
       result.errors.push(`${m.key}: ${e instanceof Error ? e.message : String(e)}`)
     }
