@@ -12,16 +12,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Bold, ChevronDown, ChevronRight, CornerUpLeft, Eraser, ExternalLink, FileText, Image as ImageIcon, Italic, Link2,
-  List, ListOrdered, Loader2, Mail, Paperclip, PenLine, RefreshCw, Search, Send, TriangleAlert, Underline, UserRound, X,
+  Bold, Check, CheckCheck, ChevronDown, ChevronRight, CornerUpLeft, Eraser, ExternalLink, FileText, Image as ImageIcon, Italic, Link2,
+  List, ListOrdered, Loader2, Mail, MessageCircle, Paperclip, PenLine, RefreshCw, Search, Send, TriangleAlert, Underline, UserRound, X,
 } from 'lucide-react'
-import { formatDateTime, formatShortDate, formatTime, pktDayKey, timeAgo } from '@/lib/datetime'
+import { dateDividerLabel, formatDateTime, formatShortDate, formatTime, pktDayKey, timeAgo } from '@/lib/datetime'
 import { hasFeature } from '@/lib/workspaces'
 import { plainToHtml } from '@/lib/richtext'
 import { matchSiteAlias } from '@/lib/sitealias'
+import { waErrorHint } from '@/lib/whatsapp'
 import { MAX_EMAIL_ATTACHMENT_BYTES, MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENTS_TOTAL, humanSize, isRetryableSkip } from '@/lib/emailattach'
 import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import { Avatar, Chip, Notice, BTN_PLAIN, BTN_PRIMARY, LABEL, postJson, short, type ZdScreenProps } from '../ui'
+import { chatDing } from '../sound'
 
 // ── Shapes the API hands back ───────────────────────────────────────────────
 
@@ -129,9 +131,16 @@ function connectLink(): string {
   return `/api/google/gmail/connect?back=${encodeURIComponent(`${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)}`
 }
 
-// ── The screen ──────────────────────────────────────────────────────────────
+// ── The email screen ──────────────────────────────────────────────────────────────
 
-export default function InboxScreen({ me, openLead }: ZdScreenProps) {
+function MailInbox({ me, openLead, channelSwitch, startWith }: {
+  me: ZdScreenProps['me']
+  openLead: (recordId: string) => void
+  /** The Email | WhatsApp switch, when the workspace has both. */
+  channelSwitch: ReactNode
+  /** A lead to open straight away with a new email started. */
+  startWith: string | null
+}) {
   const emailOn = hasFeature(me.workspace as Parameters<typeof hasFeature>[0], 'email')
 
   const [threads, setThreads] = useState<Thread[] | null>(null)
@@ -140,7 +149,7 @@ export default function InboxScreen({ me, openLead }: ZdScreenProps) {
   const [folder, setFolder] = useState<Folder>('inbox')
   const [typed, setTyped] = useState('')
   const [q, setQ] = useState('')
-  const [open, setOpen] = useState<{ leadId: string; compose: boolean } | null>(null)
+  const [open, setOpen] = useState<{ leadId: string; compose: boolean } | null>(startWith ? { leadId: startWith, compose: true } : null)
   const [picking, setPicking] = useState(false)
   const [pick, setPick] = useState('')
   const [drafts, setDrafts] = useState<DraftRow[]>([])
@@ -265,6 +274,7 @@ export default function InboxScreen({ me, openLead }: ZdScreenProps) {
       {/* ── Conversations ── */}
       <aside className="w-[340px] shrink-0 border-r border-[#d8dcde] flex flex-col bg-[#f8f9f9]" aria-label="Email conversations">
         <div className="px-4 pt-4 pb-2">
+          {channelSwitch}
           <div className="flex items-center gap-2">
             <div className="min-w-0">
               <h1 className="text-[18px] font-semibold text-[#2f3941]">Inbox</h1>
@@ -1358,4 +1368,527 @@ function CustomerPanel({ record, thread, events, openLead, onHide }: {
 
 function Fact({ label, value, capitalize }: { label: string; value: string; capitalize?: boolean }) {
   return <div className="flex gap-2"><dt className="w-[68px] shrink-0 text-[#68737d]">{label}</dt><dd className={`min-w-0 break-words ${capitalize ? 'capitalize' : ''}`}>{value}</dd></div>
+}
+
+// ── WhatsApp ────────────────────────────────────────────────────────────────
+//
+// The second channel of the same inbox. The list is /api/inbox/whatsapp, a
+// conversation is the lead's own record (its wa_in / wa_out events), and a
+// reply goes through that record's WhatsApp route. The server picks the
+// recipient and the line; this screen never sends a number.
+
+/** One row of GET /api/inbox/whatsapp. `unanswered` counts the customer's messages since our last reply. */
+interface WaThread {
+  leadId: string; siteId: string; siteName: string
+  name: string; phone: string; body: string
+  at: string | null; direction: 'in' | 'out'
+  messages: number; unanswered: number; hasMedia: boolean
+  agents: string[]; lastOutAt: string | null; failed: boolean; owner: string | null
+}
+
+type Channel = 'email' | 'whatsapp'
+type ListStatus = 'loading' | 'ok' | 'unavailable' | 'error'
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const soundOn = () => { try { return localStorage.getItem('zd-sound') !== 'off' } catch { return true } }
+const waName = (t: WaThread) => t.name || t.phone || 'No name'
+
+/** Why WhatsApp did not deliver one of our messages, in words for a team that has no templates. */
+function waFailureHint(code: number | undefined): string {
+  if (code === 63016 || code === 63024 || code === 131047) {
+    return 'WhatsApp only delivers a free reply within 24 hours of the customer’s last message, so this one did not arrive. Wait for them to write again, or email them.'
+  }
+  if (code === 63015) return 'That number has not joined the WhatsApp test line, so the message was not delivered.'
+  return waErrorHint(code) || 'WhatsApp could not deliver this message.'
+}
+
+export default function InboxScreen({ me, openLead }: ZdScreenProps) {
+  const ws = me.workspace as Parameters<typeof hasFeature>[0]
+  const emailOn = hasFeature(ws, 'email')
+  const waOn = hasFeature(ws, 'whatsapp')
+
+  const [channel, setChannel] = useState<Channel>(emailOn || !waOn ? 'email' : 'whatsapp')
+  /** A lead to open in the mail view with a new email started: "Email instead" from a WhatsApp conversation. */
+  const [mailStart, setMailStart] = useState<string | null>(null)
+  const [waThreads, setWaThreads] = useState<WaThread[] | null>(null)
+  const [waStatus, setWaStatus] = useState<ListStatus>('loading')
+  const [waStale, setWaStale] = useState(false)
+
+  const lastIn = useRef<Record<string, string>>({})
+  const seeded = useRef(false)
+
+  const loadWa = useCallback(async () => {
+    try {
+      const r = await fetch('/api/inbox/whatsapp')
+      if (r.status === 403) { setWaStatus('unavailable'); return }
+      if (!r.ok) throw new Error('failed')
+      const d = await r.json()
+      const list: WaThread[] = d.threads ?? []
+      // A conversation whose newest message is the customer's, at a time not
+      // seen before, is a new message. Arriving to ones already waiting is not.
+      let fresh = false
+      const next: Record<string, string> = {}
+      for (const t of list) {
+        if (t.direction !== 'in' || !t.at) continue
+        next[t.leadId] = t.at
+        if (seeded.current && lastIn.current[t.leadId] !== t.at) fresh = true
+      }
+      lastIn.current = next
+      if (fresh && soundOn()) chatDing()
+      seeded.current = true
+      setWaThreads(list)
+      setWaStatus('ok')
+      setWaStale(false)
+    } catch {
+      setWaStatus((s) => (s === 'ok' ? 'ok' : 'error'))
+      setWaStale(true)
+    }
+  }, [])
+
+  // The WhatsApp list is read once a minute for as long as the inbox is open,
+  // whichever channel is showing: it feeds the count on the switch and the sound.
+  useEffect(() => {
+    if (!waOn) return
+    const first = setTimeout(loadWa, 0)
+    const iv = setInterval(loadWa, POLL_MS)
+    return () => { clearTimeout(first); clearInterval(iv) }
+  }, [waOn, loadWa])
+
+  const waiting = (waThreads ?? []).filter((t) => t.unanswered > 0).length
+  const tab = (key: Channel, label: string, icon: ReactNode, count?: number) => (
+    <button type="button" role="tab" aria-selected={channel === key}
+      onClick={() => { setChannel(key); if (key === 'email') setMailStart(null) }}
+      className={`flex-1 h-8 rounded text-[13px] font-medium inline-flex items-center justify-center gap-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#1f73b7]/40 ${channel === key ? 'bg-[#1f73b7] text-white' : 'text-[#49545c] hover:bg-[#e9ebed]'}`}>
+      {icon}{label}
+      {!!count && <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-bold leading-[18px] tabular-nums ${channel === key ? 'bg-white text-[#1f73b7]' : 'bg-[#e34f32] text-white'}`} aria-label={`${count} waiting on a reply`}>{count > 99 ? '99+' : count}</span>}
+    </button>
+  )
+  const channelSwitch = emailOn && waOn ? (
+    <div className="mb-3 flex gap-0.5 p-0.5 rounded-md border border-[#d8dcde] bg-white" role="tablist" aria-label="Channel">
+      {tab('email', 'Email', <Mail size={14} aria-hidden />)}
+      {tab('whatsapp', 'WhatsApp', <MessageCircle size={14} aria-hidden />, waiting)}
+    </div>
+  ) : null
+
+  if (waOn && channel === 'whatsapp') {
+    return (
+      <WhatsAppInbox me={me} openLead={openLead} channelSwitch={channelSwitch}
+        threads={waThreads ?? []} status={waStatus} stale={waStale} reload={loadWa}
+        onEmail={emailOn ? (leadId) => { setMailStart(leadId); setChannel('email') } : undefined} />
+    )
+  }
+  return <MailInbox key={mailStart ?? 'mail'} me={me} openLead={openLead} channelSwitch={channelSwitch} startWith={mailStart} />
+}
+
+function WhatsAppInbox({ me, openLead, channelSwitch, threads, status, stale, reload, onEmail }: {
+  me: ZdScreenProps['me']
+  openLead: (recordId: string) => void
+  channelSwitch: ReactNode
+  threads: WaThread[]
+  status: ListStatus
+  stale: boolean
+  reload: () => Promise<void>
+  onEmail?: (leadId: string) => void
+}) {
+  const [view, setView] = useState<'all' | 'waiting'>('all')
+  const [query, setQuery] = useState('')
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [showInfo, setShowInfo] = useState(true)
+
+  const waiting = threads.filter((t) => t.unanswered > 0)
+  const term = query.trim().toLowerCase()
+  const base = view === 'waiting' ? waiting : threads
+  const list = term ? base.filter((t) => `${t.name} ${t.siteName} ${t.body}`.toLowerCase().includes(term)) : base
+  const open = openId ? threads.find((t) => t.leadId === openId) ?? null : null
+
+  return (
+    <>
+      <aside className="w-[340px] shrink-0 border-r border-[#d8dcde] flex flex-col bg-[#f8f9f9]" aria-label="WhatsApp conversations">
+        <div className="px-4 pt-4 pb-2">
+          {channelSwitch}
+          <h1 className="text-[18px] font-semibold text-[#2f3941]">WhatsApp</h1>
+          <p className="text-[12px] text-[#68737d]">{status === 'ok' ? (waiting.length > 0 ? `${waiting.length} waiting on a reply` : 'Nobody is waiting') : status === 'loading' ? 'Loading…' : ' '}</p>
+          <div className="mt-3 flex gap-1" role="tablist" aria-label="WhatsApp views">
+            {([['all', 'All', threads.length], ['waiting', 'Waiting on us', waiting.length]] as const).map(([key, label, count]) => (
+              <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setView(key)}
+                className={`flex-1 h-8 rounded-md text-[12px] font-medium transition-colors ${view === key ? 'bg-white text-[#1f73b7] shadow-[0_0_0_1px_#d8dcde]' : 'text-[#68737d] hover:bg-[#e9ebed]'}`}>
+                {label}{status === 'ok' && <span className="ml-1 tabular-nums opacity-80">{count}</span>}
+              </button>
+            ))}
+          </div>
+          <label className="mt-3 flex items-center gap-2 h-9 px-2.5 rounded-md bg-white border border-[#d8dcde] focus-within:border-[#1f73b7]">
+            <Search size={15} className="text-[#87929d]" aria-hidden />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, site or message" aria-label="Search WhatsApp conversations"
+              className="flex-1 min-w-0 bg-transparent outline-none text-[13px] placeholder:text-[#87929d]" />
+            {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear the search" className="w-6 h-6 rounded flex items-center justify-center text-[#68737d] hover:bg-[#e9ebed]"><X size={14} aria-hidden /></button>}
+          </label>
+        </div>
+
+        <div className="flex-1 overflow-y-auto [scrollbar-width:thin]">
+          {status === 'loading' && (
+            <div className="px-4 py-3 space-y-3" role="status" aria-label="Loading conversations">
+              {Array.from({ length: 7 }).map((_, i) => <div key={i} className="h-14 rounded-md bg-[#e9ebed] animate-pulse" />)}
+            </div>
+          )}
+          {status === 'unavailable' && (
+            <div className="px-6 py-12 text-center">
+              <MessageCircle size={24} className="mx-auto mb-2 text-[#87929d]" aria-hidden />
+              <p className="text-[13px] font-medium text-[#2f3941]">WhatsApp is not enabled for this workspace</p>
+            </div>
+          )}
+          {status === 'error' && (
+            <div className="px-6 py-12 text-center">
+              <p role="alert" className="text-[13px] font-medium text-[#2f3941]">The WhatsApp conversations could not be loaded.</p>
+              <button type="button" onClick={() => void reload()} className={`${BTN_PLAIN} mt-3`}><RefreshCw size={13} aria-hidden />Try again</button>
+            </div>
+          )}
+          {status === 'ok' && stale && (
+            <div className="px-4 py-2 border-b border-[#e9ebed] flex items-center gap-2">
+              <Notice bad text="The list could not be refreshed, so it may be out of date." />
+              <button type="button" onClick={() => void reload()} className="ml-auto shrink-0 text-[12px] font-medium text-[#1f73b7] hover:text-[#144a75]">Retry</button>
+            </div>
+          )}
+          {status === 'ok' && list.length === 0 && (
+            <p className="px-5 py-8 text-[13px] text-[#68737d]">
+              {term ? 'No WhatsApp conversation matches that search.' : view === 'waiting' ? 'Nobody is waiting on WhatsApp. A customer whose message has no reply yet shows up here.' : 'No WhatsApp conversations yet. One starts when a customer writes to your WhatsApp number.'}
+            </p>
+          )}
+          {status === 'ok' && list.map((t) => {
+            const needs = t.unanswered > 0
+            const isOpen = t.leadId === openId
+            return (
+              <button key={t.leadId} type="button" onClick={() => setOpenId(t.leadId)} aria-current={isOpen ? 'true' : undefined}
+                className={`w-full text-left px-4 py-3 flex gap-3 border-b border-[#e9ebed] transition-colors ${isOpen ? 'bg-[#edf7ff]' : needs ? 'bg-white hover:bg-[#f3f9ff]' : 'hover:bg-white'}`}>
+                <Avatar label={t.name || 'Customer'} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2">
+                    <span className={`truncate text-[13px] ${needs ? 'font-semibold' : ''} text-[#2f3941]`}>{waName(t)}</span>
+                    {t.messages > 1 && <span className="shrink-0 text-[11px] text-[#87929d] tabular-nums" aria-label={`${t.messages} messages`}>{t.messages}</span>}
+                    <span className={`ml-auto shrink-0 text-[11px] tabular-nums ${needs ? 'font-semibold text-[#2f3941]' : 'text-[#87929d]'}`} title={t.at ? formatDateTime(t.at) : undefined}>{listDate(t.at)}</span>
+                  </span>
+                  <span className={`block truncate text-[12px] ${needs ? 'font-medium text-[#2f3941]' : 'text-[#68737d]'}`}>
+                    {t.direction === 'out' ? 'You: ' : ''}{t.body || (t.hasMedia ? 'Attachment' : 'No text')}
+                  </span>
+                  <span className="mt-1 flex items-center gap-1.5 text-[11px] text-[#87929d]">
+                    <span className="truncate">{t.siteName}</span>
+                    {needs && <span className="shrink-0 px-1.5 rounded bg-[#fff3e4] text-[#ad5918] font-medium" title="The customer wrote last and nobody has replied">Waiting{t.unanswered > 1 ? ` · ${t.unanswered}` : ''}</span>}
+                    {t.failed && <span className="shrink-0 px-1.5 rounded bg-[#fff0f1] text-[#cc3340] font-medium" title="Our latest WhatsApp message was not delivered">Not delivered</span>}
+                    {t.owner && <span className="shrink-0 px-1.5 rounded bg-[#e9ebed] text-[#49545c]">{t.owner.toLowerCase() === me.email.toLowerCase() ? 'You' : short(t.owner)}</span>}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </aside>
+
+      {openId ? (
+        <WaThreadPane key={openId} leadId={openId} thread={open} openLead={openLead} onChanged={reload} onEmail={onEmail}
+          showInfo={showInfo} setShowInfo={setShowInfo} onClose={() => setOpenId(null)} />
+      ) : (
+        <main className="flex-1 min-w-0 flex flex-col items-center justify-center text-center px-6">
+          <div className="w-14 h-14 rounded-full bg-[#e9f4f3] flex items-center justify-center mb-4"><MessageCircle size={24} color="#17494d" aria-hidden /></div>
+          <p className="text-[16px] font-semibold">Pick a conversation to read it</p>
+          <p className="mt-1 text-[13px] text-[#68737d] max-w-sm">Customers whose message has no reply yet are marked Waiting. Replying from here, or from the phone, clears it.</p>
+        </main>
+      )}
+    </>
+  )
+}
+
+function WaStatus({ status }: { status?: string }) {
+  if (status === 'read') return <span className="inline-flex items-center gap-1 text-[#1f73b7]"><CheckCheck size={13} aria-hidden />Read</span>
+  if (status === 'delivered') return <span className="inline-flex items-center gap-1"><CheckCheck size={13} aria-hidden />Delivered</span>
+  if (status === 'failed' || status === 'undelivered') return <span className="inline-flex items-center gap-1 font-medium text-[#cc3340]"><TriangleAlert size={13} aria-hidden />Not delivered</span>
+  return <span className="inline-flex items-center gap-1"><Check size={13} aria-hidden />Sent</span>
+}
+
+function WaThreadPane({ leadId, thread, openLead, onChanged, onEmail, showInfo, setShowInfo, onClose }: {
+  leadId: string
+  thread: WaThread | null
+  openLead: (recordId: string) => void
+  onChanged: () => Promise<void>
+  onEmail?: (leadId: string) => void
+  showInfo: boolean
+  setShowInfo: (next: boolean) => void
+  onClose: () => void
+}) {
+  const [record, setRecord] = useState<LeadRecord | null>(null)
+  const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [refreshing, setRefreshing] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+  const [text, setText] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [flash, setFlash] = useState<Flash | null>(null)
+
+  const scroller = useRef<HTMLDivElement | null>(null)
+  const fileInput = useRef<HTMLInputElement | null>(null)
+
+  const loadRecord = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/leads/${encodeURIComponent(leadId)}`)
+      if (!r.ok) throw new Error('failed')
+      const d = await r.json()
+      setRecord(d.record as LeadRecord)
+      setState('ok')
+    } catch {
+      setState((s) => (s === 'ok' ? 'ok' : 'error'))
+    }
+  }, [leadId])
+
+  // Read on open, then once a minute while it stays open: that is how a
+  // "Sent" turns into "Delivered" or "Read", and how the 24-hour clock moves.
+  useEffect(() => {
+    const first = setTimeout(loadRecord, 0)
+    const iv = setInterval(() => { setNow(Date.now()); if (!document.hidden) void loadRecord() }, POLL_MS)
+    return () => { clearTimeout(first); clearInterval(iv) }
+  }, [loadRecord])
+
+  // The list noticed this conversation move (a new customer message): read it now.
+  const moved = thread ? `${thread.messages}|${thread.at ?? ''}` : ''
+  const lastMoved = useRef(moved)
+  useEffect(() => {
+    const before = lastMoved.current
+    lastMoved.current = moved
+    if (!moved || !before || moved === before) return
+    const t = setTimeout(loadRecord, 0)
+    return () => clearTimeout(t)
+  }, [moved, loadRecord])
+
+  const msgs = useMemo(() => (record?.timeline ?? [])
+    .filter((e) => (e.kind === 'wa_in' || e.kind === 'wa_out') && e.wa)
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()), [record])
+
+  useEffect(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight }, [msgs.length, state])
+
+  // WhatsApp's own rule, worked out from the conversation before anyone types:
+  // a free reply is delivered only within 24 hours of the customer's last message.
+  const lastInbound = msgs.reduce((m, e) => (e.kind === 'wa_in' ? Math.max(m, new Date(e.at).getTime()) : m), 0)
+  const closesAt = lastInbound ? lastInbound + DAY_MS : 0
+  const windowOpen = !!closesAt && now < closesAt
+  const left = closesAt - now
+  const leftLabel = left >= 3600000 ? `${Math.floor(left / 3600000)} h left` : `${Math.max(1, Math.round(left / 60000))} min left`
+  const fallback = onEmail && record?.contact.email ? 'or email them instead' : 'or reach them by email'
+  const rule = !lastInbound
+    ? `This customer has not written on WhatsApp yet. WhatsApp only delivers a free reply within 24 hours of the customer's last message, and ZeeDesk has no approved templates yet, so a message sent now will be refused. Wait for them to write first, ${fallback}.`
+    : !windowOpen
+      ? `Their last message was more than 24 hours ago, so WhatsApp will refuse a free reply. ZeeDesk has no approved templates yet: wait for the customer to write again, ${fallback}.`
+      : ''
+
+  const hasPhone = !!record?.contact.phone
+  const name = record?.contact.name || thread?.name || thread?.phone || 'Customer'
+
+  async function send() {
+    const body = text.trim()
+    if (busy || (!body && !file)) return
+    setBusy(true); setFlash(null)
+    try {
+      let media: { mediaPath: string; mediaName: string; mediaType: string } | null = null
+      if (file) {
+        const prep = await fetch(`/api/leads/${encodeURIComponent(leadId)}/whatsapp/upload`, postJson({ name: file.name, mime: file.type, size: file.size }))
+        const pd = await prep.json().catch(() => ({}))
+        if (!prep.ok) throw new Error(pd.error || 'That file could not be sent.')
+        const put = await fetch(pd.uploadUrl, { method: 'PUT', body: file, headers: file.type ? { 'Content-Type': file.type } : undefined })
+        if (!put.ok) throw new Error('The file could not be uploaded.')
+        media = { mediaPath: pd.path, mediaName: file.name, mediaType: file.type || '' }
+      }
+      // No recipient is sent: the server addresses the message from the lead's own record.
+      const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/whatsapp`, postJson({ body, ...(media ?? {}) }))
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d.error || 'The message could not be sent.')
+      setText(''); setFile(null)
+      if (d.recorded === false) setFlash({ text: d.warning || 'The message was sent, but it could not be added to this conversation.', bad: true })
+      await loadRecord()
+      void onChanged()
+    } catch (e) {
+      setFlash({ text: e instanceof Error && e.name !== 'TypeError' ? e.message : 'The message could not be sent. Check your connection and try again.', bad: true })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function refresh() {
+    setRefreshing(true)
+    await Promise.all([loadRecord(), onChanged()])
+    setNow(Date.now())
+    setRefreshing(false)
+  }
+
+  return (
+    <>
+      <main className="flex-1 min-w-0 flex flex-col">
+        <header className="h-[60px] shrink-0 px-5 flex items-center gap-3 border-b border-[#d8dcde]">
+          <Avatar label={record?.contact.name || thread?.name || 'Customer'} size={36} />
+          <div className="min-w-0">
+            <h2 className="font-semibold truncate">{name}</h2>
+            <p className="text-[12px] text-[#68737d] truncate">WhatsApp · {record?.siteName ?? thread?.siteName ?? ''}{thread?.agents.length ? ` · answered by ${thread.agents.join(', ')}` : ''}</p>
+          </div>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            {state === 'ok' && !!closesAt && (
+              <span title={windowOpen ? 'WhatsApp delivers a free reply for 24 hours after the customer’s last message' : 'More than 24 hours since the customer’s last message, so WhatsApp will refuse a free reply'}>
+                <Chip tone={windowOpen ? 'green' : 'amber'}>{windowOpen ? `Reply window open · ${leftLabel}` : 'Reply window closed'}</Chip>
+              </span>
+            )}
+            <button type="button" onClick={() => void refresh()} disabled={refreshing} title="Check for new messages" aria-label="Check for new messages"
+              className="w-8 h-8 rounded-md flex items-center justify-center border border-[#d8dcde] hover:bg-[#f8f9f9] disabled:opacity-40"><RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} aria-hidden /></button>
+            <button type="button" onClick={() => openLead(leadId)} className={BTN_PLAIN}><ExternalLink size={14} aria-hidden />Open the full record</button>
+            <button type="button" onClick={() => setShowInfo(!showInfo)} aria-pressed={showInfo} title="Customer details" aria-label="Customer details"
+              className={`hidden lg:flex w-8 h-8 rounded-md items-center justify-center border border-[#d8dcde] ${showInfo ? 'bg-[#edf7ff] text-[#1f73b7]' : 'hover:bg-[#f8f9f9]'}`}><UserRound size={16} aria-hidden /></button>
+            <button type="button" onClick={onClose} title="Close this conversation" aria-label="Close this conversation"
+              className="w-8 h-8 rounded-md flex items-center justify-center border border-[#d8dcde] hover:bg-[#f8f9f9]"><X size={16} aria-hidden /></button>
+          </div>
+        </header>
+
+        <div ref={scroller} className="flex-1 overflow-y-auto px-5 py-4 bg-[#f8f9f9] [scrollbar-width:thin]">
+          {state === 'loading' && (
+            <div className="space-y-3" role="status" aria-label="Loading the conversation">
+              {[0, 1, 2].map((i) => <div key={i} className={`h-12 w-1/2 rounded-lg bg-[#e9ebed] animate-pulse ${i === 1 ? 'ml-auto' : ''}`} />)}
+            </div>
+          )}
+          {state === 'error' && (
+            <div className="py-16 text-center">
+              <p role="alert" className="text-[13px] font-medium text-[#2f3941]">This conversation could not be loaded.</p>
+              <button type="button" onClick={() => { setState('loading'); void loadRecord() }} className={`${BTN_PLAIN} mt-3`}><RefreshCw size={13} aria-hidden />Try again</button>
+            </div>
+          )}
+          {state === 'ok' && msgs.length === 0 && (
+            <p className="py-16 text-center text-[13px] text-[#68737d]">No WhatsApp messages with {name} yet.</p>
+          )}
+          {state === 'ok' && (
+            <div className="max-w-[860px] mx-auto space-y-2">
+              {msgs.map((e, i) => {
+                const w = e.wa!
+                const mine = e.kind === 'wa_out'
+                const prev = msgs[i - 1]
+                const newDay = !prev || pktDayKey(prev.at) !== pktDayKey(e.at)
+                const failed = mine && (w.status === 'failed' || w.status === 'undelivered')
+                return (
+                  <div key={e.id}>
+                    {newDay && <p className="my-3 text-center"><span className="inline-block px-2.5 py-0.5 rounded-full bg-white border border-[#d8dcde] text-[11px] text-[#68737d]">{dateDividerLabel(e.at)}</span></p>}
+                    <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                      <div className={`max-w-[72%] rounded-lg px-3 py-2 ${mine ? (failed ? 'bg-white border border-[#cc3340] text-[#2f3941]' : 'bg-[#1f73b7] text-white') : 'bg-white border border-[#d8dcde] text-[#2f3941]'}`}>
+                        {mine && (w.bot || w.template) && <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide opacity-80">{w.bot ? 'Sent automatically' : 'Template'}</p>}
+                        {/* Photos, voice notes and files come through our own route, which checks this member may see this lead. */}
+                        {(w.media ?? []).map((m, k) => {
+                          const src = `/api/leads/${encodeURIComponent(leadId)}/whatsapp/media?${m.path ? `path=${encodeURIComponent(m.path)}` : `url=${encodeURIComponent(m.url ?? '')}`}`
+                          const type = (m.type || '').toLowerCase()
+                          if (type.startsWith('audio/')) return <audio key={k} controls preload="none" src={src} className="mb-1 w-60 h-9 max-w-full" aria-label={m.name || 'Voice message'} />
+                          if (type.startsWith('image/')) {
+                            return (
+                              <a key={k} href={src} target="_blank" rel="noopener noreferrer" className="block mb-1">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={src} alt={m.name || 'Photo'} loading="lazy" className="max-h-48 max-w-full rounded" />
+                              </a>
+                            )
+                          }
+                          if (type.startsWith('video/')) return <video key={k} controls preload="none" src={src} className="mb-1 w-60 max-w-full rounded" aria-label={m.name || 'Video'} />
+                          return (
+                            <a key={k} href={src} target="_blank" rel="noopener noreferrer"
+                              className={`mb-1 inline-flex items-center gap-1.5 max-w-full px-2 py-1 rounded border text-[12px] ${mine && !failed ? 'border-white/50 text-white hover:bg-white/10' : 'border-[#d8dcde] text-[#1f73b7] hover:bg-[#f8f9f9]'}`}>
+                              <FileText size={13} className="shrink-0" aria-hidden /><span className="truncate">{m.name || 'File'}</span>
+                            </a>
+                          )
+                        })}
+                        {e.body && <p className="whitespace-pre-wrap break-words leading-[1.45]">{e.body}</p>}
+                      </div>
+                      <p className="mt-0.5 flex items-center gap-2 text-[11px] text-[#87929d]">
+                        <time dateTime={e.at} title={formatDateTime(e.at)} className="tabular-nums">{formatTime(e.at)}</time>
+                        {mine && w.sentBy && <span>{short(w.sentBy)}</span>}
+                        {mine && <WaStatus status={w.status} />}
+                      </p>
+                      {failed && <p role="note" className="mt-0.5 max-w-[72%] text-right text-[12px] text-[#cc3340]">{waFailureHint(w.errorCode)}</p>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {state === 'ok' && record && (
+          <footer className="shrink-0 border-t border-[#d8dcde] px-5 py-3 bg-white">
+            {!hasPhone ? (
+              <Notice text="This lead has no phone number on file, so it cannot be messaged on WhatsApp." />
+            ) : (
+              <>
+                {rule && (
+                  <div role="note" className="mb-2 flex items-start gap-2 rounded-md border border-[#f0c48a] bg-[#fff3e4] px-3 py-2 text-[12px] leading-5 text-[#703815]">
+                    <TriangleAlert size={14} className="shrink-0 mt-0.5 text-[#ad5918]" aria-hidden />
+                    <span className="min-w-0 flex-1">{rule}</span>
+                    {onEmail && record.contact.email && <button type="button" onClick={() => onEmail(leadId)} className={`${BTN_PLAIN} shrink-0`}><Mail size={14} aria-hidden />Email instead</button>}
+                  </div>
+                )}
+                {flash && <div className="mb-2"><Notice text={flash.text} bad={flash.bad} /></div>}
+                {file && (
+                  <p className="mb-2 flex items-center gap-2 text-[12px]">
+                    <FileIcon mime={file.type} size={13} />
+                    <span className="truncate font-medium text-[#2f3941]">{file.name}</span>
+                    <span className="shrink-0 text-[#87929d] tabular-nums">{humanSize(file.size)}</span>
+                    <button type="button" onClick={() => setFile(null)} disabled={busy} aria-label={`Remove ${file.name}`} className="w-6 h-6 rounded flex items-center justify-center text-[#68737d] hover:bg-[#e9ebed] hover:text-[#cc3340] disabled:opacity-40"><X size={13} aria-hidden /></button>
+                  </p>
+                )}
+                <div className="flex items-end gap-2 rounded-lg border border-[#d8dcde] bg-white px-2 py-2 focus-within:border-[#1f73b7]">
+                  <input ref={fileInput} type="file" className="hidden" aria-hidden tabIndex={-1}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFile(f); setFlash(null) } e.target.value = '' }} />
+                  <button type="button" onClick={() => fileInput.current?.click()} disabled={busy} title="Attach a photo, PDF, audio or video file" aria-label="Attach a file"
+                    className="w-9 h-9 rounded-md flex items-center justify-center text-[#68737d] hover:bg-[#f8f9f9] disabled:opacity-40"><Paperclip size={17} aria-hidden /></button>
+                  <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={4000} aria-label="WhatsApp reply"
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } }}
+                    placeholder="Write a WhatsApp reply. Enter sends, Shift+Enter adds a line."
+                    className="flex-1 resize-none bg-transparent outline-none text-[14px] leading-5 py-1.5 placeholder:text-[#87929d]" />
+                  <button type="button" onClick={() => void send()} disabled={busy || (!text.trim() && !file)} className={`${BTN_PRIMARY} h-9 px-4`}>
+                    {busy ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Send size={15} aria-hidden />}{busy ? 'Sending…' : 'Send'}
+                  </button>
+                </div>
+              </>
+            )}
+          </footer>
+        )}
+      </main>
+
+      {showInfo && (
+        <aside className="hidden lg:flex w-[300px] shrink-0 border-l border-[#d8dcde] flex-col bg-[#f8f9f9] overflow-y-auto [scrollbar-width:thin]" aria-label="Customer">
+          <div className="h-[60px] shrink-0 px-4 flex items-center border-b border-[#d8dcde]">
+            <p className="font-semibold">Customer</p>
+            <button type="button" onClick={() => setShowInfo(false)} className="ml-auto w-7 h-7 rounded flex items-center justify-center hover:bg-[#e9ebed]" aria-label="Hide customer details"><X size={15} aria-hidden /></button>
+          </div>
+          {!record ? (
+            <p className="p-4 text-[13px] text-[#68737d]">{state === 'error' ? 'The customer could not be loaded.' : 'Loading the customer…'}</p>
+          ) : (
+            <div className="p-4 space-y-5">
+              <section>
+                <div className="flex items-center gap-3">
+                  <Avatar label={record.contact.name || 'Customer'} size={40} />
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-semibold truncate">{record.contact.name || 'No name given'}</p>
+                    <p className="text-[12px] text-[#68737d] truncate">{record.sourceLabel}</p>
+                  </div>
+                </div>
+                <dl className="mt-3 space-y-1.5 text-[13px]">
+                  <Fact label="Phone" value={record.contact.phone || 'Not given'} />
+                  <Fact label="Email" value={record.contact.email || 'Not given'} />
+                  <Fact label="Site" value={record.siteName} />
+                  <Fact label="Stage" value={String(record.stage).replace(/_/g, ' ')} capitalize />
+                  <Fact label="Owner" value={short(record.owner) || 'Unassigned'} />
+                  {record.country && <Fact label="Country" value={record.country} />}
+                </dl>
+                {record.contactsHidden && <p className="mt-2 text-[12px] text-[#68737d]">Contact details are hidden for your account. A message you send still reaches this customer.</p>}
+                <button type="button" onClick={() => openLead(record.id)} className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-[#1f73b7] hover:text-[#144a75]">Open the full record <ChevronRight size={14} aria-hidden /></button>
+              </section>
+              <section>
+                <h3 className={LABEL}>This conversation</h3>
+                <dl className="space-y-1.5 text-[13px]">
+                  <Fact label="Messages" value={`${msgs.length} in total, ${msgs.filter((e) => e.kind === 'wa_in').length} from the customer`} />
+                  <Fact label="They wrote" value={lastInbound ? timeAgo(new Date(lastInbound).toISOString()) : 'Not yet'} />
+                  <Fact label="We wrote" value={thread?.lastOutAt ? formatDateTime(thread.lastOutAt) : 'Not yet'} />
+                  <Fact label="Waiting" value={thread && thread.unanswered > 0 ? `Yes, ${thread.unanswered} message${thread.unanswered === 1 ? '' : 's'} unanswered` : 'No'} />
+                </dl>
+              </section>
+            </div>
+          )}
+        </aside>
+      )}
+    </>
+  )
 }
