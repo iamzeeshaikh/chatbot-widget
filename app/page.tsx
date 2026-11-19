@@ -1331,7 +1331,11 @@ export default function Dashboard() {
       let stamp = ''
       try { stamp = localStorage.getItem('zee-push-refreshed') ?? '' } catch { /* ignore */ }
       const today = new Date().toISOString().slice(0, 10)
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && stamp !== today) {
+      // An agent who switched the bell OFF stays off: without this the refresh
+      // re-subscribed them the next day (Steve asked for email only, 19 Nov 2026).
+      let optedOut = false
+      try { optedOut = localStorage.getItem('zee-push-off') === '1' } catch { /* ignore */ }
+      if (!optedOut && typeof Notification !== 'undefined' && Notification.permission === 'granted' && stamp !== today) {
         try {
           const { publicKey } = await fetch('/api/admin/push-subscribe').then((r) => r.json())
           if (publicKey) {
@@ -1358,6 +1362,7 @@ export default function Dashboard() {
           body: JSON.stringify({ remove: true, endpoint: existing.endpoint }),
         }).catch(() => {})
         await existing.unsubscribe()
+        try { localStorage.setItem('zee-push-off', '1') } catch { /* ignore */ }
         setPushState('off')
         return
       }
@@ -1370,6 +1375,7 @@ export default function Dashboard() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subscription: sub.toJSON(), deviceId: pushDeviceId() }),
       })
+      try { localStorage.removeItem('zee-push-off') } catch { /* ignore */ }
       setPushState('on')
     } catch (err) {
       console.error('push subscribe failed:', err)
