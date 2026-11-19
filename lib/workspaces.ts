@@ -111,7 +111,10 @@ export const SPORTS_SITES = ['texasfootball', 'volleyballuniforms', 'californias
 // 0 while Recent Leads showed the leads, and no session link could be
 // resolved. Sports leads stay out of packaging billing automatically: the
 // billing endpoint is scoped to the member's workspace sites.
-export const LEAD_TRACKED_SITES = [...PACKAGING_SITES, ...SPORTS_SITES]
+
+
+// Declared lazily because the ZeeDesk roster is defined further down this file.
+export const LEAD_TRACKED_SITES: string[] = [...PACKAGING_SITES, ...SPORTS_SITES]
 
 export function isLeadTracked(siteId: string): boolean {
   return LEAD_TRACKED_SITES.includes(siteId)
@@ -131,7 +134,16 @@ export function isRetiredLeadSite(siteId: string): boolean {
 
 // The ZeeDesk team's sites (owner's DHA office). Empty until its first sites
 // launch; a site listed here must appear in no other roster.
-export const ZEEDESK_SITES: string[] = []
+export const ZEEDESK_SITES: string[] = [
+  // 2026-11-19: the first sixteen sites of the DHA team's own set.
+  'thelashboxes', 'lashboxesuk', 'creamboxes', 'thepeptidesboxes',
+  'thewhiteboxes', 'thewhiteboxesuk', 'thepetpackaging',
+  'thesandwichboxes', 'sandwichpackaginguk',
+  'shopcorrugatedboxes', 'thecorrugatedboxesuk',
+  'shopfoldingcartons', 'thefoldingboxesuk',
+  'thekraftenvelopes', 'brownenvelopesuk', 'thebottleneckers',
+]
+LEAD_TRACKED_SITES.push(...ZEEDESK_SITES)
 
 // A Record, not a ternary: with `ws === 'sports' ? … : PACKAGING_SITES` any
 // workspace added later silently received the Model Town team's sites.
