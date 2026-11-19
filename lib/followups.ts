@@ -115,6 +115,19 @@ export interface WaitingRow {
   snippet: string
 }
 
+export interface ReplyRow extends WaitingRow {
+  /** Something went back to the customer after this message. */
+  answered: boolean
+}
+
+export interface TaskDoneRow {
+  at: string
+  sessionId: string
+  title: string
+  agent: string
+  agentName: string
+}
+
 export interface FollowupData {
   day: string
   workspace: string
@@ -128,6 +141,10 @@ export interface FollowupData {
   agents: FollowupAgentRow[]
   items: FollowupItem[]
   waiting: WaitingRow[]
+  /** Every customer message received that day, newest first. */
+  replies: ReplyRow[]
+  /** Tasks people completed that day, newest first. */
+  tasks: TaskDoneRow[]
   trend: FollowupDayRow[]
   /** A read hit its row cap — recent figures may be short. */
   truncated: boolean
@@ -179,7 +196,7 @@ export async function buildFollowups(member: Member, day: string): Promise<Follo
   const base: FollowupData = {
     day, workspace: member.workspace, generatedAt: new Date().toISOString(),
     totals: { ...emptyCounts(), tasksDone: 0, followupsAnswered: 0, waiting: 0 },
-    agents: [], items: [], waiting: [],
+    agents: [], items: [], waiting: [], replies: [], tasks: [],
     trend: trendDays.map((d) => ({ day: d, ...emptyCounts() })),
     truncated: false,
   }
@@ -420,18 +437,31 @@ export async function buildFollowups(member: Member, day: string): Promise<Follo
     })
   }
   for (const a of agentRows.values()) a.leadsContacted = agentLeads.get(a.agent)?.size ?? 0
-  for (const i of dayIns) ensure(ownerAt(i.sessionId, i.at), 'unassigned').replies++
+  for (const i of dayIns) {
+    const owner = ownerAt(i.sessionId, i.at)
+    ensure(owner, 'unassigned').replies++
+    base.replies.push({
+      sessionId: i.sessionId, siteId: i.siteId, siteName: siteName[i.siteId] ?? i.siteId,
+      customer: i.from, agent: owner, agentName: owner ? nameOfAgent(owner) : 'No agent yet',
+      at: i.at, via: i.via, snippet: i.snippet,
+      answered: (outsBySession.get(i.sessionId) ?? []).some((o) => o.at > i.at),
+    })
+  }
+  base.replies.sort((a, b) => b.at.localeCompare(a.at))
 
   // Tasks completed that day — the newest revision of each task decides.
   const taskLatest = new Map<string, ReturnType<typeof parseCrmTask>>()
-  for (const r of taskRows) { const t = parseCrmTask(r.message); if (t?.id) taskLatest.set(t.id, t) }
+  const taskSession = new Map<string, string>()
+  for (const r of taskRows) { const t = parseCrmTask(r.message); if (t?.id) { taskLatest.set(t.id, t); taskSession.set(t.id, r.session_id) } }
   for (const t of taskLatest.values()) {
     if (!t || t.deleted || t.status !== 'done' || !t.completed_at || pktDayKey(t.completed_at) !== day) continue
     const by = lower(t.completed_by)
     if (isBot(by)) continue
     ensure(by).tasksDone++
     base.totals.tasksDone++
+    base.tasks.push({ at: t.completed_at, sessionId: taskSession.get(t.id) ?? '', title: t.title, agent: by, agentName: nameOfAgent(by) })
   }
+  base.tasks.sort((a, b) => b.at.localeCompare(a.at))
 
   // Still waiting: the customer's last message of the day has nothing after it.
   const lastInOfDay = new Map<string, In>()
@@ -454,7 +484,7 @@ export async function buildFollowups(member: Member, day: string): Promise<Follo
 
   // ── customer names: the lead's own name beats an email address ────────────
   const quoteIds = Array.from(new Set(
-    [...base.items.map((x) => x.sessionId), ...base.waiting.map((x) => x.sessionId)]
+    [...base.items.map((x) => x.sessionId), ...base.replies.map((x) => x.sessionId)]
       .filter((s) => s.startsWith('quote-')).map((s) => s.slice(6)),
   ))
   if (quoteIds.length > 0) {
@@ -464,13 +494,13 @@ export async function buildFollowups(member: Member, day: string): Promise<Follo
     const nameOf = new Map<string, string>()
     for (const l of leads) { const n = (l.name ?? '').trim() || (l.email ?? '').trim(); if (n) nameOf.set(`quote-${l.id}`, n) }
     for (const x of base.items) { const n = nameOf.get(x.sessionId); if (n) x.customer = n }
-    for (const x of base.waiting) { const n = nameOf.get(x.sessionId); if (n && !x.customer) x.customer = n }
+    for (const x of [...base.waiting, ...base.replies]) { const n = nameOf.get(x.sessionId); if (n && !x.customer) x.customer = n }
   }
   // A call row carries no name; borrow it from anything else sent to that lead.
   const anyName = new Map<string, string>()
   for (const o of outs) if (o.customer && !anyName.has(o.sessionId)) anyName.set(o.sessionId, o.customer)
   for (const x of base.items) if (!x.customer) x.customer = anyName.get(x.sessionId) ?? 'Customer'
-  for (const x of base.waiting) if (!x.customer) x.customer = anyName.get(x.sessionId) ?? 'Customer'
+  for (const x of [...base.waiting, ...base.replies]) if (!x.customer) x.customer = anyName.get(x.sessionId) ?? 'Customer'
 
   // ── totals ─────────────────────────────────────────────────────────────────
   const today = trendByDay.get(day)
