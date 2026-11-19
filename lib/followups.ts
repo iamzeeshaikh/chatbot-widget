@@ -321,12 +321,10 @@ export async function buildFollowups(member: Member, day: string): Promise<Follo
       if (SYSTEM_SENDER.test(addr)) continue
       if (ourDomains.has(addr.split('@')[1] ?? '')) {
         const toAddr = (str(j.to).match(/[^\s<>"]+@[^\s<>"]+/)?.[0] ?? '').toLowerCase()
-        // Ours to ours is not outreach. A "-all" group address is the one
-        // exception: Google rewrites a customer's From to the group when it
-        // relays their mail, so that IS the customer writing.
-        if (ourDomains.has(toAddr.split('@')[1] ?? '')) {
-          if (!/-all@/.test(addr)) continue
-        } else {
+        // Ours to ours is not outreach and not a customer either: it is the
+        // copy of an agent's own mail that the "-all" group relays back.
+        if (ourDomains.has(toAddr.split('@')[1] ?? '')) continue
+        {
         // Answered from Gmail rather than from ZeeOps: still the agent's email.
         outs.push({
           at: at(r, j), sessionId: r.session_id, siteId: r.site_id,
