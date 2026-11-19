@@ -88,7 +88,7 @@ async function namesFor(sessionIds: string[]): Promise<Map<string, string>> {
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!hasFeature(member.workspace, 'telephony')) {
+  if (!hasFeature(member.workspace, 'whatsapp')) {
     return NextResponse.json({ error: 'WhatsApp is not enabled for this workspace' }, { status: 403 })
   }
   const sites = memberSites(member)

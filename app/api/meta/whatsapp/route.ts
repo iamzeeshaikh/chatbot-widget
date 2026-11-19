@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { metaWaConfig, verifyMetaSignature, downloadMetaMedia } from '@/lib/metawa'
+import { metaWaLines, verifyMetaSignature, downloadMetaMedia, type MetaWaConfig } from '@/lib/metawa'
 import { CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { leadForCaller, markPitchIfUnanswered } from '@/lib/inbound'
 import { WHATSAPP_LEAD_MESSAGE } from '@/lib/quoteintake'
@@ -27,20 +27,27 @@ export const maxDuration = 30
 // and our verify token, and expects the challenge echoed back as plain text.
 
 export async function GET(req: NextRequest) {
-  const cfg = metaWaConfig()
+  // Each line's Meta app subscribes with its own verify token.
   const q = req.nextUrl.searchParams
-  if (!cfg || q.get('hub.mode') !== 'subscribe' || !cfg.verifyToken || q.get('hub.verify_token') !== cfg.verifyToken) {
+  const given = q.get('hub.verify_token') ?? ''
+  const known = !!given && metaWaLines().some((l) => l.verifyToken && l.verifyToken === given)
+  if (q.get('hub.mode') !== 'subscribe' || !known) {
     return new NextResponse('Forbidden', { status: 403 })
   }
   return new NextResponse(q.get('hub.challenge') ?? '', { status: 200, headers: { 'Content-Type': 'text/plain' } })
 }
 
 export async function POST(req: NextRequest) {
-  const cfg = metaWaConfig()
-  if (!cfg) return new NextResponse('WhatsApp (Meta) is not configured', { status: 503 })
+  const lines = metaWaLines()
+  if (lines.length === 0) return new NextResponse('WhatsApp (Meta) is not configured', { status: 503 })
 
+  // Meta signs with the secret of the app that owns the subscription, and each
+  // line has its own app. The lines whose secret signed these bytes are the
+  // only ones this post may write to: one app can never file onto another's line.
   const raw = await req.text()
-  if (!verifyMetaSignature(cfg.appSecret, raw, req.headers.get('x-hub-signature-256'))) {
+  const header = req.headers.get('x-hub-signature-256')
+  const signedFor = lines.filter((l) => verifyMetaSignature(l.appSecret, raw, header))
+  if (signedFor.length === 0) {
     console.warn('[meta-wa] refused a webhook with a bad signature')
     return new NextResponse('Bad signature', { status: 403 })
   }
@@ -49,7 +56,7 @@ export async function POST(req: NextRequest) {
   // handled is just a duplicate — so every path below records what it can and
   // answers 200 regardless. The dedupe on message id makes a retry harmless.
   try {
-    await handle(cfg, JSON.parse(raw))
+    await handle(signedFor, JSON.parse(raw))
   } catch (e) {
     console.error('[meta-wa] webhook failed', e)
   }
@@ -64,14 +71,16 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'n
 const MEDIA_TYPES = new Set(['image', 'document', 'video', 'audio', 'sticker'])
 const WORTH_RECORDING = new Set(['delivered', 'read', 'failed'])
 
-async function handle(cfg: NonNullable<ReturnType<typeof metaWaConfig>>, payload: unknown) {
+async function handle(lines: MetaWaConfig[], payload: unknown) {
   for (const entry of arr(obj(payload).entry)) {
     for (const change of arr(obj(entry).changes)) {
       const value = obj(obj(change).value)
-      // Only our own line. A second number on the same account would arrive
-      // here too, and it is not ours to file.
+      // Only our own lines. A second number on the same account would arrive
+      // here too, and it is not ours to file. An event that names no number is
+      // taken for the signing app's line only when that is unambiguous.
       const phoneNumberId = str(obj(value.metadata).phone_number_id)
-      if (phoneNumberId && phoneNumberId !== cfg.phoneNumberId) continue
+      const cfg = phoneNumberId ? lines.find((l) => l.phoneNumberId === phoneNumberId) : lines.length === 1 ? lines[0] : undefined
+      if (!cfg) continue
       const names = new Map<string, string>()
       for (const c of arr(value.contacts)) {
         const id = str(obj(c).wa_id); const name = str(obj(obj(c).profile).name)
@@ -83,7 +92,7 @@ async function handle(cfg: NonNullable<ReturnType<typeof metaWaConfig>>, payload
   }
 }
 
-async function inbound(cfg: NonNullable<ReturnType<typeof metaWaConfig>>, msg: Obj, profileName: string) {
+async function inbound(cfg: MetaWaConfig, msg: Obj, profileName: string) {
   const sid = str(msg.id)
   const fromDigits = str(msg.from).replace(/\D/g, '')
   if (!sid || !fromDigits) return

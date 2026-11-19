@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   const [tasks, unread, waiting] = await Promise.all([
     loadMemberTasks(member),
     unreadRepliesFor(member),
-    hasFeature(member.workspace, 'telephony')
+    hasFeature(member.workspace, 'whatsapp')
       ? waWaitingSessions(await memberSites(member))
       : Promise.resolve(new Set<string>()),
   ])

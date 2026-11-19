@@ -29,7 +29,7 @@ import { CRM_WA_IN_ROLE } from './crm'
 import { parseWaMessage } from './whatsapp'
 import { phoneKey } from './identity'
 import { SITE_DOMAINS } from './sitedomains'
-import type { Workspace } from './workspaces'
+import { siteWorkspace, type Workspace } from './workspaces'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
@@ -58,6 +58,37 @@ export function metaWaConfig(): MetaWaConfig | null {
   }
 }
 
+// ── The ZeeDesk line (2026-11-19) ────────────────────────────────────────────
+// The second packaging team (workspace 'zeedesk') has ONE WhatsApp number,
+// +1 412 504 7473, on a WhatsApp Business Account and a Meta app of its own.
+// Same Cloud API, same webhook URL, different credentials:
+//   META_ZEEDESK_ACCESS_TOKEN / _PHONE_NUMBER_ID / _WABA_ID / _APP_SECRET /
+//   _VERIFY_TOKEN / _NUMBER
+// ZeeDesk has no Twilio line at all, so every ZeeDesk lead talks on this one.
+export function metaZeedeskConfig(): MetaWaConfig | null {
+  const token = process.env.META_ZEEDESK_ACCESS_TOKEN
+  const phoneNumberId = process.env.META_ZEEDESK_PHONE_NUMBER_ID
+  const appSecret = process.env.META_ZEEDESK_APP_SECRET
+  if (!token || !phoneNumberId || !appSecret) return null
+  return {
+    token, phoneNumberId, appSecret,
+    wabaId: process.env.META_ZEEDESK_WABA_ID ?? '',
+    verifyToken: process.env.META_ZEEDESK_VERIFY_TOKEN ?? '',
+    number: process.env.META_ZEEDESK_NUMBER ?? '+14125047473',
+    workspace: 'zeedesk',
+  }
+}
+
+/** Every Meta line that is configured. The webhook serves all of them. */
+export function metaWaLines(): MetaWaConfig[] {
+  return [metaWaConfig(), metaZeedeskConfig()].filter((c): c is MetaWaConfig => !!c)
+}
+
+/** The Meta line a lead on this site is written to from: its own workspace's. */
+export function metaWaConfigForSite(siteId: string): MetaWaConfig | null {
+  return siteWorkspace(siteId) === 'zeedesk' ? metaZeedeskConfig() : metaWaConfig()
+}
+
 export type WaLine = 'twilio' | 'meta'
 
 /**
@@ -71,6 +102,8 @@ export type WaLine = 'twilio' | 'meta'
  * written to from the UK line, everyone else from the workspace's Twilio line.
  */
 export async function lineForLead(sessionId: string, siteId: string): Promise<WaLine> {
+  // ZeeDesk has one line and it is a Meta one; there is nothing to choose.
+  if (siteWorkspace(siteId) === 'zeedesk') return 'meta'
   const cfg = metaWaConfig()
   if (!cfg) return 'twilio'
   const { data: rows } = await supabase.from('chat_logs')

@@ -26,7 +26,7 @@ export const maxDuration = 30
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id, 'telephony')
+  const access = await guardLeadAccess(member, id, 'whatsapp')
   if (!access.ok) return new NextResponse('Not allowed', { status: access.status })
 
   const want = req.nextUrl.searchParams.get('url') ?? ''

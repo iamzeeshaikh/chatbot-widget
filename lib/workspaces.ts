@@ -189,6 +189,8 @@ export function workspaceSites(ws: Workspace): string[] {
 // happens to be an admin — the day one was added as standard, their contacts
 // would have vanished with no decision behind it.
 // 'telephony' — WhatsApp, phone calls and the in-browser softphone.
+// 'whatsapp'  — WhatsApp alone (2026-11-19): every workspace with 'telephony'
+//               has it too; ZeeDesk has it WITHOUT calls, on its own Meta line.
 //
 // Both workspaces have it as of 2026-09-01, but they do NOT share a line. One
 // Twilio account, two numbers: sports answers on its own, packaging on its own
@@ -214,13 +216,13 @@ export function workspaceSites(ws: Workspace): string[] {
 // 'trafficdetail' (2026-10-21) — clicking a site in the Overview's "Traffic by
 // site" modal breaks that site's visits down by country, source, page and
 // device. Packaging only, as asked.
-export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony' | 'sales' | 'quotebot' | 'jobs' | 'opportunities' | 'trafficdetail' | 'lost' | 'wabot' | 'watemplates'
+export type WorkspaceFeature = 'records' | 'pipeline' | 'tasks' | 'reports' | 'email' | 'reminders' | 'chatpdf' | 'contactprivacy' | 'telephony' | 'whatsapp' | 'sales' | 'quotebot' | 'jobs' | 'opportunities' | 'trafficdetail' | 'lost' | 'wabot' | 'watemplates'
 
 const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   // 'sales' (2026-09-16): each business keeps its own sales ledger — Model Town
   // direct and the old lead-partner orders here, jersey sales on sports — with
   // a master view across both for the owner accounts (lib/salescore.ts).
-  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony', 'sales', 'quotebot', 'jobs', 'opportunities', 'trafficdetail', 'lost',
+  packaging: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'telephony', 'whatsapp', 'sales', 'quotebot', 'jobs', 'opportunities', 'trafficdetail', 'lost',
     // WhatsApp assistant + template messages (2026-11-10): packaging only —
     // sports must not change at all (owner).
     'wabot', 'watemplates']),
@@ -251,13 +253,13 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   //      its own screen, and the fix is a second OAuth client owned by that org,
   //      chosen per workspace. Nothing here breaks either way: an unconnectable
   //      Connect button is inert.
-  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy', 'telephony', 'sales']),
+  sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy', 'telephony', 'whatsapp', 'sales']),
   // ZeeDesk (2026-11-17) starts with the features an agent drives by hand. The
   // automated ones ('quotebot', 'wabot', 'watemplates', 'sales', 'jobs',
   // 'opportunities', 'lost') are still wired to the Model Town team's own
   // mailbox, bot agents, WhatsApp line and ledger; each joins this set only
   // once it reads those from the workspace instead.
-  zeedesk: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'trafficdetail']),
+  zeedesk: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'trafficdetail', 'whatsapp']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {

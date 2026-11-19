@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { guardLeadAccess, writeControlRow, leadPhone } from '@/lib/leadrecord'
 import { getMember } from '@/lib/auth'
 import { twilioConfig, twilioProblem, sendWhatsApp } from '@/lib/twilio'
-import { lineForLead, metaWaConfig, sendMetaWhatsApp } from '@/lib/metawa'
+import { lineForLead, metaWaConfigForSite, sendMetaWhatsApp } from '@/lib/metawa'
 import { CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { signedMediaUrl } from '@/lib/whatsappmedia'
 
@@ -21,16 +21,16 @@ const MAX_BODY = 4000
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   const member = await getMember(req)
-  const access = await guardLeadAccess(member, id, 'telephony')
+  const access = await guardLeadAccess(member, id, 'whatsapp')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
 
   // Which line this customer talks on (lib/metawa.ts): the UK number goes
   // through Meta directly, everything else through Twilio.
   const line = await lineForLead(id, access.siteId)
-  const meta = line === 'meta' ? metaWaConfig() : null
+  const meta = line === 'meta' ? metaWaConfigForSite(access.siteId) : null
   const cfg = line === 'meta' ? null : twilioConfig(access.member.workspace)
   const problem = line === 'meta'
-    ? (meta ? null : 'The UK WhatsApp line is not configured on the server (META_UK_*).')
+    ? (meta ? null : 'This WhatsApp line is not configured on the server.')
     : twilioProblem(access.member.workspace)
   if (problem || (!cfg && !meta)) return NextResponse.json({ error: problem, needsSetup: true }, { status: 503 })
 
