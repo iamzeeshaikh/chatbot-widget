@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, Banknote, Check, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, History,
-  Image as ImageIcon, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageSquare, Monitor, Paperclip, Pencil,
+  Image as ImageIcon, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircle, MessageSquare, Monitor, Paperclip, Pencil,
   Plus, RefreshCw, Reply, Search, Send, Sparkles, StickyNote, Target, Trash2, TriangleAlert, UserCheck, X,
 } from 'lucide-react'
 import { dateDividerLabel, formatDateTime, formatDueLabel, formatShortDateTime, formatTime, timeAgo } from '@/lib/datetime'
@@ -29,6 +29,7 @@ import {
   MAX_EMAIL_ATTACHMENT_BYTES, MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENTS_TOTAL, humanSize, isRetryableSkip,
 } from '@/lib/emailattach'
 import { matchSiteAlias } from '@/lib/sitealias'
+import { waErrorHint } from '@/lib/whatsapp'
 import type { LeadRecord as LeadData, TimelineEvent } from '@/lib/leadrecord'
 import {
   Avatar, BTN_DANGER, BTN_PLAIN, BTN_PRIMARY, CARD, Chip, Empty, INPUT, LABEL, Notice, TEXTAREA, postJson, short,
@@ -39,6 +40,7 @@ type Field = 'name' | 'email' | 'phone'
 type Status = 'loading' | 'ok' | 'forbidden' | 'missing' | 'error'
 type Method = 'POST' | 'PATCH' | 'DELETE'
 type Call = (path: string, body: unknown, method?: Method) => Promise<Record<string, unknown>>
+type ComposerTab = 'email' | 'whatsapp' | 'note'
 type FilterKey = 'all' | 'messages' | 'notes' | 'tasks' | 'updates'
 interface ReplyTo { replyToGmailId: string; to: string; subject: string }
 interface Alias { email: string; displayName: string; isPrimary: boolean; isDefault: boolean }
@@ -90,6 +92,7 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
   const ws = me.workspace as Workspace
   const canTasks = hasFeature(ws, 'tasks')
   const canEmail = hasFeature(ws, 'email')
+  const canWa = hasFeature(ws, 'whatsapp')
   // A reason is asked for only where the server demands one for a move to Lost.
   const lostNeedsReason = hasFeature(ws, 'lost')
 
@@ -97,7 +100,7 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
   const [status, setStatus] = useState<Status>('loading')
   const [filter, setFilter] = useState<FilterKey>('all')
   // Until a tab is picked, a lead that can be emailed opens on Email.
-  const [pickedTab, setPickedTab] = useState<'email' | 'note' | null>(null)
+  const [pickedTab, setPickedTab] = useState<ComposerTab | null>(null)
   const [emailOpened, setEmailOpened] = useState(false)
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null)
   const [gmail, setGmail] = useState<GmailStatus | null>(null)
@@ -169,7 +172,11 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
   }, [id, load])
 
   const hasSentEmail = !!record?.timeline.some((e) => e.kind === 'email')
-  const tab: 'email' | 'note' = pickedTab ?? (canEmail && record?.contact.email ? 'email' : 'note')
+  // WhatsApp needs a number on the lead; without one the tab is off and a
+  // stale pick falls back. A customer waiting on WhatsApp opens on WhatsApp.
+  const waReady = canWa && !!record?.contact.phone
+  const defaultTab: ComposerTab = waReady && record?.waAwaitingReply ? 'whatsapp' : canEmail && record?.contact.email ? 'email' : 'note'
+  const tab: ComposerTab = pickedTab && (pickedTab !== 'whatsapp' || waReady) ? pickedTab : defaultTab
   const emailMounted = canEmail && (emailOpened || tab === 'email')
   const wantGmail = canEmail && !!record && (emailMounted || hasSentEmail)
   useEffect(() => {
@@ -355,8 +362,13 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
   // ── Composer ──────────────────────────────────────────────────────────────
   // Once shown, the email form stays mounted so a half-written message
   // survives a look at the Note tab.
-  function showEmailTab() { setPickedTab('email'); setEmailOpened(true) }
-  function showNoteTab() { if (tab === 'email') setEmailOpened(true); setPickedTab('note') }
+  function pickTab(next: ComposerTab) { if (tab === 'email' || next === 'email') setEmailOpened(true); setPickedTab(next) }
+  function showEmailTab() { pickTab('email') }
+  function waSent() {
+    stick.current = true
+    setFilter((f) => (f === 'all' || f === 'messages' ? f : 'all'))
+    void load()
+  }
   function startReply(ctx: ReplyTo) { setReplyTo(ctx); showEmailTab() }
   function emailSent() {
     setReplyTo(null)
@@ -388,6 +400,7 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
             <h1 className="text-[16px] font-semibold break-words">{name}</h1>
             <Chip tone={stageTone(record.stage)}>{CRM_STAGE_LABEL[record.stage]}</Chip>
             {record.notALead && <span title={`Marked by ${short(record.notALead.by)}`}><Chip tone="amber">Not a lead</Chip></span>}
+            {canWa && record.waAwaitingReply && <span title="The customer wrote last on WhatsApp and nobody has answered yet"><Chip tone="green">WhatsApp waiting</Chip></span>}
             {overdue > 0 && canTasks && <Chip tone="red">{plural(overdue, 'task overdue', 'tasks overdue')}</Chip>}
           </div>
           <p className="text-[12px] text-[#68737d] truncate">
@@ -521,11 +534,24 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
                   <Mail size={14} aria-hidden />Email
                 </button>
               )}
-              <button type="button" role="tab" id="zd-tab-note" aria-selected={tab === 'note'} aria-controls="zd-panel-note" onClick={showNoteTab}
+              {canWa && (
+                <button type="button" role="tab" id="zd-tab-wa" aria-selected={tab === 'whatsapp'} aria-controls="zd-panel-wa" onClick={() => pickTab('whatsapp')}
+                  disabled={!waReady} aria-describedby={waReady ? undefined : 'zd-wa-off'}
+                  className={`h-8 px-3 rounded-t-md text-[13px] font-medium inline-flex items-center gap-1.5 border-b-2 outline-none focus-visible:ring-2 focus-visible:ring-[#1f73b7]/40 disabled:opacity-50 disabled:cursor-not-allowed ${tab === 'whatsapp' ? 'border-[#038153] text-[#038153]' : 'border-transparent text-[#68737d] enabled:hover:text-[#2f3941]'}`}>
+                  <MessageCircle size={14} aria-hidden />WhatsApp
+                </button>
+              )}
+              <button type="button" role="tab" id="zd-tab-note" aria-selected={tab === 'note'} aria-controls="zd-panel-note" onClick={() => pickTab('note')}
                 className={`h-8 px-3 rounded-t-md text-[13px] font-medium inline-flex items-center gap-1.5 border-b-2 outline-none focus-visible:ring-2 focus-visible:ring-[#1f73b7]/40 ${tab === 'note' ? 'border-[#ad5918] text-[#ad5918]' : 'border-transparent text-[#68737d] hover:text-[#2f3941]'}`}>
                 <StickyNote size={14} aria-hidden />Note
               </button>
             </div>
+            {canWa && !waReady && <p id="zd-wa-off" className="px-5 pt-1 text-[12px] text-[#68737d]">WhatsApp is off for this lead because it has no phone number. Add one under Customer.</p>}
+            {waReady && (
+              <div id="zd-panel-wa" role="tabpanel" aria-labelledby="zd-tab-wa" hidden={tab !== 'whatsapp'} className="px-5 pb-3 pt-2">
+                <WhatsAppBox leadId={record.id} events={record.timeline} canEmail={canEmail && !!record.contact.email} onSent={waSent} />
+              </div>
+            )}
             <div id="zd-panel-note" role="tabpanel" aria-labelledby="zd-tab-note" hidden={tab !== 'note'} className="px-5 pb-3 pt-2">
               <NoteBox onAdd={addNote} />
             </div>
@@ -946,7 +972,8 @@ function EventRow({ e, leadId, customer, currency, canEmail, canEditNote, canDel
   }
 
   const fromCustomer = e.kind === 'email_in' || e.kind === 'wa_in' || e.actor === 'Visitor' || e.actor === 'Customer'
-  const fromBot = e.kind === 'message' && e.title === 'Bot replied'
+  const fromBot = (e.kind === 'message' && e.title === 'Bot replied') || (e.kind === 'wa_out' && !!e.wa?.bot)
+  const waFailed = e.kind === 'wa_out' && (e.wa?.status === 'failed' || e.wa?.status === 'undelivered')
   const who = e.kind === 'email_in' && e.inbound ? (e.inbound.fromName || customer)
     : e.kind === 'email' && e.email ? (short(e.email.sentBy) || actor)
     : fromBot ? 'Assistant' : actor
@@ -954,12 +981,12 @@ function EventRow({ e, leadId, customer, currency, canEmail, canEditNote, canDel
     : e.kind === 'note' ? 'Internal note'
     : e.kind === 'email' ? 'Email sent'
     : e.kind === 'email_in' ? 'Email received'
-    : e.kind === 'wa_out' ? 'WhatsApp sent'
-    : e.kind === 'wa_in' ? 'WhatsApp received'
+    : e.kind === 'wa_out' || e.kind === 'wa_in' ? 'WhatsApp'
     : e.kind === 'call' ? 'Phone call'
     : 'File'
   const box = e.kind === 'note' ? 'bg-[#fff8e6] border-[#f1dfb4]'
     : e.kind === 'email_in' && e.unread ? 'bg-[#edf7ff] border-[#1f73b7]'
+    : waFailed ? 'bg-[#fff0f1] border-[#cc3340]'
     : fromCustomer ? 'bg-[#f8f9f9] border-[#e9ebed]' : 'bg-white border-[#d8dcde]'
 
   return (
@@ -988,18 +1015,7 @@ function EventRow({ e, leadId, customer, currency, canEmail, canEditNote, canDel
               <span className="truncate">{e.attachment.name}</span>
             </a>
           ) : e.kind === 'wa_in' || e.kind === 'wa_out' ? (
-            <>
-              {e.body && <p className="whitespace-pre-wrap break-words leading-5">{e.body}</p>}
-              {(e.wa?.media ?? []).map((m, i) => {
-                const src = `/api/leads/${encodeURIComponent(leadId)}/whatsapp/media?${m.path ? `path=${encodeURIComponent(m.path)}` : `url=${encodeURIComponent(m.url ?? '')}`}`
-                return (
-                  <a key={i} href={src} target="_blank" rel="noopener noreferrer" className={`${LINK} mt-1 flex items-center gap-1.5 w-fit max-w-full`}>
-                    <Paperclip size={13} className="shrink-0" aria-hidden /><span className="truncate">{m.name || ((m.type || '').startsWith('audio/') ? 'Voice message' : (m.type || '').startsWith('image/') ? 'Photo' : (m.type || '').startsWith('video/') ? 'Video' : 'File')}</span>
-                  </a>
-                )
-              })}
-              {!e.body && !e.wa?.media?.length && <p className="text-[#68737d]">{e.title}</p>}
-            </>
+            <WhatsAppMessage e={e} leadId={leadId} />
           ) : e.kind === 'call' ? (
             <>
               <p>{e.title}</p>
@@ -1193,6 +1209,198 @@ function SkippedFile({ skip, gmailId, onRetry }: { skip: { name: string; why: st
         </button>
       )}
     </span>
+  )
+}
+
+// ── WhatsApp ─────────────────────────────────────────────────────────────────
+// One message as it travelled: the files, the words, and for ours what
+// WhatsApp did with it. "Sent" only means accepted; Delivered and Read mean it
+// arrived, and a failure says why in words the agent can act on.
+
+const WA_DAY_MS = 24 * 60 * 60 * 1000
+const WA_MAX_FILE_BYTES = 16 * 1024 * 1024
+const WA_ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf,audio/*,video/mp4,video/3gpp'
+const WA_WINDOW_CODES = new Set([63016, 63024, 131047])
+
+function waFailureHint(code: number | undefined): string {
+  if (code !== undefined && WA_WINDOW_CODES.has(code)) {
+    return 'WhatsApp only delivers a free message within 24 hours of the customer’s last message. This one was outside that window, so it did not arrive. Wait for them to write first, or send an email.'
+  }
+  return waErrorHint(code) || 'WhatsApp did not deliver this message.'
+}
+
+function WhatsAppMessage({ e, leadId }: { e: TimelineEvent; leadId: string }) {
+  const w = e.wa
+  const mine = e.kind === 'wa_out'
+  const failed = mine && (w?.status === 'failed' || w?.status === 'undelivered')
+  // The record folds the failure hint into the event body; the message's own
+  // words are on the row itself.
+  const text = w ? w.body : (e.body ?? '')
+  const media = w?.media ?? []
+  return (
+    <div>
+      {media.map((m, i) => {
+        const src = `/api/leads/${encodeURIComponent(leadId)}/whatsapp/media?${m.path ? `path=${encodeURIComponent(m.path)}` : `url=${encodeURIComponent(m.url ?? '')}`}`
+        const type = (m.type || '').toLowerCase()
+        if (type.startsWith('audio/')) return <audio key={i} controls preload="none" className="mb-1.5 block w-full max-w-sm h-9" aria-label={m.name || 'Voice message'} src={src} />
+        if (type.startsWith('image/')) {
+          return (
+            <a key={i} href={src} target="_blank" rel="noopener noreferrer" className="mb-1.5 block w-fit rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#1f73b7]/40">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={m.name || 'Photo'} loading="lazy" className="max-h-48 max-w-full rounded-md border border-[#d8dcde]" />
+            </a>
+          )
+        }
+        if (type.startsWith('video/')) return <video key={i} controls preload="none" className="mb-1.5 block w-full max-w-sm rounded-md" aria-label={m.name || 'Video'} src={src} />
+        return (
+          <a key={i} href={src} target="_blank" rel="noopener noreferrer" className={`${LINK} mb-1.5 flex items-center gap-1.5 w-fit max-w-full`}>
+            <Paperclip size={13} className="shrink-0" aria-hidden /><span className="truncate">{m.name || 'File'}</span>
+            {typeof m.size === 'number' && m.size > 0 && <span className="shrink-0 text-[#87929d] tabular-nums">{humanSize(m.size)}</span>}
+          </a>
+        )
+      })}
+      {text
+        ? <p className="whitespace-pre-wrap break-words leading-5">{text}</p>
+        : media.length === 0 && <p className="text-[#68737d] italic">No text in this message.</p>}
+      {mine && (
+        <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {failed ? <Chip tone="red">Not delivered{w?.errorCode ? ` · code ${w.errorCode}` : ''}</Chip>
+            : w?.status === 'read' ? <Chip tone="blue">Read</Chip>
+            : w?.status === 'delivered' ? <Chip tone="green">Delivered</Chip>
+            : <span title="WhatsApp has accepted it. Delivered appears here once it reaches the customer’s phone."><Chip>Sent</Chip></span>}
+          {w?.bot && <Chip>Sent automatically</Chip>}
+          {w?.template && <Chip>Template message</Chip>}
+        </p>
+      )}
+      {failed && <p role="note" className="mt-1 text-[12px] text-[#cc3340]">{waFailureHint(w?.errorCode)}</p>}
+    </div>
+  )
+}
+
+// The WhatsApp reply box. The server picks the customer's number and the line
+// it goes out on; the browser only ever sends the lead id, the words and, for a
+// file, where it was uploaded. Voice notes cannot be recorded here, but an
+// audio file can be attached.
+function WhatsAppBox({ leadId, events, canEmail, onSent }: { leadId: string; events: TimelineEvent[]; canEmail: boolean; onSent: () => void }) {
+  const [text, setText] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [phase, setPhase] = useState<'idle' | 'uploading' | 'sending'>('idle')
+  const [error, setError] = useState('')
+  const [sentNote, setSentNote] = useState('')
+  // The clock the 24-hour rule is measured against, refreshed every minute.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  // WhatsApp's rule, worked out from the thread: a free message is allowed
+  // only within a day of the customer's own last message.
+  const lastIn = useMemo(() => {
+    let newest: TimelineEvent | null = null
+    let at = 0
+    for (const e of events) {
+      if (e.kind !== 'wa_in') continue
+      const t = Date.parse(e.at)
+      if (!Number.isNaN(t) && t > at) { at = t; newest = e }
+    }
+    return newest ? { at, iso: newest.at } : null
+  }, [events])
+  const closesAt = lastIn ? lastIn.at + WA_DAY_MS : null
+  const open = closesAt !== null && now < closesAt
+  const minutesLeft = closesAt !== null ? Math.max(1, Math.round((closesAt - now) / 60000)) : 0
+  const leftLabel = minutesLeft >= 60 ? `${Math.floor(minutesLeft / 60)} h left` : `${minutesLeft} min left`
+  const instead = canEmail ? 'Send an email instead, or wait for them to write.' : 'Wait for them to write first.'
+
+  const busy = phase !== 'idle'
+  const canSend = !busy && (!!text.trim() || !!file)
+
+  function pickFile(f: File | null) {
+    setError(''); setSentNote('')
+    if (f && f.size > WA_MAX_FILE_BYTES) { setError(`"${f.name}" is ${humanSize(f.size)}. WhatsApp allows ${humanSize(WA_MAX_FILE_BYTES)} per message.`); return }
+    setFile(f)
+  }
+
+  async function send() {
+    if (!canSend) return
+    const body = text.trim()
+    setError(''); setSentNote('')
+    try {
+      // The file goes straight to storage on a one-time link, then the message
+      // names where it landed.
+      let media: { mediaPath: string; mediaName: string; mediaType: string } | null = null
+      if (file) {
+        setPhase('uploading')
+        const prep = await fetch(`/api/leads/${encodeURIComponent(leadId)}/whatsapp/upload`, postJson({ name: file.name, mime: file.type, size: file.size }))
+        const pd = await prep.json().catch(() => ({}))
+        if (prep.status === 401) { window.location.href = '/login'; return }
+        if (!prep.ok) throw new Error(pd.error === 'Not allowed' ? 'You do not have permission to send files on WhatsApp here.' : pd.error || 'That file could not be sent.')
+        const put = await fetch(pd.uploadUrl, { method: 'PUT', body: file, headers: file.type ? { 'Content-Type': file.type } : undefined })
+        if (!put.ok) throw new Error(`"${file.name}" did not upload. Try attaching it again.`)
+        media = { mediaPath: pd.path, mediaName: file.name, mediaType: file.type || '' }
+      }
+      setPhase('sending')
+      const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/whatsapp`, postJson({ body, ...(media ?? {}) }))
+      const d = await res.json().catch(() => ({}))
+      if (res.status === 401) { window.location.href = '/login'; return }
+      if (!res.ok) throw new Error(d.error === 'Not allowed' ? 'You do not have permission to message this lead on WhatsApp.' : d.error || 'The message was not sent.')
+      // Cleared only now: a refused send keeps what was typed.
+      setText(''); setFile(null)
+      setSentNote(typeof d.warning === 'string' && d.warning ? d.warning : 'Sent. Delivery shows on the message above.')
+      onSent()
+    } catch (e) {
+      setError(errText(e, 'The message was not sent. Check your connection and try again.'))
+    } finally {
+      setPhase('idle')
+    }
+  }
+
+  return (
+    <div>
+      {open ? (
+        <p className="mb-2 flex flex-wrap items-center gap-2 text-[12px] text-[#68737d]">
+          <Chip tone="green">Reply window open · {leftLabel}</Chip>
+          <span>The customer last wrote {timeAgo(lastIn!.iso)}. You can reply freely until {formatShortDateTime(new Date(closesAt!).toISOString())}.</span>
+        </p>
+      ) : (
+        <div role="note" className="mb-2 rounded-md border border-[#f1dfb4] bg-[#fff8e6] px-3 py-2 text-[12px] text-[#703815]">
+          <b>{lastIn ? 'The 24-hour reply window has closed.' : 'This customer has not written on WhatsApp yet.'}</b>{' '}
+          {lastIn
+            ? <>Their last WhatsApp message was <span title={formatDateTime(lastIn.iso)}>{timeAgo(lastIn.iso)}</span>, and WhatsApp refuses a message sent more than 24 hours after it. </>
+            : <>WhatsApp only delivers a message within 24 hours of the customer writing to you, so one sent now will be refused. </>}
+          {instead}
+        </div>
+      )}
+      <div className="rounded-md border border-[#d8dcde] bg-white focus-within:border-[#038153]">
+        <textarea value={text} rows={3} maxLength={4000} disabled={busy} aria-label="WhatsApp message"
+          placeholder="Write a WhatsApp message. Enter sends, Shift+Enter adds a line."
+          onChange={(e) => { setText(e.target.value); setSentNote('') }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
+          className="block w-full px-2.5 py-2 bg-transparent outline-none resize-y leading-5 placeholder:text-[#87929d] disabled:opacity-60" />
+        {file && (
+          <p className="border-t border-[#e9ebed] px-2.5 py-1.5 flex items-center gap-2 text-[12px]">
+            {file.type.startsWith('image/') ? <ImageIcon size={13} className="text-[#68737d]" aria-hidden /> : <FileText size={13} className="text-[#68737d]" aria-hidden />}
+            <span className="truncate">{file.name}</span>
+            <span className="shrink-0 text-[#87929d] tabular-nums">{humanSize(file.size)}</span>
+            <button type="button" onClick={() => pickFile(null)} disabled={busy} className={`${ICON_BTN} ml-auto !w-6 !h-6`} aria-label={`Remove ${file.name}`}><X size={13} /></button>
+          </p>
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={send} disabled={!canSend} className={BTN_PRIMARY}>
+          {busy ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Send size={14} aria-hidden />}
+          {phase === 'uploading' ? 'Uploading…' : phase === 'sending' ? 'Sending…' : 'Send on WhatsApp'}
+        </button>
+        <label className={`${BTN_PLAIN} cursor-pointer focus-within:ring-2 focus-within:ring-[#1f73b7]/40 ${busy ? 'opacity-40 pointer-events-none' : ''}`} title="A photo, PDF, audio file or video, up to 16 MB">
+          <Paperclip size={14} aria-hidden />{file ? 'Change file' : 'Attach'}
+          <input type="file" className="sr-only" accept={WA_ACCEPT} disabled={busy}
+            onChange={(e) => { pickFile(e.target.files?.[0] ?? null); e.target.value = '' }} />
+        </label>
+        <span className="text-[12px] text-[#87929d]">Photos, PDFs, audio and video up to 16 MB</span>
+        {sentNote && !error && <span role="status" className="inline-flex items-center gap-1 text-[12px] text-[#038153]"><Check size={13} aria-hidden />{sentNote}</span>}
+      </div>
+      <div className="mt-1"><Notice text={error} bad /></div>
+    </div>
   )
 }
 
