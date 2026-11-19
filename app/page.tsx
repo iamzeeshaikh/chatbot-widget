@@ -2445,6 +2445,7 @@ export default function Dashboard() {
   const canEmail = hasFeature(team, 'email')
   const canWhatsApp = hasFeature(team, 'telephony')
   const canReports = hasFeature(team, 'reports')
+  const canFollowups = hasFeature(team, 'quotebot')
   // The sales ledger is an owner's page like Billing: admins only, and the
   // API refuses everyone else regardless.
   const canSales = hasFeature(team, 'sales') && userRole === 'admin'
@@ -5212,6 +5213,14 @@ export default function Dashboard() {
                   title="Full month-end report with per-agent, per-site and daily breakdowns, plus CSV and PDF export"
                   className="px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                   Month-end report
+                </a>
+              )}
+              {/* What went out and came back today, per agent (packaging). */}
+              {canFollowups && (
+                <a href="/followups" onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); router.push('/followups') } }}
+                  title="Daily follow-ups: what was sent, who replied and who is waiting, per agent"
+                  className="px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                  Daily follow-ups
                 </a>
               )}
               <button onClick={() => setPerfMonth(shiftMonth(perfMonth, -1))}
