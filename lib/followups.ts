@@ -305,6 +305,9 @@ export async function buildFollowups(member: Member, day: string): Promise<Follo
   const loginByLocal = new Map<string, string>()
   for (const o of outs) if (o.agent) loginByLocal.set(o.agent.split('@')[0], o.agent)
   for (const b of botMail.values()) if (b.agent) loginByLocal.set(b.agent.split('@')[0], b.agent)
+  const agentNames = new Set<string>()
+  for (const login of loginByLocal.values()) agentNames.add((memberNames.get(login) || agentDisplayName(login)).toLowerCase())
+  for (const n of memberNames.values()) agentNames.add(n.toLowerCase())
   for (const r of inRows) {
     const j = parse(r.message)
     if (!j) continue
@@ -316,6 +319,10 @@ export async function buildFollowups(member: Member, day: string): Promise<Follo
     // The same Gmail message already counted as mail we sent.
     if (str(j.gmailId) && sentGmail.has(str(j.gmailId))) continue
     const email = r.role === 'crm_email_in'
+    // The intake files a hand-written mail from a known customer's address as
+    // their reply. When the name on it is one of our agents, it was the
+    // agent's own answer read back out of the intake mailbox — not a customer.
+    if (email && str(j.gmailId).startsWith('intake-reply-') && agentNames.has(lower(j.fromName))) continue
     if (email) {
       const addr = (str(j.from).match(/[^\s<>"]+@[^\s<>"]+/)?.[0] ?? '').toLowerCase()
       if (SYSTEM_SENDER.test(addr)) continue
