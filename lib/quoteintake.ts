@@ -345,8 +345,18 @@ const WOOCOMMERCE_ORDER_RE = /New order:?\s*#|Built with WooCommerce|You[’']ve
 // one, which is the whole reason CHECKOUT_TAG exists.
 const COD_ORDER_RE = /^\s*Order:\s*[A-Za-z]{2,5}-\d{6,}\s*$|Payment:\s*Cash on delivery/im
 
+// The newer storefronts' order box (2026-10 on) sends a third shape:
+//   PAYMENT: PayPal invoice: send the invoice after the customer approves the proof
+//   Order CPB-261105-5R77
+// No colon after "Order" and a dated id, so neither pattern above saw it and
+// 24 such orders were counted as billable quote leads in November 2026. The
+// owner's rule (2026-11-20): a website order is a checkout, never billed.
+const STORE_ORDER_RE = /^\s*Order\s+([A-Za-z]{2,6}-\d{6}-[A-Za-z0-9]{4})\s*$/m
+const STORE_PAYMENT_RE = /^\s*PAYMENT:\s/m
+
 export function isCheckoutOrder(bodyText: string): boolean {
   return WOOCOMMERCE_ORDER_RE.test(bodyText) || COD_ORDER_RE.test(bodyText)
+    || (STORE_PAYMENT_RE.test(bodyText) && STORE_ORDER_RE.test(bodyText))
 }
 
 // WooCommerce's order number, which is the only stable identity a checkout mail
@@ -365,6 +375,8 @@ const COD_ORDER_NUMBER_RE = /^\s*Order:\s*([A-Za-z]{2,5}-\d{6,})\s*$/im
 export function checkoutOrderNumber(bodyText: string): string | null {
   const cod = bodyText.match(COD_ORDER_NUMBER_RE)
   if (cod) return cod[1].toUpperCase()
+  const store = STORE_PAYMENT_RE.test(bodyText) ? bodyText.match(STORE_ORDER_RE) : null
+  if (store) return store[1].toUpperCase()
   const m = bodyText.match(ORDER_NUMBER_RE)
   return m ? m[1] : null
 }
