@@ -9,6 +9,8 @@
 //               waived the fee, and they handed us the orders they closed to
 //               produce. The partner owes the money, not the end customer.
 //   sp_direct   the sports office's own jersey sales
+//   zd_direct   the ZeeDesk packaging team's own sales (its own ledger; never
+//               in the master view)
 //
 // Both workspaces keep their own ledger; the master view (owners only) reads
 // both. Everything here is pure — no database, no fetch — so the editor's live
@@ -35,7 +37,7 @@ import type { Member } from './auth'
 
 // ── Streams ─────────────────────────────────────────────────────────────────
 
-export type SalesStream = 'pk_direct' | 'pk_partner' | 'sp_direct'
+export type SalesStream = 'pk_direct' | 'pk_partner' | 'sp_direct' | 'zd_direct'
 
 export interface StreamInfo {
   key: SalesStream
@@ -61,16 +63,34 @@ export const STREAMS: Record<SalesStream, StreamInfo> = {
     label: 'Sports Jerseys — Direct Sales', short: 'Sports Jerseys',
     blurb: 'Jersey orders the sports office sold directly.',
   },
+  zd_direct: {
+    key: 'zd_direct', workspace: 'zeedesk',
+    label: 'ZeeDesk Packaging — Direct Sales', short: 'ZeeDesk Direct',
+    blurb: 'Packaging orders the ZeeDesk team sold and was paid for directly.',
+  },
 }
 
+/** The streams of the owners' MASTER view (packaging + sports), in tab order.
+ *  ZeeDesk's stream is deliberately NOT here: its ledger is its own and is
+ *  never part of master, so it must not show there as an empty tab or row.
+ *  For "every stream there is", use ALL_STREAMS. */
 export const STREAM_ORDER: SalesStream[] = ['pk_direct', 'pk_partner', 'sp_direct']
 
+/** Every stream, master or not. */
+export const ALL_STREAMS: SalesStream[] = [...STREAM_ORDER, 'zd_direct']
+
 export function isSalesStream(v: unknown): v is SalesStream {
-  return typeof v === 'string' && (STREAM_ORDER as string[]).includes(v)
+  return typeof v === 'string' && (ALL_STREAMS as string[]).includes(v)
 }
 
 export function streamsForWorkspace(ws: Workspace): SalesStream[] {
-  return STREAM_ORDER.filter((k) => STREAMS[k].workspace === ws)
+  return ALL_STREAMS.filter((k) => STREAMS[k].workspace === ws)
+}
+
+/** The stream a sale opened from a lead (or from a paid PayPal invoice) goes
+ *  into: the workspace's own direct-sales stream. */
+export function directStream(ws: Workspace): SalesStream {
+  return ws === 'sports' ? 'sp_direct' : ws === 'zeedesk' ? 'zd_direct' : 'pk_direct'
 }
 
 // ── Who may see what ────────────────────────────────────────────────────────

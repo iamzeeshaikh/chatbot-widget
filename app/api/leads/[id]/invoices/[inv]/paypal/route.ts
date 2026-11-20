@@ -5,13 +5,14 @@ import { listInvoices } from '@/lib/invoicestore'
 import { num, totals } from '@/lib/invoicedoc'
 import { CRM_NOTE_ROLE, type CrmNoteEntry } from '@/lib/crm'
 import { createDraft, sendInvoice, deleteDraft, nextInvoiceNumber, paypalConfigured } from '@/lib/paypalapi'
-import { siteWorkspace } from '@/lib/workspaces'
+import { siteWorkspace, workspaceKind } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-// Send one saved ZeeOps invoice through PayPal (owner, 2026-10-26: "khud
-// invoice bh bana sako"). PACKAGING only — the PayPal account is ZCB DIGITAL.
+// Send one saved invoice through PayPal (owner, 2026-10-26: "khud invoice bh
+// bana sako"). Packaging-KIND workspaces only — packaging and ZeeDesk share the
+// one PayPal account (ZCB DIGITAL); sports is refused.
 // POST { deposit?: number }  → creates the PayPal invoice from the saved doc,
 // sends it (PayPal emails the customer), saves the payer link on the lead and
 // writes a note. The paid side then arrives by itself (lib/paypalsync.ts).
@@ -20,7 +21,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const member = await getMember(req)
   const access = await guardLeadAccess(member, id, 'records')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
-  if (siteWorkspace(access.siteId) !== 'packaging') return NextResponse.json({ error: 'PayPal invoices are for packaging leads.' }, { status: 400 })
+  const ws = siteWorkspace(access.siteId)
+  if (!ws || workspaceKind(ws) !== 'packaging') return NextResponse.json({ error: 'PayPal invoices are for packaging leads.' }, { status: 400 })
   if (!paypalConfigured()) return NextResponse.json({ error: 'PayPal is not connected.' }, { status: 503 })
   const doc = (await listInvoices(id)).find((d) => d.id === inv)
   if (!doc) return NextResponse.json({ error: 'Save the invoice first.' }, { status: 404 })

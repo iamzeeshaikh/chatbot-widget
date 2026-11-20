@@ -255,11 +255,15 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   //      Connect button is inert.
   sports: new Set<WorkspaceFeature>(['chatpdf', 'records', 'pipeline', 'tasks', 'reports', 'reminders', 'email', 'contactprivacy', 'telephony', 'whatsapp', 'sales']),
   // ZeeDesk (2026-11-17) starts with the features an agent drives by hand. The
-  // automated ones ('quotebot', 'wabot', 'watemplates', 'sales', 'jobs',
+  // automated ones ('quotebot', 'wabot', 'watemplates', 'jobs',
   // 'opportunities', 'lost') are still wired to the Model Town team's own
-  // mailbox, bot agents, WhatsApp line and ledger; each joins this set only
-  // once it reads those from the workspace instead.
-  zeedesk: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'trafficdetail', 'whatsapp']),
+  // mailbox, bot agents and WhatsApp line; each joins this set only once it
+  // reads those from the workspace instead.
+  // 'sales' (2026-11-20): ZeeDesk keeps its OWN ledger (stream zd_direct in
+  // lib/salescore.ts, never part of the owners' master view) and sends PayPal
+  // invoices from the same PayPal account as packaging; lib/paypalsync.ts
+  // files a paid invoice in the ledger of the workspace its lead belongs to.
+  zeedesk: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'trafficdetail', 'whatsapp', 'sales']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {

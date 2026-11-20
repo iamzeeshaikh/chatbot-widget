@@ -35,6 +35,7 @@ import {
   Avatar, BTN_DANGER, BTN_PLAIN, BTN_PRIMARY, CARD, Chip, Empty, INPUT, LABEL, Notice, TEXTAREA, postJson, short,
   type ZdScreenProps,
 } from '../ui'
+import LeadInvoices from './LeadInvoices'
 
 type Field = 'name' | 'email' | 'phone'
 type Status = 'loading' | 'ok' | 'forbidden' | 'missing' | 'error'
@@ -571,6 +572,8 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
             <TasksPanel openTasks={record.openTasks} doneTasks={record.doneTasks} members={record.assignableMembers} me={me.email} isAdmin={isAdmin}
               busyIds={taskBusy} error={taskErr} onCreate={createTask} onToggle={toggleTask} onReassign={reassignTask} onDelete={deleteTask} />
           )}
+
+          <LeadInvoices leadId={record.id} stage={record.stage} contactsHidden={record.contactsHidden} />
 
           <section aria-label="Visit details">
             <h2 className={SECTION}>Visit details</h2>

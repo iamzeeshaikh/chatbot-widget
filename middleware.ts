@@ -17,7 +17,7 @@ function uiWorkspace(value: string | undefined): string {
   try { return String(JSON.parse(atob(decodeURIComponent(value)))?.workspace ?? '') } catch { return '' }
 }
 
-const ZD_SCREENS: Record<string, string> = { '/pipeline': 'pipeline', '/tasks': 'tasks', '/inbox': 'inbox', '/reports': 'reports', '/members': 'team' }
+const ZD_SCREENS: Record<string, string> = { '/pipeline': 'pipeline', '/tasks': 'tasks', '/inbox': 'inbox', '/reports': 'reports', '/sales': 'sales', '/members': 'team' }
 
 export function middleware(req: NextRequest) {
   const session = req.cookies.get('zee-session')

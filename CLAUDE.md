@@ -808,6 +808,22 @@ redirects `/leads/<id>`, `/pipeline`, `/tasks`, `/inbox`, `/reports` and
   only (set `NEXT_PUBLIC_SUPABASE_URL` at build time), run `next start -p 3999`,
   sign in as admin@zeedesk.dev. Restore `lib/workspaces.ts` before committing.
 
+### ZeeDesk sales and PayPal (2026-11-20)
+
+ZeeDesk carries `'sales'` with its OWN ledger: stream `zd_direct`
+(`lib/salescore.ts`), stored on `zeeops-sales-zeedesk` like the others. It is
+never part of the owners' master view: `STREAM_ORDER` is the master's stream
+list and leaves `zd_direct` out on purpose; `ALL_STREAMS` is every stream, and
+`directStream(ws)` names a workspace's own direct stream. Growth, costing, the
+sales sheet and shipping stay packaging-only.
+
+ZeeDesk invoices go out through the SAME PayPal account as packaging
+(`PAYPAL_PACKAGING_*`); the invoice routes allow any site whose `workspaceKind`
+is `packaging`. `lib/paypalsync.ts` routes a paid invoice by the workspace of
+the lead it was sent from (its `crm_pay_link`): a ZeeDesk lead means the
+ZeeDesk ledger, `zd_direct` and a push to the ZeeDesk team; a packaging lead,
+or an invoice with no lead, is packaging's. Nothing crosses between the two.
+
 ## Daily follow-ups (`/followups`, packaging admins)
 
 `lib/followups.ts` builds one Karachi day of outgoing follow-ups, customer

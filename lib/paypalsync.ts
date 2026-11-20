@@ -1,5 +1,6 @@
 // PayPal → ZeeOps for the PACKAGING ledger (owner, 2026-10-26: "PayPal ko
-// integrate karte hen take aap ko bh pata chal sake").
+// integrate karte hen take aap ko bh pata chal sake"), and ZeeDesk's own
+// ledger for invoices sent from a ZeeDesk lead (see the end of this note).
 //
 // Every 30 minutes (cron) it reads the ZCB DIGITAL LTD invoices through the
 // PayPal API (lib/paypalapi.ts) and, for each PAYMENT on a paid or part-paid
@@ -12,12 +13,19 @@
 // A payment is recorded once (payment id in a crm_paypal_sync row and on the
 // payment itself). A paid invoice with no sale is reported and pushed — never
 // guessed onto one. Unpaid invoices missing from the ledger are listed too.
+//
+// ZeeDesk (2026-11-20) sends its invoices from the SAME PayPal account but
+// keeps its own ledger. An invoice is routed by the lead it was sent from: if
+// that lead's site belongs to the zeedesk workspace, the sale is looked for,
+// and opened, in the ZeeDesk ledger (stream zd_direct) and the pushes go to
+// the ZeeDesk team. Every other invoice — packaging lead, or no lead at all —
+// is packaging's, exactly as before. Nothing ever crosses between the two.
 
 import { supabase, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { REMINDER_SITE } from './reminders'
-import { PACKAGING_SITES } from './workspaces'
+import { PACKAGING_SITES, ZEEDESK_SITES, productName, siteWorkspace } from './workspaces'
 import { readSales, writeSale } from './sales'
-import { cleanSale, type Sale } from './salescore'
+import { cleanSale, directStream, type Sale, type SalesStream } from './salescore'
 import { applyStageChange } from './stagechange'
 import { writeControlRow } from './leadrecord'
 import { CRM_NOTE_ROLE, type CrmNoteEntry, type CrmStage } from './crm'
@@ -64,11 +72,14 @@ async function remember(o: Record<string, unknown>) {
   await supabase.from('chat_logs').insert({ site_id: REMINDER_SITE, session_id: SESSION, role: CRM_PAYPAL_SYNC_ROLE, message: JSON.stringify({ ...o, at: new Date().toISOString() }) })
 }
 
-/** Invoice code → lead, from the payment links saved on packaging leads. */
+/** The two ledgers a PayPal invoice on this account can belong to. */
+type PpWorkspace = 'packaging' | 'zeedesk'
+
+/** Invoice code → lead, from the payment links saved on packaging and ZeeDesk leads. */
 async function linkIndex(): Promise<Map<string, { leadId: string; siteId: string }>> {
   const out = new Map<string, { leadId: string; siteId: string }>()
   const data = await fetchAllPagesSerial<{ session_id: string; site_id: string; message: string }>(() => supabase.from('chat_logs').select('session_id, site_id, message')
-    .eq('role', 'crm_pay_link').in('site_id', [...PACKAGING_SITES])
+    .eq('role', 'crm_pay_link').in('site_id', [...PACKAGING_SITES, ...ZEEDESK_SITES])
     .order('created_at', { ascending: true }).order('id', { ascending: true }), 20000)
   warnIfCapped('paypal sync pay links', data.length, 20000)
   for (const r of data) {
@@ -78,9 +89,9 @@ async function linkIndex(): Promise<Map<string, { leadId: string; siteId: string
   return out
 }
 
-function findSale(inv: PpInvoice, sales: Sale[], links: Map<string, { leadId: string; siteId: string }>): Sale | null {
+function findSale(inv: PpInvoice, sales: Sale[], links: Map<string, { leadId: string; siteId: string }>, stream: SalesStream): Sale | null {
   const code = shortCode(inv.id)
-  const live = sales.filter((s) => s.stream === 'pk_direct' && !s.deleted)
+  const live = sales.filter((s) => s.stream === stream && !s.deleted)
   const byCode = live.find((s) => norm(`${s.reference} ${s.notes}`).includes(code))
   if (byCode) return byCode
   const byNumber = live.filter((s) => new RegExp(`PayPal(?: invoice)? ${inv.number}\\b`, 'i').test(`${s.reference} ${s.notes}`))
@@ -94,17 +105,30 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
   const dryRun = !!opts.dryRun
   const res: PaypalSyncResult = { ok: true, dryRun, invoices: 0, applied: [], unmatchedPaid: [], unpaidNotInLedger: [], ratesLocked: [], feesFilled: [], errors: [] }
   if (!paypalConfigured()) { res.ok = false; res.errors.push('PAYPAL_PACKAGING_CLIENT_ID / SECRET are not set'); return res }
-  const [invoices, sales, links, done] = await Promise.all([listInvoices(), readSales('packaging'), linkIndex(), doneIds()])
+  // A ZeeDesk ledger that cannot be read must not stop packaging's run, and
+  // must never be mistaken for an empty one (that would open a second sale for
+  // an invoice that already has one): its invoices are skipped until it reads.
+  const [invoices, pkSales, zdSales, links, done] = await Promise.all([
+    listInvoices(), readSales('packaging'),
+    readSales('zeedesk').catch((e) => { res.errors.push(`zeedesk ledger: ${e instanceof Error ? e.message : String(e)}`); return null }),
+    linkIndex(), doneIds(),
+  ])
   res.invoices = invoices.length
   for (const inv of invoices) {
     try {
-      let sale = findSale(inv, sales, links)
+      // Whose invoice: the workspace of the lead it was sent from. No lead, or
+      // a packaging lead, is packaging.
+      const linked = links.get(shortCode(inv.id))
+      const ws: PpWorkspace = linked && siteWorkspace(linked.siteId) === 'zeedesk' ? 'zeedesk' : 'packaging'
+      const sales = ws === 'zeedesk' ? zdSales : pkSales
+      if (!sales) continue
+      const stream = directStream(ws)
+      let sale = findSale(inv, sales, links, stream)
       // Paid, no sale yet, but the invoice was sent from a lead in ZeeOps (its
       // link sits on that lead): open the sale from the invoice instead of only
       // pushing "add it in Sales" (Taylor Buser, IH-029, 28 Oct 2026).
-      const linked = links.get(shortCode(inv.id))
       if (!sale && PAID.has(inv.status) && linked && !dryRun) {
-        // What was sold: the newest ZeeOps invoice on that lead.
+        // What was sold: the newest saved invoice on that lead.
         const { data: docRows } = await supabase.from('chat_logs').select('message').eq('session_id', linked.leadId)
           .eq('role', 'crm_invoice_doc').order('created_at', { ascending: false }).limit(1)
         let doc: { number?: string; agentName?: string; items?: { name?: string; details?: string; quantity?: string }[] } = {}
@@ -116,13 +140,13 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
           product: items.map((i) => i.name).join(' + ').slice(0, 200), quantity: items.length === 1 ? String(first?.quantity ?? '') : items.map((i) => `${i.quantity} ${i.name}`).join(', ').slice(0, 120),
           size: lines[0] ?? '', material: lines.filter((l) => /pt|gsm|board|kraft|paper|corrugat|sbs/i.test(l)).join(', ').slice(0, 120),
           printing: lines.filter((l) => /print|colou?r|lamin|foil|matte|gloss/i.test(l)).join(', ').slice(0, 120),
-          stream: 'pk_direct', customer: inv.name || inv.business || 'PayPal customer', company: inv.business || '', email: inv.email || '',
+          stream, customer: inv.name || inv.business || 'PayPal customer', company: inv.business || '', email: inv.email || '',
           orderDate: inv.date || new Date().toISOString().slice(0, 10), currency: inv.currency, orderAmount: inv.amount,
           reference: `${doc.number ? `${doc.number} · ` : ''}PayPal ${inv.number} (${inv.id})`, leadId: linked.leadId,
-          source: 'PayPal invoice sent from ZeeOps (sale opened automatically when it was paid)',
+          source: `PayPal invoice sent from ${productName(ws)} (sale opened automatically when it was paid)`,
           notes: 'Opened automatically from the paid PayPal invoice. Add the production cost when known.',
           payments: [],
-        }, null, ACTOR, 'packaging')
+        }, null, ACTOR, ws)
         if (!('error' in made)) {
           const err = await writeSale(made.sale)
           if (!err) { sale = made.sale; sales.push(made.sale) } else res.errors.push(`${inv.number}: could not open the sale (${err})`)
@@ -150,7 +174,7 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
           res.unmatchedPaid.push({ invoice: inv.number, customer: inv.name || inv.business, amount: p.amount })
           if (!dryRun) {
             await remember({ paymentId: p.paymentId, invoice: inv.number, matched: null, customer: inv.name || inv.business, amount: p.amount })
-            await sendPushToWorkspace('packaging', {
+            await sendPushToWorkspace(ws, {
               title: `PayPal payment — not in Sales`, body: `${inv.name || inv.business} paid ${money(p.amount, inv.currency)} on invoice ${inv.number}. Add the sale in Sales.`,
               url: '/sales', tag: `ppsync-${p.paymentId}`, sticky: true,
             })
@@ -180,7 +204,7 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
             if (prev !== 'won') await applyStageChange({ leadId: sale.leadId, siteId, stage: 'won', previous: (prev ?? 'new') as CrmStage, actorEmail: ACTOR })
           }
         }
-        await sendPushToWorkspace('packaging', {
+        await sendPushToWorkspace(ws, {
           title: `Payment received — ${money(p.amount, inv.currency)}`,
           body: `${sale.customer} paid PayPal invoice ${inv.number}. Recorded in Sales${sale.leadId ? ' and the lead moved to Won' : ''}.`,
           url: sale.leadId ? `/leads/${encodeURIComponent(sale.leadId)}` : '/sales', tag: `ppsync-${p.paymentId}`, sticky: true,
@@ -190,7 +214,10 @@ export async function runPaypalSync(opts: { dryRun?: boolean } = {}): Promise<Pa
       res.errors.push(`${inv.number}: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
-  try { await lockRates(dryRun, res) } catch (e) { res.errors.push(`rates: ${e instanceof Error ? e.message : String(e)}`) }
+  try { await lockRates(dryRun, res, 'packaging') } catch (e) { res.errors.push(`rates: ${e instanceof Error ? e.message : String(e)}`) }
+  // The same pass over ZeeDesk's own ledger, on its own so that nothing it
+  // does (or fails at) can change what packaging's pass above reads or writes.
+  try { await lockRates(dryRun, res, 'zeedesk') } catch (e) { res.errors.push(`rates (zeedesk): ${e instanceof Error ? e.message : String(e)}`) }
   return res
 }
 
@@ -206,9 +233,12 @@ export const WISE_GBP_PKR_CUT = 0.006
  * result is locked onto the payment as PKR per USD of its NET amount, which is
  * what the ledger multiplies (lib/salescore.ts), so profit stops being an
  * estimate at a flat 4% haircut. Only payments with no rate yet are touched.
+ * Run once per ledger (packaging, then ZeeDesk): both are paid into the same
+ * PayPal account, so the same transaction report prices either one's payments.
  */
-async function lockRates(dryRun: boolean, res: PaypalSyncResult): Promise<void> {
-  const sales = (await readSales('packaging')).filter((s) => s.stream === 'pk_direct' && !s.deleted && s.currency === 'USD')
+async function lockRates(dryRun: boolean, res: PaypalSyncResult, ws: PpWorkspace): Promise<void> {
+  const stream = directStream(ws)
+  const sales = (await readSales(ws)).filter((s) => s.stream === stream && !s.deleted && s.currency === 'USD')
   // A payment synced the moment it is paid has no fee yet (PayPal's
   // transaction report lags by hours); pick those up again here too.
   const FEE_MISSING = ' — fee not found yet'

@@ -4,7 +4,8 @@ import { guardLeadAccess, loadLeadRecord } from '@/lib/leadrecord'
 import { readInvoice, buildSheet, suggestFromTimeline } from '@/lib/invoice'
 import { pktDayKey } from '@/lib/datetime'
 import { readSales } from '@/lib/sales'
-import { canUseSales, parseAmount } from '@/lib/salescore'
+import { canUseSales, directStream, parseAmount } from '@/lib/salescore'
+import { productName } from '@/lib/workspaces'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     draft: {
-      stream: member.workspace === 'sports' ? 'sp_direct' : 'pk_direct',
+      stream: directStream(member.workspace),
       leadId,
       customer: sheet.name,
       // The invoice's bill-to defaults to the contact's own name; only a
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
       currency: sheet.currency,
       orderAmount: parseAmount(sheet.amount) ?? '',
       salesPerson: record.owner ?? '',
-      source: `ZeeOps lead — ${record.siteName}`,
+      source: `${productName(member.workspace)} lead — ${record.siteName}`,
       notes: sheet.notes,
     },
   })

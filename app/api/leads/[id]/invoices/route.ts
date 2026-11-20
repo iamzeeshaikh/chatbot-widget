@@ -5,7 +5,7 @@ import { buildSheet, readInvoice, suggestFromTimeline } from '@/lib/invoice'
 import { listInvoices, saveInvoice } from '@/lib/invoicestore'
 import { loadAgentSignatures } from '@/lib/signature'
 import { pktDayKey } from '@/lib/datetime'
-import { siteWorkspace } from '@/lib/workspaces'
+import { siteWorkspace, workspaceKind } from '@/lib/workspaces'
 import { paypalConfigured } from '@/lib/paypalapi'
 import { bankDetails } from '@/lib/bankdetails'
 import {
@@ -47,6 +47,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const agentName = sigs.get(access.member.email.toLowerCase())?.name || ''
   const prefix = sitePrefix(record.siteName || record.siteId)
   const today = pktDayKey(new Date())
+  const ws = siteWorkspace(record.siteId)
 
   // A new invoice starts from what the CRM already knows: the customer, the
   // address and item the conversation mentioned, the agent's own name.
@@ -70,8 +71,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     ok: true, invoices, prefill,
     lead: { id, name: record.contact.name, email: record.contact.email, siteId: record.siteId, siteName: record.siteName },
     prefix, logoUrl: `/api/logo/${encodeURIComponent(record.siteId)}`,
-    paypal: paypalConfigured() && siteWorkspace(record.siteId) === 'packaging',
-    bank: bankDetails(siteWorkspace(record.siteId) ?? ''),
+    // Any packaging-kind workspace (ZeeDesk shares the packaging PayPal account).
+    paypal: paypalConfigured() && !!ws && workspaceKind(ws) === 'packaging',
+    bank: bankDetails(ws ?? ''),
   })
 }
 

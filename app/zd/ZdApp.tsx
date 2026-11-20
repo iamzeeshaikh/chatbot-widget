@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MessageSquare, Users, Inbox, KanbanSquare, CheckSquare, BarChart3, UserCog, LogOut, Volume2, VolumeX,
-  Paperclip, Send, Search, UserRound, Globe, Monitor, MapPin, Clock, FileText, X, ChevronRight, Contact,
+  Paperclip, Send, Search, UserRound, Globe, Monitor, MapPin, Clock, FileText, X, ChevronRight, Contact, CircleDollarSign,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { hasFeature } from '@/lib/workspaces'
@@ -25,6 +25,7 @@ import Pipeline from './screens/Pipeline'
 import Tasks from './screens/Tasks'
 import InboxScreen from './screens/Inbox'
 import Reports from './screens/Reports'
+import Sales from './screens/Sales'
 import Team from './screens/Team'
 
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
@@ -41,17 +42,19 @@ interface VisitorDetail {
 }
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; session_id?: string | null; owner?: string | null; stage?: string; notALead?: boolean }
 
-type Section = 'chats' | 'visitors' | 'leads' | 'inbox' | 'pipeline' | 'tasks' | 'reports' | 'team' | 'lead'
+type Section = 'chats' | 'visitors' | 'leads' | 'inbox' | 'pipeline' | 'tasks' | 'reports' | 'sales' | 'team' | 'lead'
 type View = 'unassigned' | 'mine' | 'all'
-const SECTIONS: readonly Section[] = ['chats', 'visitors', 'leads', 'inbox', 'pipeline', 'tasks', 'reports', 'team']
+const SECTIONS: readonly Section[] = ['chats', 'visitors', 'leads', 'inbox', 'pipeline', 'tasks', 'reports', 'sales', 'team']
 
 const visitorName = (s: Session) => s.lead?.name || s.lead?.email || `Visitor ${s.session_id.slice(-4).toUpperCase()}`
 
 // The address bar carries the open screen, so a reload or a shared link lands
-// on the same place: #pipeline, or #lead/<record id>.
+// on the same place: #pipeline, or #lead/<record id>. #sales/lead/<record id>
+// opens Sales with a new sale started from that lead.
 function readHash(): { section: Section; leadId: string } {
   const h = typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, '')
   if (h.startsWith('lead/')) { const id = decodeURIComponent(h.slice(5)); if (id) return { section: 'lead', leadId: id } }
+  if (h.startsWith('sales/lead/')) return { section: 'sales', leadId: decodeURIComponent(h.slice(11)) }
   return { section: (SECTIONS as readonly string[]).includes(h) ? (h as Section) : 'chats', leadId: '' }
 }
 
@@ -300,6 +303,7 @@ export default function ZdApp() {
         {hasFeature(ws, 'pipeline') && <RailButton icon={<KanbanSquare size={20} />} label="Pipeline" text="Pipeline" active={section === 'pipeline'} onClick={() => setSection('pipeline')} />}
         {hasFeature(ws, 'tasks') && <RailButton icon={<CheckSquare size={20} />} label="Tasks" text="Tasks" active={section === 'tasks'} onClick={() => setSection('tasks')} />}
         {hasFeature(ws, 'reports') && <RailButton icon={<BarChart3 size={20} />} label="Reports" text="Reports" active={section === 'reports'} onClick={() => setSection('reports')} />}
+        {me.role === 'admin' && <RailButton icon={<CircleDollarSign size={20} />} label="Sales" text="Sales" active={section === 'sales'} onClick={() => setSection('sales')} />}
         <div className="flex-1" />
         <RailButton icon={<UserCog size={20} />} label={me.role === 'admin' ? 'Team and settings' : 'Your profile'} text={me.role === 'admin' ? 'Team' : 'Profile'} active={section === 'team'} onClick={() => setSection('team')} />
         <RailButton icon={sound ? <Volume2 size={20} /> : <VolumeX size={20} />} label={sound ? 'Sound is on' : 'Sound is off'} text={sound ? 'Sound on' : 'Muted'} onClick={toggleSound} />
@@ -554,6 +558,7 @@ export default function ZdApp() {
       {section === 'pipeline' && hasFeature(ws, 'pipeline') && <Pipeline {...screen} />}
       {section === 'tasks' && hasFeature(ws, 'tasks') && <Tasks {...screen} />}
       {section === 'reports' && hasFeature(ws, 'reports') && <Reports {...screen} />}
+      {section === 'sales' && <Sales {...screen} fromLead={leadId || undefined} />}
       {section === 'team' && <Team {...screen} />}
     </div>
   )

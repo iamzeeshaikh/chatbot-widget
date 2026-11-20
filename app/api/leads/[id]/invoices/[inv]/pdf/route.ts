@@ -5,7 +5,7 @@ import { listInvoices } from '@/lib/invoicestore'
 import { buildInvoicePdf } from '@/lib/invoicepdf'
 import { loadSiteContacts } from '@/lib/signature'
 import { bankDetails, isBankTransfer } from '@/lib/bankdetails'
-import { siteWorkspace } from '@/lib/workspaces'
+import { productName, siteWorkspace } from '@/lib/workspaces'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const url = contacts.get(access.siteId)?.logo ?? ''
   if (/^https:\/\//i.test(url)) {
     try {
-      const r = await fetch(url, { headers: { 'User-Agent': 'ZeeOps-Invoice/1.0' }, signal: AbortSignal.timeout(8000) })
+      const r = await fetch(url, { headers: { 'User-Agent': `${productName(siteWorkspace(access.siteId) ?? '')}-Invoice/1.0` }, signal: AbortSignal.timeout(8000) })
       if (r.ok) logo = new Uint8Array(await r.arrayBuffer())
     } catch { logo = null }
   }
