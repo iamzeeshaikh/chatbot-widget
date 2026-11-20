@@ -5,6 +5,7 @@
 // screenshot of the UI: cover header, summary block, then the three tables with
 // repeating column headers, page numbers and a generated-on PKT stamp.
 
+import { productName } from './workspaces'
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import { formatDateTime } from './datetime'
 import { pct, durationLabel, type ReportData, type Metrics } from './report'
@@ -170,7 +171,7 @@ export async function buildPdf(d: ReportData): Promise<Uint8Array> {
   doc.setTitle(`${d.workspaceLabel} — Performance report, ${d.periodLabel}`)
   doc.setAuthor(d.workspaceLabel)
   doc.setSubject(`Performance report for ${d.periodLabel}`)
-  doc.setCreator('ZeeOps')
+  doc.setCreator(productName(d.workspace))
 
   const font = await doc.embedFont(StandardFonts.Helvetica)
   const bold = await doc.embedFont(StandardFonts.HelveticaBold)

@@ -1,3 +1,4 @@
+import { exportStem } from '@/lib/workspaces'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, fetchAllPages } from '@/lib/supabase'
 import { getMember, memberSites } from '@/lib/auth'
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
     return new NextResponse(csv, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="zeeops-${member.workspace}-leads-${stamp}.csv"`,
+        'Content-Disposition': `attachment; filename="${exportStem(member.workspace)}-leads-${stamp}.csv"`,
         'Cache-Control': 'no-store',
       },
     })
@@ -149,7 +150,7 @@ export async function GET(req: NextRequest) {
   return new NextResponse(JSON.stringify(body, null, 2), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Content-Disposition': `attachment; filename="zeeops-${member.workspace}-${full ? 'full' : 'leads'}-backup-${stamp}.json"`,
+      'Content-Disposition': `attachment; filename="${exportStem(member.workspace)}-${full ? 'full' : 'leads'}-backup-${stamp}.json"`,
       'Cache-Control': 'no-store',
     },
   })

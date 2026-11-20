@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
-import { hasFeature } from '@/lib/workspaces'
+import { hasFeature, exportStem } from '@/lib/workspaces'
 import { buildReport } from '@/lib/report'
 import { agentsCsv, sitesCsv, dailyCsv, buildPdf } from '@/lib/reportexport'
 import { buildLeadsPdf } from '@/lib/leadspdf'
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     const format = sp.get('format') ?? 'json'
     // A filename the client can file without renaming.
     const slug = data.periodLabel.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase()
-    const stem = `zeeops-${data.workspace}-report-${slug}`
+    const stem = `${exportStem(data.workspace)}-report-${slug}`
 
     const csv = (body: string, name: string) => new NextResponse(body, {
       headers: {
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
         return new NextResponse(Buffer.from(bytes), {
           headers: {
             'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="zeeops-leads${suffix}-${slug}.pdf"`,
+            'Content-Disposition': `attachment; filename="${data.workspace === 'zeedesk' ? 'zeedesk' : 'zeeops'}-leads${suffix}-${slug}.pdf"`,
             'Cache-Control': 'no-store',
           },
         })

@@ -14,6 +14,7 @@
 //   • the customer's own enquiry text is included for quote leads — that is the
 //     part that makes a lead feel real rather than a number in a table
 
+import { productName } from './workspaces'
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import { formatDateTime, formatShortDateTime } from './datetime'
 import type { ReportData, LeadDetail } from './report'
@@ -71,7 +72,7 @@ export async function buildLeadsPdf(d: ReportData, opts: { siteId?: string } = {
   doc.setTitle(`Leads delivered — ${siteLabel ?? d.workspaceLabel}, ${d.periodLabel}`)
   doc.setAuthor(d.workspaceLabel)
   doc.setSubject(`Lead report for ${d.periodLabel}`)
-  doc.setCreator('ZeeOps')
+  doc.setCreator(productName(d.workspace))
 
   const font = await doc.embedFont(StandardFonts.Helvetica)
   const bold = await doc.embedFont(StandardFonts.HelveticaBold)

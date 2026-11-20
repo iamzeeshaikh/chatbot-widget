@@ -293,6 +293,17 @@ export const WORKSPACE_LABEL: Record<Workspace, string> = {
   zeedesk: 'ZeeDesk',
 }
 
+// The product name printed INSIDE a file a workspace downloads (PDF metadata,
+// export filenames). ZeeDesk is its own product: nothing it exports may carry
+// the ZeeOps name (owner, 2026-11-20).
+export function productName(ws: string): string {
+  return ws === 'zeedesk' ? 'ZeeDesk' : 'ZeeOps'
+}
+/** Filename prefix for a workspace's exports: `zeedesk` or `zeeops-packaging`. */
+export function exportStem(ws: string): string {
+  return ws === 'zeedesk' ? 'zeedesk' : `zeeops-${ws}`
+}
+
 // ── Which dashboard a hostname serves ────────────────────────────────────────
 // Both dashboards are ONE deployment behind two domains, and the workspace has
 // always come from the account, never the URL. So a packaging login typed into
