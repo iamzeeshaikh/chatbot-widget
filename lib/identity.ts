@@ -78,6 +78,24 @@ export function dialable(v: string | null | undefined): string | null {
   return n
 }
 
+/**
+ * dialable(), for a lead whose SITE says which country it is in.
+ *
+ * A UK customer types "07900 255746" and a UK form stores it that way. Dialled
+ * as typed, Twilio refuses it ("invalid phone number", error 13224) and the
+ * agent hears "this call can't be connected" — Wild & Worthy, 20 Nov 2026, on
+ * a GBP 1,825 order. On a .co.uk site a national number is a UK number, so the
+ * leading 0 becomes +44. Anything already international is left alone.
+ */
+export function dialableFor(v: string | null | undefined, uk: boolean): string | null {
+  const n = phoneFromText(v)
+  if (!n || !uk || n.startsWith('+')) return dialable(v)
+  if (/^0[1-9]\d{8,9}$/.test(n)) return '+44' + n.slice(1)
+  if (/^44[1-9]\d{8,9}$/.test(n)) return '+' + n
+  if (/^00\d{9,14}$/.test(n)) return '+' + n.slice(2)
+  return dialable(v)
+}
+
 export function phoneKey(v: string | null | undefined): string | null {
   const d = digitsOnly(v)
   if (d.length < MIN_PHONE_DIGITS) return null

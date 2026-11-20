@@ -13,6 +13,7 @@
 //                         testing, the business's own number once approved)
 //   TWILIO_PHONE_NUMBER   the voice number
 
+import { SITE_DOMAINS } from './sitedomains'
 import { createHmac, timingSafeEqual } from 'crypto'
 import type { Workspace } from './workspaces'
 
@@ -100,6 +101,21 @@ function extraNumbers(ws: Workspace): string[] {
     : ws === 'zeedesk' ? process.env.TWILIO_ZEEDESK_EXTRA_NUMBERS
     : process.env.TWILIO_SPORTS_EXTRA_NUMBERS
   return String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * The number a customer should see when an agent rings them about this site.
+ *
+ * A UK customer rung from the US line sees a foreign number, often lets it go
+ * to voicemail, and one asked in writing why a UK company calls from America
+ * (20 Nov 2026). When the lead's site is a .co.uk and the workspace owns a UK
+ * line, that line is the caller ID. It is a number on this Twilio account, so
+ * Twilio accepts it, and a call back to it reaches the same team. Every other
+ * call keeps the workspace's main number.
+ */
+export function callerIdForSite(ws: Workspace, siteId: string, fallback: string): string {
+  if (!/\.co\.uk$/i.test(SITE_DOMAINS[siteId] ?? '')) return fallback
+  return extraNumbers(ws).find((n) => n.startsWith('+44')) ?? fallback
 }
 
 // Compared on the last nine digits, like every other phone in this codebase:

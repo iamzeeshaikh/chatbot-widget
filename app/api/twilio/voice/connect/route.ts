@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { twilioAuth, twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, twilioConfig, verifyTwilioSignature, callerIdForSite } from '@/lib/twilio'
 import { leadPhone, resolveLeadSite } from '@/lib/leadrecord'
 import { siteWorkspace } from '@/lib/workspaces'
 import { recordAttrs } from '@/lib/callrecording'
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   const origin = `${proto}://${host}`
   return xml(
     '<Response>'
-    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="30"${recordAttrs(origin, { leadId })}>`
+    + `<Dial callerId="${escapeXml(callerIdForSite(workspace!, resolved!.siteId, cfg.phoneNumber))}" timeout="30"${recordAttrs(origin, { leadId })}>`
     + `<Number>${escapeXml(customer)}</Number>`
     + '</Dial>'
     + '</Response>',

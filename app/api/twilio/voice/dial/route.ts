@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { twilioAuth, twilioConfig, verifyTwilioSignature } from '@/lib/twilio'
+import { twilioAuth, twilioConfig, verifyTwilioSignature, callerIdForSite } from '@/lib/twilio'
 import { emailFromIdentity } from '@/lib/voicetoken'
 import { memberByEmail } from '@/lib/auth'
 import { guardLeadAccess, writeControlRow, leadPhone } from '@/lib/leadrecord'
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
     // legible: voicemail answering means the call is being delivered and the
     // handset is not alerting, and a still-silent line means it is not.
     // It also matches how long a person actually waits before hanging up.
-    + `<Dial callerId="${escapeXml(cfg.phoneNumber)}" timeout="55"`
+    + `<Dial callerId="${escapeXml(callerIdForSite(member.workspace, access.siteId, cfg.phoneNumber))}" timeout="55"`
     + ` action="${escapeXml(statusUrl)}" method="POST"`
     // The lead is known here, so the recording is filed straight onto it — no
     // phone-number matching, and no chance of it landing on the wrong record.

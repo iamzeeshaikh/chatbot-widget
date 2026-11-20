@@ -47,7 +47,8 @@ import {
   CRM_EMAIL_IN_ROLE, CRM_EMAIL_READ_ROLE, parseCrmEmailIn, parseCrmEmailRead,
   type CrmEmailInEntry, splitQuoted } from './emailreply'
 import { signAttachments, type EmailAttachment } from './emailattach'
-import { dialable } from './identity'
+import { dialableFor } from './identity'
+import { SITE_DOMAINS } from './sitedomains'
 import { canSeeContacts, maskEmail, maskPhone, scrubText, HIDDEN_EMAIL, HIDDEN_PHONE } from './pii'
 import { payLinksInRows, redactLinks } from './paylink'
 
@@ -320,7 +321,9 @@ export async function leadPhone(id: string): Promise<string | null> {
   // call, the softphone's connect/dial webhooks, WhatsApp, the WhatsApp check
   // and the payment link all use this, and all of them need something Twilio
   // can dial — not "(optional): 6154306952", which is what one lead held.
-  return dialable(override || contactPhone || capturePhone || resolved?.lead?.phone || '')
+  // A .co.uk site's customers write UK national numbers (see dialableFor).
+  const uk = /\.co\.uk$/i.test(SITE_DOMAINS[resolved?.siteId ?? ''] ?? '')
+  return dialableFor(override || contactPhone || capturePhone || resolved?.lead?.phone || '', uk)
 }
 
 export async function markThreadRepliesRead(
