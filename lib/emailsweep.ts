@@ -155,7 +155,7 @@ export interface ThreadRef {
  * live threads the same 60 won every run forever and thread 61 was never
  * looked at again, so its replies were never captured and nothing said so.
  */
-async function allThreads(now: Date, inboundThreadIds?: Set<string>): Promise<ThreadRef[]> {
+async function allThreads(now: Date, inboundThreadIds?: Set<string>, inboundGmailIds?: Set<string>): Promise<ThreadRef[]> {
   const since = new Date(now.getTime() - THREAD_ACTIVE_DAYS * 86_400_000).toISOString()
 
   const seen = new Map<string, ThreadRef>()
@@ -201,6 +201,7 @@ async function allThreads(now: Date, inboundThreadIds?: Set<string>): Promise<Th
       const e = parseCrmEmailIn(r.message)
       if (!e?.threadId) continue
       inboundThreadIds?.add(e.threadId)
+      if (e.gmailId) inboundGmailIds?.add(e.gmailId)
       const t = seen.get(e.threadId)
       if (t && r.created_at > t.lastAt) t.lastAt = r.created_at
     }
@@ -318,6 +319,8 @@ function addressOf(v: string | undefined): string | undefined {
 /** How far back the customer-mail search looks on a routine run. */
 const CUSTOMER_SEARCH_DAYS = 2
 const CUSTOMER_SEARCH_BATCH = 20
+/** Tracked threads with a reply not yet on record, pulled ahead of the rotation: per agent, per run. */
+const WAITING_REPLY_CAP = 15
 
 /**
  * Mail a customer started THEMSELVES — a new subject, a forward — rather than
@@ -332,6 +335,9 @@ const CUSTOMER_SEARCH_BATCH = 20
 async function customerThreads(
   agent: string, cfg: NonNullable<ReturnType<typeof googleConfig>>, refsOfAgent: ThreadRef[],
   known: Set<string>, captured: Set<string>, days: number, deadline: number,
+  // Every reply already on record (by Gmail id) and the threads this run is
+  // already checking: what the "waiting reply" promotion below needs.
+  capturedIn: Set<string> = new Set(), alreadyPicked: Set<string> = new Set(),
 ): Promise<ThreadRef[]> {
   // Newest send per address wins: that is the lead the conversation is on.
   const byAddr = new Map<string, ThreadRef>()
@@ -356,8 +362,29 @@ async function customerThreads(
       out.set(h.threadId, { threadId: h.threadId, sessionId: '', siteId: '', agent, lastAt: new Date().toISOString() })
     }
   }
+  // A reply on a thread we ALREADY track must not wait for the rotation. With
+  // 1,340 tracked threads and 60 checked per run, a thread nobody had touched
+  // for three hours was reached once every ~2 hours, so a customer's answer sat
+  // in Gmail that long before the CRM showed it (Travon Cervantes, 20 Nov
+  // 2026). The search above has already found that message; if it is not on
+  // record yet, its thread is checked NOW. Capped so a message that is never
+  // recorded (an auto-reply, say) cannot crowd a run for the two days it stays
+  // in the search window.
+  const promoted: ThreadRef[] = []
+  {
+    const byThread = new Map(refsOfAgent.map((r) => [r.threadId, r]))
+    const seenThread = new Set<string>()
+    for (const h of found) {
+      if (promoted.length >= WAITING_REPLY_CAP) break
+      const ref = byThread.get(h.threadId)
+      if (!ref || capturedIn.has(h.id) || captured.has(h.id) || alreadyPicked.has(h.threadId) || seenThread.has(h.threadId)) continue
+      seenThread.add(h.threadId)
+      promoted.push(ref)
+    }
+  }
+
   // Attach each new thread to the lead of whichever listed customer wrote it.
-  const resolved: ThreadRef[] = []
+  const resolved: ThreadRef[] = [...promoted]
   for (const wave of chunks([...out.values()].slice(0, 30), 5)) {
     if (Date.now() > deadline) break
     const read = await Promise.all(wave.map(async (ref) => ({ ref, msgs: await fetchThread(agent, cfg, ref.threadId) })))
@@ -483,7 +510,8 @@ export async function runEmailSweep(
   // and nothing to keep in sync.
   const prev = await lastSweepStatus()
   const inboundThreadIds = new Set<string>()
-  const all = await allThreads(now, inboundThreadIds)
+  const inboundGmailIds = new Set<string>()
+  const all = await allThreads(now, inboundThreadIds, inboundGmailIds)
   const sel = selectThreads(all, { now, cursor: prev?.cursor ?? null })
   const threads = sel.picked
   const captured = await alreadyCaptured([...new Set(threads.map((t) => t.sessionId))])
@@ -530,7 +558,8 @@ export async function runEmailSweep(
     // agent's list and go through exactly the same capture below.
     try {
       const extra = await customerThreads(agent, cfg, all.filter((t) => t.agent === agent), knownThreads, captured,
-        Math.max(1, Math.min(60, opts.customerDays ?? CUSTOMER_SEARCH_DAYS)), Date.now() + 12_000)
+        Math.max(1, Math.min(60, opts.customerDays ?? CUSTOMER_SEARCH_DAYS)), Date.now() + 12_000,
+        inboundGmailIds, new Set(refs.map((r) => r.threadId)))
       if (extra.length) {
         for (const id of await alreadyCaptured([...new Set(extra.map((t) => t.sessionId))])) captured.add(id)
         refs.push(...extra)
