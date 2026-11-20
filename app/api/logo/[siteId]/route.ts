@@ -28,13 +28,15 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ siteId: st
   // sites ships that file, and the chat avatar was a bare letter until an
   // admin typed a logo URL in by hand (shopcustomboxes.co.uk, 5 Nov 2026).
   // Packaging only: sports keeps exactly the avatar its record says.
-  if (!/^https:\/\//i.test(url) && siteWorkspace(siteId) === 'packaging') {
+  const ws = siteWorkspace(siteId)
+  if (!/^https:\/\//i.test(url) && (ws === 'packaging' || ws === 'zeedesk')) {
     const domain = siteDomain(siteId)
     if (domain) url = `https://${domain}/apple-touch-icon.png`
   }
   if (!/^https:\/\//i.test(url)) return new NextResponse('No logo', { status: 404 })
 
-  const res = await fetch(url, { headers: { 'User-Agent': 'ZeeOps-Signature/1.0' } })
+  // A ZeeDesk site's server must not see the other team's product name.
+  const res = await fetch(url, { headers: { 'User-Agent': ws === 'zeedesk' ? 'Mozilla/5.0 (compatible; logo-fetch/1.0)' : 'ZeeOps-Signature/1.0' } })
   const type = res.headers.get('content-type') ?? ''
   if (!res.ok || !res.body || !type.startsWith('image/')) {
     return new NextResponse('No logo', { status: 404 })
