@@ -27,7 +27,7 @@ import {
   STREAMS, STREAM_ORDER, SALE_CURRENCIES, PAYMENT_METHODS, PAYMENT_METHOD_LABEL,
   PRODUCTION_STATUSES, PRODUCTION_LABEL, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_STYLE,
   SALE_LEAD_KIND_LABEL, SALE_LEAD_KIND_ORDER, type SaleLeadKind,
-  figures, totals, money, shortDate, newId, parseAmount,
+  figures, totals, isMade, money, shortDate, newId, parseAmount,
   type Sale, type SaleView, type StreamInfo, type StreamTotals, type SalesStream,
   type RateInfo, type SaleCurrency, type PaymentMethod, type ProductionStatus,
 } from '@/lib/salescore'
@@ -373,7 +373,7 @@ export default function SalesPage() {
         for (const v of direct) {
           if (v.fig.closed) continue
           // A costed sale still owing money counts once paid (totals() leaves it out too).
-          if (v.fig.profitKnown && v.fig.status !== 'paid') continue
+          if (v.fig.profitKnown && (v.fig.status !== 'paid' || !isMade(v.sale))) continue
           if (v.fig.profitKnown) { costedProfit += v.fig.profitPkr; costedRevenue += v.fig.revenuePkr }
           // Only money actually received is estimated on — an unpaid order
           // (Carly Blake's $3,700) is not profit yet, costed or not.
@@ -521,6 +521,7 @@ function profitHint(t: StreamTotals): string {
   const pending = [
     t.awaitingCosting ? `${t.awaitingCosting} sale${t.awaitingCosting === 1 ? '' : 's'} awaiting costing` : '',
     t.profitAwaitingPayment ? `${money(t.profitAwaitingPaymentPkr, 'PKR')} more when ${t.profitAwaitingPayment} sale${t.profitAwaitingPayment === 1 ? ' is' : 's are'} paid` : '',
+    t.profitAwaitingProduction ? `${money(t.profitAwaitingProductionPkr, 'PKR')} kept for production on ${t.profitAwaitingProduction} unshipped sale${t.profitAwaitingProduction === 1 ? '' : 's'}` : '',
   ].filter(Boolean).join(' · ')
   if (!t.profitSales) return pending || 'no open sales'
   return [pending, t.profitEstimated ? 'estimated' : 'at locked rates'].filter(Boolean).join(' · ')

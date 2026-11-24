@@ -433,6 +433,9 @@ export interface StreamTotals {
   /** Costed sales not fully paid yet: their profit counts once the money is in (owner, 2026-11-24). */
   profitAwaitingPayment: number
   profitAwaitingPaymentPkr: number
+  /** Paid and costed but not shipped yet: the costing may be only a sample's, so this money stays aside for production (owner, 2026-11-24, Krystian). */
+  profitAwaitingProduction: number
+  profitAwaitingProductionPkr: number
   awaitingCosting: number
   profitEstimated: boolean
   awaitingPayment: number
@@ -450,11 +453,16 @@ function toUsd(amount: number, currency: SaleCurrency, suggested: PkrRates | nul
   return (amount * src) / usd
 }
 
+/** The goods are made: its costing is final, so its profit is real. */
+export function isMade(s: Pick<Sale, 'production' | 'tracking'>): boolean {
+  return s.production === 'completed' || s.production === 'shipped' || s.production === 'delivered' || !!(s.tracking ?? '').trim()
+}
+
 export function totals(views: SaleView[], suggested: PkrRates | null): StreamTotals {
   const t: StreamTotals = {
     orders: views.length, open: 0, closed: 0,
     orderValueUsd: 0, receivedUsd: 0, feesUsd: 0, netUsd: 0, outstandingUsd: 0,
-    revenuePkr: 0, costPkr: 0, profitPkr: 0, profitSales: 0, profitAwaitingPayment: 0, profitAwaitingPaymentPkr: 0, awaitingCosting: 0, profitEstimated: false,
+    revenuePkr: 0, costPkr: 0, profitPkr: 0, profitSales: 0, profitAwaitingPayment: 0, profitAwaitingPaymentPkr: 0, profitAwaitingProduction: 0, profitAwaitingProductionPkr: 0, awaitingCosting: 0, profitEstimated: false,
     awaitingPayment: 0, needsRate: 0, estimated: false, incomplete: false,
   }
   for (const { sale: s, fig: f } of views) {
@@ -478,6 +486,11 @@ export function totals(views: SaleView[], suggested: PkrRates | null): StreamTot
     if (f.profitKnown && f.status !== 'paid') {
       t.profitAwaitingPayment++
       t.profitAwaitingPaymentPkr += f.profitPkr
+    } else if (f.profitKnown && !isMade(s)) {
+      // Krystian paid $1,400 with only a sample costed: Rs 3.6 lakh looked like
+      // October profit but has to pay for his production (owner, 2026-11-24).
+      t.profitAwaitingProduction++
+      t.profitAwaitingProductionPkr += f.profitPkr
     } else if (f.profitKnown) {
       t.profitPkr += f.profitPkr
       t.profitSales++

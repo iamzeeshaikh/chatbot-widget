@@ -345,7 +345,7 @@ export default function Sales({ me, openLead, fromLead }: ZdScreenProps & {
               <Tile label="Revenue (PKR)" value={money(t.revenuePkr, 'PKR')} sub={est ? 'includes estimates' : 'at locked rates'} />
               <Tile label="Cost (PKR)" value={money(t.costPkr, 'PKR')} sub="production and other" />
               <Tile label="Profit (PKR)" value={t.profitSales ? money(t.profitPkr, 'PKR') : 'Not known'} tone={t.profitSales ? (t.profitPkr < 0 ? 'bad' : 'good') : undefined}
-                sub={[t.awaitingCosting ? `${t.awaitingCosting} awaiting costing` : '', t.profitAwaitingPayment ? `${t.profitAwaitingPayment} awaiting payment` : '', t.profitSales ? (t.profitEstimated ? 'estimated' : 'at locked rates') : ''].filter(Boolean).join(' · ') || 'no open sales'} />
+                sub={[t.awaitingCosting ? `${t.awaitingCosting} awaiting costing` : '', t.profitAwaitingPayment ? `${t.profitAwaitingPayment} awaiting payment` : '', t.profitAwaitingProduction ? `${t.profitAwaitingProduction} not shipped` : '', t.profitSales ? (t.profitEstimated ? 'estimated' : 'at locked rates') : ''].filter(Boolean).join(' · ') || 'no open sales'} />
               <Tile label="Need a rate" value={String(t.needsRate)} sub={t.needsRate ? 'sales with an estimated PKR figure' : 'every rate is locked'} />
             </div>
 

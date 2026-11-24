@@ -318,7 +318,7 @@ export function NetProfitCard({ month, t, avgMargin, awaitingRevenuePkr, version
   /** YYYY-MM, or '' for every month on record. */
   month: string
   /** Model Town direct totals for the same period. */
-  t: { profitPkr: number; profitSales: number; awaitingCosting: number; revenuePkr: number; profitEstimated: boolean; profitAwaitingPayment?: number; profitAwaitingPaymentPkr?: number }
+  t: { profitPkr: number; profitSales: number; awaitingCosting: number; revenuePkr: number; profitEstimated: boolean; profitAwaitingPayment?: number; profitAwaitingPaymentPkr?: number; profitAwaitingProduction?: number; profitAwaitingProductionPkr?: number }
   /** Profit ÷ revenue over the costed sales of the period — used to estimate the rest. */
   avgMargin: number | null
   /** Net money received (PKR) on the sales still awaiting costing. */
@@ -375,6 +375,9 @@ export function NetProfitCard({ month, t, avgMargin, awaitingRevenuePkr, version
             ) : <p>Every sale in this period is costed.</p>}
             {t.profitAwaitingPayment ? (
               <p className="mt-0.5">{t.profitAwaitingPayment} costed sale{t.profitAwaitingPayment === 1 ? '' : 's'} not fully paid — <b className="tabular-nums">{money(t.profitAwaitingPaymentPkr ?? 0, 'PKR')}</b> profit is added once the money is in.</p>
+            ) : null}
+            {t.profitAwaitingProduction ? (
+              <p className="mt-0.5 text-amber-800">Keep aside <b className="tabular-nums">{money(t.profitAwaitingProductionPkr ?? 0, 'PKR')}</b> for production: {t.profitAwaitingProduction} paid sale{t.profitAwaitingProduction === 1 ? ' is' : 's are'} not shipped yet. It counts as profit once shipped.</p>
             ) : null}
           </div>
         </div>
