@@ -350,12 +350,16 @@ export function emailHtml(text: string): string {
 }
 
 /** The text the model reads: the form or chat, with our own boilerplate cut. */
-export function quoteTextForAssessment(message: string, name: string | null): string {
+export function quoteTextForAssessment(message: string, name: string | null, site?: string | null): string {
+  // The site it came in through, named outright: an email addressed "Hi Shop
+  // Mylar Bags team" was read as a letter to some other company and skipped
+  // (Date Kraze, 2026-11-24).
+  const via = site ? `Reached us through OUR OWN website: ${site}. A greeting, subject or brand naming that site is addressed to us.\n` : ''
   const body = String(message || '')
     .replace(/^\[(Custom Quote|Checkout)\]\s*/, '')
     .replace(/\{"__file":\{[^}]*"name":"([^"]*)"[^}]*\}\}/g, '[customer attached an image: $1]')
     .slice(0, 6000)
-  return `Lead name on file: ${name || '(none)'}\n\n${body}`
+  return `${via}Lead name on file: ${name || '(none)'}\n\n${body}`
 }
 
 // ── Follow-ups (Step 2) ─────────────────────────────────────────────────────

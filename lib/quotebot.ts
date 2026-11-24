@@ -31,6 +31,7 @@
 // is a ledger row with its reason, so "why didn't the bot answer this one?"
 // always has an answer.
 
+import { SITE_DOMAINS } from './sitedomains'
 import { isBotWaRow } from './whatsapp'
 import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { isUkSite } from './metawa'
@@ -309,10 +310,11 @@ export function isVendorPitch(reason: string): boolean {
   return /\b(selling|sell|pitch(?:ing)?|soliciting|offering)\b[^.;]{0,70}\bto us\b|\b(supplier|factory|vendor|seo|marketing|trustpilot|logistics|freight|trucking)\b[^.;]{0,30}\b(pitch|pitching|selling|soliciting)\b|\b(sales|marketing|seo|business|supplier) pitch\b|\bsoliciting\b|\bpitching (a |their |its )?(service|services)\b/i.test(reason)
 }
 
-export async function assessQuote(message: string, name: string | null): Promise<QuoteAssessment | null> {
+export async function assessQuote(message: string, name: string | null, siteId?: string | null): Promise<QuoteAssessment | null> {
+  const site = siteId ? [siteId, SITE_DOMAINS[siteId]].filter(Boolean).join(' / ') : null
   const r = await llmComplete({
     system: ASSESS_SYSTEM,
-    messages: [{ role: 'user', content: quoteTextForAssessment(message, name) }],
+    messages: [{ role: 'user', content: quoteTextForAssessment(message, name, site) }],
     maxTokens: 1200, anthropicMaxTokens: 400, temperature: 0,
     model: CLAUDE_CHAT_MODEL, timeoutMs: 25000,
   })
@@ -468,11 +470,23 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (!isAddress(to)) { await skip(`"${to}" is not a valid email address`); continue }
     if (await addressAlreadyContacted(to, now, excluded)) { await skip('this address was already emailed in the last 30 days', { to }); continue }
 
-    const assessment = await assessQuote(lead.message ?? '', lead.name)
+    const assessment = await assessQuote(lead.message ?? '', lead.name, lead.site_id)
     // The model being down is not a decision about the lead: no ledger row, so
     // the next run tries again (until the lead ages out of the window).
     if (!assessment) { act({ state: 'retry-later', why: 'could not read the enquiry (model unavailable)' }); continue }
     if (!assessment.isQuote) {
+      // Not a quote, and nobody selling to us either: a person reads it. Before
+      // this the lead was skipped with no owner and no task, so a real UK quote
+      // the model misread sat untouched all day (Date Kraze, 2026-11-24).
+      if (!isVendorPitch(assessment.reason)) {
+        await handOver(
+          `not a packaging quote: ${assessment.reason}`,
+          `Read and answer ${who} — the bot could not tell this is a quote, so it did not email them`,
+          { title: 'Enquiry needs a person', body: `${who}: the bot did not reply. ${assessment.reason}`.slice(0, 180) },
+          'quotebot-unclear',
+        )
+        continue
+      }
       await skip(`not a packaging quote: ${assessment.reason}`)
       // Somebody selling TO us — a factory, a supplier, SEO or logistics — is
       // not a lead and must not sit in the counts (owner, 2026-10-30: "factory
@@ -1003,7 +1017,7 @@ export async function answerReply(
   // Read the enquiry and every reply together: the size may be in one email
   // and the quantity in the next.
   const combined = `${lead?.message ?? ''}\n\nThe customer's replies to our questions:\n${all.map((m) => m.body).join('\n---\n')}`
-  const assessment = await assessQuote(combined, lead?.name ?? null)
+  const assessment = await assessQuote(combined, lead?.name ?? null, siteId)
   if (!assessment) return { state: 'failed', why: 'could not read the enquiry (model unavailable)' }
   const answer = buildReplyAnswer(assessment, assessment.firstName)
   const priorBot = (logRows ?? []).filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message))
