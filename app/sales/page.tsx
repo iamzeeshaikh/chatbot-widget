@@ -372,6 +372,8 @@ export default function SalesPage() {
         let costedProfit = 0, costedRevenue = 0, awaitingRevenue = 0
         for (const v of direct) {
           if (v.fig.closed) continue
+          // A costed sale still owing money counts once paid (totals() leaves it out too).
+          if (v.fig.profitKnown && v.fig.status !== 'paid') continue
           if (v.fig.profitKnown) { costedProfit += v.fig.profitPkr; costedRevenue += v.fig.revenuePkr }
           // Only money actually received is estimated on — an unpaid order
           // (Carly Blake's $3,700) is not profit yet, costed or not.
@@ -516,7 +518,10 @@ function CostLines({ costs }: { costs: Sale['costs'] }) {
 
 /** Profit is only summed over sales whose costing is in; say what is left out. */
 function profitHint(t: StreamTotals): string {
-  const pending = t.awaitingCosting ? `${t.awaitingCosting} sale${t.awaitingCosting === 1 ? '' : 's'} awaiting costing` : ''
+  const pending = [
+    t.awaitingCosting ? `${t.awaitingCosting} sale${t.awaitingCosting === 1 ? '' : 's'} awaiting costing` : '',
+    t.profitAwaitingPayment ? `${money(t.profitAwaitingPaymentPkr, 'PKR')} more when ${t.profitAwaitingPayment} sale${t.profitAwaitingPayment === 1 ? ' is' : 's are'} paid` : '',
+  ].filter(Boolean).join(' · ')
   if (!t.profitSales) return pending || 'no open sales'
   return [pending, t.profitEstimated ? 'estimated' : 'at locked rates'].filter(Boolean).join(' · ')
 }

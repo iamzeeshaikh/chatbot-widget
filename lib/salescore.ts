@@ -427,9 +427,12 @@ export interface StreamTotals {
   outstandingUsd: number
   revenuePkr: number
   costPkr: number
-  /** Summed over open sales whose costing is in; the rest are counted in awaitingCosting. */
+  /** Summed over open sales that are costed AND fully paid; the rest are counted in awaitingCosting / profitAwaitingPayment. */
   profitPkr: number
   profitSales: number
+  /** Costed sales not fully paid yet: their profit counts once the money is in (owner, 2026-11-24). */
+  profitAwaitingPayment: number
+  profitAwaitingPaymentPkr: number
   awaitingCosting: number
   profitEstimated: boolean
   awaitingPayment: number
@@ -451,7 +454,7 @@ export function totals(views: SaleView[], suggested: PkrRates | null): StreamTot
   const t: StreamTotals = {
     orders: views.length, open: 0, closed: 0,
     orderValueUsd: 0, receivedUsd: 0, feesUsd: 0, netUsd: 0, outstandingUsd: 0,
-    revenuePkr: 0, costPkr: 0, profitPkr: 0, profitSales: 0, awaitingCosting: 0, profitEstimated: false,
+    revenuePkr: 0, costPkr: 0, profitPkr: 0, profitSales: 0, profitAwaitingPayment: 0, profitAwaitingPaymentPkr: 0, awaitingCosting: 0, profitEstimated: false,
     awaitingPayment: 0, needsRate: 0, estimated: false, incomplete: false,
   }
   for (const { sale: s, fig: f } of views) {
@@ -469,7 +472,13 @@ export function totals(views: SaleView[], suggested: PkrRates | null): StreamTot
     t.outstandingUsd += usd(f.outstanding)
     t.revenuePkr += f.revenuePkr
     t.costPkr += f.costPkr
-    if (f.profitKnown) {
+    // Profit is counted when the money is in: Hanna Owen's half-paid $7,500
+    // put its whole profit in October (owner, 2026-11-24: "jab ae ga pesa tab
+    // hi profit nikala jae").
+    if (f.profitKnown && f.status !== 'paid') {
+      t.profitAwaitingPayment++
+      t.profitAwaitingPaymentPkr += f.profitPkr
+    } else if (f.profitKnown) {
       t.profitPkr += f.profitPkr
       t.profitSales++
       t.profitEstimated ||= f.profitEstimated

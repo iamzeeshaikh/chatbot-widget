@@ -318,7 +318,7 @@ export function NetProfitCard({ month, t, avgMargin, awaitingRevenuePkr, version
   /** YYYY-MM, or '' for every month on record. */
   month: string
   /** Model Town direct totals for the same period. */
-  t: { profitPkr: number; profitSales: number; awaitingCosting: number; revenuePkr: number; profitEstimated: boolean }
+  t: { profitPkr: number; profitSales: number; awaitingCosting: number; revenuePkr: number; profitEstimated: boolean; profitAwaitingPayment?: number; profitAwaitingPaymentPkr?: number }
   /** Profit ÷ revenue over the costed sales of the period — used to estimate the rest. */
   avgMargin: number | null
   /** Net money received (PKR) on the sales still awaiting costing. */
@@ -373,6 +373,9 @@ export function NetProfitCard({ month, t, avgMargin, awaitingRevenuePkr, version
                 </>
               ) : <p>{t.awaitingCosting} sale{t.awaitingCosting === 1 ? '' : 's'} awaiting costing — not counted yet (no costed sale to estimate a margin from).</p>
             ) : <p>Every sale in this period is costed.</p>}
+            {t.profitAwaitingPayment ? (
+              <p className="mt-0.5">{t.profitAwaitingPayment} costed sale{t.profitAwaitingPayment === 1 ? '' : 's'} not fully paid — <b className="tabular-nums">{money(t.profitAwaitingPaymentPkr ?? 0, 'PKR')}</b> profit is added once the money is in.</p>
+            ) : null}
           </div>
         </div>
       )}
