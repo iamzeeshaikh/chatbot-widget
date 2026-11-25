@@ -21,7 +21,7 @@ const toLines = (it: CostingItem): Line[] =>
   it.costs.length ? it.costs.map((c) => ({ id: c.id, label: c.label, amount: String(c.amount), note: c.note })) : [{ id: '', label: COST_LABELS[0], amount: '', note: '' }]
 const pkr = (n: number) => `Rs ${Math.round(n).toLocaleString('en-PK')}`
 
-const SHIP_LABEL: Record<ShippingStatus, string> = { in_production: 'In production', shipped: 'Shipped', delivered: 'Delivered' }
+const SHIP_LABEL: Record<ShippingStatus, string> = { in_production: 'In production', sample_sent: 'Sample sent (order not made yet)', shipped: 'Shipped', delivered: 'Delivered' }
 
 function ShippingRow({ item, onSaved }: { item: CostingItem; onSaved: (next: CostingItem | null, id: string) => void }) {
   const [production, setProduction] = useState<ShippingStatus>(() => (SHIPPING_STATUSES as readonly string[]).includes(String(item.production)) ? (item.production as ShippingStatus) : 'in_production')

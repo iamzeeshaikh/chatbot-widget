@@ -172,7 +172,7 @@ async function send(url: string, init: RequestInit, fallback: string): Promise<{
 
 const STATUS_TONE: Record<PaymentStatus, 'grey' | 'blue' | 'green' | 'amber'> = { pending: 'amber', partial: 'blue', paid: 'green', refunded: 'grey', cancelled: 'grey' }
 const PRODUCTION_TONE: Record<ProductionStatus, 'grey' | 'blue' | 'green' | 'red' | 'amber'> = {
-  not_started: 'grey', in_production: 'blue', completed: 'green', shipped: 'green', delivered: 'green', on_hold: 'amber', cancelled: 'red',
+  not_started: 'grey', in_production: 'blue', sample_sent: 'amber', completed: 'green', shipped: 'green', delivered: 'green', on_hold: 'amber', cancelled: 'red',
 }
 
 interface Filters { month: string; status: string; agent: string }

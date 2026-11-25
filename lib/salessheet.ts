@@ -117,13 +117,15 @@ export async function fetchSheetRows(sheetId: string, now = new Date()): Promise
 export function productionFor(status: string): ProductionStatus | null {
   const s = status.toLowerCase()
   if (/deliver/.test(s)) return 'delivered'
+  // "Sample shipping", "sample sent": the order itself is not made yet.
+  if (/sample/.test(s) && /ship|sent|dispatch/.test(s)) return 'sample_sent'
   if (/ship/.test(s)) return 'shipped'
   if (/production|sample|printing|in progress/.test(s)) return 'in_production'
   if (/hold/.test(s)) return 'on_hold'
   return null
 }
 
-const RANK: Record<string, number> = { not_started: 0, on_hold: 0, in_production: 1, completed: 2, shipped: 3, delivered: 4, cancelled: 0 }
+const RANK: Record<string, number> = { not_started: 0, on_hold: 0, in_production: 1, sample_sent: 1, completed: 2, shipped: 3, delivered: 4, cancelled: 0 }
 
 function matchSale(row: SheetRow, sales: Sale[]): Sale | null {
   const inv = row.invoice.toUpperCase()
@@ -182,10 +184,11 @@ export async function syncSalesSheet(now = new Date(), opts: { dryRun?: boolean 
     // Tracking → the sale's record AND PayPal (the new-account hold lifts a
     // few days after delivery, but only for transactions that carry tracking).
     const tracking = row.tracking.replace(/\s/g, '')
+    const sample = /sample/i.test(row.status)
     if (tracking && !(sale.notes ?? '').includes(tracking)) {
       const carrier = carrierFor(tracking)
       const paypal: string[] = []
-      if (!opts.dryRun && paypalConfigured()) {
+      if (!opts.dryRun && !sample && paypalConfigured()) {
         for (const p of sale.payments) {
           if (p.method !== 'paypal' || !p.id.startsWith('pay_pp_')) continue
           const txn = p.id.slice('pay_pp_'.length)
@@ -194,8 +197,9 @@ export async function syncSalesSheet(now = new Date(), opts: { dryRun?: boolean 
         }
       }
       out.tracked.push({ invoice: row.invoice, customer: sale.customer, tracking, carrier, paypal })
-      if ((RANK[next.production ?? 'not_started'] ?? 0) < RANK.shipped) { next = { ...next, production: 'shipped' } }
-      noteLines.push(`${day}: SHIPPED — ${carrier} tracking ${tracking} (from the sales sheet)${paypal.length ? `; PayPal tracking added on ${paypal.join(', ')}` : ''}.`)
+      if (sample) { if ((RANK[next.production ?? 'not_started'] ?? 0) < RANK.shipped) next = { ...next, production: 'sample_sent' } }
+      else if ((RANK[next.production ?? 'not_started'] ?? 0) < RANK.shipped) { next = { ...next, production: 'shipped' } }
+      noteLines.push(`${day}: ${sample ? 'SAMPLE SENT' : 'SHIPPED'} — ${carrier} tracking ${tracking} (from the sales sheet)${paypal.length ? `; PayPal tracking added on ${paypal.join(', ')}` : ''}.`)
       dirty = true
     }
 

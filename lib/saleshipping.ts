@@ -44,7 +44,8 @@ export async function applySaleShipping(
   let paypalNote = ''
   if (nextTracking && nextTracking !== (sale.tracking ?? '')) {
     const carrier = u.carrier && u.carrier !== 'OTHER' ? u.carrier : carrierFor(nextTracking)
-    if (paypalConfigured()) {
+    // A sample's tracking is not the order's: PayPal must not see it as delivery.
+    if (paypalConfigured() && u.production !== 'sample_sent') {
       for (const p of sale.payments) {
         if (p.method !== 'paypal' || !p.id.startsWith('pay_pp_')) continue
         const txn = p.id.slice('pay_pp_'.length)
@@ -55,7 +56,7 @@ export async function applySaleShipping(
         if (err) paypal.failed.push(`${txn} (${err.slice(0, 80)})`); else paypal.done.push(txn)
       }
     }
-    lines.push(`${day}: SHIPPED — ${carrier} tracking ${nextTracking} (entered by ${who} on ${u.source})`
+    lines.push(`${day}: ${u.production === 'sample_sent' ? 'SAMPLE SENT' : 'SHIPPED'} — ${carrier} tracking ${nextTracking} (entered by ${who} on ${u.source})`
       + `${paypal.done.length ? `; PayPal tracking added on ${paypal.done.join(', ')}` : ''}`
       + `${paypal.already.length ? `; PayPal already had it on ${paypal.already.join(', ')}` : ''}`
       + `${paypal.failed.length ? `; PayPal refused on ${paypal.failed.join(', ')}` : ''}.`)
@@ -67,7 +68,7 @@ export async function applySaleShipping(
     ...sale,
     production: u.production,
     tracking: nextTracking,
-    shippedAt: sale.shippedAt || (u.production !== 'in_production' ? day : ''),
+    shippedAt: sale.shippedAt || (u.production === 'shipped' || u.production === 'delivered' ? day : ''),
     notes: lines.length ? `${sale.notes ?? ''}\n${lines.join('\n')}`.trim() : sale.notes,
     updatedAt: now, updatedBy: u.by,
   }

@@ -130,10 +130,10 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   bank: 'Bank transfer', cash: 'Cash', other: 'Other',
 }
 
-export const PRODUCTION_STATUSES = ['not_started', 'in_production', 'completed', 'shipped', 'delivered', 'on_hold', 'cancelled'] as const
+export const PRODUCTION_STATUSES = ['not_started', 'in_production', 'sample_sent', 'completed', 'shipped', 'delivered', 'on_hold', 'cancelled'] as const
 export type ProductionStatus = (typeof PRODUCTION_STATUSES)[number]
 export const PRODUCTION_LABEL: Record<ProductionStatus, string> = {
-  not_started: 'Not started', in_production: 'In production', completed: 'Completed',
+  not_started: 'Not started', in_production: 'In production', sample_sent: 'Sample sent', completed: 'Completed',
   shipped: 'Shipped', delivered: 'Delivered', on_hold: 'On hold', cancelled: 'Cancelled',
 }
 
@@ -455,6 +455,7 @@ function toUsd(amount: number, currency: SaleCurrency, suggested: PkrRates | nul
 
 /** The goods are made: its costing is final, so its profit is real. */
 export function isMade(s: Pick<Sale, 'production' | 'tracking'>): boolean {
+  if (s.production === 'sample_sent') return false
   return s.production === 'completed' || s.production === 'shipped' || s.production === 'delivered' || !!(s.tracking ?? '').trim()
 }
 

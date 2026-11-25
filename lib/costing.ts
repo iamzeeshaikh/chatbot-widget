@@ -101,7 +101,7 @@ export function cleanCostLines(raw: unknown): SaleCost[] {
 }
 
 /** The production statuses the Costing page may set. */
-export const SHIPPING_STATUSES = ['in_production', 'shipped', 'delivered'] as const
+export const SHIPPING_STATUSES = ['in_production', 'sample_sent', 'shipped', 'delivered'] as const
 export type ShippingStatus = (typeof SHIPPING_STATUSES)[number]
 
 /** Clean what the shipping form posts: a status from the short list and a tracking number. */
