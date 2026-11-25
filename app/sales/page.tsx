@@ -27,7 +27,7 @@ import {
   STREAMS, STREAM_ORDER, SALE_CURRENCIES, PAYMENT_METHODS, PAYMENT_METHOD_LABEL,
   PRODUCTION_STATUSES, PRODUCTION_LABEL, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_STYLE,
   SALE_LEAD_KIND_LABEL, SALE_LEAD_KIND_ORDER, type SaleLeadKind,
-  figures, totals, isMade, money, shortDate, newId, parseAmount,
+  figures, totals, isMade, profitMonthOf, money, shortDate, newId, parseAmount,
   type Sale, type SaleView, type StreamInfo, type StreamTotals, type SalesStream,
   type RateInfo, type SaleCurrency, type PaymentMethod, type ProductionStatus,
 } from '@/lib/salescore'
@@ -367,7 +367,9 @@ export default function SalesPage() {
           and nothing else: expenses belong to the office, not to a website
           or an agent, so narrowing them by those would be meaningless. */}
       {(tab === 'pk_direct' || tab === 'master') && data.workspace === 'packaging' && (() => {
-        const direct = data.sales.filter((v) => v.sale.stream === 'pk_direct' && (!filters.month || monthKey(v.sale.orderDate) === filters.month))
+        // Profit is dated by profitMonthOf(): a sale paid in one month but made
+        // in a later one counts there (Krystian, owner 25 Nov), not in its order month.
+        const direct = data.sales.filter((v) => v.sale.stream === 'pk_direct' && (!filters.month || profitMonthOf(v.sale) === filters.month))
         const dt = totals(direct, data.rates?.rates ?? null)
         let costedProfit = 0, costedRevenue = 0, awaitingRevenue = 0
         for (const v of direct) {
@@ -388,7 +390,7 @@ export default function SalesPage() {
       {/* The office's expenses are not the partner's business (owner, 2026-10-29:
           "hamdan men ye show na karwao"). */}
       {tab !== 'pk_partner' && (
-        <ExpensesCard month={filters.month} monthProfitPkr={filters.month ? t.profitPkr : null} onChanged={() => setExpVersion((n) => n + 1)} />
+        <ExpensesCard month={filters.month} monthProfitPkr={filters.month && data ? totals(data.sales.filter((v) => profitMonthOf(v.sale) === filters.month), data.rates?.rates ?? null).profitPkr : null} onChanged={() => setExpVersion((n) => n + 1)} />
       )}
 
       <div id="sales-table" />

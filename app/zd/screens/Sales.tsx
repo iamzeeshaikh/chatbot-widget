@@ -18,7 +18,7 @@ import type { Workspace } from '@/lib/workspaces'
 import { pktDayKey } from '@/lib/datetime'
 import { SITE_DOMAINS } from '@/lib/sitedomains'
 import {
-  SALE_CURRENCIES, PAYMENT_METHODS, PAYMENT_METHOD_LABEL, PRODUCTION_STATUSES, PRODUCTION_LABEL,
+  SALE_CURRENCIES, PAYMENT_METHODS, PAYMENT_METHOD_LABEL, PRODUCTION_STATUSES, PRODUCTION_LABEL, profitMonthOf,
   PAYMENT_STATUS_LABEL, SALE_LEAD_KIND_LABEL, PAYOUT_ROUTES, PAYOUT_ROUTE_LABEL,
   EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL,
   figures, totals, money, shortDate, newId, parseAmount, streamsForWorkspace,
@@ -280,7 +280,7 @@ export default function Sales({ me, openLead, fromLead }: ZdScreenProps & {
   const t = useMemo(() => totals(rows, rates), [rows, rates])
   // Expenses belong to the office, not to an agent or a search, so their "net
   // after expenses" is set against the whole month.
-  const monthProfit = useMemo(() => (filters.month ? totals(inMonth, rates).profitPkr : null), [filters.month, inMonth, rates])
+  const monthProfit = useMemo(() => (filters.month ? totals(all.filter((v) => profitMonthOf(v.sale) === filters.month), rates).profitPkr : null), [filters.month, all, rates])
 
   if (!isAdmin || status === 'forbidden') {
     return (

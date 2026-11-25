@@ -15,7 +15,7 @@
 // tracker on that transaction (a hand fix, or an earlier run).
 
 import { readSales, writeSale } from './sales'
-import type { Sale } from './salescore'
+import { settleProfitMonth, type Sale } from './salescore'
 import type { ShippingStatus } from './costing'
 import type { Job } from './jobs'
 import { addTracking, carrierFor, hasTracker, paypalConfigured, type Carrier } from './paypalapi'
@@ -64,15 +64,15 @@ export async function applySaleShipping(
       : paypal.failed.length ? `PayPal did not take the tracking: ${paypal.failed[0]}`
       : paypal.already.length ? 'PayPal already had this tracking.' : ''
   }
-  const updated: Sale = {
+  const updated: Sale = settleProfitMonth({
     ...sale,
     production: u.production,
     tracking: nextTracking,
     shippedAt: sale.shippedAt || (u.production === 'shipped' || u.production === 'delivered' ? day : ''),
     notes: lines.length ? `${sale.notes ?? ''}\n${lines.join('\n')}`.trim() : sale.notes,
     updatedAt: now, updatedBy: u.by,
-  }
-  const changed = lines.length > 0 || updated.shippedAt !== sale.shippedAt
+  }, day)
+  const changed = lines.length > 0 || updated.shippedAt !== sale.shippedAt || updated.profitMonth !== sale.profitMonth
   const error = changed && !u.dryRun ? await writeSale(updated) : null
   return { updated, changed, paypalNote, paypal, error }
 }

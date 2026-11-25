@@ -234,6 +234,13 @@ export interface Sale {
   tracking?: string
   /** YYYY-MM-DD the parcel left, set the first time production says shipped. */
   shippedAt?: string
+  /**
+   * The month its PROFIT counts in, when that is not the order's month.
+   * 'pending' while only samples are out: the profit belongs to the month the
+   * real order is made, which is not known yet (owner, 25 Nov: Krystian paid in
+   * October, production later). Set by settleProfitMonth(); absent = order month.
+   */
+  profitMonth?: string | null
   salesPerson: string
   /** How the sale came about. */
   source: string
@@ -453,6 +460,24 @@ function toUsd(amount: number, currency: SaleCurrency, suggested: PkrRates | nul
   return (amount * src) / usd
 }
 
+const MADE = ['completed', 'shipped', 'delivered']
+
+/** YYYY-MM whose profit this sale counts in; null while it waits at the sample stage. */
+export function profitMonthOf(s: Pick<Sale, 'orderDate' | 'production' | 'profitMonth'>): string | null {
+  if (s.profitMonth === 'pending') return null
+  if (s.profitMonth) return s.profitMonth
+  if (s.production === 'sample_sent') return null
+  return (s.orderDate || '').slice(0, 7)
+}
+
+/** A sale that reaches the sample stage waits; once the real order is made its
+ *  profit is dated to that month. Every door that writes production calls this. */
+export function settleProfitMonth<T extends Pick<Sale, 'production' | 'profitMonth'>>(s: T, day: string): T {
+  if (s.production === 'sample_sent' && !s.profitMonth) return { ...s, profitMonth: 'pending' }
+  if (s.profitMonth === 'pending' && MADE.includes(s.production ?? '')) return { ...s, profitMonth: day.slice(0, 7) }
+  return s
+}
+
 /**
  * The ORDER is made, so its costing is final and its profit is real.
  *
@@ -614,7 +639,7 @@ export function cleanSale(
   const now = new Date().toISOString()
 
   return {
-    sale: {
+    sale: settleProfitMonth({
       id: prev?.id ?? newId('sale'),
       stream, workspace: ws,
       reference: text(r.reference, 80),
@@ -640,6 +665,7 @@ export function cleanSale(
       // Sales form predates these fields and must not wipe what production wrote.
       tracking: r.tracking === undefined ? (prev?.tracking ?? '') : text(r.tracking, 120),
       shippedAt: r.shippedAt === undefined ? (prev?.shippedAt ?? '') : date(r.shippedAt),
+      profitMonth: r.profitMonth === undefined ? (prev?.profitMonth ?? null) : (/^(\d{4}-\d{2}|pending)$/.test(String(r.profitMonth)) ? String(r.profitMonth) : null),
       salesPerson: text(r.salesPerson, 200),
       source: text(r.source, 300),
       counterparty: text(r.counterparty, 200),
@@ -649,7 +675,7 @@ export function cleanSale(
       createdBy: prev?.createdBy ?? actor,
       updatedAt: now,
       updatedBy: actor,
-    },
+    }, now.slice(0, 10)),
   }
 }
 

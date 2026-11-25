@@ -16,7 +16,7 @@
 
 import { readSales, writeSale } from './sales'
 import { addTracking, carrierFor, paypalConfigured } from './paypalapi'
-import type { ProductionStatus, Sale } from './salescore'
+import { settleProfitMonth, type ProductionStatus, type Sale } from './salescore'
 
 export const SHEET_ACTOR = 'sales-sheet'
 
@@ -204,7 +204,7 @@ export async function syncSalesSheet(now = new Date(), opts: { dryRun?: boolean 
     }
 
     if (!dirty || opts.dryRun) continue
-    const updated: Sale = { ...next, updatedAt: now.toISOString(), updatedBy: SHEET_ACTOR, notes: `${sale.notes ?? ''}\n${noteLines.join('\n')}`.trim() }
+    const updated: Sale = settleProfitMonth({ ...next, updatedAt: now.toISOString(), updatedBy: SHEET_ACTOR, notes: `${sale.notes ?? ''}\n${noteLines.join('\n')}`.trim() }, day)
     const err = await writeSale(updated)
     if (err) console.error('[sales-sheet] write failed', row.invoice, err)
   }
