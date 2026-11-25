@@ -824,6 +824,16 @@ the lead it was sent from (its `crm_pay_link`): a ZeeDesk lead means the
 ZeeDesk ledger, `zd_direct` and a push to the ZeeDesk team; a packaging lead,
 or an invoice with no lead, is packaging's. Nothing crosses between the two.
 
+### ZeeDesk home, calls and install (2026-11-25)
+
+`#` (no hash) is the Dashboard (`app/zd/screens/Dashboard.tsx`); Chats is
+`#chats`. Calls are the `'calls'` feature, which every `'telephony'` workspace
+also carries: the four call routes gate on `'calls'`, because `'telephony'`
+also means Twilio WhatsApp and ZeeDesk's WhatsApp is Meta's. ZeeDesk's line is
+`TWILIO_ZEEDESK_PHONE_NUMBER`. `/install` on a ZeeDesk host is `app/zd-install`
+(rewritten in `next.config.ts`), with its own icons in `public/zd-icons`. The
+formatted email box is `app/zd/RichEditor.tsx`, shared by Inbox and the record.
+
 ## Daily follow-ups (`/followups`, packaging admins)
 
 `lib/followups.ts` builds one Karachi day of outgoing follow-ups, customer
