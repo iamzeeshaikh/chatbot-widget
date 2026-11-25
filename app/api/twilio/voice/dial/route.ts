@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     return say('This line is not recognised.')
   }
 
-  const access = await guardLeadAccess(member, leadId, 'telephony')
+  const access = await guardLeadAccess(member, leadId, 'calls')
   if (!access.ok) return say('You are not allowed to call this contact.')
 
   // The agent's own workspace decides the caller ID — and guardLeadAccess has

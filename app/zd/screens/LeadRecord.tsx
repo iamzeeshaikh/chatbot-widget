@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, Banknote, Check, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, History,
   Image as ImageIcon, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircle, MessageSquare, Monitor, Paperclip, Pencil,
-  Plus, RefreshCw, Reply, Search, Send, Sparkles, StickyNote, Target, Trash2, TriangleAlert, UserCheck, X,
+  Phone, Plus, RefreshCw, Reply, Search, Send, Sparkles, StickyNote, Target, Trash2, TriangleAlert, UserCheck, X,
 } from 'lucide-react'
 import { dateDividerLabel, formatDateTime, formatDueLabel, formatShortDateTime, formatTime, timeAgo } from '@/lib/datetime'
 import { hasFeature, type Workspace } from '@/lib/workspaces'
@@ -36,6 +36,9 @@ import {
   type ZdScreenProps,
 } from '../ui'
 import LeadInvoices from './LeadInvoices'
+import RichEditor from '../RichEditor'
+import { requestBrowserCall } from '@/lib/softphonebus'
+import { plainToHtml } from '@/lib/richtext'
 
 type Field = 'name' | 'email' | 'phone'
 type Status = 'loading' | 'ok' | 'forbidden' | 'missing' | 'error'
@@ -94,6 +97,9 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
   const canTasks = hasFeature(ws, 'tasks')
   const canEmail = hasFeature(ws, 'email')
   const canWa = hasFeature(ws, 'whatsapp')
+  const canCall = hasFeature(ws, 'calls')
+  const [calling, setCalling] = useState(false)
+  const [callNote, setCallNote] = useState<{ text: string; bad: boolean } | null>(null)
   // A reason is asked for only where the server demands one for a move to Lost.
   const lostNeedsReason = hasFeature(ws, 'lost')
 
@@ -313,6 +319,24 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
   }
 
   // ── Notes ─────────────────────────────────────────────────────────────────
+  // In this tab when the softphone is registered (the agent talks through
+  // their headset); otherwise the server rings the agent's own phone and
+  // bridges the customer. The browser sends the lead id, never a number.
+  async function placeCall() {
+    if (!record) return
+    setCallNote(null)
+    const leadName = record.contact.name || 'Customer'
+    if (requestBrowserCall({ leadId: id, leadName })) return
+    setCalling(true)
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(id)}/call`, { method: 'POST' })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setCallNote({ text: typeof d.error === 'string' ? d.error : 'The call could not be placed.', bad: true }); return }
+      setCallNote({ text: 'Your phone is ringing. Answer it and you are connected to the customer.', bad: false })
+      await load()
+    } catch { setCallNote({ text: 'The call could not be placed.', bad: true }) } finally { setCalling(false) }
+  }
+
   async function addNote(body: string) {
     await call('/notes', { body })
     stick.current = true
@@ -443,6 +467,15 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
                 locked={!!record.contactsHidden}
                 edited={record.overriddenFields.includes('phone')} captured={record.captured.phone} onSave={(v) => saveField('phone', v)} />
             </div>
+            {canCall && (
+              <div className="mt-2">
+                <button type="button" onClick={() => void placeCall()} disabled={!record.contact.phone || calling} className={`${BTN_PLAIN} w-full justify-center`}
+                  title={record.contact.phone ? 'Call this lead from your browser. They see the desk number, never yours.' : 'Add a phone number first'}>
+                  <Phone size={14} aria-hidden />{calling ? 'Ringing your phone…' : 'Call'}
+                </button>
+                {callNote && <p role={callNote.bad ? 'alert' : 'status'} className={`mt-1 text-[12px] ${callNote.bad ? 'text-[#cc3340]' : 'text-[#68737d]'}`}>{callNote.text}</p>}
+              </div>
+            )}
           </section>
 
           <section aria-label="Properties" className="space-y-3">
@@ -1440,7 +1473,7 @@ function NoteBox({ onAdd }: { onAdd: (body: string) => Promise<void> }) {
 // and addresses the message itself for anyone who is not an admin. What is
 // typed is kept in this browser until the send succeeds.
 
-interface EmailDraft { from: string; to: string; cc: string; subject: string; body: string }
+interface EmailDraft { from: string; to: string; cc: string; subject: string; body: string; html: string }
 
 function readDraft(leadId: string): Partial<EmailDraft> {
   try {
@@ -1459,6 +1492,8 @@ function EmailBox({ leadId, leadEmail, siteId, siteName, contactsHidden, recipie
     const str = (v: unknown) => (typeof v === 'string' ? v : '')
     return {
       from: str(d.from), cc: str(d.cc), body: str(d.body),
+      // A draft kept before the formatted box existed has only plain text.
+      html: str(d.html) || (str(d.body) ? plainToHtml(str(d.body)) : ''),
       to: replyTo?.to || str(d.to) || leadEmail,
       subject: replyTo ? replyTo.subject : str(d.subject),
     }
@@ -1553,7 +1588,7 @@ function EmailBox({ leadId, leadEmail, siteId, siteName, contactsHidden, recipie
     setError(''); setRetryable(false); setSentNote(''); setSending(true)
     try {
       const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/email`, postJson({
-        from, to: draft.to, cc: showCc && !contactsHidden ? draft.cc : '', subject: draft.subject, body: draft.body, html: '',
+        from, to: draft.to, cc: showCc && !contactsHidden ? draft.cc : '', subject: draft.subject, body: draft.body, html: draft.html,
         replyToGmailId: replyTo?.replyToGmailId,
         attachments: files.filter((f) => f.path).map((f) => ({ path: f.path, name: f.name, mime: f.mime, size: f.size })),
       }))
@@ -1566,7 +1601,7 @@ function EmailBox({ leadId, leadEmail, siteId, siteName, contactsHidden, recipie
       }
       // Only now is it safe to let go of what was typed.
       try { localStorage.removeItem(`zd-email-draft-${leadId}`) } catch { /* ignore */ }
-      setDraft((d) => ({ ...d, cc: '', subject: '', body: '' }))
+      setDraft((d) => ({ ...d, cc: '', subject: '', body: '', html: '' }))
       setShowCc(false); setFiles([])
       setSentNote(typeof j.warning === 'string' && j.warning ? j.warning : 'Email sent.')
       onSent()
@@ -1638,9 +1673,8 @@ function EmailBox({ leadId, leadEmail, siteId, siteName, contactsHidden, recipie
           <label htmlFor="zd-mail-subject" className={ROW_LABEL}>Subject</label>
           <input id="zd-mail-subject" value={draft.subject} maxLength={300} required placeholder="What is this about?" onChange={(e) => set({ subject: e.target.value })} className={`${ROW_INPUT} font-medium`} />
         </div>
-        <textarea value={draft.body} rows={5} aria-label="Message" placeholder="Write your message. Your signature is added when it sends."
-          onChange={(e) => set({ body: e.target.value })}
-          className="block w-full px-2.5 py-2 bg-transparent outline-none resize-y leading-5 placeholder:text-[#87929d]" />
+        <RichEditor html={draft.html} placeholder="Write your message. Your signature is added when it sends."
+          onChange={(html, text) => set({ html, body: text })} onDropFiles={(f) => void addFiles(f)} onDragStateChange={() => {}} />
         {files.length > 0 && (
           <ul className="border-t border-[#e9ebed] px-2.5 py-2 space-y-1" aria-label="Attachments">
             {files.map((f) => (

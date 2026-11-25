@@ -27,7 +27,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!hasFeature(member.workspace, 'telephony')) {
+  if (!hasFeature(member.workspace, 'calls')) {
     return NextResponse.json({ error: 'Calling is not available on this dashboard.' }, { status: 403 })
   }
 

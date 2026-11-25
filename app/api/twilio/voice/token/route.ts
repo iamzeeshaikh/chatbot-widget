@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const member = await getMember(req)
   if (!member) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  if (!hasFeature(member.workspace, 'telephony')) {
+  if (!hasFeature(member.workspace, 'calls')) {
     return NextResponse.json({ error: 'Calling is not available for this workspace.' }, { status: 403 })
   }
 
