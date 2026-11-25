@@ -117,6 +117,7 @@ export default function ZdApp() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [visitors, setVisitors] = useState<LiveVisitor[]>([])
+  const [liveChatCount, setLiveChatCount] = useState(0)
   const [leads, setLeads] = useState<LeadRow[] | null>(null)
   const [sound, setSound] = useState(() => { try { return typeof localStorage === 'undefined' || localStorage.getItem('zd-sound') !== 'off' } catch { return true } })
   const [showInfo, setShowInfo] = useState(true)
@@ -181,6 +182,8 @@ export default function ZdApp() {
     if (fresh && soundRef.current) chatDing()
     seeded.current = true
     setSessions(list)
+    const cutoff = Date.now() - 30 * 60 * 1000
+    setLiveChatCount(list.filter((s) => Date.parse(s.last_at) > cutoff || (s.last_role === 'user' && !s.assignedTo)).length)
     setLoaded(true)
   }, [])
 
@@ -344,6 +347,14 @@ export default function ZdApp() {
 
   // ── Derived queue ──
   const waiting = useMemo(() => sessions.filter((s) => s.last_role === 'user' && !s.assignedTo), [sessions])
+  // The Chats badge counts every chat that is LIVE — any message in the last
+  // 30 minutes (the widget's own session gap), whoever wrote last, plus any
+  // older chat still waiting unassigned. It used to count only the waiting
+  // ones, so an agent saw "2" on Visitors and nothing on Chats while two
+  // conversations were in progress (owner, 2026-11-25). Recomputed on every
+  // 10 s poll, so a chat drops off the count on its own as it goes quiet.
+  // Counted inside the poll (not during render): the clock is read once per
+  // fetch, so the number is stable between renders.
   const mine = useMemo(() => sessions.filter((s) => me && s.assignedTo === me.email), [sessions, me])
   const queue = useMemo(() => {
     const base = view === 'unassigned' ? waiting : view === 'mine' ? mine : sessions
@@ -374,7 +385,7 @@ export default function ZdApp() {
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden><path d="M4 5h16L8 19h12" fill="none" stroke={KALE} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </div>
         <RailButton icon={<LayoutDashboard size={20} />} label="Dashboard" text="Home" active={section === 'home'} onClick={() => setSection('home')} />
-        <RailButton icon={<MessageSquare size={20} />} label="Chats" text="Chats" active={section === 'chats'} badge={waiting.length} onClick={() => setSection('chats')} />
+        <RailButton icon={<MessageSquare size={20} />} label="Chats" text="Chats" active={section === 'chats'} badge={liveChatCount} onClick={() => setSection('chats')} />
         <RailButton icon={<Users size={20} />} label="Visitors on your sites" text="Visitors" active={section === 'visitors'} badge={visitors.length} onClick={() => setSection('visitors')} />
         <RailButton icon={<Contact size={20} />} label="Leads" text="Leads" active={section === 'leads' || section === 'lead'} onClick={() => setSection('leads')} />
         {hasFeature(ws, 'email') && <RailButton icon={<Inbox size={20} />} label="Inbox" text="Inbox" active={section === 'inbox'} onClick={() => setSection('inbox')} />}
