@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  MessageSquare, Users, Inbox, KanbanSquare, CheckSquare, BarChart3, UserCog, LogOut, Volume2, VolumeX,
+  LayoutDashboard, MessageSquare, Users, Inbox, KanbanSquare, CheckSquare, BarChart3, UserCog, LogOut, Volume2, VolumeX,
   Paperclip, Send, Search, UserRound, Globe, Monitor, MapPin, Clock, FileText, X, ChevronRight, Contact, CircleDollarSign,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
@@ -27,6 +27,7 @@ import InboxScreen from './screens/Inbox'
 import Reports from './screens/Reports'
 import Sales from './screens/Sales'
 import Team from './screens/Team'
+import Dashboard from './screens/Dashboard'
 
 interface Session { session_id: string; site_id: string; site_name: string; preview: string; last_at: string; message_count: number; last_role?: string; mode: string; lead: { name: string | null; email: string | null } | null; tags?: string[]; assignedTo?: string | null }
 interface ChatMsg { id: string; session_id: string; site_id: string; role: string; message: string; created_at: string; author?: string | null }
@@ -42,9 +43,9 @@ interface VisitorDetail {
 }
 interface LeadRow { id: string; site_id: string; name: string | null; email: string | null; phone: string | null; message: string | null; created_at: string; product?: string | null; quantity?: string | null; session_id?: string | null; owner?: string | null; stage?: string; notALead?: boolean }
 
-type Section = 'chats' | 'visitors' | 'leads' | 'inbox' | 'pipeline' | 'tasks' | 'reports' | 'sales' | 'team' | 'lead'
+type Section = 'home' | 'chats' | 'visitors' | 'leads' | 'inbox' | 'pipeline' | 'tasks' | 'reports' | 'sales' | 'team' | 'lead'
 type View = 'unassigned' | 'mine' | 'all'
-const SECTIONS: readonly Section[] = ['chats', 'visitors', 'leads', 'inbox', 'pipeline', 'tasks', 'reports', 'sales', 'team']
+const SECTIONS: readonly Section[] = ['home', 'chats', 'visitors', 'leads', 'inbox', 'pipeline', 'tasks', 'reports', 'sales', 'team']
 
 const visitorName = (s: Session) => s.lead?.name || s.lead?.email || `Visitor ${s.session_id.slice(-4).toUpperCase()}`
 
@@ -55,7 +56,7 @@ function readHash(): { section: Section; leadId: string } {
   const h = typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, '')
   if (h.startsWith('lead/')) { const id = decodeURIComponent(h.slice(5)); if (id) return { section: 'lead', leadId: id } }
   if (h.startsWith('sales/lead/')) return { section: 'sales', leadId: decodeURIComponent(h.slice(11)) }
-  return { section: (SECTIONS as readonly string[]).includes(h) ? (h as Section) : 'chats', leadId: '' }
+  return { section: (SECTIONS as readonly string[]).includes(h) ? (h as Section) : 'home', leadId: '' }
 }
 
 function RailButton({ icon, label, text, active, badge, onClick }: { icon: React.ReactNode; label: string; text: string; active?: boolean; badge?: number; onClick?: () => void }) {
@@ -71,7 +72,7 @@ function RailButton({ icon, label, text, active, badge, onClick }: { icon: React
 
 export default function ZdApp() {
   const [me, setMe] = useState<Me | null>(null)
-  const [section, setSectionState] = useState<Section>('chats')
+  const [section, setSectionState] = useState<Section>('home')
   const [leadId, setLeadId] = useState('')
   const [leadQuery, setLeadQuery] = useState('')
   const backTo = useRef<Section>('leads')
@@ -118,7 +119,7 @@ export default function ZdApp() {
     window.addEventListener('hashchange', sync)
     return () => { clearTimeout(first); window.removeEventListener('hashchange', sync) }
   }, [])
-  const setSection = useCallback((next: Section) => { window.location.hash = next === 'chats' ? '' : next }, [])
+  const setSection = useCallback((next: Section) => { window.location.hash = next === 'home' ? '' : next }, [])
   const openLead = useCallback((recordId: string) => {
     const from = readHash().section
     if (from !== 'lead') backTo.current = from
@@ -296,6 +297,7 @@ export default function ZdApp() {
         <div className="w-9 h-9 mb-3 rounded-lg bg-white/95 flex items-center justify-center" title="ZeeDesk">
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden><path d="M4 5h16L8 19h12" fill="none" stroke={KALE} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </div>
+        <RailButton icon={<LayoutDashboard size={20} />} label="Dashboard" text="Home" active={section === 'home'} onClick={() => setSection('home')} />
         <RailButton icon={<MessageSquare size={20} />} label="Chats" text="Chats" active={section === 'chats'} badge={waiting.length} onClick={() => setSection('chats')} />
         <RailButton icon={<Users size={20} />} label="Visitors on your sites" text="Visitors" active={section === 'visitors'} onClick={() => setSection('visitors')} />
         <RailButton icon={<Contact size={20} />} label="Leads" text="Leads" active={section === 'leads' || section === 'lead'} onClick={() => setSection('leads')} />
@@ -310,6 +312,8 @@ export default function ZdApp() {
         <RailButton icon={<LogOut size={20} />} label="Sign out" text="Sign out" onClick={logout} />
         <div className="mt-1" title={me.email}><Avatar label={short(me.email)} tone="agent" size={34} /></div>
       </nav>
+
+      {section === 'home' && <Dashboard {...screen} waiting={waiting.map((w) => ({ session_id: w.session_id, site_id: w.site_id, site_name: w.site_name, preview: w.preview, last_at: w.last_at, name: visitorName(w) }))} />}
 
       {section === 'chats' && (
         <>
