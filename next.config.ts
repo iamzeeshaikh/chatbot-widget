@@ -17,7 +17,8 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [
         { source: '/widget.js', has: zeedesk, destination: '/_not-found' },
-        { source: '/install', has: zeedesk, destination: '/_not-found' },
+        // ZeeDesk has its own install page; the ZeeOps one never shows there.
+        { source: '/install', has: zeedesk, destination: '/zd-install' },
       ],
     }
   },

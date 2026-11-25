@@ -46,6 +46,9 @@ const ZEEDESK_METADATA: Metadata = {
   title: "ZeeDesk",
   description: "ZeeDesk workspace",
   appleWebApp: { capable: true, title: "ZeeDesk", statusBarStyle: "default" },
+  // Its own tab and home-screen icons. Declared here on purpose: `icons`
+  // overrides the app/ icon files, which carry the other dashboards' mark.
+  icons: { icon: [{ url: "/zd-icons/icon.svg", type: "image/svg+xml" }, { url: "/zd-icons/icon-192.png", sizes: "192x192", type: "image/png" }], apple: "/zd-icons/apple-icon.png" },
   other: { google: "notranslate" },
 };
 

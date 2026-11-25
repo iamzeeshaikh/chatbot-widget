@@ -164,8 +164,8 @@ export default function LoginForm({ workspace }: { workspace: Workspace | null }
 // Its own sign-in, not the ZeeOps card with another name (owner, 25 Nov: "ye
 // same zeeops wala hai, modern rakho"). Split screen in the ZeeDesk palette —
 // the deep teal app bar (#03363d) and its blue (#1f73b7) — with a Z mark of its
-// own. Nothing on it says ZeeOps. No install link: /install is ZeeOps-only
-// and is a not-found page on the ZeeDesk hosts.
+// own. Nothing on it says ZeeOps. /install on a ZeeDesk host is ZeeDesk's
+// own install page (app/zd-install).
 
 function ZeeDeskMark({ size = 40 }: { size?: number }) {
   return (
@@ -243,6 +243,9 @@ function ZeeDeskLogin({ email, setEmail, password, setPassword, error, loading, 
             </button>
           </form>
 
+          <a href="/install" className="mt-8 flex items-center justify-center gap-2 rounded-xl border border-[#e9ebed] px-4 py-3 text-sm font-medium text-[#1f73b7] transition hover:bg-[#f8f9f9]">
+            <Download size={15} aria-hidden /> Install ZeeDesk as an app
+          </a>
         </div>
       </main>
     </div>

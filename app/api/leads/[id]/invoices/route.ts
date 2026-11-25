@@ -52,6 +52,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   // A new invoice starts from what the CRM already knows: the customer, the
   // address and item the conversation mentioned, the agent's own name.
   const prefill: InvoiceDoc = blankInvoice()
+  // ZeeDesk's sites never promise free shipping or a number of days (their
+  // assistant prompts say so); both are confirmed per order on the quote. The
+  // ZeeOps defaults would print exactly those promises on every new invoice.
+  if (ws === 'zeedesk') {
+    prefill.notes = ['No extra or hidden charges', 'Free 2D and 3D mockups', 'Free design support'].join('\n')
+    prefill.terms = 'Production and delivery times as confirmed on your custom quote'
+  }
   prefill.agentName = agentName
   prefill.date = today
   prefill.dueDate = today
