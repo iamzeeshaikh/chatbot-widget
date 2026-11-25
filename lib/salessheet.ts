@@ -117,8 +117,8 @@ export async function fetchSheetRows(sheetId: string, now = new Date()): Promise
 export function productionFor(status: string): ProductionStatus | null {
   const s = status.toLowerCase()
   if (/deliver/.test(s)) return 'delivered'
-  // "Sample shipping", "sample sent": the order itself is not made yet.
-  if (/sample/.test(s) && /ship|sent|dispatch/.test(s)) return 'sample_sent'
+  // "Sample production", "sample shipping": the order itself is not made yet.
+  if (/sample/.test(s)) return 'sample_sent'
   if (/ship/.test(s)) return 'shipped'
   if (/production|sample|printing|in progress/.test(s)) return 'in_production'
   if (/hold/.test(s)) return 'on_hold'

@@ -453,10 +453,18 @@ function toUsd(amount: number, currency: SaleCurrency, suggested: PkrRates | nul
   return (amount * src) / usd
 }
 
-/** The goods are made: its costing is final, so its profit is real. */
-export function isMade(s: Pick<Sale, 'production' | 'tracking'>): boolean {
-  if (s.production === 'sample_sent') return false
-  return s.production === 'completed' || s.production === 'shipped' || s.production === 'delivered' || !!(s.tracking ?? '').trim()
+/**
+ * The ORDER is made, so its costing is final and its profit is real.
+ *
+ * Only the production status says so. A tracking number alone does not: on
+ * Krystian, May Chen and Hanna it was the samples' parcel. And a sale whose
+ * only costs are sample costs is not made either — its real production has
+ * not been costed yet, so revenue minus the sample is not a profit.
+ */
+export function isMade(s: Pick<Sale, 'production' | 'costs'>): boolean {
+  if (s.production !== 'completed' && s.production !== 'shipped' && s.production !== 'delivered') return false
+  const costs = s.costs ?? []
+  return !(costs.length > 0 && costs.every((c) => /sample/i.test(`${c.label ?? ''} ${c.note ?? ''}`)))
 }
 
 export function totals(views: SaleView[], suggested: PkrRates | null): StreamTotals {
