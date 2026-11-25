@@ -612,13 +612,16 @@
     // sites, closing the panel now only lasts until the next page. If visitors
     // start bouncing over it, this is the flag to flip back.
     //
-    // Per-site off switch (owner, 5 Nov 2026): `/api/site-config` sends
-    // `widget.autoOpen: false` for every packaging site — on a phone the panel
-    // is fullscreen, so opening it unasked a few seconds into the page is the
-    // intrusive interstitial Google penalises. The bubble stays bottom-right
-    // and the panel opens only on a tap. Sports gets no such flag and keeps
-    // auto-opening exactly as before.
+    // Per-site switches from `/api/site-config` (packaging + ZeeDesk sites):
+    // `widget.autoOpen: false` turns auto-open off entirely, and
+    // `widget.autoOpenMobile: false` keeps it off on phones only — there the
+    // panel is fullscreen (see the 767px media query above), so opening it
+    // unasked a few seconds into the page is the intrusive interstitial Google
+    // penalises (owner, 5 Nov 2026). Desktop auto-opens again since 25 Nov
+    // 2026 (owner: "auto pop up ana chahie"). Sports gets no flags and keeps
+    // auto-opening everywhere exactly as before.
     if (widgetOptions().autoOpen === false) return;
+    if (widgetOptions().autoOpenMobile === false && window.matchMedia && window.matchMedia('(max-width: 767px)').matches) return;
     var autoOpenEveryPage = true;
     setTimeout(function () {
       console.log('widget auto-open timer fired, already open=' + widget.classList.contains('open'));

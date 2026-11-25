@@ -82,11 +82,14 @@ export async function GET(req: NextRequest) {
     // prompt bot answers first and the form lands just after it. Any lower and
     // a slow LLM turn lets the form beat its own answer onto the screen.
     ? { size: 'large', leadMessage: true, leadPrompt: { idleMs: 2000, minMessages: 1, activeConvoMs: 0 } }
-    // autoOpen false (owner, 5 Nov 2026): on a phone the panel is fullscreen,
-    // so a panel that opens itself a few seconds after the page loads is the
-    // intrusive interstitial Google penalises. Packaging only — the bubble
-    // stays bottom-right and opens on a tap; sports keeps its own behaviour.
-    : { size: 'default', autoOpen: false }
+    // autoOpen desktop-only (owner, 25 Nov 2026: "auto pop up ana chahie").
+    // On 5 Nov it was switched off everywhere because on a phone the panel is
+    // fullscreen, and a panel that opens itself a few seconds into the page is
+    // the intrusive interstitial Google penalises. That reason still holds on
+    // phones, so `autoOpenMobile: false` keeps the phone bubble tap-to-open;
+    // desktop (and ZeeDesk sites, which share this branch) auto-opens again.
+    // Sports keeps its own behaviour (no flags = opens everywhere, as before).
+    : { size: 'default', autoOpen: true, autoOpenMobile: false }
 
   // bot_enabled lets the widget swap the bot-persona greeting for a neutral
   // "our team" one where the bot is off (lib/botflag.ts — per workspace now).
