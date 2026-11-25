@@ -18,7 +18,7 @@ import {
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { hasFeature } from '@/lib/workspaces'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
-import { chatDing, replyDing, unlockSound } from './sound'
+import { chatDing, replyDing, visitorDing, unlockSound } from './sound'
 import { Avatar, Empty, PageHead, Table, Td, INPUT, KALE, short, postJson as json, type Me } from './ui'
 import LeadRecord from './screens/LeadRecord'
 import Pipeline from './screens/Pipeline'
@@ -48,6 +48,36 @@ type View = 'unassigned' | 'mine' | 'all'
 const SECTIONS: readonly Section[] = ['home', 'chats', 'visitors', 'leads', 'inbox', 'pipeline', 'tasks', 'reports', 'sales', 'team']
 
 const visitorName = (s: Session) => s.lead?.name || s.lead?.email || `Visitor ${s.session_id.slice(-4).toUpperCase()}`
+
+// Live visitors are polled on this beat on EVERY screen: it is the worst-case
+// delay between a customer landing on a site and the agent's doorbell, so it
+// is kept as tight as the ZeeOps dashboard's (app/page.tsx VISITOR_POLL_MS).
+const VISITOR_POLL_MS = 5 * 1000
+
+// What an agent on another tab actually notices. A sound is useless there (a
+// browser will not play one on a hidden tab anyway), so a desktop notification
+// is drawn by the OS over whatever they are looking at, and the count in the
+// tab title is the fallback when permission was never granted. Mirrors
+// awayAlert in app/page.tsx. Cleared the moment the tab is looked at again.
+let awayUnread = 0
+let awayBaseTitle = ''
+function awayAlert(title: string, body: string) {
+  if (typeof document === 'undefined' || !document.hidden) return
+  awayUnread += 1
+  if (!awayBaseTitle) awayBaseTitle = document.title.replace(/^\(\d+\)\s*/, '')
+  document.title = `(${awayUnread}) ${awayBaseTitle}`
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const n = new Notification(title, { body, tag: 'zeedesk-away', icon: '/icon.svg' })
+      n.onclick = () => { window.focus(); n.close() }
+    }
+  } catch { /* a browser that refuses is not worth breaking the poll over */ }
+}
+function awayClear() {
+  if (typeof document === 'undefined') return
+  awayUnread = 0
+  if (awayBaseTitle) document.title = awayBaseTitle
+}
 
 // The address bar carries the open screen, so a reload or a shared link lands
 // on the same place: #pipeline, or #lead/<record id>. #sales/lead/<record id>
@@ -104,10 +134,18 @@ export default function ZdApp() {
       if (!m?.email) { window.location.href = '/login'; return }
       setMe(m)
     }).catch(() => { window.location.href = '/login' })
-    const unlock = () => unlockSound()
+    // The first click also asks for desktop-notification permission, so the
+    // arrival/message alerts can reach an agent working on another tab. A
+    // browser only lets a page ask after a gesture, which is why it sits here.
+    const unlock = () => {
+      unlockSound()
+      try { if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission() } catch { /* ignore */ }
+    }
     window.addEventListener('pointerdown', unlock, { once: true })
     window.addEventListener('keydown', unlock, { once: true })
-    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock) }
+    const onVisible = () => { if (!document.hidden) awayClear() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
 
   // ── Which screen is open ──
@@ -154,7 +192,20 @@ export default function ZdApp() {
     return () => { clearTimeout(first); clearInterval(t) }
   }, [me, loadSessions])
 
-  const open = useMemo(() => sessions.find((s) => s.session_id === openId) ?? null, [sessions, openId])
+  // A chat opened from the Visitors list has usually not been written in yet,
+  // so it is not in `sessions`. It used to fall through to the empty "Pick a
+  // chat" pane (owner, 2026-11-25: "clicked the visitor and nothing shows").
+  // Stand a session up from the live-visitor row instead, so the agent gets a
+  // header and a composer and can say hello first; the widget's open panel
+  // polls for replies, so the greeting lands on the visitor's screen.
+  const open = useMemo<Session | null>(() => {
+    if (!openId) return null
+    const known = sessions.find((s) => s.session_id === openId)
+    if (known) return known
+    const v = visitors.find((x) => x.session_id === openId)
+    if (!v) return null
+    return { session_id: v.session_id, site_id: v.site_id, site_name: v.site_name, preview: '', last_at: v.last_seen, message_count: 0, mode: 'bot', lead: null, assignedTo: null }
+  }, [sessions, visitors, openId])
 
   const loadMessages = useCallback(async (id: string) => {
     const data = await fetch(`/api/admin/messages?sessionId=${encodeURIComponent(id)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
@@ -173,14 +224,39 @@ export default function ZdApp() {
 
   useEffect(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight }, [messages])
 
-  // ── Live visitors and leads load when their section is opened ──
+  // ── Live visitors: polled on every screen, so an arrival always rings ──
+  // It used to load only while the Visitors screen was open, so an agent on
+  // Chats or Home heard nothing when a customer landed (owner, 2026-11-25).
+  // Any BRAND-NEW session gets the doorbell plus, on a hidden tab, a desktop
+  // notification. Seeded silently on the first poll so opening the app to two
+  // visitors already browsing is not two events. A hidden tab polls on a
+  // slower beat (every fourth tick) rather than not at all, so the alert can
+  // still reach the agent wherever they are.
+  const prevVisitorIds = useRef<Set<string>>(new Set())
+  const visitorsSeeded = useRef(false)
+  const loadVisitors = useCallback(async () => {
+    const d = await fetch('/api/visitor/active').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (!d) return
+    const list: LiveVisitor[] = d.visitors ?? []
+    const arrivals = list.filter((v) => !prevVisitorIds.current.has(v.session_id))
+    if (visitorsSeeded.current && arrivals.length > 0) {
+      if (soundRef.current) visitorDing()
+      awayAlert(arrivals.length === 1 ? 'Someone is on your site' : `${arrivals.length} visitors are on your sites`, arrivals[0].site_name || 'A visitor just arrived')
+    }
+    visitorsSeeded.current = true
+    prevVisitorIds.current = new Set(list.map((v) => v.session_id))
+    setVisitors(list)
+  }, [])
   useEffect(() => {
-    if (!me || section !== 'visitors') return
-    const load = () => fetch('/api/visitor/active').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setVisitors(d.visitors ?? []) }).catch(() => {})
-    load()
-    const t = setInterval(() => { if (!document.hidden) load() }, 10000)
-    return () => clearInterval(t)
-  }, [me, section])
+    if (!me) return
+    const first = setTimeout(loadVisitors, 0)
+    let missed = 0
+    const t = setInterval(() => {
+      if (!document.hidden) { missed = 0; loadVisitors(); return }
+      if (++missed >= 4) { missed = 0; loadVisitors() }
+    }, VISITOR_POLL_MS)
+    return () => { clearTimeout(first); clearInterval(t) }
+  }, [me, loadVisitors])
 
   useEffect(() => {
     if (!me || section !== 'leads') return
@@ -299,7 +375,7 @@ export default function ZdApp() {
         </div>
         <RailButton icon={<LayoutDashboard size={20} />} label="Dashboard" text="Home" active={section === 'home'} onClick={() => setSection('home')} />
         <RailButton icon={<MessageSquare size={20} />} label="Chats" text="Chats" active={section === 'chats'} badge={waiting.length} onClick={() => setSection('chats')} />
-        <RailButton icon={<Users size={20} />} label="Visitors on your sites" text="Visitors" active={section === 'visitors'} onClick={() => setSection('visitors')} />
+        <RailButton icon={<Users size={20} />} label="Visitors on your sites" text="Visitors" active={section === 'visitors'} badge={visitors.length} onClick={() => setSection('visitors')} />
         <RailButton icon={<Contact size={20} />} label="Leads" text="Leads" active={section === 'leads' || section === 'lead'} onClick={() => setSection('leads')} />
         {hasFeature(ws, 'email') && <RailButton icon={<Inbox size={20} />} label="Inbox" text="Inbox" active={section === 'inbox'} onClick={() => setSection('inbox')} />}
         {hasFeature(ws, 'pipeline') && <RailButton icon={<KanbanSquare size={20} />} label="Pipeline" text="Pipeline" active={section === 'pipeline'} onClick={() => setSection('pipeline')} />}
@@ -426,7 +502,9 @@ export default function ZdApp() {
                       </div>
                     )
                   })}
-                  {messages.length === 0 && <p className="text-[13px] text-[#68737d]">Loading the conversation…</p>}
+                  {messages.length === 0 && (open.message_count === 0
+                    ? <p className="text-[13px] text-[#68737d]">This visitor is browsing {open.site_name} and has not written yet. Say hello below to start the chat — it opens on their screen.</p>
+                    : <p className="text-[13px] text-[#68737d]">Loading the conversation…</p>)}
                 </div>
 
                 <footer className="shrink-0 border-t border-[#d8dcde] px-5 py-3 bg-[#f8f9f9]">

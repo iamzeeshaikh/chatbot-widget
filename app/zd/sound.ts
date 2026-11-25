@@ -56,6 +56,24 @@ export function chatDing() {
   } catch { /* sound is never worth an error */ }
 }
 
+/** A visitor just landed on one of the sites: a doorbell, two descending
+ *  notes (G5 then E5), bright enough to turn a head but shorter than the
+ *  chat marimba so an arrival never sounds like a message waiting. The owner
+ *  asked for this on 2026-11-25 after watching a visitor arrive in silence. */
+export function visitorDing() {
+  const c = audio()
+  if (!c) return
+  try {
+    unlockSound()
+    const out = output(c, 0.9)
+    const t0 = c.currentTime
+    for (const [freq, delay, len] of [[784, 0, 0.5], [659, 0.22, 0.75]] as const) {
+      tone(c, out, freq, t0 + delay, len, 0.9)
+      tone(c, out, freq * 3, t0 + delay, len * 0.3, 0.14)
+    }
+  } catch { /* sound is never worth an error */ }
+}
+
 /** A customer answered by email: one clear glass bell, struck twice. */
 export function replyDing() {
   const c = audio()

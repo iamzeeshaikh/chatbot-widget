@@ -245,6 +245,9 @@
   var audioCtx = null;
   var landingSoundPlayed = false;
   var interactionUnlockBound = false;
+  // Set when the auto-open bell could not sound yet (no gesture): the landing
+  // ding then plays at full bell volume on the first interaction instead.
+  var autoOpenBellPending = false;
 
   // ─── Cross-page quiet rules ─────────────────────────────────────────────────
   // Everything below is stored in localStorage, NOT in page variables, because a
@@ -634,8 +637,37 @@
         console.log('widget open class set: ' + widget.classList.contains('open'));
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="white" width="26" height="26"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
         openConversation();
+        playAutoOpenBell();
       }
     }, 5000);
+  }
+
+  // The bell that goes with the auto-open (owner, 25 Nov 2026: a visitor must
+  // hear that a message has landed). Browsers refuse to make a sound before
+  // the visitor has clicked, tapped or typed on the page, so: if audio is
+  // already allowed the full-volume chime plays now; if not, the greeting's
+  // markLandingDing() is undone so the first-interaction unlock (which only
+  // fires the landing ding once) rings the moment they first touch the page.
+  // Quiet after a dismissal, like every other announcement sound.
+  function playAutoOpenBell() {
+    if (wasDismissed() || isMuted()) return;
+    var ctx = getAudioCtx();
+    if (!ctx) return;
+    var ring = function () {
+      if (ctx.state !== 'running') {
+        landingSoundPlayed = false;
+        lsDel(DING_KEY);
+        autoOpenBellPending = true;
+        interactionUnlockBound = false; // re-arm even if the first gesture already came and went
+        bindInteractionUnlock();
+        return;
+      }
+      markLandingDing();
+      playChime(1.0);
+    };
+    var resume = (ctx.state === 'suspended' && ctx.resume) ? ctx.resume() : null;
+    if (resume && typeof resume.then === 'function') { resume.then(ring).catch(function () {}); }
+    else { ring(); }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -1121,7 +1153,9 @@
       if (landingDingDone() || wasDismissed()) return;
       if (ctx.state !== 'running') return; // still blocked — wait for interaction
       markLandingDing();
-      playChime(0.55);
+      var loud = autoOpenBellPending;
+      autoOpenBellPending = false;
+      playChime(loud ? 1.0 : 0.55);
     };
     if (resume && typeof resume.then === 'function') { resume.then(go).catch(function () {}); }
     else { go(); }
