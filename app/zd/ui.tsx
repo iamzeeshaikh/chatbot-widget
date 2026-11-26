@@ -37,7 +37,9 @@ export const ORANGE = '#e34f32'
 export const GREEN = '#038153'
 export const AMBER = '#ad5918'
 
-export const short = (email: string | null | undefined) => (email ? email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '')
+// The assistant's internal actor id must never be printed here: it carries the
+// other desk's name.
+export const short = (email: string | null | undefined) => (email === 'zeeops-bot' ? 'Assistant' : email ? email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '')
 export const initials = (s: string) => (s.trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2) || '?').toUpperCase()
 export const postJson = (body: unknown, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE' = 'POST'): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
