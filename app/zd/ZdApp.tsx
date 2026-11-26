@@ -12,13 +12,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  LayoutDashboard, MessageSquare, Users, Inbox, KanbanSquare, CheckSquare, BarChart3, UserCog, LogOut, Volume2, VolumeX,
+  LayoutDashboard, MessageSquare, Users, Inbox, KanbanSquare, CheckSquare, BarChart3, UserCog, LogOut, Volume2, VolumeX, Bell, BellOff,
   Paperclip, Send, Search, UserRound, Globe, Monitor, MapPin, Clock, FileText, X, ChevronRight, Contact, CircleDollarSign,
 } from 'lucide-react'
 import { parseAttachment, isImageMime } from '@/lib/attachment'
 import { hasFeature } from '@/lib/workspaces'
 import { formatDateTime, timeAgo } from '@/lib/datetime'
 import { chatDing, replyDing, visitorDing, unlockSound } from './sound'
+import { readPushState, enablePush, disablePush, mirrorSoundToWorker, type PushState } from './push'
 import { Avatar, Empty, PageHead, Table, Td, INPUT, KALE, short, postJson as json, type Me } from './ui'
 import LeadRecord from './screens/LeadRecord'
 import Pipeline from './screens/Pipeline'
@@ -121,6 +122,10 @@ export default function ZdApp() {
   const [leads, setLeads] = useState<LeadRow[] | null>(null)
   const [sound, setSound] = useState(() => { try { return typeof localStorage === 'undefined' || localStorage.getItem('zd-sound') !== 'off' } catch { return true } })
   const [showInfo, setShowInfo] = useState(true)
+  // Notifications on THIS device (app/zd/push.ts). 'unsupported' until read.
+  const [push, setPush] = useState<PushState>('unsupported')
+  const [pushNote, setPushNote] = useState('')
+  const [pushBusy, setPushBusy] = useState(false)
 
   const lastUserAt = useRef<Record<string, string>>({})
   const seeded = useRef(false)
@@ -275,6 +280,29 @@ export default function ZdApp() {
     setOpenId(id)
   }, [])
   const openChatFromScreen = useCallback((id: string) => { setView('all'); openChat(id); setSection('chats') }, [openChat, setSection])
+
+  // ── Notifications ──
+  // Where this device stands, and the sound switch told to the worker (on
+  // load too: a freshly started worker has never been told).
+  useEffect(() => {
+    if (!me) return
+    let alive = true
+    readPushState().then((s) => { if (alive) setPush(s) })
+    return () => { alive = false }
+  }, [me])
+  useEffect(() => { mirrorSoundToWorker(sound) }, [sound])
+  // A chat notification opens "/?…&session=<id>": land on that chat, then
+  // tidy the address so a reload does not reopen it.
+  useEffect(() => {
+    if (!me) return
+    const sid = new URLSearchParams(window.location.search).get('session')
+    if (!sid) return
+    const first = setTimeout(() => {
+      window.history.replaceState(null, '', window.location.pathname)
+      openChatFromScreen(sid)
+    }, 0)
+    return () => clearTimeout(first)
+  }, [me, openChatFromScreen])
   const patch = useCallback((id: string, change: Partial<Session>) => setSessions((prev) => prev.map((s) => (s.session_id === id ? { ...s, ...change } : s))), [])
 
   async function assign(action: 'claim' | 'release') {
@@ -340,6 +368,13 @@ export default function ZdApp() {
     if (next) { unlockSound(); replyDing() }
   }
 
+  async function togglePush() {
+    if (pushBusy) return
+    setPushBusy(true)
+    const r = push === 'on' ? await disablePush() : await enablePush()
+    setPush(r.state); setPushNote(r.note); setPushBusy(false)
+  }
+
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
     window.location.href = '/login'
@@ -396,9 +431,18 @@ export default function ZdApp() {
         <div className="flex-1" />
         <RailButton icon={<UserCog size={20} />} label={me.role === 'admin' ? 'Team and settings' : 'Your profile'} text={me.role === 'admin' ? 'Team' : 'Profile'} active={section === 'team'} onClick={() => setSection('team')} />
         <RailButton icon={sound ? <Volume2 size={20} /> : <VolumeX size={20} />} label={sound ? 'Sound is on' : 'Sound is off'} text={sound ? 'Sound on' : 'Muted'} onClick={toggleSound} />
+        <RailButton icon={push === 'on' ? <Bell size={20} /> : <BellOff size={20} />}
+          label={push === 'on' ? 'Notifications are on for this device. Click to switch them off.' : push === 'blocked' ? 'Notifications are blocked in this browser. Click for how to allow them.' : 'Get notified on this device when ZeeDesk is closed'}
+          text={push === 'on' ? 'Alerts on' : 'Alerts off'} onClick={() => void togglePush()} />
         <RailButton icon={<LogOut size={20} />} label="Sign out" text="Sign out" onClick={logout} />
         <div className="mt-1" title={me.email}><Avatar label={short(me.email)} tone="agent" size={34} /></div>
       </nav>
+      {pushNote && (
+        <div role="status" className="absolute left-[92px] bottom-4 z-40 max-w-[320px] rounded-lg border border-[#d8dcde] bg-white px-3 py-2.5 shadow-lg text-[13px] text-[#2f3941] flex items-start gap-2">
+          <span className="flex-1">{pushNote}</span>
+          <button type="button" onClick={() => setPushNote('')} aria-label="Dismiss" className="shrink-0 w-6 h-6 rounded flex items-center justify-center text-[#68737d] hover:bg-[#e9ebed]"><X size={14} /></button>
+        </div>
+      )}
 
       {section === 'home' && <Dashboard {...screen} waiting={waiting.map((w) => ({ session_id: w.session_id, site_id: w.site_id, site_name: w.site_name, preview: w.preview, last_at: w.last_at, name: visitorName(w) }))} />}
 

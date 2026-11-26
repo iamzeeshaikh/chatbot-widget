@@ -54,11 +54,16 @@ self.addEventListener('push', function (event) {
   var data = {};
   try { data = event.data.json(); } catch (e) {}
   event.waitUntil(readSoundOn().then(function (soundOn) {
-    return self.registration.showNotification(data.title || 'ZeeOps', {
+    // The worker is registered per host, and ZeeDesk's hosts are a separate
+    // team's: their notifications carry ZeeDesk's own name and mark, never the
+    // other dashboards'.
+    var zeedesk = /(^|\.)zeedesk\.dev$/i.test(self.location.hostname);
+    var icon = zeedesk ? '/zd-icons/icon-192.png' : '/icon-192.png';
+    return self.registration.showNotification(data.title || (zeedesk ? 'ZeeDesk' : 'ZeeOps'), {
       body: data.body || '',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      tag: data.tag || 'zeeops',
+      icon: icon,
+      badge: icon,
+      tag: data.tag || (zeedesk ? 'zeedesk' : 'zeeops'),
       silent: !soundOn,
       // `renotify` is what makes a repeat push on the same tag alert AGAIN
       // rather than quietly updating the existing banner — i.e. a second
