@@ -56,9 +56,22 @@ const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
 // ── config ───────────────────────────────────────────────────────────────────
 export interface GoogleConfig { clientId: string; clientSecret: string; redirectUri: string }
 
-export function googleConfig(origin: string): GoogleConfig | null {
-  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET
+/**
+ * Which Google OAuth app a connection belongs to. ZeeDesk's mailboxes live in
+ * their own Google Workspace (thewhiteboxes.com, 2026-11-25), and the original
+ * app is Internal to the other organisation, so Google refuses them outright.
+ * ZeeDesk therefore has its own app (GOOGLE_ZEEDESK_OAUTH_CLIENT_ID / _SECRET),
+ * Internal to ITS organisation. The choice is stored on the token: a refresh
+ * token only works with the app that issued it, whatever host or cron asks.
+ */
+export type GoogleClient = 'zeedesk'
+export function googleClientFor(workspace: string): GoogleClient | undefined {
+  return workspace === 'zeedesk' && process.env.GOOGLE_ZEEDESK_OAUTH_CLIENT_ID && process.env.GOOGLE_ZEEDESK_OAUTH_CLIENT_SECRET ? 'zeedesk' : undefined
+}
+
+export function googleConfig(origin: string, client?: GoogleClient): GoogleConfig | null {
+  const clientId = client === 'zeedesk' ? process.env.GOOGLE_ZEEDESK_OAUTH_CLIENT_ID : process.env.GOOGLE_OAUTH_CLIENT_ID
+  const clientSecret = client === 'zeedesk' ? process.env.GOOGLE_ZEEDESK_OAUTH_CLIENT_SECRET : process.env.GOOGLE_OAUTH_CLIENT_SECRET
   if (!clientId || !clientSecret) return null
   // The redirect URI is derived from the request's own origin so the same
   // credentials work on localhost and on every deployed alias, but it must be
@@ -118,6 +131,8 @@ interface StoredToken {
   /** Set when Google refused the refresh token — the agent must reconnect. */
   revoked?: boolean
   revokedReason?: string
+  /** The OAuth app that issued the refresh token; absent = the original app. */
+  client?: GoogleClient
 }
 
 export interface GmailConnection {
@@ -192,8 +207,8 @@ export async function connectedAddresses(): Promise<string[]> {
   return Array.from(live.entries()).filter(([, ok]) => ok).map(([e]) => e).sort()
 }
 
-export async function saveConnection(email: string, refreshToken: string, scope: string): Promise<void> {
-  await writeToken({ email, enc: seal(refreshToken), connectedAt: new Date().toISOString(), scope })
+export async function saveConnection(email: string, refreshToken: string, scope: string, client?: GoogleClient): Promise<void> {
+  await writeToken({ email, enc: seal(refreshToken), connectedAt: new Date().toISOString(), scope, ...(client ? { client } : {}) })
   forgetAccessToken(email)
 }
 
@@ -206,6 +221,7 @@ export async function markRevoked(email: string, reason: string): Promise<void> 
     scope: t?.scope ?? '',
     revoked: true,
     revokedReason: reason,
+    ...(t?.client ? { client: t.client } : {}),
   })
   forgetAccessToken(email)
 }
@@ -542,11 +558,13 @@ export async function accessTokenFor(email: string, cfg: GoogleConfig, forSend =
     throw new GmailAuthError('The stored Gmail credential could not be read. Reconnect Gmail to send email.')
   }
 
+  // The app that issued this token, not the one the caller happened to load.
+  const own = t.client ? googleConfig('', t.client) ?? cfg : cfg
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: cfg.clientId, client_secret: cfg.clientSecret,
+      client_id: own.clientId, client_secret: own.clientSecret,
       refresh_token: refresh, grant_type: 'refresh_token',
     }),
   })

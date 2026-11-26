@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMember } from '@/lib/auth'
 import { hasFeature } from '@/lib/workspaces'
-import { googleConfig, exchangeCode, saveConnection, verifyState, GMAIL_SCOPES } from '@/lib/gmail'
+import { googleConfig, googleClientFor, exchangeCode, saveConnection, verifyState, GMAIL_SCOPES } from '@/lib/gmail'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,7 +40,8 @@ export async function GET(req: NextRequest) {
   const code = sp.get('code')
   if (!code) return back(origin, to, { gmail: 'error', reason: 'Google did not return an authorisation code.' })
 
-  const cfg = googleConfig(origin)
+  const client = googleClientFor(member.workspace)
+  const cfg = googleConfig(origin, client)
   if (!cfg) return back(origin, to, { gmail: 'error', reason: 'Google OAuth is not configured on the server.' })
 
   try {
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
     // Without a refresh token the connection cannot outlive one hour. Google
     // only withholds it when consent was skipped, so ask again explicitly.
     if (!t.refreshToken) {
-      return back(origin, to, { gmail: 'error', reason: 'Google did not return a refresh token. Remove ZeeOps from your Google account permissions and connect again.' })
+      return back(origin, to, { gmail: 'error', reason: `Google did not return a refresh token. Remove ${member.workspace === 'zeedesk' ? 'ZeeDesk' : 'ZeeOps'} from your Google account permissions and connect again.` })
     }
     const granted = new Set((t.scope ?? '').split(/\s+/))
     const missing = GMAIL_SCOPES.filter((s) => !granted.has(s))
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    await saveConnection(member.email, t.refreshToken, t.scope ?? '')
+    await saveConnection(member.email, t.refreshToken, t.scope ?? '', client)
     return back(origin, to, { gmail: 'connected' })
   } catch (e) {
     console.error('[gmail] callback failed:', e instanceof Error ? e.message : e)
