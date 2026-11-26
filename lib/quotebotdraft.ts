@@ -29,6 +29,9 @@ export interface DraftInput {
   replies?: string[]
   assessment: QuoteAssessment
   siteName: string
+  /** See buildFirstEmail in lib/quotebotcore.ts: a site that promises no free
+   *  shipping, lamination, discount or delivery time, with a minimum of 100. */
+  plain?: boolean
 }
 
 const SYSTEM = `You write the first short email a sales agent at a custom packaging company sends back to a customer's quote enquiry. Write ONLY the email body, plain text, no subject line and no signature.
@@ -88,7 +91,7 @@ function brief(i: DraftInput): string {
     `PRODUCT (as we would name it): ${a.product}`,
     `MISSING: ${missing.length ? missing.map((m) => (m === 'size' ? `size — ask for the ${a.sizeLabel}` : `style — ask for the ${a.styleLabel} (a reference image works)`)).join('; ') : 'nothing'}`,
     `DEADLINE GIVEN: ${a.hasDeadline ? 'yes — do not ask' : 'no'}`,
-    `QUANTITY: ${!a.hasQuantity ? 'NOT GIVEN — ask how many pieces they need' : a.quantity && a.quantity < minimumFor(a.product) ? `${a.quantity} — BELOW MINIMUM of ${minimumFor(a.product)}: say so and offer to check a smaller first run` : `${a.quantity ?? 'given'}`}`,
+    `QUANTITY: ${!a.hasQuantity ? 'NOT GIVEN — ask how many pieces they need' : a.quantity && a.quantity < minimumFor(a.product, i.plain) ? `${a.quantity} — BELOW MINIMUM of ${minimumFor(a.product, i.plain)}: say so and offer to check a smaller first run` : `${a.quantity ?? 'given'}`}`,
     ...(a.askPackCount ? ['PACK COUNT: not given — ask whether each shipping box holds one item or several (multi-pack), and the exact product dimensions'] : []),
     ...(a.asksSample ? ['SAMPLE: they asked for a sample — rule 12'] : []),
     ...(a.feasibility ? [`FEASIBILITY CHECK: ${a.feasibility} — say so, offer the closest option via production, no price promise`] : []),
@@ -113,7 +116,7 @@ export function normalise(raw: string): string {
 }
 
 /** The checks a draft must pass before it goes to a customer. Reason, or null. */
-export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[]): string | null {
+export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[], plain = false): string | null {
   const t = text.trim()
   const words = t.split(/\s+/).length
   if (words < 35 || words > 160) return `length ${words} words`
@@ -140,7 +143,7 @@ export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[
   if (missing.includes('style') && !/\bstyle|type|shape|reference/i.test(t)) return 'did not ask for the style'
   if (!a.hasQuantity && !/quantit|how many/i.test(t)) return 'did not ask for the quantity'
   if (!a.hasQuantity && /everything I need/i.test(t)) return 'claims everything is in hand without a quantity'
-  if (a.hasQuantity && a.quantity && a.quantity < minimumFor(a.product) && !/minimum/i.test(t)) return 'quantity below our minimum not mentioned'
+  if (a.hasQuantity && a.quantity && a.quantity < minimumFor(a.product, plain) && !/minimum/i.test(t)) return 'quantity below our minimum not mentioned'
   if (/\b(I'll|I will|we'll|we will|can)\s+(include|send|provide|ship|offer|arrange)\b[^.]{0,40}\bsamples?\b/i.test(t)) return 'promised a sample'
   if (a.feasibility) {
     if (/in process|everything I need|is being prepared/i.test(t)) return 'promised a price quote for something we cannot make'
@@ -161,6 +164,22 @@ export function draftProblem(text: string, a: QuoteAssessment, missing: Missing[
   return null
 }
 
+const PLAIN_SITE_RULES = `
+
+THIS SITE'S OWN RULES (they override rule 2's fact list and every lesson above):
+- The only facts you may state are: everything is made to the customer's own size and design; free design help and a free design proof before anything is printed; no extra or hidden charges; the minimum order is 100 pieces.
+- Never mention free shipping, shipping cost, free lamination, a discount, or how long production or delivery takes. If they ask about shipping or timing, say both are confirmed on the price quote.
+- Never say or hint where the goods are made, never call us a manufacturer or a factory, and never name another company or website.
+- Mention the minimum ONLY if they asked about minimums or gave a quantity below 100.`
+
+/** What a draft for a `plain` site must not contain. */
+function plainProblem(text: string): string | null {
+  if (/free\s+(shipping|delivery|lamination)|ship(ping)?\s+(is|are)\s+free/i.test(text)) return 'promises free shipping or lamination, which this site does not offer'
+  if (/\b(manufactur\w*|factory|made in|produced in|china|usa|american[- ]made)\b/i.test(text)) return 'says where or by whom the goods are made'
+  if (/\b(250|1,?000)\b[^.]{0,30}\bminimum|minimum[^.]{0,30}\b(250|1,?000)\b/i.test(text)) return 'states the wrong minimum (this site starts at 100)'
+  return null
+}
+
 /**
  * A body written for this customer, or null when the model is down or its
  * draft fails the checks — the caller keeps the template in that case.
@@ -169,7 +188,9 @@ export async function draftCustomerEmail(i: DraftInput): Promise<{ text: string;
   const missing = missingOf(i.assessment)
   const user = brief(i)
   // What the team has taught it (lib/botlearn.ts), after the hard rules.
-  const system = SYSTEM + (await lessonsBlock())
+  // Last, so it outranks both the rule-2 fact list and anything learned from
+  // the other team's emails.
+  const system = SYSTEM + (await lessonsBlock()) + (i.plain ? PLAIN_SITE_RULES : '')
   // Two tries on the work model (the second told what was wrong with the
   // first), then one on the chat model. Temperature is left to the vendor
   // default: Claude 5 refuses the parameter.
@@ -183,7 +204,7 @@ export async function draftCustomerEmail(i: DraftInput): Promise<{ text: string;
     })
     if (r.error || !r.text.trim()) continue
     const text = normalise(r.text)
-    const problem = draftProblem(text, i.assessment, missing)
+    const problem = draftProblem(text, i.assessment, missing, i.plain) ?? (i.plain ? plainProblem(text) : null)
     if (!problem) return { text, model: r.model }
     lastProblem = problem
     console.warn(`[quotebot] draft from ${r.model} rejected: ${problem}`)

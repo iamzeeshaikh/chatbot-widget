@@ -9,7 +9,7 @@ import { buildSendSignature } from '@/lib/sendsignature'
 import { openPixelHtml } from '@/lib/emailtrack'
 import { makeSnippet, newEmailId, type CrmEmailEntry } from '@/lib/crmemail'
 import { emailHtml, BOT_ACTOR } from '@/lib/quotebotcore'
-import { CRM_BOT_ROLE } from '@/lib/quotebot'
+import { CRM_BOT_ROLE, botTeamFor } from '@/lib/quotebot'
 import { CRM_EMAIL_ROLE, CRM_TASK_ROLE } from '@/lib/crm'
 import { applyStageChange } from '@/lib/stagechange'
 import { newTaskId, type CrmTaskEntry } from '@/lib/tasks'
@@ -42,6 +42,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!draft) return NextResponse.json({ error: 'That draft is not on this lead.' }, { status: 404 })
   if (draft.status !== 'pending') return NextResponse.json({ error: `That draft was already ${draft.status}.` }, { status: 409 })
   const siteId = rows[0].site_id
+  // The lead's own team: its workspace for the signature and the push, and
+  // its public host for the logo and the open pixel (lib/quotebot.ts).
+  const team = botTeamFor(siteId)
   const by = access.member.email
   const decidedAt = new Date().toISOString()
   const ledger = (entry: Record<string, unknown>) => writeControlRow({ sessionId: id, siteId, role: CRM_BOT_ROLE, message: JSON.stringify(entry) })
@@ -73,10 +76,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // The lead's current owner sends it, not whoever the bot picked when it drafted
   // (lib/leadsender.ts) — a lead handed to another agent leaves from their mailbox.
   const sender = await currentSender(id, siteId, draft.agent, draft.from, cfg)
-  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: 'packaging', siteId, from: sender.from, base: PUBLIC_BASE })
+  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: team.workspace, siteId, from: sender.from, base: team.base })
   const emailId = newEmailId()
   const finalText = sig.text ? `${text}\n\n${sig.text}` : text
-  const finalHtml = `${emailHtml(text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+  const finalHtml = `${emailHtml(text)}${sig.html}${openPixelHtml(team.base, id, emailId)}`
   const thread = draft.step === 'reply' && draft.inboundId ? await threadContextFor(id, draft.inboundId) : null
 
   let sent
@@ -119,7 +122,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
     if (sender.agent !== by) {
-      await sendPushToMember(sender.agent, 'packaging', { title: 'Quote ready to price', body: `${draft.to} sent everything. Send the price.`, url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-${id}` }).catch(() => 0)
+      await sendPushToMember(sender.agent, team.workspace, { title: 'Quote ready to price', body: `${draft.to} sent everything. Send the price.`, url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-${id}` }).catch(() => 0)
     }
   }
   return NextResponse.json({ ok: true, status: 'sent', emailId })

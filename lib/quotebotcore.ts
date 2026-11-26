@@ -98,7 +98,10 @@ export function feasibilityIn(text: string): string | null {
 }
 
 /** Our usual minimum for this product, as the agents quote it. */
-export function minimumFor(product: string): number {
+export function minimumFor(product: string, plain = false): number {
+  // The ZeeDesk sites sell from 100 pieces whatever the product (their own
+  // site copy says so); the tiers below are the Model Town team's.
+  if (plain) return 100
   const p = product.toLowerCase()
   if (/cups?|sleeves?/.test(p)) return 1000
   if (/mailers?|bags?|pouch/.test(p) && !/box/.test(p)) return 500
@@ -251,7 +254,12 @@ export interface FirstEmail { subject: string; text: string; complete: boolean }
  * process", and a task tells the agent to price it. Anything missing → ask for
  * exactly that, nothing else. Never a price, a total, a date or a promise.
  */
-export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fromChat: boolean }): FirstEmail {
+/**
+ * `plain` (every template below): the site promises no free shipping, no free
+ * lamination, no discount and no delivery time, and its minimum is 100 — the
+ * ZeeDesk sites. Those lines are left out or reworded; nothing else changes.
+ */
+export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fromChat: boolean; plain?: boolean }): FirstEmail {
   const missing = missingOf(a)
   const complete = missing.length === 0
   const greet = a.firstName ? `Hello ${a.firstName},` : 'Hello,'
@@ -277,12 +285,12 @@ export function buildFirstEmail(a: QuoteAssessment, ctx: { siteName: string; fro
     // process"). Ask for it, and say what we will quote meanwhile — the
     // agents price standard tiers, so the quote is not held up.
     parts.push(
-      `${thanks} I've noted your ${product}. Could you please let me know the quantity you need? In the meantime, I'll prepare the price quote for our standard quantities (250, 500 and 1,000 pieces) so you can compare.`,
+      `${thanks} I've noted your ${product}. Could you please let me know the quantity you need? In the meantime, I'll prepare the price quote for our standard quantities (${ctx.plain ? '100, 250 and 500' : '250, 500 and 1,000'} pieces) so you can compare.`,
     )
     if (!a.hasDeadline) parts.push('', 'Also, how soon do you need these?')
-  } else if (complete && a.quantity && a.quantity < minimumFor(product)) {
+  } else if (complete && a.quantity && a.quantity < minimumFor(product, ctx.plain)) {
     parts.push(
-      `${thanks} Our usual minimum is ${minimumFor(product)} per size or design, but I'll check with our team whether a smaller first run of ${a.quantity} can be arranged, and I'll share the price quote with you shortly.${sampleLine}`,
+      `${thanks} Our usual minimum is ${minimumFor(product, ctx.plain)} per size or design, but I'll check with our team whether a smaller first run of ${a.quantity} can be arranged, and I'll share the price quote with you shortly.${sampleLine}`,
     )
     if (!a.hasDeadline) parts.push('', 'In the meantime, could you please let me know how soon you need these?')
   } else if (complete) {
@@ -447,6 +455,8 @@ export interface FollowUpContext {
   now: Date
   /** A UK site: no US holiday is named, the offer simply has a date. */
   uk?: boolean
+  /** See buildFirstEmail. */
+  plain?: boolean
 }
 
 /**
@@ -482,9 +492,16 @@ export function buildFollowUp(a: QuoteAssessment, c: FollowUpContext): { text: s
       break
     case 2:
       body = [`In case it helps you decide, the most popular choices for ${a.product} are ${styleIdeas(a)}. A picture of something you like works great too, and I'll take it from there.`]
-      if (!asking) body = [`I wanted to share a quick note: along with the box itself, our price includes free shipping to your doorstep and no extra or hidden charges, and we send 2D and 3D mockups before anything goes to print.`]
+      if (!asking) body = c.plain
+        ? [`I wanted to share a quick note: there are no extra or hidden charges in our price, and you get a free design proof to approve before anything goes to print.`]
+        : [`I wanted to share a quick note: along with the box itself, our price includes free shipping to your doorstep and no extra or hidden charges, and we send 2D and 3D mockups before anything goes to print.`]
       break
     case 3:
+      if (c.plain) {
+        // No discount is offered on these sites: a plain check-in instead.
+        body = [`Just checking in on your ${a.product}. ${asking ? `Whenever you have the ${what}, send it over and I'll get your price quote ready.` : `If there is anything you'd like changed or explained, I'm happy to help.`}`]
+        break
+      }
       usedOffer = offer
       body = [`${holiday.lead}, I can offer ${offer}% off your order of ${a.product} if you're able to move forward before ${dayLabel(holiday.date)}.${asking ? ` Once I have the ${what}, I'll include it in your price quote.` : ''}`]
       break
@@ -550,7 +567,7 @@ export function looksLikeQuote(body: string): boolean {
   return /\$\s?\d/.test(own)
 }
 
-export function buildQuoteFollowUp(c: { n: number; firstName: string | null; product: string; now: Date; uk?: boolean }): { text: string; offer: number | null } {
+export function buildQuoteFollowUp(c: { n: number; firstName: string | null; product: string; now: Date; uk?: boolean; plain?: boolean }): { text: string; offer: number | null } {
   const greet = c.firstName ? `Hello ${c.firstName},` : 'Hello,'
   const cycle = Math.floor((c.n - 1) / 5)
   const step = (c.n - 1) % 5
@@ -569,9 +586,15 @@ export function buildQuoteFollowUp(c: { n: number; firstName: string | null; pro
       body = [`Just floating this back to the top of your inbox in case it got buried. No rush at all - whenever you get a chance to take a look, I'd love to hear your thoughts.`, `Happy to jump on a quick call if that's easier than email.`]
       break
     case 2:
-      body = [`A quick reminder of what comes with your quote: free shipping to your doorstep, no extra or hidden charges, free lamination, and 2D and 3D mockups before anything goes to print.`, `If the quantity or budget needs a different option, just let me know and I'll see what I can do.`]
+      body = [c.plain
+        ? `A quick reminder of what comes with your quote: no extra or hidden charges, free design help, and a design proof for you to approve before anything goes to print.`
+        : `A quick reminder of what comes with your quote: free shipping to your doorstep, no extra or hidden charges, free lamination, and 2D and 3D mockups before anything goes to print.`, `If the quantity or budget needs a different option, just let me know and I'll see what I can do.`]
       break
     case 3:
+      if (c.plain) {
+        body = [`Just checking in on the price quote for your ${product}. If a different quantity or option would suit you better, let me know and I'll update it.`]
+        break
+      }
       used = offer
       body = [`${holiday.lead}, I can offer ${offer}% off the quoted pricing if you're able to move forward before ${MONTHS[holiday.date.getUTCMonth()]} ${holiday.date.getUTCDate()}.`, `Please let me know if you have any questions or would like to make any changes. I'd be happy to help!`]
       break

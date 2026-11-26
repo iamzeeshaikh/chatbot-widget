@@ -36,7 +36,7 @@ import { isBotWaRow } from './whatsapp'
 import { supabase, fetchAllPages, fetchAllPagesSerial, warnIfCapped } from './supabase'
 import { isUkSite } from './metawa'
 import { recentIntakeLags } from './intakelag'
-import { workspaceSites, hasFeature } from './workspaces'
+import { workspaceSites, hasFeature, siteWorkspace, type Workspace } from './workspaces'
 import { quoteSessionId, leadSource, isMerchantTestOrder } from './quoteintake'
 import { leadRecipient, writeControlRow, markThreadRepliesRead } from './leadrecord'
 import { notALeadSessions, parseNotALead } from './notalead'
@@ -120,6 +120,29 @@ const LEASE_MS = 4 * 60 * 1000
  * in the first bot emails came back 401 — a broken logo and no open tracking.
  */
 const PUBLIC_BASE = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chat.zeeops.dev').replace(/\/$/, '')
+
+/**
+ * One team the bot writes for. ZeeDesk (2026-11-26) is a second team on its own
+ * sites: its own agent and mailboxes, its own public host for the logo, the
+ * open pixel and links (a ZeeDesk customer must never be handed a ZeeOps
+ * address), and `plain` wording (lib/quotebotcore.ts buildFirstEmail). A lead's
+ * team is its site's workspace, so the two can never write for each other.
+ */
+interface BotTeam { workspace: Workspace; agents: readonly string[]; lateOwner: string; base: string; desk: string; plain: boolean }
+const PACKAGING_TEAM: BotTeam = { workspace: 'packaging', agents: BOT_AGENTS, lateOwner: LATE_LEAD_OWNER, base: PUBLIC_BASE, desk: 'ZeeOps', plain: false }
+export const ZEEDESK_BOT_AGENTS = ['nathan@thewhiteboxes.com'] as const
+const ZEEDESK_TEAM: BotTeam = { workspace: 'zeedesk', agents: ZEEDESK_BOT_AGENTS, lateOwner: ZEEDESK_BOT_AGENTS[0], base: 'https://chat.zeedesk.dev', desk: 'ZeeDesk', plain: true }
+const BOT_TEAMS = [PACKAGING_TEAM, ZEEDESK_TEAM]
+export function botTeamFor(siteId: string): BotTeam { return siteWorkspace(siteId) === 'zeedesk' ? ZEEDESK_TEAM : PACKAGING_TEAM }
+/** Every site of every team that has the bot switched on. */
+// ZeeDesk is NOT given the 'quotebot' workspace feature: that flag also opens
+// the admin run / test-send routes and the follow-ups page, which act on any
+// lead id. Its bot runs from the cron like the other team's, and
+// ZEEDESK_QUOTE_BOT=off stops it alone.
+function botSites(): string[] {
+  return BOT_TEAMS.filter((t) => (t.workspace === 'zeedesk' ? process.env.ZEEDESK_QUOTE_BOT !== 'off' : hasFeature(t.workspace, 'quotebot')))
+    .flatMap((t) => workspaceSites(t.workspace))
+}
 
 export type BotState = 'claimed' | 'sent' | 'skipped' | 'failed' | 'drafted'
 
@@ -276,7 +299,7 @@ async function weeklyLoad(now: Date): Promise<Map<string, { day: number; week: n
       .order('created_at', { ascending: true }).order('id', { ascending: true }),
     50000,
   )
-  const load = new Map<string, { day: number; week: number }>(BOT_AGENTS.map((a) => [a, { day: 0, week: 0 }]))
+  const load = new Map<string, { day: number; week: number }>(BOT_TEAMS.flatMap((t) => t.agents).map((a) => [a, { day: 0, week: 0 }]))
   const counted = new Set<string>()
   for (const r of data) {
     const e = parseBotLedger(r.message)
@@ -343,7 +366,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
 
   if (!dryRun && !(await takeLease(now))) return { ...result, skipped: 'leased' }
 
-  const sites = hasFeature('packaging', 'quotebot') ? workspaceSites('packaging') : []
+  const sites = botSites()
   if (!sites.length) return result
   const floor = new Date(Math.max(new Date(BOT_START).getTime(), now.getTime() - MAX_AGE_MS)).toISOString()
   const ceiling = new Date(now.getTime() - MIN_AGE_MS).toISOString()
@@ -395,6 +418,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
 
   for (const lead of leads) {
     const id = quoteSessionId(lead.id)
+    const team = botTeamFor(lead.site_id)
     const rows = bySession.get(id) ?? []
     const act = (a: Omit<BotAction, 'leadId' | 'siteId'>) => { result.actions.push({ leadId: id, siteId: lead.site_id, ...a }) }
 
@@ -434,7 +458,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       const cStage = currentStage(chat.rows)
       if (cStage !== 'new') { await skip(`chat stage is already ${cStage}`); continue }
       const talker = chat.rows.map((r) => r.role === REPLY_AUTHOR_ROLE ? (parseReplyAuthor(r.message)?.email ?? '').toLowerCase() : '')
-        .find((e) => (BOT_AGENTS as readonly string[]).includes(e))
+        .find((e) => team.agents.includes(e))
       if (talker) { await skip(`${talker} is already talking to them in the chat`); continue }
     }
 
@@ -443,14 +467,14 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     const handOver = async (why: string, title: string, push: { title: string; body: string }, tag: string) => {
       await skip(why)
       if (dryRun) return
-      await setAssignment(id, lead.site_id, LATE_LEAD_OWNER)
+      await setAssignment(id, lead.site_id, team.lateOwner)
       const task: CrmTaskEntry = {
         id: newTaskId(), title: title.slice(0, 200),
         type: 'email', due_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-        assignee: LATE_LEAD_OWNER, status: 'open', created_by: BOT_ACTOR, created_at: now.toISOString(),
+        assignee: team.lateOwner, status: 'open', created_by: BOT_ACTOR, created_at: now.toISOString(),
       }
       await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-      await sendPushToMember(LATE_LEAD_OWNER, 'packaging', { ...push, url: `/leads/${encodeURIComponent(id)}`, tag: `${tag}-${id}` }).catch(() => 0)
+      await sendPushToMember(team.lateOwner, team.workspace, { ...push, url: `/leads/${encodeURIComponent(id)}`, tag: `${tag}-${id}` }).catch(() => 0)
     }
     const who = lead.name || lead.email || 'This customer'
 
@@ -458,7 +482,9 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (lateBy !== undefined) {
       await handOver(
         `reached the CRM ${lateBy} min after the customer wrote — a person may already have answered from Gmail`,
-        `${who} reached ZeeOps ${lateBy} min late — check Gmail (dev@) for a reply already sent, then answer from here`,
+        team.plain
+          ? `${who} reached ${team.desk} ${lateBy} min late — check whether a reply already went out, then answer from here`
+          : `${who} reached ZeeOps ${lateBy} min late — check Gmail (dev@) for a reply already sent, then answer from here`,
         { title: 'Late enquiry — check Gmail first', body: `${who}: arrived ${lateBy} min late. The bot did not email them.` },
         'quotebot-late',
       )
@@ -504,7 +530,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
 
     // ── whose lead, and which address ───────────────────────────────────────
     const assigned = lastAssignment(rows) ?? (chat ? lastAssignment(chat.rows) : null)
-    const preset = assigned && (BOT_AGENTS as readonly string[]).includes(assigned) ? assigned : null
+    const preset = assigned && team.agents.includes(assigned) ? assigned : null
     if (assigned && !preset) {
       // Assigned to somebody outside the bot's roster (a chat agent, a team
       // lead). Writing in another person's name would be wrong either way.
@@ -514,7 +540,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     if (!cfg) { act({ state: 'retry-later', why: 'Google OAuth is not configured' }); continue }
     load ??= await weeklyLoad(now)
     const tally = load
-    const candidates = preset ? [preset] : [...BOT_AGENTS].sort((a, b) => {
+    const candidates = preset ? [preset] : [...team.agents].sort((a, b) => {
       const x = tally.get(a)!, y = tally.get(b)!
       return (x.day - y.day) || (x.week - y.week)
     })
@@ -534,19 +560,21 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
       const host = siteName.get(lead.site_id) ?? lead.site_id
       await handOver(
         `no verified ${lead.site_id} mailbox for ${candidates.join(' / ')}`,
-        `${who} — ${host} has no sending mailbox in ZeeOps yet. Reply from Gmail (dev@) and ask the owner to add a send-as alias for ${lead.site_id}`,
+        team.plain
+          ? `${who} — ${host} has no sending mailbox in ${team.desk} yet. Reply from Gmail and ask the owner to add a send-as address for ${lead.site_id}`
+          : `${who} — ${host} has no sending mailbox in ZeeOps yet. Reply from Gmail (dev@) and ask the owner to add a send-as alias for ${lead.site_id}`,
         { title: 'New enquiry — no mailbox for this site yet', body: `${who} (${host}): the bot cannot send from this site. Please reply from Gmail.` },
         'quotebot-nomailbox',
       )
       continue
     }
 
-    const mail = buildFirstEmail(assessment, { siteName: siteName.get(lead.site_id) ?? lead.site_id, fromChat: kind === 'chat' })
+    const mail = buildFirstEmail(assessment, { siteName: siteName.get(lead.site_id) ?? lead.site_id, fromChat: kind === 'chat', plain: team.plain })
     // Written for this customer from what they wrote (lib/quotebotdraft.ts);
     // the template above stays as the fallback and keeps the subject.
     const drafted = await draftCustomerEmail({
       kind: 'first', fromChat: kind === 'chat', enquiry: quoteTextForAssessment(lead.message ?? '', lead.name),
-      assessment, siteName: siteName.get(lead.site_id) ?? lead.site_id,
+      assessment, siteName: siteName.get(lead.site_id) ?? lead.site_id, plain: team.plain,
     })
     if (drafted) mail.text = drafted.text
     const missing = missingOf(assessment)
@@ -582,7 +610,7 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
         assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
       }
       await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-      await sendPushToMember(agent, 'packaging', {
+      await sendPushToMember(agent, team.workspace, {
         title: 'New enquiry — draft reply ready',
         body: `${who} (${siteName.get(lead.site_id) ?? lead.site_id}). Read the bot's draft and send it.`,
         url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-draft-${id}`,
@@ -597,8 +625,8 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
     }
     sends++
 
-    const base = PUBLIC_BASE
-    const sig = await buildSendSignature({ memberEmail: agent, workspace: 'packaging', siteId: lead.site_id, from: alias.email, base })
+    const base = team.base
+    const sig = await buildSendSignature({ memberEmail: agent, workspace: team.workspace, siteId: lead.site_id, from: alias.email, base })
     const emailId = newEmailId()
     const finalText = sig.text ? `${mail.text}\n\n${sig.text}` : mail.text
     const finalHtml = `${emailHtml(mail.text)}${sig.html}${openPixelHtml(base, id, emailId)}`
@@ -637,13 +665,13 @@ export async function runQuoteBot(origin: string, now = new Date(), opts: { dryR
         id: newTaskId(),
         title: (assessment.oversize
           ? `Check with production first — ${who} wants ${assessment.product} at ${assessment.oversize}; the bot said we are confirming the size, then send the price quote or an alternative`
-          : `Send the price quote — ${who} gave size and style${assessment.hasQuantity ? ' and quantity' : '; NO quantity yet, so quote 250 / 500 / 1,000 as the bot told them'} (bot replied)`).slice(0, 200),
+          : `Send the price quote — ${who} gave size and style${assessment.hasQuantity ? ' and quantity' : `; NO quantity yet, so quote ${team.plain ? '100 / 250 / 500' : '250 / 500 / 1,000'} as the bot told them`} (bot replied)`).slice(0, 200),
         type: 'email',
         due_at: new Date(Date.now() + 3 * 3600 * 1000).toISOString(),
         assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
       }
       await writeControlRow({ sessionId: id, siteId: lead.site_id, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-      await sendPushToMember(agent, 'packaging', {
+      await sendPushToMember(agent, team.workspace, {
         title: 'Quote ready to price',
         body: `${who} (${siteName.get(lead.site_id) ?? lead.site_id}) sent everything. Send the price.`,
         url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-${id}`,
@@ -827,6 +855,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   const first = ledgers.find((e) => e.step === 'first' && e.state === 'sent')
   if (!first || !first.agent || !first.from || !first.to) return { ok: false, state: 'stopped', why: 'the bot never emailed this lead' }
   const siteId = rows[0].site_id
+  const team = botTeamFor(siteId)
   const firstAt = new Date(first.at).getTime()
 
   // The bot's latest word: its first email, or its answer to a reply.
@@ -868,7 +897,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   if (!assessment) return { ok: false, state: 'failed', why: 'could not read the enquiry (model unavailable)' }
   const cc = await ccForLead(id, lead?.message, first.to)
   const missing = (latest.missing ?? []) as Missing[]
-  const fu = buildFollowUp(assessment, { n, missing, firstName: assessment.firstName, now, uk: isUkSite(siteId) })
+  const fu = buildFollowUp(assessment, { n, missing, firstName: assessment.firstName, now, uk: isUkSite(siteId), plain: team.plain })
 
   // Threaded under the first email, in the customer's mail client and ours.
   const sentRows = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
@@ -883,10 +912,10 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
   const cfg = googleConfig(PUBLIC_BASE)
   if (!cfg) return { ok: false, state: 'failed', why: 'Google OAuth is not configured' }
   const sender = await currentSender(id, siteId, first.agent, first.from, cfg)
-  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: 'packaging', siteId, from: sender.from, base: PUBLIC_BASE })
+  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: team.workspace, siteId, from: sender.from, base: team.base })
   const emailId = newEmailId()
   const finalText = sig.text ? `${fu.text}\n\n${sig.text}` : fu.text
-  const finalHtml = `${emailHtml(fu.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+  const finalHtml = `${emailHtml(fu.text)}${sig.html}${openPixelHtml(team.base, id, emailId)}`
 
   if (!(await ledger(id, siteId, { step: 'followup', n, state: 'claimed', at: now.toISOString(), to: first.to, agent: first.agent }))) {
     return { ok: false, state: 'failed', why: 'ledger write failed' }
@@ -923,7 +952,7 @@ export async function sendFollowUp(leadId: string, now = new Date(), opts: { for
       assignee: sender.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-    await sendPushToMember(first.agent, 'packaging', {
+    await sendPushToMember(first.agent, team.workspace, {
       title: 'Call this customer',
       body: `${who} has not answered ${n} follow-ups. A call usually gets the reply.`,
       url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-call-${id}`,
@@ -947,6 +976,7 @@ export async function answerReply(
   latest: { gmailId: string; body: string },
   now: Date, dryRun: boolean,
 ): Promise<ReplyResult> {
+  const team = botTeamFor(siteId)
   const { data: logRows } = await supabase.from('chat_logs').select('role, message, created_at')
     .eq('session_id', id).in('role', [CRM_BOT_ROLE, CRM_EMAIL_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE]).order('created_at', { ascending: true })
   const ledgers = (logRows ?? []).filter((r) => r.role === CRM_BOT_ROLE).map((r) => parseBotLedger(r.message)).filter(Boolean) as BotLedger[]
@@ -1006,7 +1036,7 @@ export async function answerReply(
       assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-    await sendPushToMember(first.agent, 'packaging', {
+    await sendPushToMember(first.agent, team.workspace, {
       title: 'Customer needs you', body: `${who}: ${decision.reason}`,
       url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-reply-${id}`,
     }).catch(() => 0)
@@ -1026,6 +1056,7 @@ export async function answerReply(
     kind: 'reply', fromChat: false, enquiry: quoteTextForAssessment(lead?.message ?? '', lead?.name ?? null),
     weAsked: (priorBot?.body ?? '').split('\n--\n')[0], replies: all.map((m) => m.body),
     assessment, siteName: (await supabase.from('sites').select('name').eq('site_id', siteId).maybeSingle()).data?.name ?? siteId,
+    plain: team.plain,
   })
   if (drafted) answer.text = drafted.text
   if (dryRun) return { state: 'would-send', complete: answer.complete, text: answer.text }
@@ -1055,7 +1086,7 @@ export async function answerReply(
       assignee: first.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-    await sendPushToMember(first.agent, 'packaging', {
+    await sendPushToMember(first.agent, team.workspace, {
       title: 'Customer replied — draft answer ready', body: `${who}: read the bot's draft and send it.`,
       url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-draft-${id}`,
     }).catch(() => 0)
@@ -1066,10 +1097,10 @@ export async function answerReply(
     return { state: 'failed', why: 'ledger write failed' }
   }
   const sender = await currentSender(id, siteId, first.agent, first.from, cfg)
-  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: 'packaging', siteId, from: sender.from, base: PUBLIC_BASE })
+  const sig = await buildSendSignature({ memberEmail: sender.agent, workspace: team.workspace, siteId, from: sender.from, base: team.base })
   const emailId = newEmailId()
   const finalText = sig.text ? `${answer.text}\n\n${sig.text}` : answer.text
-  const finalHtml = `${emailHtml(answer.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+  const finalHtml = `${emailHtml(answer.text)}${sig.html}${openPixelHtml(team.base, id, emailId)}`
   let sent
   try {
     sent = await sendEmail(sender.agent, cfg, {
@@ -1101,7 +1132,7 @@ export async function answerReply(
       assignee: sender.agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-    await sendPushToMember(first.agent, 'packaging', {
+    await sendPushToMember(first.agent, team.workspace, {
       title: 'Quote ready to price', body: `${who} sent the last details. Send the price.`,
       url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-${id}`,
     }).catch(() => 0)
@@ -1145,7 +1176,7 @@ async function closeBotCallTasks(id: string, siteId: string): Promise<void> {
 
 async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budget: number): Promise<BotRunResult> {
   result.quotes = []
-  const sites = workspaceSites('packaging')
+  const sites = botSites()
   const since = new Date(Math.max(new Date(BOT_START).getTime(), now.getTime() - FOLLOW_UP_WINDOW_DAYS * 864e5)).toISOString()
   // Paged for the same reason as withFollowUps: past 1,000 rows the newest
   // quotes were invisible and their skips were written again every run.
@@ -1220,7 +1251,7 @@ async function withQuotes(result: BotRunResult, now: Date, dryRun: boolean, budg
           assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
         }
         await writeControlRow({ sessionId: r.session_id, siteId: q.siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-        await sendPushToMember(agent, 'packaging', {
+        await sendPushToMember(agent, botTeamFor(q.siteId).workspace, {
           title: 'Customer answered the quote', body: `${who} replied to the quote. Over to you.`,
           url: `/leads/${encodeURIComponent(r.session_id)}`, tag: `quotebot-answer-${r.session_id}`,
         }).catch(() => 0)
@@ -1279,6 +1310,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   const rows = (data ?? []) as (LogRow & { site_id: string })[]
   if (!rows.length) return { ok: false, state: 'stopped', why: 'no such lead' }
   const siteId = rows[0].site_id
+  const team = botTeamFor(siteId)
   const spam = rows.filter((r) => r.role === CRM_NOT_A_LEAD_ROLE).map((r) => parseNotALead(r.message)).filter(Boolean).pop()
   if (spam?.spam) return { ok: true, state: 'stopped', why: 'marked not a lead' }
   const ledgers = rows.filter((r) => r.role === CRM_BOT_ROLE).map((r) => parseBotLedger(r.message)).filter(Boolean) as BotLedger[]
@@ -1304,7 +1336,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   // conversation is already on.
   const sentRows = rows.filter((r) => r.role === CRM_EMAIL_ROLE).map((r) => parseCrmEmail(r.message)).filter(Boolean) as CrmEmailEntry[]
   const owner = lastAssignment(rows)
-  const agent = owner && (BOT_AGENTS as readonly string[]).includes(owner) ? owner : null
+  const agent = owner && team.agents.includes(owner) ? owner : null
   if (!agent) return { ok: true, state: 'stopped', why: `owner ${owner ?? '(none)'} is not one the bot writes for` }
   const lastMine = [...sentRows].reverse().find((e) => e.sentBy.toLowerCase() === agent)
   if (!lastMine) return { ok: true, state: 'stopped', why: `${agent} has not emailed this customer from the CRM` }
@@ -1321,7 +1353,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
 
   const { data: lead } = await supabase.from('leads').select('name, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   const assessment = await assessQuote(lead?.message ?? '', lead?.name ?? null)
-  const fu = buildQuoteFollowUp({ n, firstName: assessment?.firstName ?? null, product: assessment?.product ?? 'packaging', now, uk: isUkSite(siteId) })
+  const fu = buildQuoteFollowUp({ n, firstName: assessment?.firstName ?? null, product: assessment?.product ?? 'packaging', now, uk: isUkSite(siteId), plain: team.plain })
   // Whoever the agent copied on the price, else everyone the customer copied.
   const cc = lastMine.cc || await ccForLead(id, lead?.message, to)
   if (opts.dryRun) return { ok: true, state: 'not-due', n, text: fu.text, why: 'dry run: would send now' }
@@ -1352,10 +1384,10 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
   if (!(await ledger(id, siteId, { step: 'quote_fu', n, state: 'claimed', at: now.toISOString(), to, agent }))) {
     return { ok: false, state: 'failed', why: 'ledger write failed' }
   }
-  const sig = await buildSendSignature({ memberEmail: agent, workspace: 'packaging', siteId, from: lastMine.from, base: PUBLIC_BASE })
+  const sig = await buildSendSignature({ memberEmail: agent, workspace: team.workspace, siteId, from: lastMine.from, base: team.base })
   const emailId = newEmailId()
   const finalText = sig.text ? `${fu.text}\n\n${sig.text}` : fu.text
-  const finalHtml = `${emailHtml(fu.text)}${sig.html}${openPixelHtml(PUBLIC_BASE, id, emailId)}`
+  const finalHtml = `${emailHtml(fu.text)}${sig.html}${openPixelHtml(team.base, id, emailId)}`
   let sent
   try {
     sent = await sendEmail(agent, cfg, {
@@ -1384,7 +1416,7 @@ export async function sendQuoteFollowUp(leadId: string, now = new Date(), opts: 
       assignee: agent, status: 'open', created_by: BOT_ACTOR, created_at: at,
     }
     await writeControlRow({ sessionId: id, siteId, role: CRM_TASK_ROLE, message: JSON.stringify(task) })
-    await sendPushToMember(agent, 'packaging', {
+    await sendPushToMember(agent, team.workspace, {
       title: 'Call about the quote', body: `${who} has not answered ${n} follow-ups on the quote.`,
       url: `/leads/${encodeURIComponent(id)}`, tag: `quotebot-qcall-${id}`,
     }).catch(() => 0)
@@ -1403,6 +1435,8 @@ export async function sendPromo(leadId: string, now = new Date()): Promise<{ ok:
   const id = leadId.startsWith('quote-') ? leadId : `quote-${leadId}`
   const { data: lead } = await supabase.from('leads').select('site_id, name, product, message').eq('id', id.replace(/^quote-/, '')).maybeSingle()
   if (!lead) return { ok: false, why: 'no such lead' }
+  // Offers are the Model Town team's campaigns; a ZeeDesk site promises none.
+  if (botTeamFor(lead.site_id).plain) return { ok: false, why: 'promo emails are not sent for this site' }
   const to = await leadRecipient(id)
   if (!to || !isAddress(to)) return { ok: false, why: 'no valid email address' }
   if ((await unsubscribedSet()).has(to.toLowerCase())) return { ok: false, why: `${to} unsubscribed from offers` }

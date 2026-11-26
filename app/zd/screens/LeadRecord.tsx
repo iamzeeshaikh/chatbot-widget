@@ -548,6 +548,9 @@ function RecordView({ me, openLead, openChat, id, onBack }: ZdScreenProps & { id
 
         {/* ── Center: history and reply ── */}
         <section aria-label="Conversation and history" className="order-first min-[1100px]:order-none min-w-0 flex flex-col min-[1100px]:flex-1 min-[1100px]:min-h-0 border-b min-[1100px]:border-b-0 border-[#d8dcde]">
+          {record.botDraft && canEmail && (
+            <DraftCard key={record.botDraft.id} leadId={record.id} draft={record.botDraft} onDone={() => { void load() }} />
+          )}
           <HistoryPane
             paneRef={pane} events={record.timeline} filter={filter} onFilter={setFilter} leadId={record.id} customer={name}
             currency={record.value.currency} myLabel={myLabel} isAdmin={isAdmin} canEmail={canEmail}
@@ -1866,5 +1869,74 @@ function TaskRow({ task, people, me, isAdmin, busy, onToggle, onReassign, onDele
         </div>
       )}
     </li>
+  )
+}
+
+// ── The assistant's draft ────────────────────────────────────────────────────
+// The assistant reads a new enquiry and writes the first reply (and the answer
+// to a customer's reply) but never sends it: it waits here for the agent to
+// check, change and send, or to discard. Same endpoint as the other desk
+// (/api/leads/[id]/bot-draft); the signature is added when it sends.
+
+function DraftCard({ leadId, draft, onDone }: { leadId: string; draft: NonNullable<LeadData['botDraft']>; onDone: () => void }) {
+  const [text, setText] = useState(draft.text)
+  const [subject, setSubject] = useState(draft.subject)
+  const [cc, setCc] = useState(draft.cc ?? '')
+  const [busy, setBusy] = useState<'send' | 'discard' | null>(null)
+  const [sure, setSure] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function decide(action: 'send' | 'discard') {
+    setBusy(action); setErr('')
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/bot-draft`, postJson({ draftId: draft.id, action, text, subject, cc }))
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { setErr(typeof j.error === 'string' ? j.error : 'That did not work. Try again.'); return }
+      onDone()
+    } catch { setErr('That did not work. Try again.') } finally { setBusy(null); setSure(false) }
+  }
+
+  return (
+    <section aria-label="Draft reply waiting for you" className="shrink-0 mx-5 mt-3 rounded-lg border border-[#f1dfb4] bg-[#fff8e6]">
+      <header className="px-3 py-2 border-b border-[#f1dfb4] flex flex-wrap items-center gap-2">
+        <Sparkles size={14} className="text-[#ad5918]" aria-hidden />
+        <h2 className="text-[13px] font-semibold text-[#703815]">{draft.step === 'first' ? 'Draft first reply' : 'Draft answer to the customer\'s reply'}: not sent yet</h2>
+        <span className="ml-auto text-[11px] text-[#ad5918]">drafted {formatShortDateTime(draft.at)} · from {draft.from}</span>
+      </header>
+      <div className="px-3 py-2.5 space-y-2">
+        <p className="text-[12px] text-[#703815]">
+          The assistant read the enquiry and wrote this for you. Check it, change anything, then send. Your signature is added when it sends.
+          {draft.complete ? ' The customer gave every detail, so your price quote comes next.' : draft.missing.length ? ` It asks for: ${draft.missing.join(', ')}.` : ''}
+        </p>
+        <div>
+          <label htmlFor="zd-draft-cc" className={LABEL}>Cc</label>
+          <input id="zd-draft-cc" value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Nobody" className={INPUT} />
+        </div>
+        <div>
+          <label htmlFor="zd-draft-subject" className={LABEL}>Subject</label>
+          <input id="zd-draft-subject" value={subject} onChange={(e) => setSubject(e.target.value)} className={INPUT} />
+        </div>
+        <div>
+          <label htmlFor="zd-draft-text" className={LABEL}>Message</label>
+          <textarea id="zd-draft-text" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(12, Math.max(6, text.split('\n').length + 1))} className={`${TEXTAREA} resize-y`} />
+        </div>
+        <Notice text={err} bad />
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" disabled={!!busy || !text.trim()} onClick={() => void decide('send')} className={BTN_PRIMARY}>
+            <Send size={14} aria-hidden />{busy === 'send' ? 'Sending…' : 'Send to customer'}
+          </button>
+          {sure ? (
+            <>
+              <button type="button" disabled={!!busy} onClick={() => void decide('discard')} className={BTN_DANGER}>{busy === 'discard' ? 'Discarding…' : 'Yes, discard it'}</button>
+              <button type="button" disabled={!!busy} onClick={() => setSure(false)} className={BTN_PLAIN}>Keep it</button>
+              <span className="text-[11px] text-[#703815]">The assistant will not write to this customer again.</span>
+            </>
+          ) : (
+            <button type="button" disabled={!!busy} onClick={() => setSure(true)} className={BTN_PLAIN}><Trash2 size={14} aria-hidden />Discard</button>
+          )}
+          <span className="ml-auto text-[11px] text-[#703815]">To: {draft.to}</span>
+        </div>
+      </div>
+    </section>
   )
 }
