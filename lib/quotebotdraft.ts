@@ -190,7 +190,7 @@ export async function draftCustomerEmail(i: DraftInput): Promise<{ text: string;
   // What the team has taught it (lib/botlearn.ts), after the hard rules.
   // Last, so it outranks both the rule-2 fact list and anything learned from
   // the other team's emails.
-  const system = SYSTEM + (await lessonsBlock()) + (i.plain ? PLAIN_SITE_RULES : '')
+  const system = SYSTEM + (await lessonsBlock(i.plain ? 'zeedesk' : 'packaging')) + (i.plain ? PLAIN_SITE_RULES : '')
   // Two tries on the work model (the second told what was wrong with the
   // first), then one on the chat model. Temperature is left to the vendor
   // default: Claude 5 refuses the parameter.

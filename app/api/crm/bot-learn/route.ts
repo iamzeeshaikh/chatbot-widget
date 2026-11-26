@@ -29,7 +29,11 @@ export async function GET(req: NextRequest) {
   // ?end=<iso>: learn from a past window (history replay, admins only).
   const endRaw = req.nextUrl.searchParams.get('end')
   const endMs = endRaw && w.admin ? Date.parse(endRaw) : NaN
-  return NextResponse.json(await learnFromTeam({ dryRun: dry, hours, ...(Number.isFinite(endMs) ? { endMs } : {}) }))
+  const opts = { dryRun: dry, hours, ...(Number.isFinite(endMs) ? { endMs } : {}) }
+  // ZeeDesk first: it is small, and returns at once when its agent sent nothing.
+  // Its list is its own (lib/botlearn.ts); a failure there never stops the other.
+  const zeedesk = await learnFromTeam({ ...opts, team: 'zeedesk' }).catch((e: unknown) => ({ ok: false, why: e instanceof Error ? e.message : 'failed' }))
+  return NextResponse.json({ ...(await learnFromTeam(opts)), zeedesk })
 }
 
 export async function POST(req: NextRequest) {

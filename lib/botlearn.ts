@@ -19,7 +19,7 @@ import { REMINDER_SITE } from './reminders'
 import { llmComplete, CLAUDE_WORK_MODEL } from './llm'
 import { CRM_BOT_DRAFT_ROLE, parseBotDraft, type BotDraft } from './botdraft'
 import { CRM_EMAIL_ROLE, parseCrmEmail } from './crmemail'
-import { PACKAGING_SITES } from './workspaces'
+import { PACKAGING_SITES, ZEEDESK_SITES } from './workspaces'
 import { splitQuoted } from './emailreply'
 
 export const CRM_BOT_LESSONS_ROLE = 'crm_bot_lessons'
@@ -36,29 +36,44 @@ export function parseLessons(message: string | null | undefined): BotLessons | n
   } catch { return null }
 }
 
-export async function readLessons(): Promise<BotLessons> {
+/**
+ * Each team has its OWN list (2026-11-26). ZeeDesk's assistant also reads the
+ * Model Town team's list, which is where its training came from, but what it
+ * learns from ZeeDesk's own agent stays in ZeeDesk's list: one shared list
+ * would carry each team's habits into the other's emails.
+ */
+export type LessonTeam = 'packaging' | 'zeedesk'
+const lessonsSession = (team: LessonTeam) => (team === 'zeedesk' ? `${BOT_LESSONS_SESSION}-zeedesk` : BOT_LESSONS_SESSION)
+
+export async function readLessons(team: LessonTeam = 'packaging'): Promise<BotLessons> {
   const { data } = await supabase.from('chat_logs').select('message')
-    .eq('session_id', BOT_LESSONS_SESSION).eq('role', CRM_BOT_LESSONS_ROLE)
+    .eq('session_id', lessonsSession(team)).eq('role', CRM_BOT_LESSONS_ROLE)
     .order('created_at', { ascending: false }).limit(1)
   return parseLessons(data?.[0]?.message) ?? { lessons: [], at: '', by: '' }
 }
 
-export async function writeLessons(l: BotLessons): Promise<void> {
-  await supabase.from('chat_logs').insert({ site_id: REMINDER_SITE, session_id: BOT_LESSONS_SESSION, role: CRM_BOT_LESSONS_ROLE, message: JSON.stringify(l) })
+export async function writeLessons(l: BotLessons, team: LessonTeam = 'packaging'): Promise<void> {
+  await supabase.from('chat_logs').insert({ site_id: REMINDER_SITE, session_id: lessonsSession(team), role: CRM_BOT_LESSONS_ROLE, message: JSON.stringify(l) })
 }
 
-let cache: { at: number; text: string } | null = null
-/** The lessons as a block for the draft writer's instructions (cached 10 min). */
-export async function lessonsBlock(): Promise<string> {
-  if (cache && Date.now() - cache.at < 10 * 60_000) return cache.text
+const cache = new Map<LessonTeam, { at: number; text: string }>()
+/** The lessons as a block for the draft writer's instructions (cached 10 min).
+ *  ZeeDesk gets the first team's list and then its own, which outranks it. */
+export async function lessonsBlock(team: LessonTeam = 'packaging'): Promise<string> {
+  const hit = cache.get(team)
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.text
   let text = ''
   try {
-    const l = await readLessons()
+    const l = await readLessons('packaging')
     if (l.lessons.length) {
       text = `\n\nLESSONS LEARNED FROM OUR AGENTS' REAL EMAILS (follow them unless a numbered rule above says otherwise):\n${l.lessons.map((x) => `- ${x.text}`).join('\n')}`
     }
+    if (team === 'zeedesk') {
+      const own = await readLessons('zeedesk')
+      if (own.lessons.length) text += `\n\nLESSONS FROM THIS SITE'S OWN AGENT (where they differ from the list above, these win):\n${own.lessons.map((x) => `- ${x.text}`).join('\n')}`
+    }
   } catch { text = '' }
-  cache = { at: Date.now(), text }
+  cache.set(team, { at: Date.now(), text })
   return text
 }
 
@@ -73,11 +88,11 @@ export interface LearnSignals {
 
 /** Gather `hours` of signals across the packaging sites, ending at `endMs`
  *  (now by default — the nightly pass). A history replay walks it back week by week. */
-export async function gatherSignals(hours = 26, endMs = Date.now()): Promise<LearnSignals> {
+export async function gatherSignals(hours = 26, endMs = Date.now(), team: LessonTeam = 'packaging'): Promise<LearnSignals> {
   const since = new Date(endMs - hours * 3600_000).toISOString()
   const until = new Date(endMs).toISOString()
   const draftSince = new Date(endMs - (hours + 72) * 3600_000).toISOString()
-  const sites = [...PACKAGING_SITES]
+  const sites = team === 'zeedesk' ? [...ZEEDESK_SITES] : [...PACKAGING_SITES]
   // Paged: a plain select stops at 1,000 rows whatever .limit() asks for.
   const [drafts, emails] = await Promise.all([
     fetchAllPages<{ session_id: string; message: string; created_at: string }>(() => supabase.from('chat_logs').select('session_id, message, created_at').eq('role', CRM_BOT_DRAFT_ROLE).in('site_id', sites)
@@ -158,11 +173,17 @@ Rules for lessons:
 - Merge with the EXISTING lessons: keep the ones still right (unchanged text, same "from"), improve or merge near-duplicates, drop ones the new evidence contradicts. Keep every lesson whose "from" is "owner" unchanged.
 - At most ${MAX_LESSONS} lessons in total, most useful first.`
 
+// ZeeDesk's sites promise less than the first team's, and a lesson must never
+// teach its assistant to promise more.
+const ZEEDESK_LEARN_RULES = `
+- These sites never promise free shipping, free lamination, a discount or a production or delivery time, never say where the goods are made, and their minimum order is 100 pieces. Never write a lesson that says otherwise, even if an agent's email did.`
+
 /** One learning pass: gather, ask the model, merge, store. */
-export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number; endMs?: number } = {}): Promise<{ ok: boolean; why?: string; signals: { edited: number; discarded: number; human: number }; before: number; after?: BotLessons }> {
-  const sig = await gatherSignals(opts.hours ?? 26, opts.endMs ?? Date.now())
+export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number; endMs?: number; team?: LessonTeam } = {}): Promise<{ ok: boolean; why?: string; signals: { edited: number; discarded: number; human: number }; before: number; after?: BotLessons }> {
+  const team: LessonTeam = opts.team ?? 'packaging'
+  const sig = await gatherSignals(opts.hours ?? 26, opts.endMs ?? Date.now(), team)
   const counts = { edited: sig.edited.length, discarded: sig.discarded.length, human: sig.human.length }
-  const current = await readLessons()
+  const current = await readLessons(team)
   if (!counts.edited && !counts.discarded && !counts.human) return { ok: true, why: 'nothing new to learn from', signals: counts, before: current.lessons.length }
   const user = [
     'EXISTING LESSONS:', JSON.stringify(current.lessons.map((l) => ({ text: l.text, from: l.from }))), '',
@@ -173,7 +194,7 @@ export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number; en
     `EMAILS AGENTS WROTE THEMSELVES (${counts.human}):`,
     ...sig.human.slice(0, 40).map((e, i) => `#${i + 1}\nCUSTOMER WROTE:\n${e.customer || '(new enquiry)'}\nAGENT REPLIED:\n${e.agent}`),
   ].join('\n').slice(0, 60000)
-  const r = await llmComplete({ system: LEARN_SYSTEM, messages: [{ role: 'user', content: user }], maxTokens: 16000, anthropicMaxTokens: 16000, model: CLAUDE_WORK_MODEL, timeoutMs: 240000 })
+  const r = await llmComplete({ system: team === 'zeedesk' ? LEARN_SYSTEM + ZEEDESK_LEARN_RULES : LEARN_SYSTEM, messages: [{ role: 'user', content: user }], maxTokens: 16000, anthropicMaxTokens: 16000, model: CLAUDE_WORK_MODEL, timeoutMs: 240000 })
   if (r.error || !r.text.trim()) return { ok: false, why: 'the model did not answer', signals: counts, before: current.lessons.length }
   const m = r.text.match(/\{[\s\S]*\}/)
   let parsed: { lessons?: { text?: string; from?: string; evidence?: string }[] } = {}
@@ -193,6 +214,6 @@ export async function learnFromTeam(opts: { dryRun?: boolean; hours?: number; en
     .filter((l) => l.from !== 'owner' || owner.some((o) => o.text === l.text))
   const merged = [...owner, ...learned.filter((l) => !owner.some((o) => o.text === l.text))].slice(0, MAX_LESSONS)
   const next: BotLessons = { lessons: merged, at: now, by: 'zeeops-bot-learn', learnedFrom: counts }
-  if (!opts.dryRun && merged.length) { await writeLessons(next); cache = null }
+  if (!opts.dryRun && merged.length) { await writeLessons(next, team); cache.clear() }
   return { ok: true, signals: counts, before: current.lessons.length, after: next }
 }
