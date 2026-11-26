@@ -13,7 +13,7 @@
 // Claude reply and the real checks — and nothing written, sent or pushed.
 
 import { supabase } from './supabase'
-import { PACKAGING_SITES, siteWorkspace } from './workspaces'
+import { PACKAGING_SITES, ZEEDESK_SITES, siteWorkspace } from './workspaces'
 import {
   CRM_WA_IN_ROLE, CRM_WA_OUT_ROLE, CRM_CALL_ROLE, CRM_STAGE_ROLE, CRM_NOT_A_LEAD_ROLE,
   CRM_WA_BOT_ROLE, CRM_WA_BOT_OFF_ROLE, CRM_WA_BOT_CFG_ROLE, CRM_NOTE_ROLE, CRM_FIELD_ROLE,
@@ -29,7 +29,7 @@ import { waLeadContext } from './wacontext'
 import { siteFacts } from './sitefacts'
 import { memberDisplayName } from './membername'
 import { twilioConfig, sendWhatsApp } from './twilio'
-import { metaWaConfig, sendMetaWhatsApp } from './metawa'
+import { metaWaConfigForSite, sendMetaWhatsApp } from './metawa'
 import { leadPhone } from './leadrecord'
 import { sendPushToMember, sendPushToWorkspace } from './push'
 import { extractEmail } from './contactharvest'
@@ -101,14 +101,20 @@ export async function runWaBot(opts: {
   const dryRun = !!opts.dryRun
   const cfg = await readBotConfig()
   const result: BotRunResult = { enabled: cfg.enabled, dryRun, scanned: 0, items: [], sent: 0 }
+  // ZeeDesk (2026-11-26) is a second team on its own Meta line. Its assistant
+  // is not tied to the Model Town team's dashboard switch: it uses the same
+  // timing and stops alone with ZEEDESK_WA_BOT=off (WA_BOT=off stops both).
+  const hardOff = String(process.env.WA_BOT ?? '').toLowerCase() === 'off'
+  const zdOn = !hardOff && String(process.env.ZEEDESK_WA_BOT ?? '').toLowerCase() !== 'off'
   // A dry run may preview a switched-off assistant; a live run never acts.
-  if (!cfg.enabled && !dryRun) return result
+  if (!cfg.enabled && !zdOn && !dryRun) return result
   const runCfg = dryRun ? { ...cfg, enabled: true } : cfg
+  const sites = [...(cfg.enabled || dryRun ? PACKAGING_SITES : []), ...(zdOn || dryRun ? ZEEDESK_SITES : [])]
 
   // Who is waiting: inbound WhatsApp on packaging sites, recent enough to answer.
   const sinceMs = now.getTime() - (opts.sampleDays ? opts.sampleDays * 864e5 : (MAX_AGE_MIN + 5) * 60e3)
   let q = supabase.from('chat_logs').select('session_id, site_id, created_at')
-    .eq('role', CRM_WA_IN_ROLE).in('site_id', PACKAGING_SITES)
+    .eq('role', CRM_WA_IN_ROLE).in('site_id', sites)
     .gte('created_at', new Date(sinceMs).toISOString())
     .order('created_at', { ascending: false }).limit(500)
   if (opts.leadIds?.length) q = q.in('session_id', opts.leadIds)
@@ -117,9 +123,9 @@ export async function runWaBot(opts: {
   result.scanned = sessions.length
 
   for (const [leadId, siteId] of sessions) {
-    if (siteWorkspace(siteId) !== 'packaging') continue
+    if (!sites.includes(siteId)) continue
     if (!dryRun && result.sent >= MAX_SENDS_PER_RUN) break
-    const item = await handleLead(leadId, siteId, now, runCfg, dryRun, !!opts.ignoreTiming, dryRun && !!opts.replayFirst)
+    const item = await handleLead(leadId, siteId, now, siteWorkspace(siteId) === 'zeedesk' ? { ...runCfg, enabled: true } : runCfg, dryRun, !!opts.ignoreTiming, dryRun && !!opts.replayFirst)
     result.items.push(item)
     if (item.state === 'sent') result.sent++
   }
@@ -144,11 +150,13 @@ async function handleLead(leadId: string, siteId: string, now: Date, cfg: WaBotC
 
   const ctx = await waLeadContext(leadId)
   if (!ctx) return { leadId, siteId, state: 'skipped', why: 'lead not found' }
+  const team = siteWorkspace(ctx.leadSiteId) === 'zeedesk' ? 'zeedesk' as const : 'packaging' as const
+  const plain = team === 'zeedesk'
   const facts = ctx.siteKnown && ctx.siteId ? await siteFacts(ctx.siteId) : null
   const agentName = ctx.assignee ? ((await memberDisplayName(ctx.assignee)).split(/\s+/)[0] || null) : null
   const customerText = d.thread.filter((m) => m.inbound).map((m) => m.body).join('\n')
   const base: BotRunItem = {
-    leadId, siteId, state: 'skipped', line: ctx.line === 'meta' ? 'UK' : 'US', site: ctx.siteName, uk: ctx.uk,
+    leadId, siteId, state: 'skipped', line: plain ? 'ZeeDesk' : ctx.line === 'meta' ? 'UK' : 'US', site: ctx.siteName, uk: ctx.uk,
     customer: d.pending.map((m) => [m.media.length ? `[${m.media.join(', ')}]` : '', m.body].filter(Boolean).join(' ')).join(' / ').slice(0, 500),
     facts: facts?.sources,
   }
@@ -156,6 +164,7 @@ async function handleLead(leadId: string, siteId: string, now: Date, cfg: WaBotC
   const system = systemPrompt({
     siteName: ctx.siteName, siteDomain: ctx.siteDomain, siteKnown: ctx.siteKnown, uk: ctx.uk, agentName,
     customerFirstName: ctx.firstName, facts: facts?.text ?? '', firstReply: d.firstReply, prevCollected: d.prevCollected,
+    plain,
   })
   const convo = transcript(d.thread, (t) => formatDateTime(new Date(t).toISOString()))
   let feedback = ''
@@ -178,7 +187,7 @@ async function handleLead(leadId: string, siteId: string, now: Date, cfg: WaBotC
       return { ...base, state: 'model-skip', why: `model: ${out.skip}`, model }
     }
     reply = tidy(out.reply)
-    const problem = replyProblem(reply, facts?.text ?? '', { uk: ctx.uk, siteKnown: ctx.siteKnown, firstReply: d.firstReply, customerText })
+    const problem = replyProblem(reply, facts?.text ?? '', { uk: ctx.uk, siteKnown: ctx.siteKnown, firstReply: d.firstReply, customerText, plain })
     if (!problem) break
     console.warn(`[wa-bot] ${leadId} reply rejected: ${problem}`)
     feedback = `\n\nYOUR LAST REPLY WAS REJECTED: ${problem}. Rewrite it following every rule.`
@@ -216,7 +225,7 @@ async function handleLead(leadId: string, siteId: string, now: Date, cfg: WaBotC
   }
 
   const to = await leadPhone(leadId)
-  const meta = ctx.line === 'meta' ? metaWaConfig() : null
+  const meta = ctx.line === 'meta' ? metaWaConfigForSite(ctx.leadSiteId) : null
   const tw = ctx.line === 'meta' ? null : twilioConfig('packaging')
   if (!to || (!meta && !tw?.whatsappFrom)) {
     await ledger({ state: 'failed', why: !to ? 'no phone on the lead' : 'line not configured' })
@@ -239,7 +248,7 @@ async function handleLead(leadId: string, siteId: string, now: Date, cfg: WaBotC
     }),
   })
   await ledger({ state: 'sent', sid: sent.sid, model, collected, handoff: out.handoff })
-  await saveCollected(leadId, ctx.leadSiteId, d.prevCollected, collected, out.handoff, ctx.assignee, ctx.siteName)
+  await saveCollected(leadId, ctx.leadSiteId, d.prevCollected, collected, out.handoff, ctx.assignee, ctx.siteName, team)
   return item
 }
 
@@ -253,7 +262,7 @@ async function standDown(leadId: string, siteId: string, inboundSid: string, sta
 /** New details go on the record: an empty Email field is filled, and a note
  *  lists what the customer has told the assistant — written only when something
  *  changed, and then the agent is pushed. */
-async function saveCollected(leadId: string, siteId: string, before: Collected, now: Collected, handoff: boolean, assignee: string | null, siteName: string) {
+async function saveCollected(leadId: string, siteId: string, before: Collected, now: Collected, handoff: boolean, assignee: string | null, siteName: string, team: 'packaging' | 'zeedesk' = 'packaging') {
   const changed = (Object.keys(COLLECTED_LABEL) as (keyof Collected)[]).filter((k) => now[k] && now[k] !== before[k])
   if (!changed.length && !handoff) return
   const at = new Date().toISOString()
@@ -281,8 +290,8 @@ async function saveCollected(leadId: string, siteId: string, before: Collected, 
     url: `/leads/${encodeURIComponent(leadId)}`, tag: `wabot-${leadId}`,
   }
   if (assignee) {
-    const n = await sendPushToMember(assignee, 'packaging', payload).catch(() => 0)
+    const n = await sendPushToMember(assignee, team, payload).catch(() => 0)
     if (n > 0) return
   }
-  await sendPushToWorkspace('packaging', payload).catch(() => {})
+  await sendPushToWorkspace(team, payload).catch(() => {})
 }

@@ -184,6 +184,9 @@ export interface PromptInput {
   facts: string
   firstReply: boolean
   prevCollected: Collected
+  /** A site that promises no free shipping, delivery time or discount and never
+   *  says where its goods are made (the ZeeDesk sites). */
+  plain?: boolean
 }
 
 export function systemPrompt(p: PromptInput): string {
@@ -202,7 +205,9 @@ HARD RULES
 - Never discuss payment problems, card or bank issues, refunds or chargebacks: say ${who} will help with that.
 - Never mention where the company is registered or located${p.uk ? '' : ', and never mention the UK, England or London'}.
 - We do not make packaging for alcohol, religious products or Christmas. Politely say it is not something we can help with.
-- Never use the words "configurator", "design tool" or "written quote". Say "custom quote".
+- Never use the words "configurator", "design tool" or "written quote". Say "custom quote".${p.plain ? `
+- Never say shipping or delivery is free, and never say how long production or delivery takes, even if asked: say both are confirmed on the custom quote.
+- Never say or hint where the goods are made, never call us a manufacturer or a factory, and never name another company or website.` : ''}
 - Never make up facts about samples, stock, materials or printing that are not in SITE FACTS; say ${who} will confirm.
 - If the customer sends a photo or file, thank them for it; you cannot see it, so do not describe it. You cannot listen to voice notes: ask them to type the key details.
 - Spelling: ${p.uk ? 'British English (colour, customise, centre, organise), prices in £ as the site shows' : 'American English (color, customize, center, organize)'}.
@@ -261,9 +266,10 @@ const norm = (s: string) => s.toLowerCase().replace(/[\s,]/g, '')
  * Why this reply must not be sent, or null. Every figure in it has to be in
  * the site's own text — the model is told so, and this is what makes it a rule.
  */
-export function replyProblem(reply: string, facts: string, o: { uk: boolean; siteKnown: boolean; firstReply: boolean; customerText: string }): string | null {
+export function replyProblem(reply: string, facts: string, o: { uk: boolean; siteKnown: boolean; firstReply: boolean; customerText: string; plain?: boolean }): string | null {
   const t = reply.trim()
   if (!t) return 'empty reply'
+  if (o.plain && /free\s+(shipping|delivery)|ship(ping)?\s+is\s+free|\b(manufactur\w*|factory|made in|produced in)\b/i.test(t)) return 'promises free shipping or says where the goods are made, which this site never does'
   const words = t.split(/\s+/).length
   if (words > 95) return `too long (${words} words)`
   if (t.split(/\n\s*\n/).length > 3) return 'more than 3 paragraphs'

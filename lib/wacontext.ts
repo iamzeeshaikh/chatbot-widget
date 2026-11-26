@@ -17,7 +17,7 @@
 
 import { supabase } from './supabase'
 import { SITE_DOMAINS } from './sitedomains'
-import { PACKAGING_SITES } from './workspaces'
+import { PACKAGING_SITES, ZEEDESK_SITES, siteWorkspace } from './workspaces'
 import { CRM_FIELD_ROLE, CRM_WA_IN_ROLE } from './crm'
 import { ASSIGNMENT_ROLE } from './assignment'
 import { lineForLead, isUkSite, type WaLine } from './metawa'
@@ -44,14 +44,18 @@ const PLACEHOLDER_RE = /Site not identified|Site is a BEST GUESS/i
 
 /** The verified WhatsApp display names of the two lines — what the customer
  *  already sees at the top of the chat, so the safe name when no site is known. */
-export function lineBrand(line: WaLine): string {
+/** ZeeDesk's one line carries its own business name (the name on its WhatsApp
+ *  account), never the other team's. */
+export function lineBrand(line: WaLine, zeedesk = false): string {
+  if (zeedesk) return 'Custom Packaging Desk'
   return line === 'meta' ? 'ZEE Pack UK' : 'ZEE Pack'
 }
 
 let siteNames: { at: number; map: Map<string, string> } | null = null
 export async function packagingSiteNames(): Promise<Map<string, string>> {
   if (siteNames && Date.now() - siteNames.at < 10 * 60 * 1000) return siteNames.map
-  const { data } = await supabase.from('sites').select('site_id, name').in('site_id', PACKAGING_SITES)
+  // Both packaging-kind teams' sites; each caller looks up only its own.
+  const { data } = await supabase.from('sites').select('site_id, name').in('site_id', [...PACKAGING_SITES, ...ZEEDESK_SITES])
   const map = new Map<string, string>((data ?? []).map((s) => [String(s.site_id), String(s.name ?? s.site_id)]))
   siteNames = { at: Date.now(), map }
   return map
@@ -59,16 +63,16 @@ export async function packagingSiteNames(): Promise<Map<string, string>> {
 
 /** A site the customer's own words name: a domain first, then the prefilled
  *  "Hi <Site Name>!" / "Hi <Site Name> team" greeting. Ambiguity names nothing. */
-export function siteFromThreadText(text: string, names: Map<string, string>, preferUk: boolean): string | null {
+export function siteFromThreadText(text: string, names: Map<string, string>, preferUk: boolean, sites: readonly string[] = PACKAGING_SITES): string | null {
   const hay = text.toLowerCase()
-  const byDomain = PACKAGING_SITES.filter((id) => SITE_DOMAINS[id] && hay.includes(SITE_DOMAINS[id].toLowerCase()))
+  const byDomain = sites.filter((id) => SITE_DOMAINS[id] && hay.includes(SITE_DOMAINS[id].toLowerCase()))
   if (byDomain.length === 1) return byDomain[0]
   // Longest domain wins over a shorter one it contains (thepapercups.co.uk vs thepapercups.com does not
   // collide, but zeepack.co is inside zeepack.com-like strings).
   if (byDomain.length > 1) return byDomain.sort((a, b) => SITE_DOMAINS[b].length - SITE_DOMAINS[a].length)[0]
   const greet = [...text.matchAll(/\bHi,?\s+(?:the\s+)?([A-Z][\w&' ]{2,40}?)(?:\s+team)?\s*[!,.]/gi)].map((m) => m[1].trim().toLowerCase())
   if (!greet.length) return null
-  const hits = PACKAGING_SITES.filter((id) => {
+  const hits = sites.filter((id) => {
     const n = (names.get(id) ?? '').toLowerCase().replace(/^the\s+/, '')
     return n.length > 3 && greet.some((g) => g.replace(/^the\s+/, '') === n)
   })
@@ -111,20 +115,25 @@ export async function waLeadContext(sessionId: string): Promise<WaLeadContext | 
       if (w?.body) inbound.push(w.body)
     }
   }
-  const uk = line === 'meta' || isUkSite(leadSiteId)
+  // The lead's own team decides which sites it can be about. ZeeDesk's line
+  // is a Meta one with a US number, so there a Meta line says nothing about
+  // the customer being in the UK.
+  const zeedesk = siteWorkspace(leadSiteId) === 'zeedesk'
+  const sites: readonly string[] = zeedesk ? ZEEDESK_SITES : PACKAGING_SITES
+  const uk = zeedesk ? isUkSite(leadSiteId) : (line === 'meta' || isUkSite(leadSiteId))
   const placeholder = PLACEHOLDER_RE.test(resolved.lead?.message ?? '')
   let siteId: string | null = placeholder ? null : leadSiteId
   // Even a "known" site is re-read from the thread: a returning customer whose
   // phone matched an old lead on another site is writing about THIS one.
-  const named = siteFromThreadText(inbound.join('\n'), names, uk)
+  const named = siteFromThreadText(inbound.join('\n'), names, uk, sites)
   if (named) siteId = named
-  if (siteId && !PACKAGING_SITES.includes(siteId)) siteId = null
+  if (siteId && !sites.includes(siteId)) siteId = null
   return {
     sessionId, leadSiteId, siteId,
-    siteName: siteId ? (names.get(siteId) ?? siteId) : lineBrand(line),
+    siteName: siteId ? (names.get(siteId) ?? siteId) : lineBrand(line, zeedesk),
     siteDomain: siteId ? (SITE_DOMAINS[siteId] ?? null) : null,
     siteKnown: !!siteId,
-    line, uk: siteId ? (isUkSite(siteId) || line === 'meta') : uk,
+    line, uk: siteId ? (isUkSite(siteId) || (!zeedesk && line === 'meta')) : uk,
     firstName: greetableFirstName(name),
     assignee,
   }
