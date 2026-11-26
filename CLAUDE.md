@@ -834,6 +834,28 @@ also means Twilio WhatsApp and ZeeDesk's WhatsApp is Meta's. ZeeDesk's line is
 (rewritten in `next.config.ts`), with its own icons in `public/zd-icons`. The
 formatted email box is `app/zd/RichEditor.tsx`, shared by Inbox and the record.
 
+### ZeeDesk's assistants, mail and alerts (2026-11-26)
+
+- **Email assistant**: `lib/quotebot.ts` works by TEAM (`botTeamFor(siteId)`):
+  packaging (Samir/Steve, `chat.zeeops.dev`) or ZeeDesk (`ZEEDESK_BOT_AGENTS`,
+  `chat.zeedesk.dev`, `plain: true`). `plain` wording promises no free shipping,
+  lamination, discount or delivery time and uses a minimum of 100
+  (`lib/quotebotcore.ts`, `PLAIN_SITE_RULES` + `plainProblem` in
+  `lib/quotebotdraft.ts`). ZeeDesk does NOT carry the `'quotebot'` feature (that
+  flag opens admin run/test-send routes); `ZEEDESK_QUOTE_BOT=off` stops it.
+  Promo emails are packaging-only. The draft shows in ZeeDesk as `DraftCard`
+  in `app/zd/screens/LeadRecord.tsx`. A new template line must honour `plain`.
+- **WhatsApp assistant**: `lib/wabotsweep.ts` covers `ZEEDESK_SITES` on the
+  ZeeDesk Meta line (`metaWaConfigForSite`), brand "Custom Packaging Desk",
+  `plain` rules in `lib/wabot.ts`; `ZEEDESK_WA_BOT=off` stops it alone.
+- **Gmail**: ZeeDesk mailboxes are another Google organisation, so they
+  connect through their own OAuth app (`GOOGLE_ZEEDESK_OAUTH_CLIENT_ID/_SECRET`);
+  a token row carries `client: 'zeedesk'` and refreshes with that app.
+- **Alerts**: `app/zd/push.ts` + the rail's Alerts button subscribe a device;
+  `public/sw.js` uses ZeeDesk's name and icon on `*.zeedesk.dev`.
+- The assistant's actor id `zeeops-bot` must never be printed in ZeeDesk:
+  `short()` in `app/zd/ui.tsx` shows it as "Assistant".
+
 ## Daily follow-ups (`/followups`, packaging admins)
 
 `lib/followups.ts` builds one Karachi day of outgoing follow-ups, customer
