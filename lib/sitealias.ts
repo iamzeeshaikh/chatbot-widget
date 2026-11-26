@@ -24,7 +24,11 @@ export function matchSiteAlias<T extends Alias>(aliases: T[], siteId: string, si
   const site = siteId.toLowerCase()
   const domain = siteDomain(site)?.toLowerCase()
   if (domain) {
-    const exact = aliases.find((a) => aliasDomain(a) === domain)
+    // A mailbox that holds both a person's address and the site's shared one
+    // on this domain (ZeeDesk: nathan@ and info@) writes as the person, so
+    // the From line matches the signature. With only one, that one.
+    const onDomain = aliases.filter((a) => aliasDomain(a) === domain)
+    const exact = onDomain.find((a) => !/^(info|sales|hello|support|contact|quotes?|orders?|admin)@/i.test(a.email)) ?? onDomain[0]
     if (exact) return exact
   }
   const name = siteName.toLowerCase().replace(/[^a-z]/g, '')
