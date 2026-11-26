@@ -631,6 +631,9 @@ export function isTestSubmission(name: string | null | undefined, email: string 
   // address at our own sites — is always us testing (owner, 2026-11-05: "test
   // lead CRM men na aea kare", the sports team said the same).
   if (e && (OWNER_INBOX.test(e) || isOurAddress(e))) return `our own test (${e})`
+  // Addresses that cannot exist (sample@email.tst): twelve widget test chats
+  // were counted as November 2026 chat leads.
+  if (e && /\.(?:tst|test|invalid|example|local)$|@example\.(?:com|net|org)$/i.test(e)) return `test address (${e})`
   if (/\[security test\]|security hardening probe|\bescape probe\b|\brelay probe\b|\bautoreply probe\b/i.test(body)) return 'security test probe'
   // Our own tests (owner, 2026-10-23: "claude test etc wali remove karo").
   // Launch/QA forms on new sites (2026-10-26 backfill: "TEST ux", "TEST smtp",
