@@ -841,6 +841,8 @@ export interface InboundMessage {
    *  Delivered-To / X-Forwarded-* / X-Original-To headers and the "for <…>"
    *  of each Received line. A Bcc'd recipient appears nowhere else. */
   routedTo: string
+  /** A mailing-list or bulk send (List-Unsubscribe / Precedence: bulk). */
+  bulk: boolean
   subject: string
   bodyText: string
   at: string
@@ -1032,6 +1034,7 @@ export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadI
       cc: headerOf(headers, 'Cc'),
       replyTo: headerOf(headers, 'Reply-To'),
       routedTo: routedAddresses(headers),
+      bulk: !!headerOf(headers, 'List-Unsubscribe') || /bulk|list|junk/i.test(headerOf(headers, 'Precedence')),
       subject: headerOf(headers, 'Subject'),
       bodyText: extractBody(m.payload),
       at: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : '',

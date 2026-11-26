@@ -24,7 +24,7 @@ import { NextRequest } from 'next/server'
 import { supabase, fetchAllPages } from './supabase'
 import { REMINDER_SITE } from './reminders'
 import { siteIdFromQuoteCode, isMachineMessage, customerNameFromBody } from './quoteintake'
-import { siteWorkspace, workspaceKind } from './workspaces'
+import { siteWorkspace, workspaceKind, isRetiredLeadSite } from './workspaces'
 import { googleConfig, searchIntakeMessageIds, fetchThread, fetchAttachment, type InboundMessage } from './gmail'
 import { POST as intakePost } from '@/app/api/quote-intake/route'
 import { isOurAddress } from './customercc'
@@ -84,7 +84,7 @@ export interface PullResult {
   errors: string[]
   /** Dry runs only: what was left as not-a-form, so a person can see what
    *  the intake is passing over (Stars Telemetry, 25 Nov 2026). */
-  notForms?: { gmailId: string; from: string; subject: string; to: string; routedTo: string; at: string }[]
+  notForms?: { gmailId: string; from: string; subject: string; to: string; routedTo: string; at: string; excerpt: string }[]
 }
 
 async function processedIds(retryNotAForm = false, days = 4, ignoreFresh = false): Promise<Set<string>> {
@@ -164,6 +164,22 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
         const addr = (m.bodyText.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []).find((a) => !ours(a))
         if (c && addr) { code = c; fwdEmail = addr }
       }
+      // A customer who writes to info@<site> themselves, with no website form
+      // at all (Stars Telemetry, 25 Nov 2026: one email to several suppliers,
+      // us on Bcc, so the site is named only in the delivery headers). It is
+      // an enquiry like any other and used to be passed over in silence.
+      // Filed only when a stranger sent it, it is not a bulk or robot send,
+      // and it was addressed or delivered to one of our own site addresses.
+      let direct: { domain: string } | null = null
+      if (!code) {
+        const sender = (`${m.replyTo} ${m.from}`.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) ?? [''])[0]
+        const chain = `${m.to} ${m.cc} ${m.routedTo}`.toLowerCase()
+        const hit = Object.entries(SITE_DOMAINS).find(([sid, d]) => chain.includes(`@${d.toLowerCase()}`) && !isRetiredLeadSite(sid) && workspaceKind(siteWorkspace(sid) ?? 'sports') === 'packaging')
+        const c = hit ? Object.entries(QUOTE_SITE_CODES).find(([, sid]) => sid === hit[0])?.[0] : undefined
+        if (sender && !ours(sender) && !automatedSender(sender) && !m.bulk && !m.labelIds.includes('SENT') && c && m.bodyText.trim().length > 20) {
+          code = c; direct = { domain: hit![1] }
+        }
+      }
       const siteId = code ? siteIdFromQuoteCode(code) : null
       // Any packaging-kind site: the ZeeDesk team's form mail arrives in this
       // same intake mailbox, and /api/quote-intake files and announces each
@@ -171,12 +187,17 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
       const ws = siteId ? siteWorkspace(siteId) : null
       if (!code || !siteId || !ws || workspaceKind(ws) !== 'packaging') {
         if (!dryRun) await remember(ref.id, 'not-a-form')
-        else (out.notForms ??= []).push({ gmailId: m.gmailId, from: m.from, subject: m.subject.slice(0, 120), to: `${m.to}${m.cc ? ` | cc ${m.cc}` : ''}`.slice(0, 200), routedTo: m.routedTo, at: m.at })
+        else (out.notForms ??= []).push({ gmailId: m.gmailId, from: m.from, subject: m.subject.slice(0, 120), to: `${m.to}${m.cc ? ` | cc ${m.cc}` : ''}`.slice(0, 200), routedTo: m.routedTo, at: m.at, excerpt: m.bodyText.replace(/\s+/g, ' ').slice(0, 260) })
         out.skipped++
         continue
       }
       // The same shim the Apps Script hands leadFromMessage_: a Gmail message.
-      const parsed = g.leadFromMessage_({
+      const parsed = direct ? {
+        name: m.from.replace(/<[^>]*>/, '').replace(/["']/g, '').trim() || null,
+        email: (`${m.replyTo} ${m.from}`.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) ?? [''])[0],
+        phone: null, product: null, unreadable: false,
+        message: `Direct email to info@${direct.domain} (not a website form).\nSubject: ${m.subject}\n\n${m.bodyText.trim()}`,
+      } : g.leadFromMessage_({
         getPlainBody: () => m.bodyText, getSubject: () => m.subject,
         getFrom: () => m.from, getReplyTo: () => m.replyTo ?? '',
       })
@@ -221,7 +242,7 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
         unreadable: parsed.unreadable === true, attachments: files,
       }
       if (dryRun) {
-        out.posted.push({ gmailId: m.gmailId, site: siteId, name: String(parsed.name ?? ''), email: String(parsed.email ?? ''), result: 'would-post' })
+        out.posted.push({ gmailId: m.gmailId, site: siteId, name: String(parsed.name ?? ''), email: String(parsed.email ?? ''), result: direct ? 'would-post (direct email)' : 'would-post' })
         continue
       }
       const res = await intakePost(new NextRequest(`${origin}/api/quote-intake`, {
