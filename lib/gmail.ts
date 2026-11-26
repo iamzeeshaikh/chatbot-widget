@@ -837,6 +837,10 @@ export interface InboundMessage {
   /** The Reply-To header, '' when none. Google Group mail ("X via Info All
    *  Brands") has the group in From and the customer only here. */
   replyTo: string
+  /** Every address this copy was delivered or forwarded to, from the
+   *  Delivered-To / X-Forwarded-* / X-Original-To headers and the "for <…>"
+   *  of each Received line. A Bcc'd recipient appears nowhere else. */
+  routedTo: string
   subject: string
   bodyText: string
   at: string
@@ -844,6 +848,17 @@ export interface InboundMessage {
   labelIds: string[]
   /** Declared attachments — metadata only; bytes are fetched separately. */
   attachments: InboundAttachmentRef[]
+}
+
+function routedAddresses(headers: { name: string; value: string }[]): string {
+  const out = new Set<string>()
+  for (const h of headers) {
+    const n = h.name.toLowerCase()
+    const v = n === 'received' ? (h.value.match(/\bfor\s+<?([^\s<>;]+@[^\s<>;]+)>?/i)?.[1] ?? '')
+      : ['delivered-to', 'x-forwarded-for', 'x-forwarded-to', 'x-original-to', 'envelope-to', 'x-gm-original-to'].includes(n) ? h.value : ''
+    for (const a of v.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []) out.add(a.toLowerCase())
+  }
+  return [...out].join(', ')
 }
 
 function headerOf(headers: { name: string; value: string }[], name: string): string {
@@ -1016,6 +1031,7 @@ export async function fetchThread(agentEmail: string, cfg: GoogleConfig, threadI
       to: headerOf(headers, 'To'),
       cc: headerOf(headers, 'Cc'),
       replyTo: headerOf(headers, 'Reply-To'),
+      routedTo: routedAddresses(headers),
       subject: headerOf(headers, 'Subject'),
       bodyText: extractBody(m.payload),
       at: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : '',

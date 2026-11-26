@@ -82,9 +82,12 @@ export interface PullResult {
   posted: { gmailId: string; site: string; name: string; email: string; result: string }[]
   skipped: number
   errors: string[]
+  /** Dry runs only: what was left as not-a-form, so a person can see what
+   *  the intake is passing over (Stars Telemetry, 25 Nov 2026). */
+  notForms?: { gmailId: string; from: string; subject: string; to: string; routedTo: string; at: string }[]
 }
 
-async function processedIds(retryNotAForm = false, days = 4): Promise<Set<string>> {
+async function processedIds(retryNotAForm = false, days = 4, ignoreFresh = false): Promise<Set<string>> {
   const since = new Date(Date.now() - Math.max(4, days + 1) * 864e5).toISOString()
   // Paged: 732 rows in five days already, and a plain select stops at 1,000 —
   // past that the oldest-first page would hide the newest pulls and re-import them.
@@ -97,7 +100,7 @@ async function processedIds(retryNotAForm = false, days = 4): Promise<Set<string
   for (const r of data ?? []) { try { const o = JSON.parse(r.message); if (o?.gmailId) last.set(o.gmailId, { result: String(o.result ?? ''), at: String(o.at ?? '') }) } catch { /* skip */ } }
   // A not-a-form re-read in the last 6 hours stays done, or a backfill would
   // re-open the same newest 40 on every call and never get further back.
-  const fresh = new Date(Date.now() - 6 * 3600_000).toISOString()
+  const fresh = ignoreFresh ? new Date().toISOString() : new Date(Date.now() - 6 * 3600_000).toISOString()
   for (const [id, v] of last) if (!(retryNotAForm && v.result === 'not-a-form' && v.at < fresh)) out.add(id)
   return out
 }
@@ -114,7 +117,7 @@ async function remember(gmailId: string, result: string, extra: Record<string, u
  * re-reads messages earlier skipped as not-a-form — for when a site was
  * missing from the intake maps and has just been added (2026-10-26).
  */
-export async function runIntakePull(origin: string, opts: { dryRun?: boolean; days?: number; retryNotAForm?: boolean } = {}): Promise<PullResult> {
+export async function runIntakePull(origin: string, opts: { dryRun?: boolean; days?: number; retryNotAForm?: boolean; force?: boolean } = {}): Promise<PullResult> {
   const dryRun = !!opts.dryRun
   const out: PullResult = { ranAt: new Date().toISOString(), dryRun, found: 0, opened: 0, posted: [], skipped: 0, errors: [] }
   const cfg = googleConfig(origin)
@@ -130,7 +133,9 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
   const spam = await searchIntakeMessageIds(INTAKE_MAILBOX, cfg, `in:spam ${days ? `newer_than:${days}d` : WINDOW}`, 200, true).catch(() => [])
   for (const m of spam) if (!ids.some((x) => x.id === m.id)) ids.push(m)
   out.found = ids.length
-  const done = await processedIds(!!opts.retryNotAForm, days || 4)
+  // A dry run writes nothing, so it may re-read everything; `force` lets an
+  // admin re-file a message skipped within the last six hours.
+  const done = await processedIds(!!opts.retryNotAForm, days || 4, dryRun || !!opts.force)
   const todo = ids.filter((m) => !done.has(m.id)).slice(0, PER_RUN)
   const threads = new Map<string, InboundMessage[]>()
   const g = script()
@@ -166,6 +171,7 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
       const ws = siteId ? siteWorkspace(siteId) : null
       if (!code || !siteId || !ws || workspaceKind(ws) !== 'packaging') {
         if (!dryRun) await remember(ref.id, 'not-a-form')
+        else (out.notForms ??= []).push({ gmailId: m.gmailId, from: m.from, subject: m.subject.slice(0, 120), to: `${m.to}${m.cc ? ` | cc ${m.cc}` : ''}`.slice(0, 200), routedTo: m.routedTo, at: m.at })
         out.skipped++
         continue
       }

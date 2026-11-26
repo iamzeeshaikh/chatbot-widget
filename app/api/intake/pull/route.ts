@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
       dryRun: q.get('dryRun') === '1',
       days: cron ? undefined : Number(q.get('days')) || undefined,
       retryNotAForm: !cron && q.get('retry') === '1',
+      force: !cron && q.get('force') === '1',
     })
     if (result.errors.length) console.error('[intake-pull]', result.errors.slice(0, 5))
     return NextResponse.json(result)
