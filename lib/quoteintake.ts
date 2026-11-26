@@ -468,7 +468,7 @@ const NOT_A_CUSTOMER_RE = new RegExp([
   // codes and supplier "who handles purchasing" pitches.
   // The form's own honeypot fired ("Spam check: hidden field filled") — no
   // person fills a field they cannot see — plus blog-comment spam (owner, 2026-10-29).
-  String.raw`^\s*(?:\[[^\]]*\]\s*)?spam check:[^\n]*hidden field filled`,
+  String.raw`^\s*(?:\[[^\]]*\]\s*)?spam check:[^\n]*hidden field (?:was )?filled`,
   String.raw`enjoying the (?:template|theme)|perfect balance.{0,40}user friendliness|exceptional blog|\bthe blog loads\b|\bporno\b`,
   String.raw`competitors outrank you|outrank (?:your )?competitors|competitors' google ranking|let.?s outrank`,
   String.raw`\blink insertions?\b|contextual link added to an existing article|i pay the publisher`,

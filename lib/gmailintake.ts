@@ -38,7 +38,11 @@ import { QUOTE_SITE_CODES } from './quoteintake'
 const AUTOMATED_LOCAL = /^(?:[^@]*[._+-])?(?:no-?reply|do-?not-?reply|donotreply|notifications?|mailer|bounces?)(?:[._+-][^@]*)?@/i
 function automatedSender(from: string): string | null {
   const addr = (String(from || '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0] ?? '').toLowerCase()
-  if (!addr || isOurAddress(addr) || !AUTOMATED_LOCAL.test(addr)) return null
+  if (!addr || isOurAddress(addr)) return null
+  // Trustpilot's review-invitation and account mail comes from support@ as well
+  // as noreply.activation@: 12 of them were counted as November 2026 leads.
+  if (/@(?:[a-z0-9-]+\.)*trustpilot\.com$/.test(addr)) return `automated sender ${addr}`
+  if (!AUTOMATED_LOCAL.test(addr)) return null
   return `automated sender ${addr}`
 }
 
@@ -206,7 +210,8 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
       // noreply.activation@ to four sites' info@, 29 Oct 2026) is nobody's
       // enquiry. A form notice with a "Name:" field is kept even when its
       // sender is a no-reply address (Rebecca Knorr, 25 Sep 2026).
-      const robotLead = customerNameFromBody(m.bodyText) ? null : automatedSender(String(parsed.email ?? ''))
+      const robotSender = automatedSender(String(parsed.email ?? ''))
+      const robotLead = robotSender && (/trustpilot\.com$/.test(robotSender) || !customerNameFromBody(m.bodyText)) ? robotSender : null
       if (robotLead) { if (!dryRun) await remember(ref.id, 'machine', { detail: robotLead }); out.skipped++; continue }
       if (fwdEmail) {
         if (!parsed.email || isOurAddress(String(parsed.email))) { parsed.email = fwdEmail; parsed.unreadable = false }
