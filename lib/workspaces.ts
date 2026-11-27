@@ -142,6 +142,8 @@ export const ZEEDESK_SITES: string[] = [
   'shopcorrugatedboxes', 'thecorrugatedboxesuk',
   'shopfoldingcartons', 'thefoldingboxesuk',
   'thekraftenvelopes', 'brownenvelopesuk', 'thebottleneckers',
+  // 2026-11-27: tin boxes pair (thetinboxes.com + thetinboxes.co.uk).
+  'thetinboxes', 'thetinboxesuk',
 ]
 LEAD_TRACKED_SITES.push(...ZEEDESK_SITES)
 
