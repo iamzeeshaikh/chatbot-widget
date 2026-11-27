@@ -41,7 +41,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   return NextResponse.json({
     line: v.desk ? 'desk' : v.line === 'meta' ? 'UK' : 'US',
     templates: WA_TEMPLATES.map((t) => ({
-      name: t.name, label: t.label, status: status.get(t.name) ?? 'unknown', preview: renderTemplate(t, v.vars),
+      // ZeeDesk is handed its own account's names, never the other desk's.
+      name: v.desk ? t.deskName : t.name, label: t.label, status: status.get(t.name) ?? 'unknown', preview: renderTemplate(t, v.vars),
     })),
   })
 }
@@ -51,7 +52,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await guardLeadAccess(await getMember(req), id, 'watemplates')
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
   const body = await req.json().catch(() => ({}))
-  const t = templateByName(String(body.name ?? ''))
+  const asked = String(body.name ?? '')
+  const t = templateByName(asked) ?? WA_TEMPLATES.find((x) => x.deskName === asked) ?? null
   if (!t) return NextResponse.json({ error: 'Unknown template.' }, { status: 400 })
   const v = await varsFor(access.member, id)
   if (!v) return NextResponse.json({ error: 'No such lead' }, { status: 404 })
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     sid: sent.sid, from: meta ? meta.number : cfg!.whatsappFrom.replace(/^whatsapp:/, ''), to,
     body: renderTemplate(t, v.vars), at: new Date().toISOString(),
     sentBy: access.member.email, direction: 'outbound' as const,
-    status: sent.status || 'queued', template: t.name,
+    status: sent.status || 'queued', template: v.desk ? t.deskName : t.name,
   }
   const { error } = await writeControlRow({ sessionId: id, siteId: access.siteId, role: CRM_WA_OUT_ROLE, message: JSON.stringify(entry) })
   return NextResponse.json({ ok: true, sent: true, recorded: !error, status: sent.status })
