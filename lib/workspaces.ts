@@ -269,7 +269,7 @@ const WORKSPACE_FEATURES: Record<Workspace, ReadonlySet<WorkspaceFeature>> = {
   // files a paid invoice in the ledger of the workspace its lead belongs to.
   // 'calls' (2026-11-25): its own line, +1 412 504 7473 (TWILIO_ZEEDESK_PHONE_NUMBER),
   // the same number its WhatsApp runs on at Meta.
-  zeedesk: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'trafficdetail', 'whatsapp', 'calls', 'sales']),
+  zeedesk: new Set<WorkspaceFeature>(['records', 'pipeline', 'tasks', 'reports', 'email', 'reminders', 'trafficdetail', 'whatsapp', 'calls', 'sales', 'watemplates']),
 }
 
 export function hasFeature(ws: Workspace, feature: WorkspaceFeature): boolean {

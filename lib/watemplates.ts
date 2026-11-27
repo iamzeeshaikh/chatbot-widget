@@ -17,7 +17,7 @@
 // disappears from the menu instead of failing at send time.
 
 import { twilioConfig, twilioTemplateStatuses } from './twilio'
-import { metaWaConfig, metaTemplateStatuses, type WaLine } from './metawa'
+import { metaWaConfig, metaZeedeskConfig, metaTemplateStatuses, type WaLine } from './metawa'
 
 export interface WaTemplate {
   /** The WhatsApp template name — identical on both lines. */
@@ -27,22 +27,25 @@ export interface WaTemplate {
   body: string
   twilioSid: string
   language: string
+  /** The same text on ZeeDesk's own WhatsApp account (2026-11-27), where the
+   *  template is registered under this name. */
+  deskName: string
 }
 
 export const WA_TEMPLATES: readonly WaTemplate[] = [
   {
     name: 'zeeops_followup', label: 'Follow up on their request', language: 'en',
-    twilioSid: 'HX834b7e75763957eafe0acdb556cd23a5',
+    twilioSid: 'HX834b7e75763957eafe0acdb556cd23a5', deskName: 'desk_followup',
     body: 'Hi {{1}}, this is {{2}} from {{3}}. Following up on your packaging request. Just reply to this message and I will pick it up from here.',
   },
   {
     name: 'zeeops_quote_ready', label: 'Your custom quote is ready', language: 'en',
-    twilioSid: 'HX034371ede71fd9c2fb572d34e42ad2f0',
+    twilioSid: 'HX034371ede71fd9c2fb572d34e42ad2f0', deskName: 'desk_quote_ready',
     body: 'Hi {{1}}, this is {{2}} from {{3}}. Your custom quote for your packaging request is ready. Reply to this message and I will share it with you here.',
   },
   {
     name: 'zeeops_order_update', label: 'We tried to reach you about your order', language: 'en',
-    twilioSid: 'HXa9276d8f11b3aaca61948446c059d889',
+    twilioSid: 'HXa9276d8f11b3aaca61948446c059d889', deskName: 'desk_order_update',
     body: 'Hi {{1}}, this is {{2}} from {{3}}. We tried to reach you about your order. Please reply to this message when you have a moment so we can continue.',
   },
 ]
@@ -62,31 +65,35 @@ export function cleanVar(v: string, fallback: string): string {
   return s || fallback
 }
 
-const cache: Partial<Record<WaLine, { at: number; status: Map<string, string> }>> = {}
+const cache: Partial<Record<WaLine | 'desk', { at: number; status: Map<string, string> }>> = {}
 
 /** Approval state per template on a line: 'approved' | 'pending' | 'rejected' | 'unknown'. */
-export async function templateStatuses(line: WaLine): Promise<Map<string, 'approved' | 'pending' | 'rejected' | 'unknown'>> {
-  const hit = cache[line]
+export async function templateStatuses(line: WaLine, desk = false): Promise<Map<string, 'approved' | 'pending' | 'rejected' | 'unknown'>> {
+  const key = desk ? 'desk' : line
+  const hit = cache[key]
   let raw: Map<string, string>
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) raw = hit.status
   else {
     raw = new Map()
     try {
-      if (line === 'meta') {
+      if (desk) {
+        const cfg = metaZeedeskConfig()
+        if (cfg) raw = await metaTemplateStatuses(cfg)
+      } else if (line === 'meta') {
         const cfg = metaWaConfig()
         if (cfg) raw = await metaTemplateStatuses(cfg)
       } else {
         const cfg = twilioConfig('packaging')
         if (cfg) raw = await twilioTemplateStatuses(cfg)
       }
-      cache[line] = { at: Date.now(), status: raw }
+      cache[key] = { at: Date.now(), status: raw }
     } catch (e) {
       console.error(`[wa-templates] approval lookup failed on ${line}:`, e instanceof Error ? e.message : e)
     }
   }
   const out = new Map<string, 'approved' | 'pending' | 'rejected' | 'unknown'>()
   for (const t of WA_TEMPLATES) {
-    const s = String(raw.get(line === 'meta' ? t.name : t.twilioSid) ?? '').toLowerCase()
+    const s = String(raw.get(desk ? t.deskName : line === 'meta' ? t.name : t.twilioSid) ?? '').toLowerCase()
     out.set(t.name, s === 'approved' ? 'approved'
       : /reject|disabled|paused/.test(s) ? 'rejected'
       : /pending|received|in_appeal|submitted/.test(s) ? 'pending' : 'unknown')

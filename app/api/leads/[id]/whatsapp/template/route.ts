@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { guardLeadAccess, writeControlRow, leadPhone } from '@/lib/leadrecord'
 import { getMember, type Member } from '@/lib/auth'
 import { twilioConfig, twilioProblem, sendWhatsAppTemplate } from '@/lib/twilio'
-import { metaWaConfig, sendMetaTemplate } from '@/lib/metawa'
+import { metaWaConfigForSite, sendMetaTemplate } from '@/lib/metawa'
+import { siteWorkspace } from '@/lib/workspaces'
 import { CRM_WA_OUT_ROLE } from '@/lib/crm'
 import { WA_TEMPLATES, templateByName, renderTemplate, templateStatuses, cleanVar } from '@/lib/watemplates'
 import { waLeadContext, greetableFirstName } from '@/lib/wacontext'
@@ -17,14 +18,16 @@ export const maxDuration = 30
 // own line. Packaging only ('watemplates'), and — like the free-form send —
 // the recipient is never taken from the request.
 
-async function varsFor(member: Member, id: string): Promise<{ vars: string[]; line: 'twilio' | 'meta' } | null> {
+async function varsFor(member: Member, id: string): Promise<{ vars: string[]; line: 'twilio' | 'meta'; desk: boolean } | null> {
   const ctx = await waLeadContext(id)
   if (!ctx) return null
   // A shared login (packaging@, info@) has no person's name to sign with.
   const agent = greetableFirstName((await memberDisplayName(member.email)).split(/\s+/)[0]) ?? 'the team'
+  // ZeeDesk's leads go out on its own WhatsApp account, under its own names.
+  const desk = siteWorkspace(ctx.leadSiteId) === 'zeedesk'
   return {
-    line: ctx.line,
-    vars: [cleanVar(ctx.firstName ?? '', 'there'), cleanVar(agent, 'the team'), cleanVar(ctx.siteName, 'ZEE Pack')],
+    line: ctx.line, desk,
+    vars: [cleanVar(ctx.firstName ?? '', 'there'), cleanVar(agent, 'the team'), cleanVar(ctx.siteName, desk ? 'Custom Packaging Desk' : 'ZEE Pack')],
   }
 }
 
@@ -34,9 +37,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!access.ok) return NextResponse.json({ error: 'Not allowed' }, { status: access.status })
   const v = await varsFor(access.member, id)
   if (!v) return NextResponse.json({ error: 'No such lead' }, { status: 404 })
-  const status = await templateStatuses(v.line)
+  const status = await templateStatuses(v.line, v.desk)
   return NextResponse.json({
-    line: v.line === 'meta' ? 'UK' : 'US',
+    line: v.desk ? 'desk' : v.line === 'meta' ? 'UK' : 'US',
     templates: WA_TEMPLATES.map((t) => ({
       name: t.name, label: t.label, status: status.get(t.name) ?? 'unknown', preview: renderTemplate(t, v.vars),
     })),
@@ -52,13 +55,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!t) return NextResponse.json({ error: 'Unknown template.' }, { status: 400 })
   const v = await varsFor(access.member, id)
   if (!v) return NextResponse.json({ error: 'No such lead' }, { status: 404 })
-  if ((await templateStatuses(v.line)).get(t.name) !== 'approved') {
+  if ((await templateStatuses(v.line, v.desk)).get(t.name) !== 'approved') {
     return NextResponse.json({ error: 'WhatsApp has not approved this template on this line yet.' }, { status: 409 })
   }
-  const meta = v.line === 'meta' ? metaWaConfig() : null
+  const meta = v.line === 'meta' ? metaWaConfigForSite(access.siteId) : null
   const cfg = v.line === 'meta' ? null : twilioConfig(access.member.workspace)
   const problem = v.line === 'meta'
-    ? (meta ? null : 'The UK WhatsApp line is not configured on the server (META_UK_*).')
+    ? (meta ? null : 'This WhatsApp line is not configured on the server.')
     : twilioProblem(access.member.workspace)
   if (problem || (!cfg && !meta)) return NextResponse.json({ error: problem, needsSetup: true }, { status: 503 })
   const to = await leadPhone(id)
@@ -68,7 +71,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   let sent
   try {
     sent = meta
-      ? await sendMetaTemplate(meta, to, t.name, t.language, v.vars)
+      ? await sendMetaTemplate(meta, to, v.desk ? t.deskName : t.name, t.language, v.vars)
       : await sendWhatsAppTemplate(cfg!, to, t.twilioSid, Object.fromEntries(v.vars.map((x, i) => [String(i + 1), x])), statusUrl)
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'WhatsApp refused the template.' }, { status: 502 })

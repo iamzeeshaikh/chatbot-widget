@@ -37,6 +37,7 @@ import {
 } from '../ui'
 import LeadInvoices from './LeadInvoices'
 import RichEditor from '../RichEditor'
+import WaTemplates from '../WaTemplates'
 import { requestBrowserCall } from '@/lib/softphonebus'
 import { plainToHtml } from '@/lib/richtext'
 
@@ -1349,7 +1350,7 @@ function WhatsAppBox({ leadId, events, canEmail, onSent }: { leadId: string; eve
   const open = closesAt !== null && now < closesAt
   const minutesLeft = closesAt !== null ? Math.max(1, Math.round((closesAt - now) / 60000)) : 0
   const leftLabel = minutesLeft >= 60 ? `${Math.floor(minutesLeft / 60)} h left` : `${minutesLeft} min left`
-  const instead = canEmail ? 'Send an email instead, or wait for them to write.' : 'Wait for them to write first.'
+  const instead = canEmail ? 'Send one of the approved messages below, send an email instead, or wait for them to write.' : 'Send one of the approved messages below, or wait for them to write first.'
 
   const busy = phase !== 'idle'
   const canSend = !busy && (!!text.trim() || !!file)
@@ -1410,6 +1411,7 @@ function WhatsAppBox({ leadId, events, canEmail, onSent }: { leadId: string; eve
           {instead}
         </div>
       )}
+      {!open && <WaTemplates leadId={leadId} onSent={onSent} />}
       <div className="rounded-md border border-[#d8dcde] bg-white focus-within:border-[#038153]">
         <textarea value={text} rows={3} maxLength={4000} disabled={busy} aria-label="WhatsApp message"
           placeholder="Write a WhatsApp message. Enter sends, Shift+Enter adds a line."

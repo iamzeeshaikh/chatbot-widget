@@ -25,6 +25,7 @@ import type { LeadRecord, TimelineEvent } from '@/lib/leadrecord'
 import { Avatar, Chip, Notice, BTN_PLAIN, BTN_PRIMARY, LABEL, postJson, short, type ZdScreenProps } from '../ui'
 import { chatDing } from '../sound'
 import RichEditor from '../RichEditor'
+import WaTemplates from '../WaTemplates'
 
 // ── Shapes the API hands back ───────────────────────────────────────────────
 
@@ -1558,9 +1559,9 @@ function WaThreadPane({ leadId, thread, openLead, onChanged, onEmail, showInfo, 
   const leftLabel = left >= 3600000 ? `${Math.floor(left / 3600000)} h left` : `${Math.max(1, Math.round(left / 60000))} min left`
   const fallback = onEmail && record?.contact.email ? 'or email them instead' : 'or reach them by email'
   const rule = !lastInbound
-    ? `This customer has not written on WhatsApp yet. WhatsApp only delivers a free reply within 24 hours of the customer's last message, and ZeeDesk has no approved templates yet, so a message sent now will be refused. Wait for them to write first, ${fallback}.`
+    ? `This customer has not written on WhatsApp yet. WhatsApp only delivers a free reply within 24 hours of the customer's last message, so a typed message sent now will be refused. Send one of the approved messages below, wait for them to write first, ${fallback}.`
     : !windowOpen
-      ? `Their last message was more than 24 hours ago, so WhatsApp will refuse a free reply. ZeeDesk has no approved templates yet: wait for the customer to write again, ${fallback}.`
+      ? `Their last message was more than 24 hours ago, so WhatsApp will refuse a typed reply. Send one of the approved messages below, wait for the customer to write again, ${fallback}.`
       : ''
 
   const hasPhone = !!record?.contact.phone
@@ -1706,6 +1707,7 @@ function WaThreadPane({ leadId, thread, openLead, onChanged, onEmail, showInfo, 
                     {onEmail && record.contact.email && <button type="button" onClick={() => onEmail(leadId)} className={`${BTN_PLAIN} shrink-0`}><Mail size={14} aria-hidden />Email instead</button>}
                   </div>
                 )}
+                {rule && <WaTemplates leadId={leadId} onSent={() => { void loadRecord(); void onChanged() }} />}
                 {flash && <div className="mb-2"><Notice text={flash.text} bad={flash.bad} /></div>}
                 {file && (
                   <p className="mb-2 flex items-center gap-2 text-[12px]">
