@@ -183,6 +183,19 @@ export async function runIntakePull(origin: string, opts: { dryRun?: boolean; da
         if (sender && !ours(sender) && !automatedSender(sender) && !m.bulk && !m.labelIds.includes('SENT') && c && m.bodyText.trim().length > 20) {
           code = c; direct = { domain: hit![1] }
         }
+      } else if (!fwdEmail) {
+        // The same kind of email with the site address in plain sight on the
+        // To line: the site is known, but there is no form in it, and the form
+        // reader took the first line after the greeting for the product (Emma
+        // Reardon, 27 Nov 2026: product "I hope you are well"). Filed as a
+        // direct email, with the subject kept and no product guessed.
+        const sender = (`${m.replyTo} ${m.from}`.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) ?? [''])[0]
+        const sid = siteIdFromQuoteCode(code)
+        const domain = sid ? SITE_DOMAINS[sid] : undefined
+        const formLines = m.bodyText.split('\n').filter((l) => /^\s*(full name|name|e-?mail|email address|phone|product|quantity|size|length|width|height|unit|material|print(ing)?|company|message|wall|finish|page url)\s*:/i.test(l)).length
+        if (domain && formLines < 2 && sender && !ours(sender) && !automatedSender(sender) && !m.bulk && !m.labelIds.includes('SENT') && m.bodyText.trim().length > 20) {
+          direct = { domain }
+        }
       }
       const siteId = code ? siteIdFromQuoteCode(code) : null
       // Any packaging-kind site: the ZeeDesk team's form mail arrives in this
